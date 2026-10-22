@@ -1,0 +1,60 @@
+# Dependabot version updates.
+# Reference: https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '08:00'
+      timezone: Asia/Ho_Chi_Minh
+    # package.json pins exact versions (no ^ or ~), enforced by tests/unit/deps.test.ts.
+    # "increase" rewrites each pin to the new exact version instead of widening it into a range.
+    versioning-strategy: increase
+    open-pull-requests-limit: 5
+    # A dependency joins the first group whose pattern matches it.
+    groups:
+      astro:
+        patterns:
+          - 'astro'
+          - '@astrojs/*'
+          - 'starlight*'
+      test-tooling:
+        patterns:
+          - 'vitest'
+          - '@playwright/test'
+          - '@types/*'
+          - 'typescript'
+      other:
+        patterns:
+          - '*'
+    ignore:
+      # rehype-katex 7.0.1 renders with katex ^0.16, and the KaTeX CSS must match the renderer.
+      # tests/unit/deps.test.ts enforces katex 0.16.x. Revisit when rehype-katex moves to a newer katex.
+      - dependency-name: 'katex'
+        versions: ['>=0.17.0']
+      # A new rehype-katex major may bring its own katex and leave the root CSS behind.
+      # Bump it together with katex by hand.
+      - dependency-name: 'rehype-katex'
+        update-types: ['version-update:semver-major']
+      # @astrojs/check 0.9.12 declares peer typescript "^5.0.0 || ^6.0.0".
+      # Revisit when @astrojs/check accepts typescript 7.
+      - dependency-name: 'typescript'
+        versions: ['>=7.0.0']
+      # .node-version pins Node 24; @types/node must stay on the same major.
+      # Revisit together with .node-version.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+      time: '08:00'
+      timezone: Asia/Ho_Chi_Minh
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - '*'

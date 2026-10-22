@@ -1,0 +1,110 @@
+name: Báo lỗi website
+description: Trang hiển thị sai, nút không chạy, giao diện vỡ trên điện thoại… (Website bug)
+title: '[Lỗi] '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Cảm ơn bạn đã báo lỗi. Mẫu này dành cho lỗi của **website** (giao diện, tính năng, link).
+        Lỗi kiến thức trong bài học thì dùng mẫu **Báo lỗi nội dung bài học**. Lỗi bảo mật thì **không** mở issue, xem `SECURITY.md`.
+
+        *You can write in English.*
+
+  - type: input
+    id: page-url
+    attributes:
+      label: URL của trang
+      description: Trang bạn gặp lỗi. (Page URL)
+      placeholder: https://ai-atlas.pages.dev/vi/ml/linear-regression/
+    validations:
+      required: true
+
+  - type: dropdown
+    id: language
+    attributes:
+      label: Ngôn ngữ của trang
+      description: (Page language)
+      options:
+        - Tiếng Việt (vi)
+        - English (en)
+        - Cả hai (both)
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Các bước tái hiện
+      description: Làm thế nào để thấy lỗi. (Steps to reproduce)
+      placeholder: |
+        1. Mở trang ...
+        2. Bấm ...
+        3. Thấy lỗi ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Kết quả mong đợi
+      description: Bạn nghĩ điều gì lẽ ra phải xảy ra. (Expected behavior)
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Kết quả thực tế
+      description: Điều gì đã xảy ra. Có thông báo lỗi thì chép nguyên văn. (Actual behavior)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: device
+    attributes:
+      label: Thiết bị
+      description: (Device)
+      options:
+        - Máy tính (desktop)
+        - Điện thoại (phone)
+        - Máy tính bảng (tablet)
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Trình duyệt và hệ điều hành
+      description: Kèm phiên bản nếu biết. (Browser and OS)
+      placeholder: Chrome 140 trên Android 16
+    validations:
+      required: true
+
+  - type: dropdown
+    id: theme
+    attributes:
+      label: Chế độ giao diện
+      description: (Theme)
+      options:
+        - Sáng (light)
+        - Tối (dark)
+        - Không rõ (not sure)
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Ảnh chụp màn hình hoặc thông tin thêm
+      description: Kéo thả ảnh vào đây. Có lỗi trong Console của trình duyệt thì dán vào. (Screenshots, console errors)
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Kiểm tra trước khi gửi
+      options:
+        - label: Tôi đã tìm trong các issue có sẵn và không thấy lỗi trùng. (I searched existing issues.)
+          required: true
