@@ -1,0 +1,270 @@
+---
+// First screen: the atlas title card beside a slowly changing old map plate.
+import { Picture } from 'astro:assets';
+import { HOME } from '@data/home';
+import { HERO_PLATES } from '@data/home-pictures';
+import { LESSONS, type Locale } from '@data/roadmap';
+import { formatString } from '@i18n/format';
+import { getStrings } from '@i18n/ui';
+import RouteMark from './RouteMark.astro';
+import Stripe from './Stripe.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = getStrings(Astro.locals.t, 'home');
+const otherLocale: Locale = locale === 'vi' ? 'en' : 'vi';
+---
+
+<section class="hero" aria-labelledby="home-title">
+  <div class="hero-card">
+    <Stripe id="hero-stripe" class="hero-stripe" />
+    <div class="hero-body">
+      <p class="hero-wordmark">
+        <RouteMark class="hero-mark" />
+        <span>AI Atlas</span>
+      </p>
+      <h1 id="home-title" class="hero-title">{HOME.hero.title[locale]}</h1>
+      <p class="hero-lead">{formatString(HOME.hero.lead[locale], { count: LESSONS.length })}</p>
+      <a class="atlas-button" href="#map">{t.openMap}</a>
+    </div>
+    <nav class="hero-links" aria-label={t.quickLinks}>
+      <a href="#route">{t.linkRoute}</a>
+      <a href="#terms">{t.linkTerms}</a>
+      <a href={`/${otherLocale}/`} hreflang={otherLocale} lang={otherLocale} title={t.otherLanguageName}>{t.otherLanguage}</a>
+    </nav>
+  </div>
+
+  <div class="hero-plates" data-crossfade>
+    {
+      HERO_PLATES.map((plate, index) => (
+        <figure
+          class:list={['hero-plate', { 'is-current': index === 0, 'is-deferred': index > 0 }]}
+          aria-hidden={index === 0 ? undefined : 'true'}
+        >
+          <Picture
+            src={plate.src}
+            alt={plate.alt[locale]}
+            widths={[480, 720, 960, 1280]}
+            sizes="(min-width: 64rem) 50vw, 100vw"
+            formats={['avif', 'webp']}
+            quality={60}
+            loading={index === 0 ? 'eager' : 'lazy'}
+            fetchpriority={index === 0 ? 'high' : 'auto'}
+            style={`object-position: ${plate.focus ?? '50% 50%'}`}
+          />
+          <figcaption>{plate.caption[locale]}</figcaption>
+        </figure>
+      ))
+    }
+  </div>
+</section>
+
+<style>
+  .hero {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--gap);
+    padding: var(--gap) var(--edge) 0;
+    background: var(--atlas-ground);
+  }
+
+  .hero-card {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--atlas-paper);
+    color: var(--atlas-paper-ink);
+    text-align: center;
+    --stripe-height: 40px;
+  }
+
+  .hero-stripe {
+    color: var(--atlas-paper-ink);
+  }
+
+  .hero-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 28px 20px 24px;
+  }
+
+  .hero-wordmark {
+    display: flex;
+    align-items: center;
+    gap: 0.18em;
+    margin: 0;
+    font-family: var(--atlas-font-display);
+    font-size: var(--step-display);
+    font-weight: 700;
+    line-height: 0.85;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
+  }
+
+  .hero-mark {
+    height: 0.62em;
+    color: var(--atlas-paper-ink);
+  }
+
+  .hero-title {
+    max-width: 15ch;
+    font-size: var(--step-head);
+    line-height: 1.1;
+  }
+
+  .hero-lead {
+    max-width: 42ch;
+    margin: 0;
+    font-size: var(--step-body);
+    line-height: 1.5;
+    text-wrap: balance;
+  }
+
+  .hero-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px 28px;
+    padding: 0 20px 28px;
+    font-size: var(--step-small);
+  }
+
+  .hero-links a {
+    color: var(--atlas-paper-ink);
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 4px;
+    text-decoration-color: var(--atlas-field);
+    transition: text-decoration-color 0.2s ease;
+  }
+
+  .hero-links a:hover {
+    text-decoration-color: var(--atlas-paper-ink);
+  }
+
+  .hero-plates {
+    position: relative;
+    order: -1;
+    height: 30svh;
+    overflow: hidden;
+    background: var(--atlas-ground-step);
+  }
+
+  .hero-plate {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    opacity: 0;
+    transition: opacity 1.6s ease;
+  }
+
+  /* Plates after the first stay out of the layout, so they do not load with the page. */
+  .hero-plate.is-deferred {
+    display: none;
+  }
+
+  .hero-plate.is-current {
+    opacity: 1;
+  }
+
+  .hero-plate :global(img) {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .hero-plate figcaption {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    max-width: min(46ch, 100%);
+    padding: 10px 14px;
+    background: var(--atlas-ground);
+    color: var(--atlas-ground-ink);
+    font-size: var(--step-small);
+    line-height: 1.4;
+  }
+
+  @media (min-width: 64rem) {
+    .hero {
+      grid-template-columns: 1fr 1fr;
+      min-height: calc(100svh - var(--sl-nav-height));
+      padding: var(--gap) var(--edge) var(--gap);
+    }
+
+    .hero-card {
+      --stripe-height: 56px;
+    }
+
+    .hero-body {
+      gap: 24px;
+      padding: 56px 40px 40px;
+    }
+
+    .hero-plates {
+      order: 0;
+      height: auto;
+      min-height: 100%;
+    }
+  }
+</style>
+
+<script>
+  // Signature move: on wide screens the plates crossfade slowly, like light shifting on a page.
+  // The other plates load only after the page has loaded; the change runs one full round, pauses
+  // while the pointer or focus is in the hero or the hero is off screen, and never runs under
+  // reduced motion.
+  const root = document.querySelector<HTMLElement>('[data-crossfade]');
+  const hero = root?.closest<HTMLElement>('.hero');
+  const plates = root ? Array.from(root.querySelectorAll<HTMLElement>('.hero-plate')) : [];
+  const wide = window.matchMedia('(min-width: 64rem)').matches;
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const start = async () => {
+    const deferred = plates.filter((plate) => plate.classList.contains('is-deferred'));
+    deferred.forEach((plate) => plate.classList.remove('is-deferred'));
+    await Promise.all(
+      deferred.map((plate) => plate.querySelector('img')?.decode().catch(() => undefined)),
+    );
+
+    let current = 0;
+    let steps = 0;
+    let paused = false;
+    let visible = true;
+    hero?.addEventListener('pointerenter', () => (paused = true));
+    hero?.addEventListener('pointerleave', () => (paused = false));
+    hero?.addEventListener('focusin', () => (paused = true));
+    hero?.addEventListener('focusout', () => (paused = false));
+    if (hero) new IntersectionObserver(([entry]) => (visible = entry.isIntersecting)).observe(hero);
+
+    const timer = window.setInterval(() => {
+      if (document.hidden || paused || !visible) return;
+      plates[current].classList.remove('is-current');
+      plates[current].setAttribute('aria-hidden', 'true');
+      current = (current + 1) % plates.length;
+      plates[current].classList.add('is-current');
+      plates[current].removeAttribute('aria-hidden');
+      steps += 1;
+      // One full round, back on the first plate, then rest.
+      if (steps >= plates.length) window.clearInterval(timer);
+    }, 6500);
+  };
+
+  if (plates.length > 1 && wide && !reduced) {
+    const schedule = () => {
+      if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(() => void start());
+      else window.setTimeout(() => void start(), 200);
+    };
+    if (document.readyState === 'complete') schedule();
+    else window.addEventListener('load', schedule, { once: true });
+  }
+</script>

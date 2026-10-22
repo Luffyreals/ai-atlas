@@ -1,0 +1,244 @@
+---
+// Inside a lesson: six paper slips along the bottom edge, one per stage of the sample lesson,
+// over an old atlas lying open. The code slip shows code that was run; the output slip is its output.
+import { Picture } from 'astro:assets';
+import { HOME } from '@data/home';
+import { LESSON_PICTURE } from '@data/home-pictures';
+import type { Locale } from '@data/roadmap';
+import { renderInlineMarkup } from '@lib/inline-markup';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const { lesson } = HOME;
+
+type SlipView = { title: string; lines?: string[]; code?: string; output?: string[]; note?: string };
+const textSlips: SlipView[] = lesson.slips.map((slip) => ({
+  title: slip.title[locale],
+  lines: slip.lines?.[locale].map((line) => renderInlineMarkup(line)),
+  output: slip.output,
+  note: slip.note?.[locale],
+}));
+// Order of a lesson: intuition, theory, code, output, quick check, summary.
+const slips: SlipView[] = [
+  textSlips[0],
+  textSlips[1],
+  { title: lesson.codeTitle[locale], code: lesson.code[locale] },
+  ...textSlips.slice(2),
+];
+// Height (svh) and tilt (deg) of each slip, so the row reads as loose paper. Reused in turn.
+const SHAPES = [
+  { h: 34, tilt: 0 },
+  { h: 42, tilt: -1.5 },
+  { h: 46, tilt: 0 },
+  { h: 30, tilt: 1.2 },
+  { h: 38, tilt: 0 },
+  { h: 33, tilt: -1 },
+];
+---
+
+<section id="lesson" class="lesson" aria-labelledby="lesson-title">
+  <div class="lesson-photo" aria-hidden="true">
+    <Picture
+      src={LESSON_PICTURE.src}
+      alt=""
+      widths={[640, 960, 1280, 1920]}
+      sizes="100vw"
+      formats={['avif', 'webp']}
+      quality={60}
+      style={`object-position: ${LESSON_PICTURE.focus ?? '50% 50%'}`}
+    />
+  </div>
+
+  <div class="lesson-text">
+    <h2 id="lesson-title" data-reveal>{lesson.heading[locale]}</h2>
+    <p class="lesson-lead" data-reveal style="--i: 1">{lesson.lead[locale]}</p>
+    <p class="lesson-note" data-reveal style="--i: 2">{lesson.note[locale]}</p>
+    <p class="lesson-caption">{LESSON_PICTURE.caption[locale]}</p>
+  </div>
+
+  <ol class="slips">
+    {
+      slips.map((slip, index) => {
+        const shape = SHAPES[index % SHAPES.length];
+        return (
+          <li class="slip" data-reveal style={`--i: ${index}; --h: ${shape.h}svh; --tilt: ${shape.tilt}deg`}>
+            <p class="slip-title">{slip.title}</p>
+            {/* Keep <pre> on one line: any whitespace inside it would show as indentation. */}
+            {slip.code && <pre class="slip-code"><code>{slip.code}</code></pre>}
+            {slip.output && <pre class="slip-output"><samp>{slip.output.join('\n')}</samp></pre>}
+            {slip.note && <p class="slip-note">{slip.note}</p>}
+            {slip.lines?.map((line) => <p class="slip-line" set:html={line} />)}
+          </li>
+        );
+      })
+    }
+  </ol>
+</section>
+
+<style>
+  .lesson {
+    position: relative;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    overflow: hidden;
+    background: var(--atlas-ground);
+    color: var(--atlas-ground-ink);
+  }
+
+  .lesson-photo {
+    position: absolute;
+    inset: 0;
+  }
+
+  .lesson-photo :global(img) {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .lesson-text {
+    position: relative;
+    display: grid;
+    gap: 16px;
+    max-width: 38rem;
+    margin: var(--edge);
+    padding: 24px;
+    background: var(--atlas-ground);
+  }
+
+  .lesson-text h2 {
+    font-size: var(--step-head);
+  }
+
+  .lesson-lead {
+    margin: 0;
+    font-size: var(--step-lead);
+    line-height: 1.25;
+  }
+
+  .lesson-note {
+    margin: 0;
+    color: var(--atlas-ground-muted);
+  }
+
+  .lesson-caption {
+    margin: 8px 0 0;
+    color: var(--atlas-ground-muted);
+    font-size: var(--step-small);
+  }
+
+  .slips {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    margin: 32px var(--edge) var(--edge);
+    padding: 0;
+    list-style: none;
+  }
+
+  .slip {
+    margin: 0;
+    padding: 20px 18px;
+    background: var(--atlas-paper);
+    color: var(--atlas-paper-ink);
+    font-size: var(--step-small);
+    line-height: 1.45;
+  }
+
+  .slip p {
+    margin: 0;
+  }
+
+  .slip-title {
+    margin-bottom: 12px !important;
+    font-weight: 600;
+  }
+
+  .slip-line + .slip-line {
+    margin-top: 2px !important;
+  }
+
+  .slip-line :global(.katex) {
+    font-size: 1em;
+  }
+
+  .slip :is(pre) {
+    margin: 0;
+    padding: 0;
+    overflow-x: auto;
+    background: none;
+    color: inherit;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    white-space: pre;
+  }
+
+  .slip-output {
+    font-size: var(--step-small) !important;
+  }
+
+  .slip-note {
+    margin-top: 12px !important;
+    color: var(--atlas-paper-muted);
+    font-style: italic;
+  }
+
+  @media (min-width: 40rem) {
+    .slips {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 64rem) {
+    .lesson {
+      min-height: 100svh;
+    }
+
+    .lesson-text {
+      margin: 12svh 0 0 18%;
+      padding: 32px;
+    }
+
+    /* Loose slips along the bottom edge; their lower ends run past it, padded so no text is lost. */
+    .slips {
+      grid-template-columns: 1fr 1.1fr 2fr 0.9fr 1fr 1.05fr;
+      align-items: end;
+      margin: 48px var(--edge) 0;
+    }
+
+    .slip {
+      min-height: calc(var(--h) + 6svh);
+      margin-bottom: -6svh;
+      padding-bottom: calc(6svh + 20px);
+      transform: rotate(var(--tilt));
+      transform-origin: 50% 100%;
+    }
+
+    .slip :is(pre) {
+      font-size: 0.8125rem;
+    }
+  }
+
+  /* One moving picture, driven by the reader's own scroll (no motion runs on its own). */
+  @supports (animation-timeline: view()) {
+    @media (prefers-reduced-motion: no-preference) {
+      .lesson-photo :global(img) {
+        animation: drift linear both;
+        animation-timeline: view();
+      }
+    }
+  }
+
+  @keyframes drift {
+    from {
+      transform: scale(1.08) translateY(-2%);
+    }
+    to {
+      transform: scale(1) translateY(2%);
+    }
+  }
+</style>

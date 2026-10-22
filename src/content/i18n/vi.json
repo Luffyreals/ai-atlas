@@ -1,0 +1,23 @@
+{
+  "atlas.common.comingSoon": "Sắp có",
+  "atlas.common.notTranslated": "Chưa dịch",
+  "atlas.home.openMap": "Mở bản đồ",
+  "atlas.home.linkRoute": "Lộ trình",
+  "atlas.home.linkTerms": "Thuật ngữ",
+  "atlas.home.otherLanguage": "English",
+  "atlas.home.otherLanguageName": "Đọc bằng tiếng Anh",
+  "atlas.home.quickLinks": "Đi nhanh",
+  "atlas.home.previous": "Phần trước",
+  "atlas.home.next": "Phần sau",
+  "atlas.notFound.title": "Không tìm thấy trang",
+  "atlas.notFound.text": "Trang bạn tìm không tồn tại hoặc đã được chuyển đi.",
+  "atlas.notFound.homeLink": "Về trang chủ",
+  "atlas.roadmap.lessons": "{{count}} bài",
+  "atlas.roadmap.branchNote": "Sau Học sâu, chọn một nhánh",
+  "atlas.roadmap.routeLabel": "Điểm đến",
+  "atlas.roadmap.routeResult": "Đường tới {{lesson}}: {{count}} bài, qua {{parts}} phần.",
+  "atlas.roadmap.showOnMap": "Xem trên bản đồ",
+  "atlas.roadmap.legendOpen": "Chữ đậm: bài đã mở",
+  "atlas.roadmap.legendSoon": "Chữ nhạt: sắp có",
+  "atlas.roadmap.legendNone": "Chưa bài nào được mở. Bài mở sẽ in đậm và có link."
+}

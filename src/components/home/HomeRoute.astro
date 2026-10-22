@@ -1,0 +1,336 @@
+---
+// The road told left to right: seven parts, with the fork after Deep Learning.
+import { Picture } from 'astro:assets';
+import { HOME } from '@data/home';
+import { PART_PICTURES } from '@data/home-pictures';
+import { PARTS, type Locale, type Part } from '@data/roadmap';
+import { formatString } from '@i18n/format';
+import { getStrings } from '@i18n/ui';
+import { getLessonsByPart } from '@lib/roadmap';
+import RouteMark from './RouteMark.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = getStrings(Astro.locals.t, 'home');
+const tRoadmap = getStrings(Astro.locals.t, 'roadmap');
+
+type Stop = { kind: 'part'; part: Part } | { kind: 'fork' };
+const stops: Stop[] = [
+  ...PARTS.filter((part) => part.track === 'core').map((part): Stop => ({ kind: 'part', part })),
+  { kind: 'fork' },
+  ...PARTS.filter((part) => part.track === 'branch').map((part): Stop => ({ kind: 'part', part })),
+];
+// Space above each stop (px). It alternates clearly, so the road visibly rises and falls.
+const SPACES = [24, 120, 24, 120, 0, 24, 120, 24];
+---
+
+<section id="route" class="route" aria-labelledby="route-title">
+  <div class="route-top">
+    <h2 id="route-title" data-reveal>{HOME.route.heading[locale]}</h2>
+    <p class="route-intro" data-reveal style="--i: 1">{HOME.route.intro[locale]}</p>
+    <div class="route-buttons">
+      <button type="button" class="route-button" data-route-step="-1" aria-label={t.previous} aria-controls="route-row">
+        <span aria-hidden="true">←</span>
+      </button>
+      <button type="button" class="route-button" data-route-step="1" aria-label={t.next} aria-controls="route-row">
+        <span aria-hidden="true">→</span>
+      </button>
+    </div>
+  </div>
+  <div class="route-progress" aria-hidden="true"><span data-route-progress></span></div>
+
+  <ol id="route-row" class="route-row" tabindex="0" aria-labelledby="route-title" data-route-row>
+    {
+      stops.map((stop, index) => {
+        const space = `--space: ${SPACES[index % SPACES.length]}px`;
+        if (stop.kind === 'fork') {
+          return (
+            <li class="route-fork" style={space}>
+              <RouteMark class="fork-mark" />
+              <p class="fork-note">{tRoadmap.branchNote}</p>
+            </li>
+          );
+        }
+        const { part } = stop;
+        const picture = PART_PICTURES[part.id];
+        return (
+          <li class="route-stop" style={space}>
+            <h3 class="stop-title">{part.title[locale]}</h3>
+            <p class="stop-why">{HOME.route.why[part.id][locale]}</p>
+            <p class="stop-count">{formatString(tRoadmap.lessons, { count: getLessonsByPart(part.id).length })}</p>
+            <figure class="stop-figure">
+              <Picture
+                src={picture.src}
+                alt={picture.alt[locale]}
+                widths={[280, 420, 560]}
+                sizes="(min-width: 64rem) 30vw, (min-width: 50rem) 280px, 72vw"
+                formats={['avif', 'webp']}
+                quality={70}
+                draggable="false"
+                style={`object-position: ${picture.focus ?? '50% 50%'}`}
+              />
+              <figcaption>{picture.caption[locale]}</figcaption>
+            </figure>
+          </li>
+        );
+      })
+    }
+  </ol>
+</section>
+
+<style>
+  .route {
+    padding: var(--section-gap) 0;
+    background: var(--sl-color-black);
+    color: var(--sl-color-white);
+  }
+
+  .route-top {
+    display: grid;
+    align-items: end;
+    gap: 20px 40px;
+    padding: 0 var(--edge);
+  }
+
+  .route-top h2 {
+    font-size: var(--step-head);
+  }
+
+  .route-intro {
+    max-width: 52ch;
+    margin: 0;
+    color: var(--sl-color-gray-2);
+  }
+
+  .route-buttons {
+    display: none;
+    gap: 8px;
+  }
+
+  .route-button {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    border: 0;
+    background: var(--sl-color-white);
+    color: var(--sl-color-black);
+    font-size: var(--step-body);
+    cursor: pointer;
+    transition: transform 0.2s ease, background-color 0.2s ease;
+  }
+
+  .route-button:hover {
+    transform: translateY(-2px);
+    background: var(--sl-color-accent);
+  }
+
+  .route-button:active {
+    transform: translateY(0);
+  }
+
+  .route-progress {
+    height: 6px;
+    margin: 32px var(--edge) 40px;
+    background: var(--sl-color-gray-5);
+  }
+
+  .route-progress span {
+    display: block;
+    width: 18%;
+    height: 100%;
+    background: var(--sl-color-white);
+    transition: width 0.2s linear;
+  }
+
+  .route-row {
+    display: flex;
+    gap: 16px;
+    margin: 0 var(--edge);
+    padding: 0 0 8px;
+    list-style: none;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    cursor: grab;
+  }
+
+  .route-row::-webkit-scrollbar {
+    display: none;
+  }
+
+  .route-row.is-dragging {
+    cursor: grabbing;
+    scroll-snap-type: none;
+    user-select: none;
+  }
+
+  .route-stop,
+  .route-fork {
+    display: flex;
+    flex: 0 0 72vw;
+    flex-direction: column;
+    margin: 0;
+    scroll-snap-align: start;
+  }
+
+  .stop-title {
+    font-size: var(--step-lead);
+  }
+
+  .stop-why {
+    min-height: 3em;
+    margin: 10px 0 0;
+    color: var(--sl-color-gray-2);
+  }
+
+  .stop-count {
+    margin: 4px 0 0;
+    color: var(--sl-color-gray-3);
+    font-size: var(--step-small);
+  }
+
+  .stop-figure {
+    margin: 20px 0 0;
+  }
+
+  .stop-figure :global(img) {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 4 / 5;
+    object-fit: cover;
+    background: var(--atlas-paper);
+    transition: transform 0.5s var(--ease-out);
+    -webkit-user-drag: none;
+  }
+
+  /* White scans sit on the page like paper: multiply into the light ground, soften in the dark. */
+  :global(:root[data-theme='light']) .stop-figure :global(img) {
+    mix-blend-mode: multiply;
+  }
+
+  :global(:root:not([data-theme='light'])) .stop-figure :global(img) {
+    filter: sepia(0.15) brightness(0.9);
+  }
+
+  .route-stop:hover .stop-figure :global(img) {
+    transform: scale(1.02);
+  }
+
+  .stop-figure figcaption {
+    margin-top: 10px;
+    color: var(--sl-color-gray-3);
+    font-size: var(--step-small);
+    line-height: 1.4;
+  }
+
+  .route-fork {
+    justify-content: center;
+    gap: 20px;
+    padding: 32px 0;
+    color: var(--sl-color-white);
+  }
+
+  .fork-mark {
+    height: 96px;
+    color: var(--sl-color-accent);
+  }
+
+  .fork-note {
+    max-width: 18ch;
+    margin: 0;
+    font-family: var(--atlas-font-display);
+    font-size: var(--step-lead);
+    font-weight: 700;
+    line-height: 1.1;
+    text-wrap: balance;
+  }
+
+  @media (min-width: 50rem) {
+    .route-top {
+      grid-template-columns: 5fr 6fr auto;
+    }
+
+    .route-buttons {
+      display: flex;
+    }
+
+    .route-row {
+      gap: 32px;
+    }
+
+    .route-stop,
+    .route-fork {
+      flex-basis: 280px;
+      margin-top: var(--space);
+    }
+
+    .route-fork {
+      flex-basis: 220px;
+    }
+  }
+
+  @media (min-width: 64rem) {
+    /* Three and a half stops in view, so the edge always cuts through a picture, not a line of text. */
+    .route-stop {
+      flex-basis: calc((100% - 3 * 32px) / 3.5);
+    }
+  }
+</style>
+
+<script>
+  // Buttons step one stop at a time, the bar shows how far along the road you are,
+  // and a mouse can drag the row (touch and trackpads scroll it natively).
+  const row = document.querySelector<HTMLElement>('[data-route-row]');
+  const bar = document.querySelector<HTMLElement>('[data-route-progress]');
+
+  if (row) {
+    const update = () => {
+      const max = row.scrollWidth - row.clientWidth;
+      const ratio = max > 0 ? row.scrollLeft / max : 1;
+      const visible = row.clientWidth / row.scrollWidth;
+      if (bar) bar.style.width = `${Math.max(visible, ratio) * 100}%`;
+    };
+    row.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    update();
+
+    document.querySelectorAll<HTMLButtonElement>('[data-route-step]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const step = Number(button.dataset.routeStep);
+        const first = row.querySelector<HTMLElement>('li');
+        const distance = first ? first.offsetWidth + 32 : row.clientWidth * 0.8;
+        const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        row.scrollBy({ left: step * distance, behavior: smooth ? 'smooth' : 'auto' });
+      });
+    });
+
+    // Stop the browser's own image drag, which would cancel the pointer and the scroll.
+    row.addEventListener('dragstart', (event) => event.preventDefault());
+
+    let startX = 0;
+    let startLeft = 0;
+    let dragging = false;
+    row.addEventListener('pointerdown', (event) => {
+      if (event.pointerType !== 'mouse' || event.button !== 0) return;
+      dragging = true;
+      startX = event.clientX;
+      startLeft = row.scrollLeft;
+      row.classList.add('is-dragging');
+      row.setPointerCapture(event.pointerId);
+    });
+    row.addEventListener('pointermove', (event) => {
+      if (dragging) row.scrollLeft = startLeft - (event.clientX - startX);
+    });
+    const stop = () => {
+      dragging = false;
+      row.classList.remove('is-dragging');
+    };
+    row.addEventListener('pointerup', stop);
+    row.addEventListener('pointercancel', stop);
+  }
+</script>
