@@ -28,3 +28,17 @@ Thumbs.db
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Skill junctions (the source lives in .agents/skills/, which is committed).
+# Recreate on a new machine (PowerShell):
+#   New-Item -ItemType Junction -Path .claude\skills\design-taste-frontend -Target "$PWD\.agents\skills\design-taste-frontend"
+.claude/skills/design-taste-frontend
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Working files of the design-taste-frontend skill (notes, direction sheet, screenshots)
+.taste-skill/

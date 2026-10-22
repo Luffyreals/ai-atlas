@@ -79,7 +79,7 @@ Mọi bài đều theo cùng một khung, **ưu tiên giải thích**:
 ## 5. Cấu trúc thư mục dự kiến
 
 ```
-Road Map/
+ai-atlas/
 ├─ src/
 │  ├─ content/docs/          # Bài học (MDX)
 │  │  ├─ vi/                 # Tiếng Việt
@@ -92,7 +92,10 @@ Road Map/
 │  └─ styles/
 ├─ public/                   # Hình ảnh, file tĩnh
 ├─ giáo án ai.md             # Giáo án gốc để tham khảo
-├─ README.md / README.en.md  # Giới thiệu dự án
+├─ docs/                     # Tài liệu dự án: spec MVP, template, glossary, thiết kế
+├─ README.md                 # Giới thiệu dự án (tiếng Việt)
+├─ README.en.md              # Giới thiệu dự án (tiếng Anh)
+├─ CHANGELOG.md              # Các thay đổi
 └─ PLAN.md                   # File kế hoạch này
 ```
 
@@ -202,23 +205,27 @@ Road Map/
 
 ## 7. Lộ trình thực hiện
 
+> **Bản MVP** gom Giai đoạn 0–2 và một phần Giai đoạn 3–4 thành 5 mốc (M0–M4): bộ khung, component, bài mẫu, 5 bài ML đầu, ra mắt. Phạm vi và tiêu chí hoàn thành ở [docs/mvp.md](docs/mvp.md).
+
 ### Giai đoạn 0: Khởi tạo dự án
 - [x] Đặt tên dự án: **AI Atlas**
-- [x] Viết README (Việt + Anh)
+- [x] Viết README (tiếng Việt và tiếng Anh)
+- [x] Viết spec bản MVP ([docs/mvp.md](docs/mvp.md))
 - [x] `git init`, tạo repo **private** trên GitHub (`ai-atlas`)
-- [ ] Khởi tạo Astro + Starlight, cấu hình 2 ngôn ngữ (vi mặc định, en)
+- [x] Khởi tạo Astro + Starlight, cấu hình 2 ngôn ngữ (vi mặc định, en)
+- [x] CI GitHub Actions (check, test, build, e2e) và Dependabot
 - [ ] Kết nối Cloudflare Pages, tự deploy khi push
 - [ ] Mua tên miền và gắn vào Cloudflare Pages
 
 **Kết quả:** một website trống đã chạy online.
 
 ### Giai đoạn 1: Xây nền tảng
-- [ ] Cài KaTeX, tùy chỉnh giao diện
+- [x] Cài KaTeX, tùy chỉnh giao diện (nhận diện và trang chủ, xem [docs/architecture/homepage.md](docs/architecture/homepage.md))
 - [ ] `PythonRunner` (Pyodide)
 - [ ] `Quiz`, `Prerequisites`
 - [ ] Lưu tiến độ (`LessonProgress`)
-- [ ] `RoadmapMap` cho trang chủ, đọc từ `roadmap.ts`
-- [ ] Tạo khung sidebar và trang trống cho toàn bộ 78 bài
+- [x] `RoadmapMap` cho trang chủ, đọc từ `roadmap.ts` (chưa có đánh dấu tiến độ, thêm cùng `LessonProgress`)
+- [x] Tạo khung sidebar từ `roadmap.ts` cho toàn bộ 78 bài. Không tạo trang trống: bài chưa viết chỉ có nhãn "Sắp có" trên lộ trình.
 
 **Kết quả:** website có đủ khung lộ trình và đủ công cụ trình bày.
 
@@ -248,4 +255,8 @@ Mỗi phần viết xong bản tiếng Việt thì deploy luôn, rồi dịch sa
 
 1. ~~Tên dự án~~ → **AI Atlas**, repo `ai-atlas`.
 2. ~~Ngôn ngữ~~ → **tiếng Việt và tiếng Anh**.
-3. ~~Tên miền riêng~~ → **có**. Còn cần chọn và mua tên miền cụ thể (xem mục 2).
+3. ~~Tên miền riêng~~ → **có**. Còn cần chọn và mua tên miền cụ thể (xem mục 2), trước mốc M4.
+4. ~~Giấy phép~~ → nội dung **CC BY-NC-SA 4.0**, code **MIT** (xem [LICENSE-CONTENT.md](LICENSE-CONTENT.md)).
+5. ~~Trang trống cho bài chưa viết~~ → **không tạo**. Lộ trình hiện đủ 78 bài, bài chưa viết có nhãn "Sắp có".
+
+Các quyết định kỹ thuật và cách viết bài khác: [docs/mvp.md](docs/mvp.md) mục 7.
