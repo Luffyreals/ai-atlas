@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Báo lỗi bảo mật (Security vulnerability)
+    url: https://github.com/Luffyreals/ai-atlas/blob/main/SECURITY.md
+    about: Không mở issue công khai cho lỗi bảo mật. Đọc cách báo cáo riêng ở đây. (Do not open a public issue; see how to report privately.)

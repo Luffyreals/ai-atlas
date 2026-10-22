@@ -1,0 +1,95 @@
+name: Báo lỗi nội dung bài học
+description: Sai kiến thức, sai công thức, code ví dụ chạy lỗi, bản dịch lệch… (Lesson content error)
+title: '[Nội dung] '
+labels: ['content']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Cảm ơn bạn đã giúp bài học chính xác hơn. Bạn chỉ rõ chỗ sai và, nếu được, kèm nguồn tham khảo có thật (tác giả, năm, link).
+
+        *You can write in English.*
+
+  - type: input
+    id: lesson-url
+    attributes:
+      label: URL của bài học
+      description: (Lesson URL)
+      placeholder: https://ai-atlas.pages.dev/vi/ml/linear-regression/
+    validations:
+      required: true
+
+  - type: dropdown
+    id: language
+    attributes:
+      label: Bản bị lỗi
+      description: (Which version has the error)
+      options:
+        - Tiếng Việt (vi)
+        - English (en)
+        - Cả hai (both)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: section
+    attributes:
+      label: Mục trong bài
+      description: Mục chứa lỗi, theo khung 9 mục của bài học. (Lesson section)
+      options:
+        - Mục tiêu (Goals)
+        - Cần biết trước (Prerequisites)
+        - Trực giác (Intuition)
+        - Lý thuyết (Theory)
+        - Minh họa (Illustration)
+        - Ví dụ code (Code example)
+        - Lỗi hay gặp (Common mistakes)
+        - Kiểm tra nhanh (Quick check)
+        - Tóm tắt và đọc thêm (Summary and further reading)
+        - Khác (Other)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Loại lỗi
+      description: (Kind of error)
+      options:
+        - Sai kiến thức hoặc giải thích chưa đúng (Incorrect explanation)
+        - Sai công thức hoặc ký hiệu (Math or notation error)
+        - Code ví dụ chạy lỗi hoặc ra kết quả khác (Code example fails or gives different output)
+        - Quiz sai đáp án hoặc giải thích (Quiz answer or explanation is wrong)
+        - Bản vi và en không khớp (vi and en do not match)
+        - Link hỏng hoặc nguồn tham khảo sai (Broken link or wrong reference)
+        - Chính tả, diễn đạt khó hiểu (Typo or unclear wording)
+        - Khác (Other)
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Chỗ nào sai
+      description: Trích đoạn bị sai (câu, công thức hoặc dòng code) và giải thích vì sao sai. (What is wrong and why)
+    validations:
+      required: true
+
+  - type: textarea
+    id: fix
+    attributes:
+      label: Đề xuất sửa và nguồn
+      description: Cách viết đúng theo bạn, kèm nguồn có thật nếu có. (Suggested fix and source)
+      placeholder: |
+        Nên sửa thành: ...
+        Nguồn: Tác giả (Năm). Tên tài liệu. https://...
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Kiểm tra trước khi gửi
+      options:
+        - label: Tôi đã tìm trong các issue có sẵn và không thấy lỗi trùng. (I searched existing issues.)
+          required: true

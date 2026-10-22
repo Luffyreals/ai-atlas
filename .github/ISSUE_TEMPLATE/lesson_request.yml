@@ -1,0 +1,85 @@
+name: Đề xuất bài học hoặc cải thiện
+description: Đề xuất chủ đề mới, minh họa mới, hoặc cách giải thích tốt hơn cho một bài. (Lesson request or improvement)
+title: '[Đề xuất] '
+labels: ['content', 'enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Cảm ơn bạn đã góp ý. Lộ trình hiện có 78 bài, bạn xem danh sách trong [PLAN.md mục 6](https://github.com/Luffyreals/ai-atlas/blob/main/PLAN.md#6-danh-sách-nội-dung-78-bài) trước để tránh đề xuất trùng.
+        Notebook thực hành Colab/Kaggle nằm **ngoài phạm vi** website, nên không nhận đề xuất loại này.
+
+        *You can write in English.*
+
+  - type: dropdown
+    id: request-type
+    attributes:
+      label: Loại đề xuất
+      description: (Request type)
+      options:
+        - Bài học mới (New lesson)
+        - Cải thiện bài có sẵn (Improve an existing lesson)
+        - Minh họa tương tác mới (New interactive illustration)
+        - Khác (Other)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: part
+    attributes:
+      label: Phần trong lộ trình
+      description: (Part of the roadmap)
+      options:
+        - 1. Python
+        - 2. Toán cho AI (Math for AI)
+        - 3. Machine Learning
+        - 4. Deep Learning
+        - 5a. NLP
+        - 5b. Computer Vision
+        - 5c. LLM
+        - Chưa rõ (Not sure)
+    validations:
+      required: true
+
+  - type: input
+    id: topic
+    attributes:
+      label: Chủ đề
+      description: Tên chủ đề hoặc khái niệm. (Topic)
+      placeholder: 'Ví dụ: Support Vector Machine (SVM)'
+    validations:
+      required: true
+
+  - type: input
+    id: lesson-url
+    attributes:
+      label: URL bài liên quan
+      description: Nếu đề xuất cải thiện một bài có sẵn. (Related lesson URL, if any)
+      placeholder: https://ai-atlas.pages.dev/vi/ml/linear-regression/
+    validations:
+      required: false
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Vì sao cần
+      description: Người học gặp khó khăn gì, bài mới hoặc phần cải thiện giúp được gì. (Why it is needed)
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: Tài liệu tham khảo
+      description: Nguồn có thật, ghi tác giả, năm, link. (References)
+      placeholder: Tác giả (Năm). Tên tài liệu. https://...
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Kiểm tra trước khi gửi
+      options:
+        - label: Tôi đã tìm trong các issue có sẵn và không thấy đề xuất trùng. (I searched existing issues.)
+          required: true
