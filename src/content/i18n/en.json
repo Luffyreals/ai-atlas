@@ -1,0 +1,23 @@
+{
+  "atlas.common.comingSoon": "Coming soon",
+  "atlas.common.notTranslated": "Not translated yet",
+  "atlas.home.openMap": "Open the map",
+  "atlas.home.linkRoute": "Route",
+  "atlas.home.linkTerms": "Terms",
+  "atlas.home.otherLanguage": "Tiếng Việt",
+  "atlas.home.otherLanguageName": "Read in Vietnamese",
+  "atlas.home.quickLinks": "Quick links",
+  "atlas.home.previous": "Previous part",
+  "atlas.home.next": "Next part",
+  "atlas.notFound.title": "Page not found",
+  "atlas.notFound.text": "The page you are looking for does not exist or has moved.",
+  "atlas.notFound.homeLink": "Back to the home page",
+  "atlas.roadmap.lessons": "{{count}} lessons",
+  "atlas.roadmap.branchNote": "After Deep Learning, pick a branch",
+  "atlas.roadmap.routeLabel": "Destination",
+  "atlas.roadmap.routeResult": "Route to {{lesson}}. Lessons on the way: {{count}}. Parts: {{parts}}.",
+  "atlas.roadmap.showOnMap": "Show on the map",
+  "atlas.roadmap.legendOpen": "Bold: open now",
+  "atlas.roadmap.legendSoon": "Faded: coming soon",
+  "atlas.roadmap.legendNone": "No lesson is open yet. Open lessons appear in bold, with a link."
+}

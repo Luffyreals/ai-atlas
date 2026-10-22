@@ -1,0 +1,86 @@
+/*
+ * AI Atlas theme: "walnut and tan", printed like an old atlas plate.
+ * Starlight tokens carry the light/dark switch; the --atlas-* tokens add the few
+ * roles Starlight has no name for (the paper of a plate, the tan field).
+ * Components use only var(--sl-color-*) and var(--atlas-*), never raw colours.
+ */
+
+/* Dark mode (Starlight default): walnut ground, bone ink. */
+:root {
+  --sl-color-white: #f6f2ea;
+  --sl-color-gray-1: #e8e3d8;
+  --sl-color-gray-2: #d6cfc2;
+  --sl-color-gray-3: #ada392;
+  --sl-color-gray-4: #7f7360;
+  --sl-color-gray-5: #4e4232;
+  --sl-color-gray-6: #382d1e;
+  --sl-color-black: #2b2216;
+
+  --sl-color-accent-low: #4f3e2c;
+  --sl-color-accent: #c9ae93;
+  --sl-color-accent-high: #ecdfcf;
+
+  /* The paper of a plate stays paper in both themes: bone, printed in walnut ink. */
+  --atlas-paper: #e4e2da;
+  --atlas-paper-ink: #22190f;
+  --atlas-paper-muted: #5c4f3f;
+  --atlas-paper-step: #d5d1c6;
+  /* The tan field: a whole section turns to it. */
+  --atlas-field: #c4a98f;
+  --atlas-field-ink: #1c150d;
+  /* The walnut ground the plates sit on. */
+  --atlas-ground: #2b2216;
+  --atlas-ground-step: #382d1e;
+  --atlas-ground-ink: #e4e2da;
+  --atlas-ground-muted: #b9ae9c;
+
+  --sl-font: 'Barlow', var(--sl-font-system);
+  --atlas-font-display: 'Barlow Condensed', 'Barlow', var(--sl-font-system);
+}
+
+/* Light mode: bone ground, walnut ink. */
+:root[data-theme='light'] {
+  --sl-color-white: #1c150d;
+  --sl-color-gray-1: #2b2216;
+  --sl-color-gray-2: #3b3023;
+  --sl-color-gray-3: #5b4f3f;
+  --sl-color-gray-4: #857866;
+  --sl-color-gray-5: #c2b8a7;
+  --sl-color-gray-6: #ddd6c9;
+  --sl-color-gray-7: #e9e4da;
+  --sl-color-black: #f2eee6;
+
+  --sl-color-accent-low: #e0d3c2;
+  --sl-color-accent: #6e4f32;
+  --sl-color-accent-high: #3d2b19;
+
+  --atlas-paper: #f3f2ee;
+  --atlas-paper-step: #e3e0d8;
+  --atlas-ground: #2b2216;
+  --atlas-ground-step: #382d1e;
+}
+
+/* Display face for the site title and page headings. */
+.site-title {
+  font-family: var(--atlas-font-display);
+  font-weight: 700;
+  font-size: 1.5rem;
+  letter-spacing: -0.01em;
+  color: var(--sl-color-white);
+}
+
+:is(h1#_top, .sl-markdown-content :is(h1, h2, h3)) {
+  font-family: var(--atlas-font-display);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+::selection {
+  background-color: var(--sl-color-accent);
+  color: var(--sl-color-black);
+}
+
+/* Show the whole label of the theme and language selects (Vietnamese labels are longer). */
+:is(starlight-theme-select, starlight-lang-select) select {
+  width: auto;
+}

@@ -1,0 +1,139 @@
+---
+// A short letter on a sheet of paper with a scalloped edge and a tear-off stub carrying the licence.
+import { CC_LICENCE_URL, HOME } from '@data/home';
+import type { Locale } from '@data/roadmap';
+import { escapeHtml } from '@lib/inline-markup';
+import RouteMark from './RouteMark.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const { letter } = HOME;
+// **phrase** becomes a phrase on a flat marker colour.
+const withMarks = (text: string) => escapeHtml(text).replace(/\*\*(.+?)\*\*/g, '<mark>$1</mark>');
+---
+
+<section class="letter" aria-labelledby="letter-title">
+  <article class="sheet" data-reveal>
+    <div class="sheet-body">
+      <span class="sheet-avatar" aria-hidden="true"><RouteMark /></span>
+      <h2 id="letter-title">{letter.heading[locale]}</h2>
+      {letter.paragraphs[locale].map((paragraph) => <p set:html={withMarks(paragraph)} />)}
+      <p class="sheet-sign">
+        <span class="sheet-name">{letter.signName[locale]}</span>
+        <span class="sheet-role">{letter.signRole[locale]}</span>
+      </p>
+    </div>
+    <svg class="sheet-edge" aria-hidden="true" focusable="false" preserveAspectRatio="none">
+      <defs>
+        <pattern id="sheet-scallop" width="24" height="12" patternUnits="userSpaceOnUse">
+          <circle cx="12" cy="0" r="12" fill="currentColor"></circle>
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#sheet-scallop)"></rect>
+    </svg>
+    <div class="sheet-stub">
+      <p>{letter.stub[locale]}</p>
+      <a class="atlas-button" href={CC_LICENCE_URL[locale]} rel="license">{letter.stubAction[locale]}</a>
+    </div>
+  </article>
+</section>
+
+<style>
+  .letter {
+    padding: var(--section-gap) var(--edge);
+    background: var(--sl-color-gray-6);
+  }
+
+  .sheet {
+    max-width: 640px;
+    margin: 0 auto;
+    color: var(--atlas-paper-ink);
+  }
+
+  .sheet-body {
+    display: grid;
+    gap: 16px;
+    padding: 32px 24px 24px;
+    background: var(--atlas-paper);
+    font-size: var(--step-body);
+    line-height: 1.55;
+  }
+
+  .sheet-body p {
+    margin: 0;
+  }
+
+  .sheet-body h2 {
+    margin: 8px 0 4px;
+    font-size: var(--step-lead);
+  }
+
+  .sheet-avatar {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--atlas-paper-ink);
+    color: var(--atlas-paper);
+    font-size: 22px;
+  }
+
+  .sheet-body :global(mark) {
+    padding: 0 3px;
+    background: var(--atlas-field);
+    color: var(--atlas-field-ink);
+  }
+
+  .sheet-sign {
+    display: grid;
+    margin-top: 8px !important;
+  }
+
+  .sheet-name {
+    font-size: var(--step-lead);
+    font-style: italic;
+  }
+
+  .sheet-role {
+    color: var(--atlas-paper-muted);
+    font-size: var(--step-small);
+  }
+
+  .sheet-edge {
+    display: block;
+    width: 100%;
+    height: 12px;
+    color: var(--atlas-paper);
+  }
+
+  /* The tear-off stub is set apart by a strip of the ground showing through, not by a line. */
+  .sheet-stub {
+    display: grid;
+    gap: 14px;
+    justify-items: start;
+    margin-top: 16px;
+    padding: 20px 24px;
+    background: var(--atlas-paper);
+  }
+
+  .sheet-stub p {
+    margin: 0;
+  }
+
+  @media (min-width: 40rem) {
+    .sheet-body {
+      padding: 60px 60px 40px;
+    }
+
+    .sheet-stub {
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      min-height: 72px;
+      padding: 16px 60px;
+    }
+  }
+</style>

@@ -1,0 +1,159 @@
+---
+// One idea, two names: a bilingual gazetteer of terms from docs/glossary.md.
+// The reader's language sits at the left end of each row, the other language at the right.
+import { Picture } from 'astro:assets';
+import { HOME } from '@data/home';
+import { TERMS_PICTURE } from '@data/home-pictures';
+import type { Locale } from '@data/roadmap';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const other: Locale = locale === 'vi' ? 'en' : 'vi';
+---
+
+<section id="terms" class="terms" aria-labelledby="terms-title">
+  <div class="terms-side">
+    <h2 id="terms-title" data-reveal>{HOME.terms.heading[locale]}</h2>
+    <p class="terms-intro" data-reveal style="--i: 1">{HOME.terms.intro[locale]}</p>
+    <figure class="terms-figure" data-reveal style="--i: 2">
+      <Picture
+        src={TERMS_PICTURE.src}
+        alt={TERMS_PICTURE.alt[locale]}
+        widths={[320, 480, 640]}
+        sizes="(min-width: 64rem) 30vw, 60vw"
+        formats={['avif', 'webp']}
+        style={`object-position: ${TERMS_PICTURE.focus ?? '50% 50%'}`}
+      />
+      <figcaption>{TERMS_PICTURE.caption[locale]}</figcaption>
+    </figure>
+  </div>
+
+  <dl class="terms-rows">
+    {
+      HOME.terms.rows.map((row, index) => (
+        <div class="term" data-reveal style={`--i: ${Math.min(index, 8)}`}>
+          <dt lang={locale}>{row[locale]}</dt>
+          <dd lang={other}>{row[other]}</dd>
+        </div>
+      ))
+    }
+  </dl>
+</section>
+
+<style>
+  .terms {
+    display: grid;
+    gap: 48px;
+    padding: var(--section-gap) var(--edge);
+    background: var(--sl-color-black);
+    color: var(--sl-color-white);
+  }
+
+  .terms-side {
+    display: grid;
+    align-content: start;
+    gap: 20px;
+  }
+
+  .terms-side h2 {
+    font-size: var(--step-head);
+  }
+
+  .terms-intro {
+    max-width: 40ch;
+    margin: 0;
+    color: var(--sl-color-gray-2);
+  }
+
+  .terms-figure {
+    width: min(60vw, 320px);
+    margin: 12px 0 0;
+  }
+
+  .terms-figure :global(img) {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 3 / 4;
+    object-fit: cover;
+    background: var(--atlas-paper);
+  }
+
+  :global(:root[data-theme='light']) .terms-figure :global(img) {
+    mix-blend-mode: multiply;
+  }
+
+  :global(:root:not([data-theme='light'])) .terms-figure :global(img) {
+    filter: sepia(0.15) brightness(0.9);
+  }
+
+  .terms-figure figcaption {
+    margin-top: 10px;
+    color: var(--sl-color-gray-3);
+    font-size: var(--step-small);
+    line-height: 1.4;
+  }
+
+  .terms-rows {
+    display: grid;
+    align-content: start;
+    gap: 0;
+    margin: 0;
+  }
+
+  /* The two names of one idea sit side by side on a shared baseline, close enough to read as a pair. */
+  .term {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: baseline;
+    gap: 4px 24px;
+    max-width: 44rem;
+    padding: 8px 12px;
+    margin: 0 -12px;
+    transition: background-color 0.2s ease;
+  }
+
+  .term:hover {
+    background: var(--sl-color-gray-6);
+  }
+
+  .term dt {
+    font-family: var(--atlas-font-display);
+    font-size: var(--step-lead);
+    font-weight: 700;
+    line-height: 1.1;
+  }
+
+  .term dd {
+    margin: 0;
+    color: var(--sl-color-gray-2);
+    font-size: var(--step-body);
+    font-style: italic;
+  }
+
+  @media (min-width: 48rem) {
+    .terms {
+      grid-template-columns: 5fr 7fr;
+      gap: 0 48px;
+    }
+  }
+
+  @media (min-width: 64rem) {
+    .terms {
+      gap: 0 64px;
+    }
+
+    .terms-side {
+      position: sticky;
+      top: calc(var(--sl-nav-height) + 32px);
+      align-self: start;
+    }
+
+    .terms-figure {
+      width: min(100%, 360px);
+    }
+  }
+</style>
