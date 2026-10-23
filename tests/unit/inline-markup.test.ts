@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { escapeHtml, renderInlineMarkup } from '../../src/lib/inline-markup';
+import { escapeHtml, inlineMarkupLabel, renderInlineMarkup } from '../../src/lib/inline-markup';
 
 /** Tags that KaTeX (HTML + MathML output) and the `code` token may produce. Nothing else is allowed. */
 const ALLOWED_TAGS = new Set([
@@ -124,5 +124,34 @@ describe('renderInlineMarkup', () => {
       expect(html.toLowerCase(), input).not.toMatch(/<(script|img|b|a|iframe)[\s>/]/);
       expectOnlySafeMarkup(html, input);
     }
+  });
+});
+
+describe('inlineMarkupLabel (accessible names, decision 12)', () => {
+  it('keeps plain text and replaces $...$ with its TeX source', () => {
+    expect(inlineMarkupLabel(String.raw`Nếu $\eta$ quá lớn`)).toBe(String.raw`Nếu \eta quá lớn`);
+    expect(inlineMarkupLabel(String.raw`$\frac{1}{2}$`)).toBe(String.raw`\frac{1}{2}`);
+  });
+
+  it('keeps the text of `code`', () => {
+    expect(inlineMarkupLabel('`np.mean(x)` trả về gì?')).toBe('np.mean(x) trả về gì?');
+  });
+
+  it('returns plain text, not HTML: nothing is escaped', () => {
+    expect(inlineMarkupLabel('$a < b$ & `"x"`')).toBe('a < b & "x"');
+  });
+
+  it('trims the TeX source and collapses runs of spaces', () => {
+    expect(inlineMarkupLabel('  Tính $ x^2 $   và  $y$ ')).toBe('Tính x^2 và y');
+  });
+
+  it('is never empty for a non-empty option, even one that is only a formula', () => {
+    for (const option of ['$2$', String.raw`$\hat{y}$`, '`0`', 'Giảm dần']) {
+      expect(inlineMarkupLabel(option), option).not.toBe('');
+    }
+  });
+
+  it('leaves a lone "$" as it is, like renderInlineMarkup', () => {
+    expect(inlineMarkupLabel('Giá 5$')).toBe('Giá 5$');
   });
 });

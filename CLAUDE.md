@@ -22,9 +22,19 @@ AI Atlas là website wiki **song ngữ Việt – Anh**, công khai và miễn p
 
 ## Trạng thái hiện tại
 
-Mốc M0 (bộ khung) gần xong: **đã khởi tạo Astro + Starlight** theo `docs/architecture/scaffold.md`. Có song ngữ vi/en, KaTeX, `src/data/roadmap.ts` đủ 78 bài (tất cả `planned`), sidebar sinh từ roadmap, 404 song ngữ, Vitest và Playwright, CI GitHub Actions và Dependabot (`.github/`). Còn thiếu: deploy lên Cloudflare Pages (người dùng tự kết nối).
+Mốc M0 (bộ khung) xong, trừ deploy: Astro + Starlight theo `docs/architecture/scaffold.md`, song ngữ vi/en, KaTeX, `src/data/roadmap.ts` đủ 78 bài (tất cả `planned`), sidebar sinh từ roadmap, 404 song ngữ, Vitest và Playwright, CI GitHub Actions và Dependabot (`.github/`). Còn thiếu: deploy lên Cloudflare Pages (người dùng tự kết nối).
 
-Đã có **nhận diện và trang chủ** thiết kế bằng skill `design-taste-frontend`: bảng màu "walnut and tan", font Barlow, logo con đường rẽ ba, trang chủ dạng tấm bản đồ atlas. Xem `docs/architecture/homepage.md`. `RoadmapMap` đã làm sớm (chưa có đánh dấu tiến độ). Chưa có bài học và các component M1 còn lại.
+Mốc M1 (công cụ trình bày) xong phần kỹ thuật, theo `docs/architecture/components.md`:
+
+- `Prerequisites`
+- `LessonProgress` (lưu localStorage)
+- `Quiz` (câu hỏi trong frontmatter, KaTeX render lúc build)
+- `PythonRunner` (Pyodide 314.0.7 trong Web Worker, chỉ tải khi bấm Chạy)
+- `RoadmapMap` có dấu ✓ và "Đã học x/y"
+
+Trang demo: `/vi/dev/components/` và `/en/dev/components/` (không vào sitemap). Còn chờ: người dùng duyệt giao diện (M1-10) và chạy thử trên bản deploy.
+
+Nhận diện và trang chủ thiết kế bằng skill `design-taste-frontend`: bảng màu "walnut and tan", font Barlow, logo con đường rẽ ba, trang chủ dạng tấm bản đồ atlas. Xem `docs/architecture/homepage.md`. Chưa có bài học nào. Bước tiếp theo: M2, bài mẫu Hồi quy tuyến tính.
 
 ## Công nghệ
 
@@ -125,4 +135,5 @@ Cần Node `>=22.23.4` (máy phát triển và Cloudflare Pages dùng 24.15.0, g
 | `npm run preview` | Xem bản build trong `dist/` |
 | `npm run check` | Kiểm tra kiểu TypeScript (`astro check`), phải 0 lỗi 0 cảnh báo |
 | `npm test` | Unit test (Vitest) trong `tests/unit/` |
-| `npm run test:e2e` | E2E (Playwright): tự build rồi chạy preview, project `desktop` và `mobile` (375px) |
+| `npm run test:e2e` | E2E (Playwright): tự build rồi chạy preview ở cổng 4322, project `desktop` và `mobile` (375px), bỏ qua các test `@network` |
+| `npm run test:e2e:network` | E2E cần mạng (tag `@network`, chỉ project `desktop`): tải Pyodide thật từ CDN và chạy code mẫu. Không chạy trong `test:e2e` |

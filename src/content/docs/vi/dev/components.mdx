@@ -5,7 +5,42 @@ pagefind: false
 head:
   - tag: meta
     attrs: { name: robots, content: noindex }
+quiz:
+  - question: 'Với dự đoán $\hat{y} = 3$ và giá trị thật $y = 2$, sai số $\frac{1}{2}(\hat{y} - y)^2$ bằng bao nhiêu?'
+    options:
+      - '$2$'
+      - '$\frac{1}{2}$'
+      - '$1$'
+      - '$\frac{1}{4}$'
+    answer: 1
+    explanation: 'Hiệu $\hat{y} - y = 1$, bình phương lên vẫn là $1$. Nhân với $\frac{1}{2}$ thì được $\frac{1}{2}$.'
+  - question: 'Gradient descent cập nhật tham số để hàm mất mát $\mathcal{L}$ thay đổi thế nào?'
+    options:
+      - 'Giảm dần'
+      - 'Tăng dần'
+      - 'Giữ nguyên'
+    answer: 0
+    explanation: 'Gradient chỉ hướng $\mathcal{L}$ tăng nhanh nhất. Mỗi bước đi ngược hướng đó, nên $\mathcal{L}$ giảm, miễn là tốc độ học $\eta$ không quá lớn.'
+  - question: '`np.mean(np.array([1, 2, 3, 6]))` trả về gì?'
+    options:
+      - '`2.5`'
+      - '`12`'
+      - '`3.0`'
+      - '`[1, 2, 3, 6]`'
+    answer: 2
+    explanation: '`np.mean` cộng các phần tử rồi chia cho số phần tử: $(1 + 2 + 3 + 6) / 4 = 3$. Kết quả là số thực `3.0`. Còn `2.5` là trung vị, không phải trung bình.'
 ---
+
+import LessonProgress from '@components/LessonProgress.astro';
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import RoadmapMap from '@components/RoadmapMap.astro';
+import helloCode from '@code/dev/hello.vi.py?raw';
+import plotCode from '@code/dev/plot.vi.py?raw';
+import errorCode from '@code/dev/error.vi.py?raw';
+import slowCode from '@code/dev/slow.vi.py?raw';
+import inputCode from '@code/dev/input.vi.py?raw';
 
 Trang này chỉ để kiểm tra hiển thị công thức và component. Nó không thuộc lộ trình.
 
@@ -24,3 +59,74 @@ $$
 :::note
 Đây là một ghi chú (aside) của Starlight.
 :::
+
+## Cần biết trước
+
+Hai bài, cả hai đều sắp có:
+
+<Prerequisites ids={['ml/linear-regression', 'math/calculus']} />
+
+Danh sách rỗng:
+
+<Prerequisites ids={[]} />
+
+## Đánh dấu đã học
+
+<LessonProgress id="ml/linear-regression" />
+
+## Bản đồ lộ trình
+
+Chỉ phần Học máy. Dấu ✓ và dòng "Đã học x/y" chỉ hiện khi bạn đã đánh dấu ít nhất một bài.
+
+<RoadmapMap id="demo-map" parts={['ml']} />
+
+## Kiểm tra nhanh
+
+Câu hỏi lấy từ trường `quiz` trong frontmatter:
+
+<Quiz />
+
+Quiz thứ hai trên cùng trang, truyền bằng prop `questions`:
+
+<Quiz
+  questions={[
+    {
+      question: 'Vì sao ta giữ riêng một tập kiểm tra (test set), không dùng nó khi huấn luyện?',
+      options: [
+        'Để mô hình có thêm dữ liệu học',
+        'Để đo mô hình làm tốt đến đâu trên dữ liệu nó chưa từng thấy',
+        'Để huấn luyện chạy nhanh hơn',
+      ],
+      answer: 1,
+      explanation:
+        'Trên dữ liệu đã học, điểm số thường cao hơn thực tế. Dữ liệu mô hình chưa thấy mới cho biết nó dùng được trên dữ liệu mới hay không.',
+    },
+    {
+      question: 'Mô hình đúng 99% trên tập huấn luyện nhưng chỉ đúng 60% trên tập kiểm tra. Đây là hiện tượng gì?',
+      options: ['Underfitting', 'Overfitting'],
+      answer: 1,
+      explanation:
+        'Mô hình nhớ cả những chi tiết ngẫu nhiên của tập huấn luyện, nên làm kém trên dữ liệu mới. Đó là overfitting. Underfitting thì kém ngay cả trên tập huấn luyện.',
+    },
+  ]}
+/>
+
+## Chạy code Python
+
+Pyodide chỉ tải khi bạn bấm Chạy lần đầu. Hai ô ngay dưới đây đặt liền nhau để thử hàng đợi: bấm Chạy ở ô 1 rồi ở ô 2 thật nhanh, ô 2 sẽ chờ ô 1 chạy xong.
+
+<PythonRunner code={helloCode} title="In vài dòng" />
+
+<PythonRunner code={plotCode} title="Một biểu đồ matplotlib" figureAlt={['Các điểm dữ liệu nằm quanh đường thẳng y = 2x + 1']} />
+
+Code có lỗi ở dòng 6. Hình vẽ ở dòng 4 vẫn hiện:
+
+<PythonRunner code={errorCode} />
+
+Vòng lặp không tự dừng. Sau 10 giây có gợi ý bấm Dừng:
+
+<PythonRunner code={slowCode} />
+
+Đọc dữ liệu nhập bằng `input()`. Bạn sửa được hai dòng trong ô dữ liệu nhập:
+
+<PythonRunner code={inputCode} stdin={'Lan\n20'} />

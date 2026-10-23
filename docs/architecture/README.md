@@ -1,7 +1,7 @@
 # Tổng quan kiến trúc
 
 > Một trang cho người mới vào dự án: website được build và phục vụ thế nào, dữ liệu nằm ở đâu, lỗi bị bắt ở lớp nào.
-> Lý do chi tiết của từng quyết định nằm ở ba tài liệu thiết kế, xem [mục 8](#8-tài-liệu-thiết-kế-chi-tiết).
+> Lý do chi tiết của từng quyết định nằm ở bốn tài liệu thiết kế, xem [mục 8](#8-tài-liệu-thiết-kế-chi-tiết).
 
 ## 1. Tóm tắt
 
@@ -31,7 +31,9 @@ src/pages/404.astro, public/        trang 404, file tĩnh ─────┤
                      dist/ ─► Cloudflare Pages ─► trình duyệt
 ```
 
-**Build.** `npm run build` chạy `astro build` và ghi kết quả vào `dist/`. Starlight tự tạo chỉ mục tìm kiếm Pagefind và `sitemap-index.xml` (vì `site` đã khai báo trong `astro.config.ts`).
+**Build.** `npm run build` chạy `astro build` và ghi kết quả vào `dist/`. Starlight tự tạo chỉ mục tìm kiếm Pagefind. `sitemap-index.xml` sinh ra vì `site` đã khai báo trong `astro.config.ts`.
+
+Từ mốc M1, `@astrojs/sitemap` được khai báo tường minh trong `astro.config.ts`, kèm `filter` để bỏ trang nội bộ `/vi/dev/`, `/en/dev/`. Khi đó Starlight không thêm bản sitemap của nó nữa. Chi tiết ở [components.md](components.md) mục 2.10.
 
 **Phục vụ.** Cloudflare Pages phục vụ `dist/` như file tĩnh.
 
@@ -120,7 +122,11 @@ markdown: {
 | Unit | Vitest, `tests/unit/` | Lộ trình hợp lệ (id, thứ tự, vòng lặp); trạng thái khớp file thật và `title` khớp frontmatter; sidebar; vi/en cùng bộ key và placeholder; phiên bản gói ghim chính xác | `npm test` |
 | E2E | Playwright + Chromium, `tests/e2e/` | Chuyển hướng `/`, thuộc tính `lang`, chuyển ngôn ngữ, 404 song ngữ, KaTeX, không cuộn ngang ở 375px, chế độ tối | `npm run test:e2e` |
 
-- E2E chạy trên **bản build**: Playwright tự chạy `npm run build` rồi `npm run preview` ở cổng 4321. Có hai project: `desktop` và `mobile` (viewport 375px).
+- E2E chạy trên **bản build**: Playwright tự chạy `npm run build` rồi `npm run preview` ở cổng 4322 (không dùng 4321, cổng của `npm run dev`, xem [scaffold.md](scaffold.md) mục 4.10). Có hai project: `desktop` và `mobile` (viewport 375px).
+- Từ mốc M1, test tải Pyodide thật gắn tag `@network`:
+  - `npm run test:e2e` bỏ qua các test này (`--grep-invert @network`). CI cũng vậy.
+  - `npm run test:e2e:network` chỉ chạy các test này, trên project `desktop`, khi cần kiểm tra bằng tay.
+  - Test "mở trang không tải Pyodide" không cần mạng nên vẫn chạy trong CI. Xem [components.md](components.md) mục 2.11.
 - CI trên GitHub Actions ([.github/workflows/ci.yml](../../.github/workflows/ci.yml)) chạy các lệnh trên khi push lên `main` và khi mở pull request, trừ khi thay đổi chỉ nằm ở tài liệu (file `.md` ở gốc repo, `docs/`). Build có dòng `[WARN]`, hoặc `astro check` có cảnh báo, thì CI báo lỗi.
 - Dependabot ([.github/dependabot.yml](../../.github/dependabot.yml)) đề xuất nâng cấp gói. Cấu hình giữ `katex` ở 0.16.x, `typescript` dưới 7 và `@types/node` cùng major với `.node-version`. Bản major mới của `rehype-katex` không được tự đề xuất: bạn nâng nó cùng `katex` bằng tay.
 
@@ -157,4 +163,5 @@ Quy trình đầy đủ cho người đóng góp: [CONTRIBUTING.md](../../CONTRI
 |---|---|
 | [scaffold.md](scaffold.md) | Mốc M0: lý do chọn `unified()`, định tuyến song ngữ, sidebar, trang 404, kiểm tra link, cấu hình từng file, Cloudflare Pages, danh sách phụ thuộc |
 | [roadmap-data.md](roadmap-data.md) | Schema của `roadmap.ts`, ý nghĩa trạng thái, quy tắc "cần biết trước", hàm tiện ích, bảng slug của 78 bài, test bắt buộc |
-| [components.md](components.md) | Mốc M1: 5 component (`Prerequisites`, `Quiz`, `LessonProgress`, `PythonRunner`, `RoadmapMap`), quiz trong frontmatter, Pyodide, lưu tiến độ, thay đổi template bài học |
+| [components.md](components.md) | Mốc M1: `Prerequisites`, `Quiz`, `LessonProgress`, `PythonRunner` và tiến độ trên `RoadmapMap`. Quiz trong frontmatter, Pyodide (hàng đợi, Dừng, giới hạn output), lưu tiến độ, hình thức và tương phản, bảng chuỗi i18n, sitemap, thứ tự task M1 |
+| [homepage.md](homepage.md) | Nhận diện (màu, font, logo) và cấu trúc trang chủ |

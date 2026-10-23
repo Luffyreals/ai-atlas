@@ -1,18 +1,27 @@
 ---
 # Template bài học chuẩn của AI Atlas.
 # Sao chép file này sang src/content/docs/vi/<phần>/<tên-bài>.mdx rồi điền nội dung.
-# Các component (Prerequisites, PythonRunner, Quiz, LessonProgress) sẽ có ở Giai đoạn 1.
-# Khi chưa có, giữ chỗ bằng comment {/* TODO: ... */}.
-title: Tên bài học
+# Sidebar sinh từ src/data/roadmap.ts, nên không cần `sidebar.order`.
+# Bốn component bên dưới tự gắn `client:*`, không viết `client:*` trong MDX.
+# Code ví dụ nằm ở src/code/<phần>/<bài>/, mỗi ví dụ hai file: example.vi.py và example.en.py
+# (chỉ khác comment). Bản en của bài import example.en.py.
+title: Tên bài học # phải trùng title trong roadmap.ts
 description: Một câu mô tả bài học, dùng cho SEO và thẻ chia sẻ (tối đa khoảng 160 ký tự).
-sidebar:
-  order: 1
+# Câu hỏi cho <Quiz /> ở mục "Kiểm tra nhanh". Luôn dùng nháy đơn '...' cho chuỗi có $ hoặc \
+# (trong nháy đơn, \ giữ nguyên). Muốn có dấu ' thì gõ ''. Chỉ hỗ trợ $công thức$ và `code`.
+# answer: chỉ số của đáp án đúng, đếm từ 0. explanation: bắt buộc.
+quiz:
+  - question: '...'
+    options: ['...', '...']
+    answer: 0
+    explanation: '...'
 ---
 
-{/* import Prerequisites from '@components/Prerequisites.astro'; */}
-{/* import PythonRunner from '@components/PythonRunner'; */}
-{/* import Quiz from '@components/Quiz'; */}
-{/* import LessonProgress from '@components/LessonProgress'; */}
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import exampleCode from '@code/<phần>/<bài>/example.vi.py?raw';
 
 ## Mục tiêu
 
@@ -24,9 +33,9 @@ Sau bài này, bạn sẽ:
 
 ## Cần biết trước
 
-{/* <Prerequisites ids={['ml/ml-overview', 'math/calculus']} /> */}
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
 
-- [Tên bài nền tảng](/vi/math/calculus/): vì sao cần biết (link luôn tuyệt đối, có `/` cuối)
+<Prerequisites />
 
 ## Trực giác
 
@@ -55,20 +64,16 @@ Một ý quan trọng cần nhớ.
 
 Hình SVG hoặc component minh họa tương tác giúp người đọc "thấy" khái niệm.
 
-{/* <TenMinhHoa client:visible /> */}
+{/* <TenMinhHoa /> */}
 
 ## Ví dụ code
 
 Đoạn code ngắn (khoảng 40 dòng trở xuống) thể hiện đúng phần lý thuyết ở trên.
 
-{/* <PythonRunner client:visible code={`...`} /> */}
+{/* Phần DL, NLP, CV, LLM có code cần PyTorch hoặc GPU: dùng khối ```python thường, không dùng PythonRunner.
+    Code có input(): thêm stdin={'dòng 1\ndòng 2'}. Code vẽ hình: thêm figureAlt={['Mô tả hình 1']}. */}
 
-```python
-import numpy as np
-
-rng = np.random.default_rng(42)
-# ...
-```
+<PythonRunner code={exampleCode} />
 
 Giải thích kết quả in ra và liên hệ lại với lý thuyết.
 
@@ -80,10 +85,9 @@ Mô tả hiểu nhầm, vì sao sai, cách hiểu đúng.
 
 ## Kiểm tra nhanh
 
-{/* <Quiz client:visible questions={[...]} /> */}
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
 
-1. Câu hỏi 1?
-   - Đáp án đúng và giải thích ngắn.
+<Quiz />
 
 ## Tóm tắt và đọc thêm
 
@@ -96,4 +100,4 @@ Mô tả hiểu nhầm, vì sao sai, cách hiểu đúng.
 
 - Tác giả (Năm). *Tên tài liệu*. [Link](https://...)
 
-{/* <LessonProgress client:load /> */}
+<LessonProgress />

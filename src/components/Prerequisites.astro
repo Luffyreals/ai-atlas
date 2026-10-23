@@ -1,0 +1,78 @@
+---
+// "Before this lesson": the lessons a lesson builds on, read from roadmap.ts.
+// Plain HTML; a small script only adds the ticks for lessons the reader has learned.
+// Styles: src/styles/prerequisites.css, loaded on every page through Starlight's customCss (astro.config.ts).
+import { formatString } from '@i18n/format';
+import { getStrings } from '@i18n/ui';
+import type { LessonId, Locale } from '@data/roadmap';
+import { lessonLinkView } from '@lib/lesson-link';
+import { getPart, getPartIdOf, getPrerequisites, getRouteLessonId, requireLesson } from '@lib/roadmap';
+
+interface Props {
+  /** Override. Default: prerequisites of the current lesson from roadmap.ts. */
+  ids?: LessonId[];
+}
+
+const { ids } = Astro.props;
+const route = Astro.locals.starlightRoute;
+const locale = (route.locale ?? 'vi') as Locale;
+const t = getStrings(Astro.locals.t, 'prereq');
+const tCommon = getStrings(Astro.locals.t, 'common');
+
+function lessonsToShow() {
+  if (ids) return ids.map((id) => requireLesson(id));
+  const current = getRouteLessonId(route.id);
+  if (!current) {
+    throw new Error(
+      `<Prerequisites /> on "${route.id}": this page is not a lesson in src/data/roadmap.ts. Pass ids={[...]}.`,
+    );
+  }
+  return getPrerequisites(current);
+}
+
+const items = lessonsToShow().map((lesson) => ({
+  view: lessonLinkView(lesson, locale),
+  part: getPart(getPartIdOf(lesson.id)).title[locale],
+}));
+---
+
+{
+  items.length === 0 ? (
+    <p class="atlas-prereq-empty not-content">{t.none}</p>
+  ) : (
+    <ul class="atlas-prereq not-content" data-prereq>
+      {items.map(({ view, part }) => (
+        <li class="atlas-prereq-item" data-lesson-id={view.id}>
+          <span class="atlas-prereq-lesson">
+            {view.href ? (
+              <a class="atlas-prereq-title" href={view.href}>
+                {view.title}
+              </a>
+            ) : (
+              <span class="atlas-prereq-title">{view.title}</span>
+            )}
+            <span class="sr-only">, {formatString(tCommon.lessonsOn, { part })}</span>
+            {view.state !== 'open' && (
+              <span class="atlas-prereq-note">
+                ({view.state === 'soon' ? tCommon.comingSoon : tCommon.notTranslated})
+              </span>
+            )}
+            <span class="atlas-prereq-done atlas-check" aria-hidden="true" />
+            <span class="atlas-prereq-done-text sr-only"> ({tCommon.learned})</span>
+          </span>
+          <span class="atlas-prereq-part" aria-hidden="true">
+            {part}
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+<script>
+  import { applyProgressMarks } from '../lib/progress-marks';
+
+  for (const list of document.querySelectorAll<HTMLElement>('[data-prereq]')) {
+    applyProgressMarks(list);
+  }
+</script>

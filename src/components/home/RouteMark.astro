@@ -1,6 +1,7 @@
 ---
 // The AI Atlas mark: four stops on one road, then the fork into NLP, CV and LLM.
 // Drawn in currentColor so it takes the ink of whatever it sits on.
+// Styles: src/styles/roadmap-map.css (customCss), at zero specificity so a parent's class wins.
 interface Props {
   class?: string;
 }
@@ -22,12 +23,3 @@ const { class: className } = Astro.props;
     <circle cx="34" cy="26" r="3"></circle>
   </g>
 </svg>
-
-<style>
-  .route-mark {
-    display: inline-block;
-    width: auto;
-    height: 1em;
-    vertical-align: -0.1em;
-  }
-</style>

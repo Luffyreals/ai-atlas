@@ -221,13 +221,19 @@ ai-atlas/
 
 ### Giai đoạn 1: Xây nền tảng
 - [x] Cài KaTeX, tùy chỉnh giao diện (nhận diện và trang chủ, xem [docs/architecture/homepage.md](docs/architecture/homepage.md))
-- [ ] `PythonRunner` (Pyodide)
-- [ ] `Quiz`, `Prerequisites`
-- [ ] Lưu tiến độ (`LessonProgress`)
-- [x] `RoadmapMap` cho trang chủ, đọc từ `roadmap.ts` (chưa có đánh dấu tiến độ, thêm cùng `LessonProgress`)
+- [x] `PythonRunner` (Pyodide 314.0.7 trong Web Worker, chỉ tải khi bấm Chạy; có matplotlib, nút Dừng, hàng đợi)
+- [x] `Quiz` (câu hỏi trong frontmatter, KaTeX lúc build), `Prerequisites`
+- [x] Lưu tiến độ (`LessonProgress`, localStorage, không lỗi khi bị chặn)
+- [x] `RoadmapMap` cho trang chủ, đọc từ `roadmap.ts`, có dấu ✓ bài đã học và dòng "Đã học x/y"
 - [x] Tạo khung sidebar từ `roadmap.ts` cho toàn bộ 78 bài. Không tạo trang trống: bài chưa viết chỉ có nhãn "Sắp có" trên lộ trình.
+- [x] Trang demo `/vi/dev/components/` và `/en/dev/components/` dùng đủ các component (thiết kế: [docs/architecture/components.md](docs/architecture/components.md))
+- [ ] Người dùng duyệt giao diện trên trang demo, cả máy tính lẫn điện thoại thật (M1-10)
 
 **Kết quả:** website có đủ khung lộ trình và đủ công cụ trình bày.
+
+> **Trạng thái mốc M1 (23/10/2026):** xong phần kỹ thuật. `npm run check` 0 lỗi 0 cảnh báo, `npm test` 244/244, `npm run build` 0 `[WARN]`, `npm run test:e2e` 111 qua (3 bỏ qua có chủ ý), `npm run test:e2e:network` 11/11. Lighthouse mobile trang demo: Accessibility 100, Performance 87–90 (chấp nhận theo [quyết định 17](docs/mvp.md), tối ưu ở M4). Còn chờ: người dùng duyệt (M1-10) và tiêu chí "mọi component chạy trên bản deploy" (cần kết nối Cloudflare Pages, Giai đoạn 0).
+>
+> **Bước tiếp theo (M2, Giai đoạn 2):** bài mẫu Hồi quy tuyến tính, theo quy trình bài học: `summarizer` tóm tắt tài liệu vào `docs/research/` → `lesson-writer` (vi) → `content-reviewer` → sửa → `viz-builder` → `lesson-translator` (en) → `content-reviewer` (khớp vi/en). Mỗi bản xong thì đổi `status` của `ml/linear-regression` trong `roadmap.ts` sang `published` (vi trước, en sau). Cuối cùng người dùng duyệt bài và chỉnh template.
 
 ### Giai đoạn 2: Bài mẫu
 - [ ] Viết hoàn chỉnh **1 bài mẫu: Hồi quy tuyến tính**. Bài có đủ trực giác, toán từng bước, minh họa tương tác, code ví dụ và quiz.

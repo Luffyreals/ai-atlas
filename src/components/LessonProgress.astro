@@ -1,0 +1,76 @@
+---
+// "I have finished this lesson": a toggle button saved in localStorage (shared by vi/en).
+// Every string is rendered here; the custom element only flips aria-pressed and the status line.
+// Styles: src/styles/lesson-progress.css, loaded on every page through Starlight's customCss (astro.config.ts).
+import { getStrings } from '@i18n/ui';
+import type { LessonId } from '@data/roadmap';
+import { getRouteLessonId, requireLesson } from '@lib/roadmap';
+
+interface Props {
+  /** Override. Default: current lesson from the route. Build error on a non-lesson page without id. */
+  id?: LessonId;
+}
+
+const route = Astro.locals.starlightRoute;
+const id = Astro.props.id ?? getRouteLessonId(route.id);
+if (!id) {
+  throw new Error(`<LessonProgress /> on "${route.id}": this page is not a lesson in src/data/roadmap.ts. Pass id="...".`);
+}
+requireLesson(id);
+
+const t = getStrings(Astro.locals.t, 'progress');
+const tCommon = getStrings(Astro.locals.t, 'common');
+---
+
+<atlas-lesson-progress class="atlas-progress not-content" data-lesson-id={id}>
+  <button type="button" class="atlas-progress-toggle" aria-pressed="false" disabled>
+    <span class="atlas-progress-box" aria-hidden="true"><span class="atlas-check"></span></span>
+    <span>{t.markDone}</span>
+  </button>
+  <p class="atlas-progress-status" aria-live="polite" data-status-done={t.doneStatus}></p>
+  <p class="atlas-progress-warning" data-storage-warning hidden>{t.storageBlocked}</p>
+  <noscript><p class="atlas-progress-noscript">{tCommon.needsScript}</p></noscript>
+</atlas-lesson-progress>
+
+<script>
+  import { getProgressStore } from '../lib/progress';
+
+  class AtlasLessonProgress extends HTMLElement {
+    #abort?: AbortController;
+
+    connectedCallback() {
+      const id = this.dataset.lessonId;
+      const button = this.querySelector<HTMLButtonElement>('.atlas-progress-toggle');
+      const status = this.querySelector<HTMLElement>('.atlas-progress-status');
+      const warning = this.querySelector<HTMLElement>('[data-storage-warning]');
+      if (!id || !button || !status) return;
+
+      const store = getProgressStore();
+      const render = () => {
+        const done = store.isDone(id);
+        button.setAttribute('aria-pressed', String(done));
+        const text = done ? (status.dataset.statusDone ?? '') : '';
+        if (status.textContent !== text) status.textContent = text;
+        // Storage can turn out to be blocked only on the first write, so check on every change.
+        if (warning) warning.hidden = store.available;
+      };
+
+      this.#abort = new AbortController();
+      button.addEventListener('click', () => store.setDone(id, !store.isDone(id)), { signal: this.#abort.signal });
+      // setDone() notifies subscribers in this tab; the 'storage' event covers other tabs.
+      const unsubscribe = store.subscribe(render);
+      this.#abort.signal.addEventListener('abort', unsubscribe);
+
+      render();
+      button.disabled = false;
+    }
+
+    disconnectedCallback() {
+      this.#abort?.abort();
+    }
+  }
+
+  if (!customElements.get('atlas-lesson-progress')) {
+    customElements.define('atlas-lesson-progress', AtlasLessonProgress);
+  }
+</script>

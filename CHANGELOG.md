@@ -19,6 +19,13 @@ Mọi thay đổi đáng chú ý của AI Atlas được ghi ở đây. Mỗi m�
 - Nhận diện: bảng màu "walnut and tan", font Barlow và Barlow Condensed (tự host), logo con đường rẽ ba, favicon.
 - Trang chủ thiết kế lại dạng tấm bản đồ atlas ([homepage.md](docs/architecture/homepage.md)): hero với bản đồ cổ chuyển cảnh, hàng 7 phần kèm ảnh lịch sử, bản đồ 78 bài có chọn điểm đến, một bài học mẫu bằng các mảnh giấy, thuật ngữ hai đầu, thư ngỏ, footer bưu thiếp. 13 ảnh lịch sử có giấy phép mở (11 phạm vi công cộng, 2 CC BY-NC-SA 3.0), có ghi nguồn song ngữ.
 - `RoadmapMap` (làm sớm từ M1, chưa có đánh dấu tiến độ), `src/lib/route.ts`, `src/lib/inline-markup.ts`, `src/i18n/format.ts`.
+- Mốc M1, component dùng chung cho bài học ([báo cáo](docs/progress/2026-10-23.md)):
+  - `Prerequisites`, `LessonProgress` (lưu tiến độ trong localStorage), dấu ✓ và "Đã học x/y" trên `RoadmapMap`.
+  - `Quiz`: câu hỏi đặt trong frontmatter, kiểm tra bằng zod, KaTeX render lúc build.
+  - `PythonRunner`: chạy Python trong trình duyệt (Pyodide 314.0.7, Web Worker), có hàng đợi, nút Dừng, giới hạn output, trả hình vẽ matplotlib.
+  - Trang demo `/dev/components/`, 5 file code mẫu vi/en trong `src/code/dev/`.
+  - Sitemap (`@astrojs/sitemap`, lọc `/dev/`), 59 key i18n mới.
+  - Test: unit 88 lên 244 (Vitest + jsdom), e2e 47 lên 111, thêm e2e `@network` (`npm run test:e2e:network`).
 
 ### Sửa lỗi
 
@@ -29,10 +36,21 @@ Mọi thay đổi đáng chú ý của AI Atlas được ghi ở đây. Mỗi m�
   - **Chức năng:** kéo hàng lộ trình bắt đầu trên ảnh; route finder đúng sau khi Back.
   - **Song ngữ và nội dung:** nguồn ảnh song ngữ; sửa giấy phép hai ảnh David Rumsey thành CC BY-NC-SA 3.0; câu chữ khớp hiện trạng; câu kết quả tiếng Anh không sai số nhiều.
   - **SEO:** tiêu đề trang riêng cho vi/en.
+- M1, sau review của analyst:
+  - radio đáp án chỉ có công thức giờ có tên truy cập (`aria-label` sinh từ TeX); Lighthouse Accessibility trang demo từ 95 lên 100.
+  - bỏ điểm dừng Tab thừa (`overflow-y: hidden`); sửa lỗi Tab khi radio có focus trước lúc hydrate.
+  - CSS component gộp vào `customCss`, không còn chặn render.
+  - lỗi Python được đọc lên bằng dòng sr-only.
+  - JSON nhúng được escape `<` (`toScriptJson`).
+  - dấu ngã ba trang chủ không còn bị thu từ 96px còn 19px sau khi gộp CSS.
 - `formatString` không còn lấy nhầm thuộc tính của `Object.prototype` (ví dụ `{{constructor}}`).
 
 ### Thay đổi
 
+- `docs/lesson-template.mdx`: cập nhật cách dùng `Quiz` và `PythonRunner`.
+- Cổng e2e đổi sang 4322 (Astro 7 chỉ cho một `astro preview` mỗi project).
+- Đã biết: stdout của `PythonRunner` dùng `write` thay `batched` (lệch spec), vì `batched` làm mất chữ in cuối khi không có `
+`.
 - README tiếng Việt: thêm phần "Vì sao có AI Atlas", cấu trúc một bài học, trạng thái MVP.
 - Gốc repo git chuyển từ `Road Map/` vào `ai-atlas/`.
 

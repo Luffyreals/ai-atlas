@@ -5,7 +5,42 @@ pagefind: false
 head:
   - tag: meta
     attrs: { name: robots, content: noindex }
+quiz:
+  - question: 'With a prediction $\hat{y} = 3$ and a true value $y = 2$, what is the error $\frac{1}{2}(\hat{y} - y)^2$?'
+    options:
+      - '$2$'
+      - '$\frac{1}{2}$'
+      - '$1$'
+      - '$\frac{1}{4}$'
+    answer: 1
+    explanation: 'The difference $\hat{y} - y = 1$ is still $1$ once squared. Times $\frac{1}{2}$, that gives $\frac{1}{2}$.'
+  - question: 'Gradient descent updates the parameters so that the loss $\mathcal{L}$ does what?'
+    options:
+      - 'Goes down'
+      - 'Goes up'
+      - 'Stays the same'
+    answer: 0
+    explanation: 'The gradient points where $\mathcal{L}$ grows fastest. Each step goes the opposite way, so $\mathcal{L}$ goes down, as long as the learning rate $\eta$ is not too large.'
+  - question: 'What does `np.mean(np.array([1, 2, 3, 6]))` return?'
+    options:
+      - '`2.5`'
+      - '`12`'
+      - '`3.0`'
+      - '`[1, 2, 3, 6]`'
+    answer: 2
+    explanation: '`np.mean` adds the elements and divides by how many there are: $(1 + 2 + 3 + 6) / 4 = 3$. The result is the float `3.0`. `2.5` is the median, not the mean.'
 ---
+
+import LessonProgress from '@components/LessonProgress.astro';
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import RoadmapMap from '@components/RoadmapMap.astro';
+import helloCode from '@code/dev/hello.en.py?raw';
+import plotCode from '@code/dev/plot.en.py?raw';
+import errorCode from '@code/dev/error.en.py?raw';
+import slowCode from '@code/dev/slow.en.py?raw';
+import inputCode from '@code/dev/input.en.py?raw';
 
 This page only checks how formulas and components render. It is not part of the roadmap.
 
@@ -24,3 +59,74 @@ $$
 :::note
 This is a Starlight note (aside).
 :::
+
+## Before this lesson
+
+Two lessons, both coming soon:
+
+<Prerequisites ids={['ml/linear-regression', 'math/calculus']} />
+
+An empty list:
+
+<Prerequisites ids={[]} />
+
+## Mark as learned
+
+<LessonProgress id="ml/linear-regression" />
+
+## Roadmap map
+
+Only the Machine Learning part. The tick and the "Learned x/y" line appear only once you have marked at least one lesson.
+
+<RoadmapMap id="demo-map" parts={['ml']} />
+
+## Quick check
+
+Questions from the `quiz` field in the frontmatter:
+
+<Quiz />
+
+A second quiz on the same page, passed through the `questions` prop:
+
+<Quiz
+  questions={[
+    {
+      question: 'Why do we keep a test set apart and not use it for training?',
+      options: [
+        'To give the model more data to learn from',
+        'To measure how well the model does on data it has never seen',
+        'To make training run faster',
+      ],
+      answer: 1,
+      explanation:
+        'On data it has learned from, a model usually scores higher than it really is. Only data the model has not seen tells you whether it works on new data.',
+    },
+    {
+      question: 'A model is 99% right on the training set but only 60% right on the test set. What is this called?',
+      options: ['Underfitting', 'Overfitting'],
+      answer: 1,
+      explanation:
+        'The model memorised even the random details of the training set, so it does poorly on new data. That is overfitting. Underfitting is poor even on the training set.',
+    },
+  ]}
+/>
+
+## Run Python code
+
+Pyodide only loads when you press Run for the first time. The two blocks right below sit next to each other to test the queue: press Run in block 1, then quickly in block 2, and block 2 waits for block 1 to finish.
+
+<PythonRunner code={helloCode} title="Print a few lines" />
+
+<PythonRunner code={plotCode} title="A matplotlib chart" figureAlt={['Data points scattered around the line y = 2x + 1']} />
+
+The code has an error on line 6. The figure drawn on line 4 still shows:
+
+<PythonRunner code={errorCode} />
+
+The loop never stops on its own. After 10 seconds, a hint suggests pressing Stop:
+
+<PythonRunner code={slowCode} />
+
+Reading input with `input()`. You can edit the two lines in the input box:
+
+<PythonRunner code={inputCode} stdin={'Lan\n20'} />

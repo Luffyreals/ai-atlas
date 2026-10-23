@@ -49,6 +49,7 @@ src/components/home/
   HomeFooter.astro    # mặt sau bưu thiếp + nguồn ảnh
   Stripe.astro, RouteMark.astro
 src/components/RoadmapMap.astro      # tấm bản đồ 78 bài + route finder (dùng lại được ở trang khác)
+src/styles/roadmap-map.css           # CSS của RoadmapMap, Stripe, RouteMark (customCss, xem components.md mục 3)
 src/data/home.ts                     # toàn bộ chữ của trang chủ, vi và en
 src/data/home-pictures.ts            # ảnh, alt, chú thích, nguồn
 src/assets/home/                     # ảnh gốc đã thu nhỏ (Astro sinh AVIF/WebP lúc build)
@@ -73,7 +74,7 @@ Trang chủ **không tải React**. Mỗi khối có một script nhỏ (crossfa
 ## 5. Kiểm tra
 
 ```bash
-node .agents/skills/design-taste-frontend/scripts/lint.mjs src/components/home src/components/RoadmapMap.astro
+node .agents/skills/design-taste-frontend/scripts/lint.mjs src/components/home src/components/RoadmapMap.astro src/styles/roadmap-map.css
 node .agents/skills/design-taste-frontend/scripts/inspect.mjs http://127.0.0.1:4322/vi/
 ```
 
