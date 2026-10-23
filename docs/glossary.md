@@ -46,21 +46,25 @@ Dùng thống nhất cho toàn bộ AI Atlas. Gặp thuật ngữ mới thì th�
 |---|---|---|
 | Bình phương tối thiểu | Least squares | Dịch. Không dùng "bình phương nhỏ nhất" |
 | Bình phương tối thiểu thông thường | Ordinary least squares (OLS) | Dịch, viết tắt OLS. Tên scikit-learn dùng cho `LinearRegression` |
+| Cây quyết định | Decision tree | Dịch |
 | Cộng tuyến | Collinearity | Dịch. Các đặc trưng phụ thuộc tuyến tính, hoặc gần như vậy, ví dụ diện tích theo m² và theo ft² |
 | Điểm đòn bẩy cao | High-leverage point | Dịch. Điểm có đặc trưng nằm xa phần còn lại, có thể kéo mạnh đường hồi quy |
 | Điểm trung bình | Mean point | Dịch. Điểm $(\bar{x}, \bar{y})$. Đường bình phương tối thiểu (có hệ số tự do) luôn đi qua điểm này |
+| Độ chệch | Bias | Dịch, lần đầu ghi "độ chệch (bias)". Sai lệch có hệ thống do mô hình quá đơn giản. Khác hệ số tự do $b$: trong bài có cả hai thì luôn gọi $b$ là "hệ số tự do" |
 | Độ dốc | Slope | Dịch. Trong hồi quy: chỉ gọi $w$ là độ dốc khi có một đặc trưng. Nhiều đặc trưng thì gọi "trọng số" |
+| Fold | Fold | Giữ. Một trong $k$ phần của dữ liệu khi kiểm định chéo |
 | Gradient descent | Gradient descent | Giữ |
 | Hàm mất mát | Loss function | Dịch |
 | Hệ số tự do | Bias (term) | Dịch, lần đầu ghi "bias, còn gọi là intercept". Sách thống kê và scikit-learn (`intercept_`) gọi là intercept |
 | Hồi quy | Regression | Dịch |
+| Hồi quy đa thức | Polynomial regression | Dịch. Hồi quy tuyến tính trên các đặc trưng $x, x^2, \dots, x^d$ |
 | Hồi quy Logistic | Logistic regression | Dịch |
 | Hồi quy tuyến tính | Linear regression | Dịch |
 | K-Nearest Neighbors (KNN) | K-nearest neighbors (KNN) | Giữ, viết tắt KNN. Lần đầu có thể giải thích "k láng giềng gần nhất" |
 | Kiểm định chéo | Cross-validation | Dịch. Tách train/kiểm định nhiều lần rồi lấy trung bình điểm |
 | Môi trường | Environment | Dịch. Trong học tăng cường: nơi tác nhân hành động và nhận phần thưởng |
 | Ngoại suy | Extrapolation | Dịch. Dự đoán ở ngoài khoảng giá trị của dữ liệu huấn luyện |
-| Overfitting / Underfitting | Overfitting / Underfitting | Giữ |
+| Overfitting / Underfitting | Overfitting / Underfitting | Giữ. Lần đầu có thể ghi "quá khớp" / "thiếu khớp" |
 | Phân cụm | Clustering | Dịch |
 | Phân loại | Classification | Dịch |
 | Phần dư | Residual | Dịch. $e^{(i)} = y^{(i)} - \hat{y}^{(i)}$, khác "sai số" (error) chưa quan sát được |
@@ -68,10 +72,12 @@ Dùng thống nhất cho toàn bộ AI Atlas. Gặp thuật ngữ mới thì th�
 | Phương trình chuẩn | Normal equation | Dịch, lần đầu kèm "normal equation" |
 | Regularization | Regularization | Giữ |
 | Sai số bình phương trung bình | Mean squared error (MSE) | Dịch, viết tắt MSE. Site dùng hệ số $\frac{1}{m}$ |
+| Sự đánh đổi bias–variance | Bias–variance trade-off | Dịch, kèm tiếng Anh. Tăng độ linh hoạt làm độ chệch giảm, variance tăng |
 | Tác nhân | Agent | Dịch. Trong học tăng cường: bên chọn hành động và học từ phần thưởng |
 | Tốc độ học | Learning rate | Dịch |
 | Tổng quát hóa | Generalization | Dịch. Khả năng làm tốt trên dữ liệu chưa thấy khi huấn luyện. Ước lượng bằng điểm trên tập kiểm tra |
 | Trọng số | Weight | Dịch |
+| Variance (của mô hình) | Variance | Giữ trong cụm bias–variance: mức mô hình học được thay đổi khi đổi bộ dữ liệu huấn luyện. Nghĩa thống kê chung thì dịch "phương sai" (nhóm Toán) |
 
 ## Deep Learning
 
@@ -99,10 +105,12 @@ Dùng thống nhất cho toàn bộ AI Atlas. Gặp thuật ngữ mới thì th�
 
 | Tiếng Việt | Tiếng Anh | Cách dùng |
 |---|---|---|
+| Bậc (của đa thức) | Degree | Dịch. Số mũ lớn nhất, ký hiệu $d$ |
 | Chuẩn (của vectơ, ma trận) | Norm | Dịch. Ví dụ "chuẩn 2" (2-norm). Với vectơ, chuẩn 2 là độ dài $\lVert\mathbf{v}\rVert$ |
 | Chuyển vị | Transpose | Dịch |
 | Đạo hàm | Derivative | Dịch |
 | Đạo hàm riêng | Partial derivative | Dịch |
+| Đa thức | Polynomial | Dịch |
 | Định thức | Determinant | Dịch |
 | Độ lệch (so với trung bình) | Deviation | Dịch. Ví dụ $x^{(i)} - \bar{x}$. Không nhầm với bias |
 | Độc lập tuyến tính | Linearly independent | Dịch |

@@ -205,7 +205,7 @@ export const LESSONS: readonly Lesson[] = [
     id: 'ml/overfitting-underfitting',
     title: { vi: 'Overfitting và Underfitting', en: 'Overfitting and Underfitting' },
     prerequisites: ['ml/linear-regression'],
-    status: { vi: 'planned', en: 'planned' },
+    status: { vi: 'published', en: 'planned' },
   },
   {
     id: 'ml/regularization',

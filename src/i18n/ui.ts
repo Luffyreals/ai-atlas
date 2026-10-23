@@ -33,6 +33,11 @@ export const UI_KEYS = {
     'yourLine', 'bestLine', 'residual', 'mseValue', 'showBest', 'nearBest', 'bestNote',
     'announce', 'announceBest', 'meanPoint', 'meanNote',
   ],
+  vizPolyFit: [
+    'caption', 'plotLabel', 'errorLabel', 'errorDesc', 'controls', 'degreeLabel', 'degreeValueText',
+    'curve', 'truth', 'showTruth', 'trainMse', 'testMse', 'degreeAxis', 'mseAxis', 'overNote',
+    'underfit', 'goodFit', 'overfit', 'bestDegree', 'announce',
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 export type UiNamespace = keyof typeof UI_KEYS;

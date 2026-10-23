@@ -19,15 +19,10 @@ import {
 } from '../../../lib/viz/linear-fit';
 import { clamp, clipLineToBox, pct, toPercentX, toPercentY } from '../../../lib/viz/scale';
 import PlotFrame from '../kit/PlotFrame';
+import type { AxisText } from '../kit/types';
 import { useHydrated } from '../kit/use-hydrated';
 import { useSettled } from '../kit/use-settled';
 import VizSlider from '../kit/VizSlider';
-
-export interface AxisText {
-  name: string; // "Diện tích": in the plot's accessible name
-  unit: string; // "m²": in aria-valuetext
-  title: string; // "Diện tích (m²)": the visible axis title
-}
 
 export interface LinearFitVizIslandProps {
   rows: readonly Row[];

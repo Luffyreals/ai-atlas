@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { DATASETS } from '../../src/data/datasets/index';
 import type { Row, XYDataset } from '../../src/data/datasets/types';
-import { LOCALES } from '../../src/data/roadmap';
+import { LOCALES, type Localized } from '../../src/data/roadmap';
 import { getLesson } from '../../src/lib/roadmap';
 import { decimalsOf } from '../../src/lib/viz/format';
 
@@ -189,6 +189,34 @@ describe('checkPythonDatasets (in-memory sources)', () => {
   });
 });
 
+/**
+ * A unit is '' in every locale (a quantity without a unit, e.g. x and y of the sine data; viz.md, section 9.4.1)
+ * or a real text in every locale. Empty in one locale only, or only spaces, is a mistake.
+ */
+function unitProblem(where: string, unit: Localized): string | null {
+  if (LOCALES.every((locale) => unit[locale] === '')) return null;
+  const empty = LOCALES.filter((locale) => unit[locale].trim() === '');
+  if (empty.length === 0) return null;
+  return `${where}: blank in ${empty.join(', ')}; write the unit in every locale, or '' in every locale`;
+}
+
+describe('unitProblem (in-memory units)', () => {
+  it("accepts a unit in every locale, or '' in every locale", () => {
+    expect(unitProblem('demo.x.unit', { vi: 'm²', en: 'm²' })).toBeNull();
+    expect(unitProblem('demo.x.unit', { vi: 'triệu đồng', en: 'million VND' })).toBeNull();
+    expect(unitProblem('demo.x.unit', { vi: '', en: '' })).toBeNull();
+  });
+
+  it('reports a unit empty in one locale only, or made of spaces', () => {
+    expect(unitProblem('demo.x.unit', { vi: '', en: 'm²' })).toBe(
+      "demo.x.unit: blank in vi; write the unit in every locale, or '' in every locale",
+    );
+    expect(unitProblem('demo.y.unit', { vi: 'm²', en: '' })).toMatch(/^demo\.y\.unit: blank in en;/);
+    expect(unitProblem('demo.y.unit', { vi: ' ', en: '' })).toMatch(/^demo\.y\.unit: blank in vi, en;/);
+    expect(unitProblem('demo.y.unit', { vi: ' ', en: ' ' })).toMatch(/blank in vi, en;/);
+  });
+});
+
 const ENTRIES = Object.entries(DATASETS) as [string, XYDataset][];
 const PYTHON_NAME = /^[A-Za-z_]\w*$/;
 
@@ -197,10 +225,12 @@ describe.skipIf(ENTRIES.length === 0)('DATASETS', () => {
     expect(dataset.id).toBe(key);
     expect(dataset.rows.length).toBeGreaterThan(0);
     for (const locale of LOCALES) {
-      for (const text of [dataset.caption, dataset.itemLabel, dataset.description, dataset.x.name, dataset.x.unit, dataset.y.name, dataset.y.unit]) {
+      for (const text of [dataset.caption, dataset.itemLabel, dataset.description, dataset.x.name, dataset.y.name]) {
         expect(text[locale].trim(), `${key}: empty ${locale} text`).not.toBe('');
       }
     }
+    expect(unitProblem(`${key}.x.unit`, dataset.x.unit)).toBeNull();
+    expect(unitProblem(`${key}.y.unit`, dataset.y.unit)).toBeNull();
     for (const column of [dataset.x, dataset.y]) {
       expect(column.python).toMatch(PYTHON_NAME);
       expect(Number.isInteger(column.digits) && column.digits >= 0).toBe(true);

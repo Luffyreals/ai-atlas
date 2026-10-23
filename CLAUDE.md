@@ -38,7 +38,7 @@ Nhận diện và trang chủ thiết kế bằng skill `design-taste-frontend`:
 
 Mốc M2 (bài mẫu) xong: bài `ml/linear-regression` có bản vi (người dùng đã duyệt, là bài mẫu) và bản en, VIZ `LinearFitViz` (thiết kế ở `docs/architecture/viz.md`), bảng dữ liệu `DatasetTable`, SEO cho trang fallback (`src/lib/seo.ts`, `src/routeData.ts`), nút "Bắt đầu học" ở trang chủ. Template đã chốt theo bài này.
 
-Mốc M3 (đang làm): 4 bài ML còn lại, **chỉ bản vi**, bản en làm sau MVP (`docs/mvp.md` quyết định 43). Đã xong bản vi bài `ml/ml-overview` (người dùng đã duyệt), có 2 hình SVG tĩnh (`docs/architecture/viz.md` mục 8). Bài kế tiếp: `ml/overfitting-underfitting`.
+Mốc M3 (đang làm): 4 bài ML còn lại, **chỉ bản vi**, bản en làm sau MVP (`docs/mvp.md` quyết định 43). Đã xong bản vi (người dùng đã duyệt) của `ml/ml-overview` (2 hình SVG tĩnh, `docs/architecture/viz.md` mục 8) và `ml/overfitting-underfitting` (VIZ `PolyFitViz`, bộ dữ liệu `sine`, viz.md mục 9). Bài kế tiếp: `ml/regularization`.
 
 ## Công nghệ
 

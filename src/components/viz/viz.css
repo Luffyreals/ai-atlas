@@ -9,6 +9,8 @@
   --atlas-viz-ink: var(--sl-color-white);
   --atlas-viz-primary: var(--sl-color-accent);
   --atlas-viz-reference: var(--sl-color-blue-high);
+  /* A second group of data (the test set): the same token as --atlas-fig-alt of the static figures. */
+  --atlas-viz-alt: var(--sl-color-blue-high);
   --atlas-viz-error: var(--sl-color-red-high);
   --atlas-viz-muted: var(--sl-color-gray-3);
   --atlas-viz-grid: var(--sl-color-gray-5);
@@ -104,6 +106,11 @@
   overflow: visible;
 }
 
+/* A low plot (PlotFrame shape="short"), such as an error chart under the main plot. */
+.atlas-viz-chart[data-shape='short'] .atlas-viz-plot {
+  aspect-ratio: 2 / 1;
+}
+
 /* Marks: each kind differs in shape as well as colour (solid, dashed, thin and upright). */
 .atlas-viz-grid-line,
 .atlas-viz-axis {
@@ -138,6 +145,41 @@
 
 .atlas-viz-error {
   stroke: var(--atlas-viz-error);
+  stroke-width: 2px;
+}
+
+/* Curves (PlotCurve). Solid 3px fit, solid 2px series, dashed 6 4 second series, dotted 2 4 guide. */
+.atlas-viz-plot polyline {
+  fill: none;
+}
+
+/* A point of the second group, or a triangle off the top of the chart: hollow, so it differs in shape too. */
+.atlas-viz-ring {
+  fill: var(--atlas-viz-plot-bg);
+  stroke: var(--atlas-viz-alt);
+  stroke-width: 2px;
+}
+
+.atlas-viz-series {
+  stroke: var(--atlas-viz-ink);
+  stroke-width: 2px;
+}
+
+.atlas-viz-series-alt {
+  stroke: var(--atlas-viz-alt);
+  stroke-dasharray: 6 4;
+}
+
+/* Something to compare with, never louder than the fit: grey and dotted. */
+.atlas-viz-guide {
+  stroke: var(--atlas-viz-muted);
+  stroke-width: 2px;
+  stroke-dasharray: 2 4;
+}
+
+/* The chosen value on a chart, in the colour of the fit it belongs to. */
+.atlas-viz-cursor {
+  stroke: var(--atlas-viz-primary);
   stroke-width: 2px;
 }
 
@@ -176,6 +218,11 @@
   overflow: visible;
 }
 
+/* A line with a point on it: wide enough for a 6 4 dash on both sides of the point. */
+.atlas-viz-swatch-wide {
+  width: 36px;
+}
+
 .atlas-viz-swatch .atlas-viz-point {
   stroke-width: 0;
 }
@@ -183,7 +230,7 @@
 /* Two rows on one grid, so the two MSE values sit one above the other. */
 .atlas-viz-readouts {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 4px 12px;
   align-items: start;
   color: var(--sl-color-white);
@@ -334,6 +381,10 @@
 @container (min-width: 32rem) {
   .atlas-viz-plot {
     aspect-ratio: 3 / 2;
+  }
+
+  .atlas-viz-chart[data-shape='short'] .atlas-viz-plot {
+    aspect-ratio: 3 / 1;
   }
 }
 
