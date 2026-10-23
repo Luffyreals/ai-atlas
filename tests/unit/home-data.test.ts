@@ -5,7 +5,7 @@ import { CC_LICENCE_URL, HOME, type Slip } from '../../src/data/home';
 import { ALL_PICTURES, HERO_PLATES, LESSON_PICTURE, PART_PICTURES, STAMP_PICTURE, TERMS_PICTURE } from '../../src/data/home-pictures';
 import { PART_IDS } from '../../src/data/roadmap';
 import { proseLessonIds } from '../../src/lib/inline-markup';
-import { getLesson, hasPage } from '../../src/lib/roadmap';
+import { getFirstOpenLesson, getLesson, hasPage, isTranslated } from '../../src/lib/roadmap';
 
 type LocalizedValue = string | readonly string[];
 
@@ -71,15 +71,20 @@ describe('homepage copy (src/data/home.ts, home-pictures.ts)', () => {
     }
   });
 
-  it('letter: vi and en link the same lessons in the same paragraphs, and each one has a page', () => {
-    const vi = HOME.letter.paragraphs.vi.map(proseLessonIds);
-    expect(HOME.letter.paragraphs.en.map(proseLessonIds)).toEqual(vi);
-    const ids = vi.flat();
-    expect(ids).toContain('ml/linear-regression');
-    for (const id of ids) {
-      const lesson = getLesson(id);
-      expect(lesson, id).toBeDefined();
-      expect(hasPage(lesson!), `${id} has a page`).toBe(true);
+  // Each letter names the first lesson open in its own language, like "Start learning" (decision 43: en
+  // waits until after the MVP, so the two letters may name different lessons).
+  it('letter: vi and en link as many lessons in the same paragraphs, each written in that language', () => {
+    const links = (locale: 'vi' | 'en') => HOME.letter.paragraphs[locale].map(proseLessonIds);
+    expect(links('en').map((ids) => ids.length)).toEqual(links('vi').map((ids) => ids.length));
+    for (const locale of ['vi', 'en'] as const) {
+      const ids = links(locale).flat();
+      expect(ids, locale).toContain(getFirstOpenLesson(locale)?.id);
+      for (const id of ids) {
+        const lesson = getLesson(id);
+        expect(lesson, id).toBeDefined();
+        expect(hasPage(lesson!), `${id} has a page`).toBe(true);
+        expect(isTranslated(lesson!, locale), `${locale}/${id} is written`).toBe(true);
+      }
     }
   });
 

@@ -1,5 +1,5 @@
 // The one copy of the apartment table (decision 19 in docs/mvp.md; docs/architecture/viz.md, section 4.1).
-// Used by DatasetTable (Intuition), LinearFitViz (Illustration) and src/code/ml/linear-regression/*.py, where
+// Used by DatasetTable (Intuition), LinearFitViz (Illustration) and src/code/ml/{ml-overview,linear-regression}/*.py, where
 // the same numbers sit under "# dataset: apartments" (kept equal by tests/unit/datasets.test.ts).
 // Relative imports only: Playwright e2e imports this file too.
 import type { LinearFitConfig } from '../../lib/viz/linear-fit';
@@ -7,7 +7,7 @@ import type { XYDataset } from './types';
 
 export const APARTMENTS = {
   id: 'apartments',
-  lessons: ['ml/linear-regression'],
+  lessons: ['ml/ml-overview', 'ml/linear-regression'],
   caption: {
     vi: 'Giá thuê theo diện tích của 10 căn hộ. Số liệu tự tạo cho bài học, không phải giá thị trường.',
     en: 'Rent by floor area for 10 apartments. The numbers are made up for the lesson, not market prices.',

@@ -150,12 +150,17 @@ describe('lookup helpers', () => {
     expect(getLessonUrl('ml/linear-regression', 'en')).toBe('/en/ml/linear-regression/');
   });
 
-  it('getFirstOpenLesson: the first lesson in roadmap order with a vi page, or undefined', () => {
-    const open = { status: { vi: 'published', en: 'planned' } } as const;
-    expect(getFirstOpenLesson([lesson('python/a'), lesson('python/b')])).toBeUndefined();
-    expect(getFirstOpenLesson([lesson('python/a'), lesson('ml/b', [], open), lesson('ml/c', [], open)])?.id).toBe('ml/b');
+  it('getFirstOpenLesson: the first lesson written in the locale, else the first with any page, or undefined', () => {
+    const vi = { status: { vi: 'published', en: 'planned' } } as const;
+    const both = { status: { vi: 'published', en: 'published' } } as const;
+    expect(getFirstOpenLesson('vi', [lesson('python/a'), lesson('python/b')])).toBeUndefined();
+    expect(getFirstOpenLesson('vi', [lesson('python/a'), lesson('ml/b', [], vi), lesson('ml/c', [], both)])?.id).toBe('ml/b');
+    // en skips a vi-only lesson for the first one written in English (decision 43)...
+    expect(getFirstOpenLesson('en', [lesson('python/a'), lesson('ml/b', [], vi), lesson('ml/c', [], both)])?.id).toBe('ml/c');
+    // ...and falls back to the first page (shown as Starlight's fallback) while none is.
+    expect(getFirstOpenLesson('en', [lesson('python/a'), lesson('ml/b', [], vi)])?.id).toBe('ml/b');
     // An en-only status is not a page (the vi page comes first).
-    expect(getFirstOpenLesson([lesson('python/a', [], { status: { vi: 'planned', en: 'published' } })])).toBeUndefined();
+    expect(getFirstOpenLesson('en', [lesson('python/a', [], { status: { vi: 'planned', en: 'published' } })])).toBeUndefined();
     expect(getFirstOpenLesson()).toBe(LESSONS.find((item) => item.status.vi === 'published'));
   });
 

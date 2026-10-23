@@ -6,6 +6,7 @@ import { expect, test, type ConsoleMessage, type Locator, type Page } from '@pla
 import { LESSONS, LOCALES, type Locale } from '../../src/data/roadmap';
 import { isTranslated } from '../../src/lib/roadmap';
 import { lessonShape } from '../unit/fixtures/lesson-shape';
+import { installContrast, type Contrast } from './helpers';
 
 // Checks shared by every VIZ (docs/architecture/viz.md, sections 2.7–2.9, 2.12; task V5 in section 6), on every
 // lesson page whose file uses one: /vi/<id>/ when status.vi is 'published', and /en/<id>/ (the fallback page
@@ -101,57 +102,11 @@ function ownJs(islandFile: string, rendererFile: string): { files: string[]; gzi
   return { files, gzip };
 }
 
-// --- Contrast (WCAG 2.x), from the colours the browser computed. Runs in the page. ---
+// --- Contrast (WCAG 2.x): the core (rgba, backgroundOf, luminance, pair) is in helpers.ts. Runs in the page. ---
 
-interface Contrast {
-  what: string;
-  color: string;
-  background: string;
-  ratio: number;
-}
-
-/** Contrast of plot marks, key swatches and text of one VIZ. Canvas turns any CSS colour into sRGB bytes. */
+/** Contrast of plot marks, key swatches and text of one VIZ. Needs installContrast(page) first. */
 function measureContrast(root: Element): { marks: Contrast[]; swatches: Contrast[]; text: Contrast[] } {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1;
-  canvas.height = 1;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-  type Rgba = [number, number, number, number];
-  const rgba = (color: string): Rgba => {
-    ctx.clearRect(0, 0, 1, 1);
-    ctx.fillStyle = 'rgba(0, 0, 0, 0)';
-    ctx.fillStyle = color;
-    ctx.fillRect(0, 0, 1, 1);
-    const [r = 0, g = 0, b = 0, a = 0] = ctx.getImageData(0, 0, 1, 1).data;
-    return [r, g, b, a / 255];
-  };
-  const over = (top: Rgba, under: Rgba): Rgba => {
-    const a = top[3];
-    return [top[0] * a + under[0] * (1 - a), top[1] * a + under[1] * (1 - a), top[2] * a + under[2] * (1 - a), 1];
-  };
-  /** The opaque background behind an element: the nearest backgrounds up the tree, composited. */
-  const backgroundOf = (element: Element): Rgba => {
-    const layers: Rgba[] = [];
-    for (let el: Element | null = element; el; el = el.parentElement) {
-      const layer = rgba(getComputedStyle(el).backgroundColor);
-      if (layer[3] > 0) layers.push(layer);
-      if (layer[3] >= 1) break;
-    }
-    return layers.reduceRight<Rgba>((under, top) => over(top, under), [255, 255, 255, 1]);
-  };
-  const luminance = ([r, g, b]: Rgba) => {
-    const channel = (value: number) => {
-      const c = value / 255;
-      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    };
-    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
-  };
-  const css = (c: Rgba) => `rgb(${c.slice(0, 3).map(Math.round).join(', ')})`;
-  const pair = (what: string, colour: string, background: Rgba): Contrast => {
-    const fg = over(rgba(colour), background);
-    const [l1, l2] = [luminance(fg), luminance(background)].sort((a, b) => b - a) as [number, number];
-    return { what, color: css(fg), background: css(background), ratio: Math.round(((l1 + 0.05) / (l2 + 0.05)) * 100) / 100 };
-  };
+  const { backgroundOf, pair } = window.atlasContrast!;
 
   // Marks on the plot against the plot background. Not measured on purpose (section 4.9): the grid
   // (decoration), the halo of the × and the outline of the points (both the plot background colour).
@@ -311,6 +266,7 @@ for (const { path, count } of PAGES) {
           for (const pass of ['as loaded', 'toggles on']) {
             if (pass === 'toggles on') for (const button of await viz.getByRole('button').all()) await button.click();
             await page.mouse.move(0, 0); // no hover style on a button
+            await installContrast(page);
             const { marks, swatches, text } = await viz.evaluate(measureContrast);
             const lowest = (list: Contrast[]) => list.reduce((low, m) => (m.ratio < low.ratio ? m : low), list[0]!);
             test.info().annotations.push({
@@ -339,6 +295,7 @@ for (const { path, count } of PAGES) {
         root.querySelector('line.atlas-viz-error')?.setAttribute('style', `stroke: ${getComputedStyle(plot).backgroundColor}`);
         caption.style.color = getComputedStyle(root).backgroundColor;
       });
+      await installContrast(page);
       const result = await viz.evaluate(measureContrast);
       expect(result.marks.some((m) => m.what.includes('atlas-viz-error') && m.ratio < 1.1)).toBe(true);
       expect(result.text.some((m) => m.ratio < 1.1)).toBe(true);

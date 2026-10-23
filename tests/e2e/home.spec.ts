@@ -12,7 +12,6 @@ import { isNarrow, scrollThrough, STRINGS } from './helpers';
 // Homepage (src/components/home/*, RoadmapMap.astro). All URLs end with "/" (trailingSlash 'always').
 
 const OPEN_MAP: Record<Locale, string> = { vi: 'Mở bản đồ', en: 'Open the map' };
-const FIRST_OPEN = getFirstOpenLesson();
 /** Parses "…: {{count}} bài, qua {{parts}} phần." / "… Lessons on the way: {{count}}. Parts: {{parts}}." */
 const RESULT_PATTERN: Record<Locale, RegExp> = {
   vi: /:\s*(\d+) bài, qua (\d+) phần\.$/,
@@ -33,6 +32,8 @@ async function readResult(page: Page, locale: Locale): Promise<{ text: string; c
 }
 
 for (const locale of LOCALES) {
+  // Per language: /en/ starts at the first lesson written in English (decision 43).
+  const FIRST_OPEN = getFirstOpenLesson(locale);
   test.describe(`homepage /${locale}/`, () => {
     test('has exactly one h1, and the hero button leads to #map', async ({ page }) => {
       await page.goto(`/${locale}/`);
@@ -157,6 +158,7 @@ for (const locale of LOCALES) {
 // English labels are longer, and the two actions may wrap onto two rows.
 for (const width of [320, 360]) {
   for (const locale of LOCALES) {
+    const FIRST_OPEN = getFirstOpenLesson(locale);
     test(`at ${width}px (${locale}) the first screen still shows both hero actions and the other-language link`, async ({
       page,
     }, testInfo) => {

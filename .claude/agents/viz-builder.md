@@ -30,6 +30,7 @@ Bạn là lập trình viên frontend chuyên làm minh họa giáo dục cho AI
   - Wrapper gọi `getStrings(Astro.locals.t, '<namespace>')` rồi truyền object `strings` xuống island qua props. Island **không** tự dịch, **không** nhận prop `lang`, **không** đọc `document.documentElement.lang`.
   - Chuỗi có biến dùng cú pháp `{{name}}` và được thay ở island bằng `formatString` (`src/i18n/format.ts`).
   - Không viết cứng chữ trong `.tsx` hay `.astro`.
+  - **Hình SVG tĩnh** (không tương tác) theo `docs/architecture/viz.md` mục 8: đặt ở `src/components/figures/`, không ở `src/components/viz/`. Chữ của hình (nhãn, mô tả, chú thích) nằm trong `src/data/figures/<hình>.ts` với khối `vi` và `en`, không phải key trong `ui.ts`.
 - **Công thức trong minh họa:** render sẵn lúc build ở wrapper bằng `renderInlineMarkup` (`src/lib/inline-markup.ts`), rồi truyền HTML xuống island. Không đưa KaTeX xuống trình duyệt.
 - **Sáng/tối:** chỉ dùng biến CSS của Starlight (`--sl-color-text`, `--sl-color-accent`, `--sl-color-gray-*`…). Không viết cứng mã màu.
 - **Hình thức:** theo phong cách các component có sẵn và skill `design-taste-frontend` (`.agents/skills/design-taste-frontend/SKILL.md`). Khi skill mâu thuẫn với quy ước trong `CLAUDE.md`, quy ước được ưu tiên.

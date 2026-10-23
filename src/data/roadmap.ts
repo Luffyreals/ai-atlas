@@ -193,7 +193,7 @@ export const LESSONS: readonly Lesson[] = [
     id: 'ml/ml-overview',
     title: { vi: 'Tổng quan về Học máy', en: 'Introduction to Machine Learning' },
     prerequisites: ['python/numpy-pandas'],
-    status: { vi: 'planned', en: 'planned' },
+    status: { vi: 'published', en: 'planned' },
   },
   {
     id: 'ml/linear-regression',

@@ -9,7 +9,7 @@
 Sau MVP, một người mới học AI có thể:
 
 1. Mở trang chủ, **thấy toàn bộ lộ trình** 78 bài và biết nên bắt đầu từ đâu.
-2. Đọc **5 bài đầu của phần Machine Learning**, bằng tiếng Việt hoặc tiếng Anh.
+2. Đọc **5 bài đầu của phần Machine Learning** bằng tiếng Việt. Bản tiếng Anh làm sau MVP, trừ bài mẫu Hồi quy tuyến tính đã có (quyết định 43).
 3. Trong mỗi bài: đọc công thức, tương tác với minh họa, **chạy thử code Python ngay trên trang**, làm quiz.
 4. Đánh dấu bài đã học. Quay lại lần sau vẫn thấy tiến độ.
 
@@ -29,7 +29,7 @@ Với người phát triển (bạn), MVP chứng minh rằng:
 
 ### Có trong MVP
 
-**Nội dung (5 bài × 2 ngôn ngữ = 10 trang bài học):**
+**Nội dung (5 bài tiếng Việt, cộng bản tiếng Anh của bài mẫu; quyết định 43):**
 
 | # | Bài | File | Ghi chú |
 |---|---|---|---|
@@ -95,7 +95,7 @@ MVP chỉ được coi là xong khi **tất cả** mục dưới đây đều đ
 
 - [ ] 5 bài đều qua `content-reviewer`, không còn lỗi mức "Nghiêm trọng" hay "Nên sửa".
 - [ ] Mọi code ví dụ đã chạy thật, kết quả khớp lời giải thích.
-- [ ] Bản en khớp bản vi: cùng số heading, công thức, khối code, component.
+- [ ] Bài đã có bản en thì bản en khớp bản vi: cùng số heading, công thức, khối code, component. Bài chưa dịch hiện trang fallback (quyết định 30, 33).
 - [ ] Mọi nguồn tham khảo có thật, link mở được.
 
 **Ra mắt**
@@ -113,7 +113,7 @@ Mỗi mốc kết thúc bằng một bản deploy dùng được.
 | **M0. Bộ khung** | Khởi tạo Astro + Starlight, i18n vi/en, KaTeX, `roadmap.ts` đủ 78 bài, trang chủ tạm, cài Vitest + Playwright, deploy lên Cloudflare Pages | Website trống chạy online | Giai đoạn 0 |
 | **M1. Công cụ trình bày** | `Prerequisites`, `Quiz`, `LessonProgress`, `PythonRunner`, `RoadmapMap` bản đơn giản. Một trang demo dùng đủ component. | Mọi component có test và chạy trên bản deploy | Giai đoạn 1 |
 | **M2. Bài mẫu** | Bài Hồi quy tuyến tính bản vi → review → minh họa → **bạn duyệt** → chỉnh template → bản en | Bài chuẩn, template chốt | Giai đoạn 2 |
-| **M3. Mạch ML đầu tiên** | 4 bài còn lại, vi rồi en | 5 bài × 2 ngôn ngữ | Một phần Giai đoạn 3 |
+| **M3. Mạch ML đầu tiên** | 4 bài còn lại, bản vi (en sau MVP, quyết định 43) | 5 bài tiếng Việt | Một phần Giai đoạn 3 |
 | **M4. Ra mắt** | SEO cơ bản, trang Giới thiệu, 404, Lighthouse, kiểm tra điện thoại, gắn tên miền (nếu đã mua) | **MVP công khai** | Một phần Giai đoạn 4 |
 
 M2 có một bước **chờ bạn duyệt**. Mọi bài sau đều theo template đã chốt ở bước này, nên đừng bỏ qua.
@@ -175,5 +175,30 @@ M2 có một bước **chờ bạn duyệt**. Mọi bài sau đều theo templat
 33. **Trang fallback ra khỏi tìm kiếm Pagefind:** trang fallback có `pagefind: false` (route middleware `src/routeData.ts`), để chữ tiếng Việt không lọt vào chỉ mục tìm kiếm tiếng Anh. Bổ sung cho quyết định 30.
 34. **Mọi trang không phải bài học phải có đủ bản vi và en**, kiểm bằng test trong `roadmap-files.test.ts`. Nhờ vậy `src/lib/seo.ts` chỉ cần xét bài học khi quyết định trang nào chưa dịch.
 35. **Sửa nhỏ bài Hồi quy tuyến tính sau review vi/en:** "cùng dự đoán **trên tập huấn luyện**" khi $\mathbf{X}^\top\mathbf{X}$ suy biến; `LinearRegression` "cũng giải trực tiếp trên $\mathbf{X}$" thay vì "như `np.linalg.lstsq`"; ghi tiếng Anh lần đầu cho "tham số", "độ lệch", "nghiệm có độ dài nhỏ nhất"; thêm 3 thuật ngữ vào glossary.
+
+Đã quyết ngày 23/10/2026 (mốc M3):
+
+36. **Nhịp làm:** từng bài theo thứ tự lộ trình, bắt đầu từ Tổng quan Học máy. Xong bản vi thì dừng chờ người dùng duyệt, rồi mới dịch sang en.
+37. **Minh họa:** VIZ tương tác cho 3 bài, tái dùng kit VIZ có sẵn. Overfitting: thanh trượt bậc đa thức, sai số train/test. Regularization: thanh trượt λ, hệ số co lại. Gradient Descent: chạy từng bước, đổi tốc độ học. Bài Tổng quan Học máy chỉ dùng hình SVG tĩnh.
+38. **Dữ liệu ví dụ:** dùng lại bảng 10 căn hộ khi hợp (Gradient Descent giải lại đúng bài toán của Hồi quy tuyến tính). Overfitting và Regularization dùng dữ liệu nhỏ tự sinh, có seed, đặt trong `src/data/datasets/`.
+39. **Test cho bài mới:** gọn hơn M2. Dựa vào test chung cho mọi bài (`lessons.spec.ts`, `lesson-pairs.test.ts`, `viz.spec.ts`), cộng unit test cho toán của từng VIZ. Không viết spec e2e riêng cho từng bài, không so tọa độ hay chuỗi chính xác.
+40. **Bài Tổng quan Học máy (`ml/ml-overview`):**
+    - **Phạm vi:** nêu ba nhóm có giám sát, không giám sát và tăng cường. Trọng tâm là học có giám sát (hồi quy, phân loại), quy trình dữ liệu → huấn luyện → đánh giá, tách train/test, khái niệm tổng quát hóa, trỏ tới bài Overfitting.
+    - **Toán:** chỉ giới thiệu ký hiệu chung ($\mathbf{x}$, $y$, $\hat{y} = f(\mathbf{x})$, $m$, $n$, $\mathcal{L}$), không dẫn công thức.
+    - **Code và quiz:** 2 ô code trên bảng căn hộ (`fit`/`predict` dạng hộp đen, `train_test_split`). Khoảng 8–10 phút đọc, 4 câu quiz.
+    - **Hình:** 2 hình SVG tĩnh, gồm sơ đồ các nhóm học máy và sơ đồ quy trình.
+41. ~~**Thư ngỏ trang chủ:** giữ nguyên tới khi bài Tổng quan có bản en.~~ Thay bằng quyết định 43.
+42. **Tự chọn khi làm bài Tổng quan** (đổi lại được khi người dùng duyệt):
+    - Ô code 2 dùng `random_state` 4, 8, 2 thay cho 0, 1, 2. Lý do: ở seed 0 và 1, KNN với k = 1 gặp hai láng giềng cách đều, nên kết quả tùy vào cách scikit-learn phá hòa.
+    - `MlWorkflowFigure` chỉ có bố cục hẹp. Bố cục rộng vượt ngân sách 10 000 ký tự.
+    - Đoạn mô tả `sr-only` của hình có `aria-hidden="true"`, để trình đọc màn hình chỉ đọc một lần qua `aria-describedby`.
+
+Đã quyết ngày 23/10/2026 (sau khi duyệt bản vi bài Tổng quan):
+
+43. **Bản tiếng Anh của các bài M3 làm sau MVP.** MVP gồm 5 bài tiếng Việt; chỉ bài mẫu Hồi quy tuyến tính có bản en. Bản vi bài Tổng quan Học máy đã được người dùng duyệt, bước tiếp là bài Overfitting và Underfitting. Hệ quả:
+    - Trang `/en/` của bài chưa dịch là trang fallback: `noindex`, không vào sitemap, không vào tìm kiếm (quyết định 30, 33).
+    - Nút "Bắt đầu học" theo từng ngôn ngữ: `/vi/` dẫn tới bài đầu tiên có bản vi (Tổng quan), `/en/` dẫn tới bài đầu tiên có bản en (Hồi quy tuyến tính). Xem `getFirstOpenLesson(locale)`.
+    - Thư ngỏ: bản vi link tới Tổng quan, bản en giữ Hồi quy tuyến tính.
+    - Bước `lesson-translator` và `content-reviewer` (khớp vi/en) của mỗi bài M3 chuyển sang sau MVP.
 
 Còn mở: tên miền (trước M4).

@@ -1,0 +1,63 @@
+---
+// ml/ml-overview, "Minh họa": the test set is split off first and used only to evaluate, never in training.
+// The training path runs down a main column (data → split → training set → fit → model → evaluate → use);
+// the test set sits in a side column and its only arrow runs down the side, past "fit", into "evaluate".
+// Narrow layout only: a wide one with the same boxes doubles the SVG and took the figure past the HTML budget
+// of viz.md 8.2 g (11 203 characters, limit 10 000, with this kit). On a desktop the narrow one is 400px wide.
+// Words: src/data/figures/ml-workflow.ts (docs/architecture/viz.md, section 8).
+import { ML_WORKFLOW } from '@data/figures/ml-workflow';
+import { toLines } from '@lib/figures/geometry';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = ML_WORKFLOW[getPageLocale(Astro.locals.starlightRoute)];
+
+/** First line as the main label, the rest as small lines. */
+const split = (key: Exclude<keyof typeof t.labels, 'model' | 'use' | 'note'>) => {
+  const [main = '', ...small] = toLines(t.labels[key]);
+  return { lines: main, small };
+};
+
+// Narrow: main column x 8–176 (centre 92), side column x 224–352 (centre 288).
+const N = { mainX: 8, mainW: 168, sideX: 224, sideW: 128 } as const;
+const nMid = N.mainX + N.mainW / 2;
+const nSide = N.sideX + N.sideW / 2;
+const n = {
+  data: { y: 8, h: 56 },
+  split: { y: 84, h: 56 },
+  sets: { y: 168, h: 56 },
+  fit: { y: 244, h: 56 },
+  model: { y: 320, h: 40 },
+  evaluate: { y: 380, h: 56 },
+  use: { y: 456, h: 56 },
+} as const;
+const bottom = (row: { y: number; h: number }) => row.y + row.h;
+const middle = (row: { y: number; h: number }) => row.y + row.h / 2;
+const narrowHeight = bottom(n.use) + 8;
+
+---
+
+<FigureFrame id="ml-workflow" text={t} narrowHeight={narrowHeight}>
+  <Fragment slot="narrow">
+    <FigNode x={N.mainX} y={n.data.y} width={N.mainW} height={n.data.h} {...split('data')} />
+    <FigArrow from={[nMid, bottom(n.data)]} to={[nMid, n.split.y]} />
+    <FigNode x={N.mainX} y={n.split.y} width={N.mainW} height={n.split.h} {...split('split')} />
+    <FigArrow from={[nMid, bottom(n.split)]} to={[nMid, n.sets.y]} />
+    <FigArrow from={[N.mainX + N.mainW, middle(n.split)]} via={[[nSide, middle(n.split)]]} to={[nSide, n.sets.y]} />
+    <FigNode x={N.mainX} y={n.sets.y} width={N.mainW} height={n.sets.h} {...split('train')} tone="accent" />
+    <FigNode x={N.sideX} y={n.sets.y} width={N.sideW} height={n.sets.h} {...split('test')} tone="alt" />
+    <FigArrow from={[nMid, bottom(n.sets)]} to={[nMid, n.fit.y]} />
+    <FigNode x={N.mainX} y={n.fit.y} width={N.mainW} height={n.fit.h} {...split('fit')} />
+    <FigText x={nSide - 8} y={middle(n.fit)} lines={t.labels.note} size="small" anchor="end" />
+    <FigArrow from={[nMid, bottom(n.fit)]} to={[nMid, n.model.y]} />
+    <FigNode x={N.mainX} y={n.model.y} width={N.mainW} height={n.model.h} lines={t.labels.model} />
+    <FigArrow from={[nMid, bottom(n.model)]} to={[nMid, n.evaluate.y]} />
+    <FigArrow from={[nSide, bottom(n.sets)]} via={[[nSide, middle(n.evaluate)]]} to={[N.mainX + N.mainW, middle(n.evaluate)]} />
+    <FigNode x={N.mainX} y={n.evaluate.y} width={N.mainW} height={n.evaluate.h} {...split('evaluate')} />
+    <FigArrow from={[nMid, bottom(n.evaluate)]} to={[nMid, n.use.y]} />
+    <FigNode x={N.mainX} y={n.use.y} width={N.mainW} height={n.use.h} lines={t.labels.use} />
+  </Fragment>
+</FigureFrame>

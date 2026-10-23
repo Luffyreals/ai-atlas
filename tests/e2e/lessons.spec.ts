@@ -9,8 +9,8 @@ import { LESSONS, LOCALES, PARTS, type Lesson, type Locale } from '../../src/dat
 import { formatString } from '../../src/i18n/format';
 import rehypeKatexA11y from '../../src/lib/rehype-katex-a11y';
 import { getPartIdOf, hasPage, isTranslated, requireLesson } from '../../src/lib/roadmap';
-import { lessonShape, prose, splitMdx } from '../unit/fixtures/lesson-shape';
-import { axNames, contentLocale, isNarrow, s, showPreferences } from './helpers';
+import { figureCount, lessonShape, prose, splitMdx } from '../unit/fixtures/lesson-shape';
+import { axNames, contentLocale, installContrast, isNarrow, s, showPreferences, type Contrast } from './helpers';
 
 // Lesson pages and every place that links to them: homepage map, Prerequisites, sidebar, sitemap.
 // Expectations come from src/data/roadmap.ts (hasPage, isTranslated), so the same tests hold while every
@@ -45,6 +45,128 @@ function expectedAlternates(lesson: Lesson): [string, string][] {
     pathOf(locale, lesson.id),
   ]);
   return [...pairs, ['x-default', pathOf('vi', lesson.id)] as [string, string]].sort();
+}
+
+// --- Static figures (docs/architecture/viz.md, section 8.2 d–h). Both functions run in the page. ---
+
+const FIGURE_BUDGET = { chars: 10_000, elements: 200 }; // outerHTML of one figure.atlas-figure (section 8.2 g)
+const FIGURE_MIN_TEXT_PX = 12; // every visible text, at 375px and on a desktop (section 8.2 e)
+
+interface FigureReport {
+  id: string;
+  lang: string | null;
+  caption: string;
+  /** Visible svg.atlas-fig-svg: exactly one, the other layout (if any) is display: none. */
+  visibleSvgs: number;
+  svg: { role: string | null; label: string; description: string } | null;
+  duplicateIds: string[];
+  /** Elements that are JS or load another file. */
+  forbidden: string[];
+  chars: number;
+  elements: number;
+  texts: number;
+  smallestPx: number;
+  /** Text too small, outside the viewBox, or out of its box. */
+  textIssues: string[];
+}
+
+/** Structure, budget and text geometry of one figure, after document.fonts.ready. */
+function inspectFigure(figure: Element, minPx: number): FigureReport {
+  const svgs = [...figure.querySelectorAll<SVGSVGElement>('svg.atlas-fig-svg')];
+  const visible = svgs.filter((svg) => svg.checkVisibility());
+  const svg = visible.length === 1 ? (visible[0] ?? null) : null;
+  const describedBy = svg?.getAttribute('aria-describedby') ?? '';
+  const ids = [figure, ...figure.querySelectorAll('[id]')].map((el) => el.id).filter(Boolean);
+  const forbidden = [
+    ...figure.querySelectorAll('astro-island, script, img, image, foreignObject, foreignobject, iframe, object, embed, use'),
+  ]
+    .filter((el) => !(el.tagName === 'use' && (el.getAttribute('href') ?? el.getAttribute('xlink:href') ?? '').startsWith('#')))
+    .map((el) => el.tagName);
+
+  const textIssues: string[] = [];
+  let smallestPx = Infinity;
+  let texts = 0;
+  if (svg) {
+    const box = svg.viewBox.baseVal;
+    type Box = { x: number; y: number; width: number; height: number };
+    const inside = (b: Box, outer: Box, slack: number) =>
+      b.x >= outer.x - slack &&
+      b.y >= outer.y - slack &&
+      b.x + b.width <= outer.x + outer.width + slack &&
+      b.y + b.height <= outer.y + outer.height + slack;
+    const show = (b: Box) => [b.x, b.y, b.width, b.height].map((v) => Math.round(v * 10) / 10).join(' ');
+    for (const text of svg.querySelectorAll<SVGTextElement>('text')) {
+      const spans = [...text.querySelectorAll('tspan')];
+      const lines = spans.length > 0 ? spans : [text];
+      const words = lines.map((el) => (el.textContent ?? '').replace(/\s+/g, ' ').trim()).join(' / ');
+      if (!words.replace(/[\s/]/g, '')) continue;
+      texts++;
+      // Font size in viewBox units, times the viewBox-to-screen scale: the size on screen.
+      const scale = text.getScreenCTM()?.a ?? 0;
+      for (const el of lines) {
+        const px = Math.round(parseFloat(getComputedStyle(el).fontSize) * scale * 100) / 100;
+        smallestPx = Math.min(smallestPx, px);
+        if (!(px >= minPx)) textIssues.push(`"${(el.textContent ?? '').trim()}": ${px}px, under ${minPx}px`);
+      }
+      const b = text.getBBox();
+      if (!inside(b, box, 0.5)) textIssues.push(`"${words}": box ${show(b)} outside the viewBox ${show(box)}`);
+      const rect = text.closest('.atlas-fig-node')?.querySelector<SVGRectElement>(':scope > rect');
+      if (rect) {
+        const r = rect.getBBox();
+        if (!inside(b, r, 1)) textIssues.push(`"${words}": box ${show(b)} outside its node ${show(r)}`);
+      }
+    }
+  }
+  return {
+    id: figure.id,
+    lang: figure.getAttribute('lang'),
+    caption: (figure.querySelector('figcaption')?.textContent ?? '').trim(),
+    visibleSvgs: visible.length,
+    svg: svg && {
+      role: svg.getAttribute('role'),
+      label: (svg.getAttribute('aria-label') ?? '').trim(),
+      description: describedBy ? (document.getElementById(describedBy)?.textContent ?? '').trim() : '',
+    },
+    duplicateIds: ids.filter((id) => document.querySelectorAll(`[id="${CSS.escape(id)}"]`).length !== 1),
+    forbidden,
+    chars: figure.outerHTML.length,
+    elements: figure.querySelectorAll('*').length + 1,
+    texts,
+    smallestPx,
+    textIssues,
+  };
+}
+
+/** Text ≥ 4.5 against the nearest background (its box, or the page); box borders and arrows ≥ 3 against the page. */
+function figureContrast(figure: Element): { text: Contrast[]; marks: Contrast[] } {
+  const { backgroundOf, over, rgba, pair } = window.atlasContrast!;
+  const text: Contrast[] = [];
+  const marks: Contrast[] = [];
+  const caption = figure.querySelector('figcaption');
+  if (caption) text.push(pair('figcaption', getComputedStyle(caption).color, backgroundOf(caption)));
+  for (const svg of figure.querySelectorAll('svg.atlas-fig-svg')) {
+    if (!svg.checkVisibility()) continue;
+    const page = backgroundOf(svg);
+    for (const el of svg.querySelectorAll('text')) {
+      const spans = [...el.querySelectorAll('tspan')];
+      const words = (spans.length > 0 ? spans : [el]).map((line) => (line.textContent ?? '').trim()).join(' / ');
+      if (!words.replace(/[\s/]/g, '')) continue;
+      const rect = el.closest('.atlas-fig-node')?.querySelector(':scope > rect');
+      const background = rect ? over(rgba(getComputedStyle(rect).fill), page) : page;
+      text.push(pair(`"${words.slice(0, 40)}"`, getComputedStyle(el).fill, background));
+    }
+    for (const [selector, property] of [
+      ['.atlas-fig-node > rect', 'stroke'],
+      ['.atlas-fig-arrow', 'stroke'],
+      ['.atlas-fig-arrow-head', 'fill'],
+    ] as const) {
+      for (const el of svg.querySelectorAll(selector)) {
+        const tone = el.closest('.atlas-fig-node')?.getAttribute('data-tone');
+        marks.push(pair(`${selector}${tone ? `[${tone}]` : ''} ${property}`, getComputedStyle(el).getPropertyValue(property), page));
+      }
+    }
+  }
+  return { text, marks };
 }
 
 /** Every lesson of a RoadmapMap: a link when it has a page, "(coming soon)" text otherwise; and the legend. */
@@ -221,10 +343,11 @@ for (const lesson of WITH_PAGE) {
     const source = readSource(textLocale, lesson.id);
     const shape = lessonShape(source);
     const body = prose(splitMdx(source).body);
+    const figures = figureCount(source);
     const index = WITH_PAGE.indexOf(lesson);
 
     test.describe(`lesson page ${path}`, () => {
-      test(`language, title, fallback notice, hreflang, canonical, and ${translated ? 'no noindex' : 'noindex (fallback page)'}`, async ({
+      test(`language, title, fallback notice, hreflang, canonical, ${translated ? 'no noindex, searchable' : 'noindex and out of search (fallback page)'}`, async ({
         page,
       }) => {
         const response = await page.goto(path);
@@ -244,6 +367,8 @@ for (const lesson of WITH_PAGE) {
         // Only a fallback page is noindex, with exactly one robots tag.
         await expect(page.locator('meta[name="robots"][content*="noindex"]')).toHaveCount(translated ? 0 : 1);
         if (!translated) await expect(page.locator('meta[name="robots"]')).toHaveCount(1);
+        // Decision 33: a fallback page is left out of the search index (no data-pagefind-body anywhere).
+        await expect(page.locator('[data-pagefind-body]')).toHaveCount(translated ? 1 : 0);
       });
 
       test('sidebar marks this lesson as current; Previous and Next follow the roadmap', async ({ page }) => {
@@ -345,6 +470,48 @@ for (const lesson of WITH_PAGE) {
         await expect(page.locator('atlas-lesson-progress')).toHaveCount(shape.components.LessonProgress ?? 0);
         if (/<LessonProgress\s*\/>/.test(body)) {
           await expect(page.locator(`atlas-lesson-progress[data-lesson-id="${lesson.id}"]`)).toHaveCount(1);
+        }
+      });
+
+      test('static figures: one per tag, named, described, readable, no JS', async ({ page }) => {
+        test.skip(figures === 0, 'the lesson has no static figure');
+        for (const scheme of ['light', 'dark'] as const) {
+          await page.emulateMedia({ colorScheme: scheme });
+          await page.goto(path);
+          await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+          const blocks = page.locator('figure.atlas-figure');
+          await expect(blocks).toHaveCount(figures);
+          await page.evaluate(() => document.fonts.ready);
+          await installContrast(page);
+
+          for (const figure of await blocks.all()) {
+            const report = await figure.evaluate(inspectFigure, FIGURE_MIN_TEXT_PX);
+            const where = `#${report.id} (${scheme})`;
+            if (scheme === 'light') {
+              test.info().annotations.push({
+                type: `figure #${report.id}`,
+                description: `${report.chars} characters, ${report.elements} elements, ${report.texts} texts, smallest ${report.smallestPx}px`,
+              });
+              // The figure follows the page's language, even on a fallback page (section 8.2 c).
+              expect.soft(report.lang, `${where}: lang`).toBe(locale);
+              expect.soft(report.caption, `${where}: figcaption`).not.toBe('');
+              expect.soft(report.visibleSvgs, `${where}: visible svg.atlas-fig-svg`).toBe(1);
+              expect.soft(report.svg?.role, `${where}: role`).toBe('img');
+              expect.soft(report.svg?.label, `${where}: aria-label`).toBeTruthy();
+              expect.soft(report.svg?.description, `${where}: text of aria-describedby`).toBeTruthy();
+              expect.soft(report.duplicateIds, `${where}: ids used twice on the page`).toEqual([]);
+              expect.soft(report.forbidden, `${where}: JS or another file inside`).toEqual([]);
+              expect.soft(report.chars, `${where}: outerHTML characters`).toBeLessThanOrEqual(FIGURE_BUDGET.chars);
+              expect.soft(report.elements, `${where}: elements`).toBeLessThanOrEqual(FIGURE_BUDGET.elements);
+              expect.soft(report.texts, `${where}: texts measured`).toBeGreaterThan(0);
+              expect.soft(report.textIssues, `${where}: text too small or overflowing`).toEqual([]);
+            }
+            const { text, marks } = await figure.evaluate(figureContrast);
+            expect.soft(text.length, `${where}: texts measured for contrast`).toBeGreaterThan(1);
+            expect.soft(marks.length, `${where}: marks measured for contrast`).toBeGreaterThan(0);
+            expect.soft(text.filter((c) => c.ratio < 4.5), `${where}: text below 4.5:1`).toEqual([]);
+            expect.soft(marks.filter((c) => c.ratio < 3), `${where}: marks below 3:1`).toEqual([]);
+          }
         }
       });
 
