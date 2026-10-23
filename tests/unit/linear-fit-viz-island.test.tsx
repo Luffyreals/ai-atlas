@@ -9,10 +9,8 @@ import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SETTLE_MS } from '../../src/components/viz/kit/use-settled';
-import LinearFitVizIsland, {
-  type AxisText,
-  type LinearFitVizIslandProps,
-} from '../../src/components/viz/linear-fit-viz/LinearFitVizIsland';
+import type { AxisText } from '../../src/components/viz/kit/types';
+import LinearFitVizIsland, { type LinearFitVizIslandProps } from '../../src/components/viz/linear-fit-viz/LinearFitVizIsland';
 import { APARTMENTS, APARTMENTS_LINEAR_FIT } from '../../src/data/datasets/apartments';
 import type { DatasetColumn } from '../../src/data/datasets/types';
 import { formatString } from '../../src/i18n/format';

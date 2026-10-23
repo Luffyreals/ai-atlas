@@ -14,6 +14,7 @@ export interface PlotFrameProps {
   yTitle: string;
   label: string; // aria-label of the <svg role="img">
   describedBy?: string; // id of an sr-only description
+  shape?: 'default' | 'short'; // 'short': a low plot (data-shape on .atlas-viz-chart, viz.css; section 9.4.7)
   children: ReactNode; // SVG marks
 }
 
@@ -31,6 +32,7 @@ export default function PlotFrame({
   yTitle,
   label,
   describedBy,
+  shape = 'default',
   children,
 }: PlotFrameProps) {
   const xLabels = tickLabels(xTicks);
@@ -38,7 +40,7 @@ export default function PlotFrame({
   // The y tick column is as wide as its longest label (tabular figures: one ch per character).
   const style = { '--atlas-viz-ytick-ch': Math.max(1, ...yLabels.map((text) => text.length)) } as CSSProperties;
   return (
-    <div className="atlas-viz-chart" style={style}>
+    <div className="atlas-viz-chart" style={style} data-shape={shape === 'short' ? 'short' : undefined}>
       <div className="atlas-viz-axis-title atlas-viz-ytitle" aria-hidden="true">
         {yTitle}
       </div>

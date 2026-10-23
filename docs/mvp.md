@@ -200,5 +200,18 @@ M2 có một bước **chờ bạn duyệt**. Mọi bài sau đều theo templat
     - Nút "Bắt đầu học" theo từng ngôn ngữ: `/vi/` dẫn tới bài đầu tiên có bản vi (Tổng quan), `/en/` dẫn tới bài đầu tiên có bản en (Hồi quy tuyến tính). Xem `getFirstOpenLesson(locale)`.
     - Thư ngỏ: bản vi link tới Tổng quan, bản en giữ Hồi quy tuyến tính.
     - Bước `lesson-translator` và `content-reviewer` (khớp vi/en) của mỗi bài M3 chuyển sang sau MVP.
+44. **Bài Overfitting và Underfitting (`ml/overfitting-underfitting`):**
+    - **Phạm vi:** hai hiện tượng qua hồi quy đa thức, đường cong sai số train/test theo bậc, bias–variance ở mức trực giác, tập kiểm định và kiểm định chéo ở mức giới thiệu. Regularization chỉ nhắc tên, để dành cho bài sau.
+    - **Toán:** viết mô hình đa thức $\hat{y} = w_1x + w_2x^2 + \dots + w_dx^d + b$ và MSE, giải thích vì sao nó vẫn tuyến tính theo tham số. Không dẫn công thức phân rã bias–variance.
+    - **Dữ liệu:** đường cong sin cộng nhiễu, khoảng 20 điểm, tự sinh có seed, đặt trong `src/data/datasets/`. Dùng chung cho lời văn, VIZ và code; bài Regularization dùng lại.
+    - **Độ dài:** khoảng 10–12 phút đọc, 3 ô code (khớp bậc 1, 3, 15 và vẽ; sai số train/test theo bậc; `cross_val_score` để chọn bậc), 4 câu quiz, 1 VIZ thanh trượt bậc (quyết định 37).
+45. **Dữ liệu và VIZ bài Overfitting** (thiết kế ở `docs/architecture/viz.md` mục 9):
+    - **Dữ liệu:** 24 điểm thay vì khoảng 20, gồm 16 điểm train và 8 điểm test. Bậc 15 có 16 hệ số, nên cần ít nhất 16 điểm train thì mới có nghiệm duy nhất và trình duyệt mới tính ra đúng số của scikit-learn.
+    - **Bậc của VIZ:** từ 1 tới 15.
+    - **`PolyFitViz`:** có thêm biểu đồ nhỏ "MSE theo bậc" (hình chữ U). Trên điện thoại VIZ cao thêm khoảng 220px.
+
+46. **Bản vi bài Overfitting và Underfitting đã được người dùng duyệt (23/10/2026).** Gồm các lựa chọn tự quyết khi làm bài:
+    - quiz câu 2 thu phạm vi về bậc 1–12;
+    - chưa gộp phần trùng lặp giữa `PolyFitViz` và `LinearFitViz` (mẫu nét, hàm `axis()`).
 
 Còn mở: tên miền (trước M4).
