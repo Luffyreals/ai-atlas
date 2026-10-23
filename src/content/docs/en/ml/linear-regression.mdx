@@ -1,0 +1,428 @@
+---
+title: Linear Regression
+description: Predict apartment rent with a straight line. Residuals, MSE, the least squares solution, the normal equation, and code in NumPy and scikit-learn.
+quiz:
+  - question: 'Why does MSE square the residuals instead of simply adding them up?'
+    options:
+      - 'Because squaring makes small residuals matter more than large ones'
+      - 'Because a computer cannot compute a plain sum'
+      - 'Because positive and negative residuals cancel out, so a very bad line can still have residuals that add up to 0'
+      - 'Because squaring makes the line always pass through the origin'
+    answer: 2
+    explanation: 'A flat line at the mean rent has residuals that add up to $0$, even though it predicts the same rent for every apartment. A square is never negative, so nothing cancels. Squaring also punishes large errors more (the opposite of the first option), and you can take its derivative.'
+  - question: 'A model learns $\hat{y} = 0.17x + 2.04$, where $x$ is the floor area (m²) and $\hat{y}$ is the rent (million VND/month). Two apartments differ in area by 10 m². How far apart are their predicted rents?'
+    options:
+      - 'About 1.7 million VND/month'
+      - 'About 0.17 million VND/month'
+      - 'About 2.04 million VND/month'
+      - 'You cannot tell without knowing the area of each apartment'
+    answer: 0
+    explanation: 'Each extra m² adds $0.17$ million, for small and large apartments alike, so 10 m² more means $10 \times 0.17 = 1.7$ million more. When you subtract one prediction from the other, $b$ cancels out, so you do not need the area of each apartment.'
+  - question: 'Instead of the 110 m² apartment from the third code cell, you add to the original table a 52 m² apartment, very close to the mean area $\bar{x} = 52.4$, with its rent mistyped as 1.0 instead of 10.0. How does the least squares line change?'
+    options:
+      - 'It tilts sharply, and $w$ drops by more than half, as in the third code cell'
+      - 'It moves down, almost parallel to itself, and $w$ stays almost the same'
+      - 'It does not change at all, because the point is close to the mean point'
+      - 'It gets much steeper, because the new point has a very large residual'
+    answer: 1
+    explanation: 'The point sits near $\bar{x}$, so it barely tilts the line. It only pulls $\bar{y}$ down by $(10.92 - 1.0)/11 \approx 0.9$ million, and the line always passes through the mean point, so the whole line moves down with it. Run it and you will see $w$ change by only about 0.6%. A large residual still pulls the line, so "does not change" is wrong.'
+  - question: 'Which case makes $\mathbf{X}^\top\mathbf{X}$ not invertible?'
+    options:
+      - 'Two apartments have the same floor area'
+      - 'There are 1000 apartments but only 3 features'
+      - 'The data contains an outlier'
+      - 'There is a column for the area in m² and another for the area in ft²'
+    answer: 3
+    explanation: 'The ft² column equals the m² column times about $10.76$ (if the ft² column is computed straight from the m² column, with no rounding), so the two columns are linearly dependent, and infinitely many $\boldsymbol{\theta}$ give the same predictions. Two apartments with the same area are fine; it only breaks when every apartment has the same area. More samples than parameters is a good thing. An outlier skews the solution, but it does not make it non-unique.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import DatasetTable from '@components/DatasetTable.astro';
+import LinearFitViz from '@components/viz/LinearFitViz.astro';
+import normalEquationCode from '@code/ml/linear-regression/normal-equation.en.py?raw';
+import sklearnFitCode from '@code/ml/linear-regression/sklearn-fit.en.py?raw';
+import outlierCode from '@code/ml/linear-regression/outlier.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Understand how linear regression makes predictions, and why the best line is the one with the smallest *mean squared error* (MSE).
+- Be able to derive the formulas for $w$ and $b$ yourself when there is one *feature*, and read the *normal equation* $\mathbf{X}^\top\mathbf{X}\boldsymbol{\theta} = \mathbf{X}^\top\mathbf{y}$.
+- Implement it with NumPy and scikit-learn, and explain what $w$ and $b$ mean.
+- Recognize its main limitations, such as outliers, extrapolation, and the case where the normal equation has infinitely many solutions.
+
+## Prerequisites
+
+{/* The list comes from the lesson's prerequisites in roadmap.ts. Do not write the links by hand. */}
+
+<Prerequisites />
+
+:::tip[Quick reminder]
+The **dot product** of two vectors of the same length is the sum of the products of their matching entries: $\mathbf{w}^\top\mathbf{x} = w_1x_1 + w_2x_2 + \dots + w_nx_n$. The **derivative** of a function at a point is the slope of its graph there. At the bottom of a bowl, the slope is 0. The **partial derivative** with respect to one variable is the slope when only that variable changes and the others stay fixed.
+:::
+
+## Intuition
+
+You are looking for an apartment to rent. You ask about the rent of 10 apartments in the area where you want to live, and write them down in the table below. The whole lesson uses this table.
+
+<DatasetTable dataset="apartments" />
+
+Then a friend tells you that a 65 m² apartment will be free soon. What would be a fair rent?
+
+One look at the table tells you that larger apartments cost more. But not evenly: the 30 m² apartment is cheaper than the 25 m² one, and the 75 m² apartment is cheaper than the 68 m² one. Rent also depends on location, floor, furniture, things the table does not record. So no straight line goes through all 10 points.
+
+What you can do is find the line that runs **closest** to the points, then use it to guess the rent of the 65 m² apartment. That is the whole idea of **linear regression**.
+
+### Try a few lines
+
+Try two simple ways to guess:
+
+- **Line A:** ignore the area and guess the mean rent of the table, 10.92 million VND, for every apartment. This is a flat line.
+- **Line B:** "200,000 VND per m²". It guesses 5.0 million for the 25 m² apartment and 17.0 million for the 85 m² one.
+
+For each apartment, take the actual rent minus the rent the line guesses. This difference is called the **residual**.
+
+For line B, the 25 m² apartment has a residual of 6.7 − 5.0 = 1.7: the point lies *above* the line. The 75 m² apartment has a residual of 13.9 − 15.0 = −1.1: the point lies *below* the line. On a plot, a residual is the vertical segment between a data point and the line. To compare two lines, you need **one number** that sums up the residuals of all 10 apartments.
+
+### Why square the residuals
+
+Your first thought might be to add up the residuals. But the residuals of line A add up to exactly 0, because the positive and negative residuals around the mean cancel out perfectly. Yet line A is very bad: it guesses the same rent for the 25 m² apartment and the 85 m² one.
+
+The fix is to **square** each residual, then take the mean. This number is the **mean squared error**, or MSE for short. There are three reasons to choose the square:
+
+1. **Nothing cancels.** A square is never negative, so an error counts whichever side of the line it is on.
+2. **Large errors cost more.** Being off by 1 million costs 1 point; being off by 2 million costs 4 points. So two apartments that are each off by 1 million (2 points) beat one exact guess plus one apartment off by 2 million (4 points). The downside: a single point that lies very far away pulls the whole line toward it, as you will see in the third code cell.
+3. **You can take its derivative.** The square function is smooth, while the absolute value has a sharp corner at 0, where it has no derivative. Derivatives let you find the best line with algebra instead of trial and error.
+
+The MSE of each line, computed with Python on the table above:
+
+| Line | MSE |
+|---|---:|
+| A: flat at the mean rent 10.92 | 10.50 |
+| B: 200,000 VND per m² | 0.88 |
+| The best line, found later in this lesson | 0.36 |
+
+Line B is much better than line A, but an even better line exists. The problem is now clear: **among all straight lines, find the one with the smallest MSE.**
+
+## Theory
+
+### Stating the problem
+
+The table has $m$ *samples*, one per apartment, so $m = 10$. Sample $i$ has a feature $x^{(i)}$, the floor area, and a *label* $y^{(i)}$, the actual rent. The superscript $(i)$ means "apartment number $i$", not a power.
+
+The model guesses the rent with a straight line:
+
+$$
+\hat{y} = wx + b
+$$
+
+- $\hat{y}$ (read "y hat") is the **predicted** rent, to tell it apart from the actual rent $y$.
+- $w$ is the **weight**. With only one feature, $w$ is the **slope** of the line: when the area grows by 1 m², the predicted rent grows by $w$ million.
+- $b$ is the **bias**, also called the *intercept*: where the line crosses the vertical axis.
+
+Most of this lesson uses one feature, because it is easy to picture. The section on the matrix form extends this to many features.
+
+### The MSE loss function
+
+For apartment $i$, the predicted rent is $\hat{y}^{(i)} = wx^{(i)} + b$, and the residual is
+
+$$
+e^{(i)} = y^{(i)} - \hat{y}^{(i)}
+$$
+
+The *loss function* $\mathcal{L}$ is the MSE, the mean of the squared residuals over all $m$ apartments:
+
+$$
+\begin{aligned}
+\mathcal{L}(w, b) &= \frac{1}{m}\sum_{i=1}^{m}\left(\hat{y}^{(i)} - y^{(i)}\right)^2 \\
+&= \frac{1}{m}\sum_{i=1}^{m}\left(wx^{(i)} + b - y^{(i)}\right)^2
+\end{aligned}
+$$
+
+A few things to notice:
+
+- $\hat{y}^{(i)} - y^{(i)}$ is just the residual with its sign flipped. Once squared, the two are the same.
+- The data is fixed, so $\mathcal{L}$ is a function of only the two parameters $w$ and $b$.
+- Many books use $\frac{1}{2m}$ so that the 2 cancels when you take the derivative. Multiplying $\mathcal{L}$ by a positive constant does not move its lowest point, so the solution stays the same. This lesson uses $\frac{1}{m}$ to match the MSE of scikit-learn.
+
+The task is to find the $w$ and $b$ that make $\mathcal{L}(w, b)$ as small as possible. The answer is called the **least squares** solution.
+
+### The solution with one feature
+
+$\mathcal{L}$ is a sum of squares of expressions that are linear in $w$ and $b$, so its graph over $(w, b)$ is a bowl that opens upward. The only place where the bowl is flat (every partial derivative is 0) is its bottom, so you only need to set the two partial derivatives to 0 and solve. This requires that the apartments do not all have the same area (see the section "When the solution is not unique").
+
+Let $\bar{x} = \frac{1}{m}\sum_{i=1}^{m} x^{(i)}$ be the mean area and $\bar{y} = \frac{1}{m}\sum_{i=1}^{m} y^{(i)}$ the mean rent.
+
+**Step 1: the partial derivative with respect to $b$.** By the chain rule, the derivative of $u^2$ is $2u$ times the derivative of $u$. Here $u = wx^{(i)} + b - y^{(i)}$, and its derivative with respect to $b$ is 1. So:
+
+$$
+\frac{\partial\mathcal{L}}{\partial b} = \frac{2}{m}\sum_{i=1}^{m}\left(wx^{(i)} + b - y^{(i)}\right)
+$$
+
+Set this derivative to 0 and divide both sides by 2. The sum splits into $w\sum_{i} x^{(i)} + mb - \sum_{i} y^{(i)}$. Dividing by $m$ turns the three parts into $w\bar{x}$, $b$ and $\bar{y}$:
+
+$$
+\begin{aligned}
+0 &= \frac{1}{m}\sum_{i=1}^{m}\left(wx^{(i)} + b - y^{(i)}\right) \\
+&= w\bar{x} + b - \bar{y}
+\end{aligned}
+$$
+
+Rearranging:
+
+$$
+b = \bar{y} - w\bar{x}
+$$
+
+In words: $\bar{y} = w\bar{x} + b$, so **the best line always passes through the mean point $(\bar{x}, \bar{y})$**, and the residuals average to 0. Line A also passes through this point (which is why its residuals add up to 0), and it is still bad: this condition is necessary but not sufficient. You also have to pick the right slope.
+
+**Step 2: the partial derivative with respect to $w$.** This time, the derivative of $u$ with respect to $w$ is $x^{(i)}$:
+
+$$
+\frac{\partial\mathcal{L}}{\partial w} = \frac{2}{m}\sum_{i=1}^{m}x^{(i)}\left(wx^{(i)} + b - y^{(i)}\right)
+$$
+
+Set this derivative to 0, then drop the factor $\frac{2}{m}$, since it is not 0:
+
+$$
+\sum_{i=1}^{m}x^{(i)}\left(wx^{(i)} + b - y^{(i)}\right) = 0
+$$
+
+**Step 3: substitute $b$ from step 1.** Write the deviations from the mean as $\tilde{x}^{(i)} = x^{(i)} - \bar{x}$ and $\tilde{y}^{(i)} = y^{(i)} - \bar{y}$. The expression in parentheses becomes:
+
+$$
+\begin{aligned}
+& wx^{(i)} + b - y^{(i)} \\
+&= wx^{(i)} + \left(\bar{y} - w\bar{x}\right) - y^{(i)} \\
+&= w\left(x^{(i)} - \bar{x}\right) - \left(y^{(i)} - \bar{y}\right) \\
+&= w\tilde{x}^{(i)} - \tilde{y}^{(i)}
+\end{aligned}
+$$
+
+The third line groups the two terms with $w$ together, and the other two terms together. The equation from step 2 becomes:
+
+$$
+\sum_{i=1}^{m}x^{(i)}\left(w\tilde{x}^{(i)} - \tilde{y}^{(i)}\right) = 0
+$$
+
+**Step 4: turn the $x^{(i)}$ in front of the parentheses into $\tilde{x}^{(i)}$.** Deviations from the mean always add up to 0: $\sum_{i} \tilde{x}^{(i)} = \sum_{i} x^{(i)} - m\bar{x} = 0$, and likewise $\sum_{i} \tilde{y}^{(i)} = 0$. Therefore:
+
+$$
+\begin{aligned}
+& \bar{x}\sum_{i=1}^{m}\left(w\tilde{x}^{(i)} - \tilde{y}^{(i)}\right) \\
+&= \bar{x}\,(w \cdot 0 - 0) = 0
+\end{aligned}
+$$
+
+Subtract this identity from the equation of step 3. Each $x^{(i)}$ in front of the parentheses becomes $x^{(i)} - \bar{x}$, which is $\tilde{x}^{(i)}$:
+
+$$
+\sum_{i=1}^{m}\tilde{x}^{(i)}\left(w\tilde{x}^{(i)} - \tilde{y}^{(i)}\right) = 0
+$$
+
+**Step 5: solve for $w$.** Expanding the parentheses splits the equation into two sums:
+
+$$
+w\sum_{i=1}^{m}\left(\tilde{x}^{(i)}\right)^2 - \sum_{i=1}^{m}\tilde{x}^{(i)}\tilde{y}^{(i)} = 0
+$$
+
+Move the second sum to the right-hand side, divide by the first sum, and write the result in terms of the original $x$ and $y$:
+
+$$
+w = \frac{\sum_{i=1}^{m}\left(x^{(i)} - \bar{x}\right)\left(y^{(i)} - \bar{y}\right)}{\sum_{i=1}^{m}\left(x^{(i)} - \bar{x}\right)^2}
+$$
+
+Once you have $w$, step 1 gives $b = \bar{y} - w\bar{x}$.
+
+:::note[Remember]
+With one feature, $w$ is the sum of the products of the deviations divided by the sum of the squared deviations of $x$, and $b = \bar{y} - w\bar{x}$. The best line always passes through the mean point $(\bar{x}, \bar{y})$.
+:::
+
+**Reading the formula.** An apartment whose two deviations have the same sign (larger and pricier than average, or smaller and cheaper) adds a positive number to the numerator; opposite signs add a negative number. When the positive numbers outweigh the negative ones, $w > 0$ and the line slopes upward. The denominator measures how spread out the areas are, and it is 0 only when every apartment has the same area.
+
+**On the apartment table.** Here $\bar{x} = 52.4$, $\bar{y} = 10.92$, the numerator is 598.32 and the denominator is 3530.4. So:
+
+$$
+\begin{aligned}
+w &= \frac{598.32}{3530.4} \approx 0.1695 \\
+b &\approx 10.92 - 0.1695 \times 52.4 \approx 2.04
+\end{aligned}
+$$
+
+The best line is $\hat{y} = 0.1695x + 2.04$, with an MSE of about 0.3615. Each extra m² raises the predicted rent by about 0.17 million (170,000 VND). As for $b \approx 2.04$, it is just where the line crosses the vertical axis, not "the rent of a 0 m² apartment": the data has no apartment anywhere near that small.
+
+### Matrix form and the normal equation
+
+With several features, for example the number of bedrooms as well, each apartment is a vector $\mathbf{x} = [x_1, \dots, x_n]^\top$, each $x_j$ has its own weight $w_j$, and the prediction is a dot product plus $b$:
+
+$$
+\hat{y} = \mathbf{w}^\top\mathbf{x} + b
+$$
+
+Matrix notation lets you write the problem compactly for any $n$. Arrange the data into a **design matrix** $\mathbf{X}$: one row per apartment, one column per feature, plus a **column of ones** at the end. The actual rents form a vector $\mathbf{y}$. For the apartment table:
+
+$$
+\mathbf{X} = \begin{bmatrix} 25 & 1 \\ 30 & 1 \\ \vdots & \vdots \\ 85 & 1 \end{bmatrix}, \qquad
+\mathbf{y} = \begin{bmatrix} 6.7 \\ 6.5 \\ \vdots \\ 16.8 \end{bmatrix}
+$$
+
+The parameters go into a vector $\boldsymbol{\theta} = [w, b]^\top$. With $n$ features, row $i$ of $\mathbf{X}$ is $[\,x^{(i)}_1, \dots, x^{(i)}_n, 1\,]$ ($x^{(i)}_j$ is feature $j$ of apartment $i$) and $\boldsymbol{\theta} = [w_1, \dots, w_n, b]^\top$, so $\mathbf{X}$ has $m$ rows and $n + 1$ columns.
+
+Why the column of ones? The dot product of row $i$ with $\boldsymbol{\theta}$ is $x^{(i)}w + 1 \cdot b = \hat{y}^{(i)}$: the column of ones is there so that $b$ gets added to every prediction. So $\mathbf{X}\boldsymbol{\theta}$ holds all $m$ predicted rents, and $\mathbf{X}\boldsymbol{\theta} - \mathbf{y}$ holds the $\hat{y}^{(i)} - y^{(i)}$. The squared length of a vector, $\lVert\mathbf{v}\rVert^2 = v_1^2 + \dots + v_m^2$, is the sum of the squares of its entries, so the MSE becomes simply:
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = \frac{1}{m}\left\lVert\mathbf{X}\boldsymbol{\theta} - \mathbf{y}\right\rVert^2
+$$
+
+Set every partial derivative of this function (with respect to $w_1, \dots, w_n$ and $b$) to 0, and you get $n + 1$ linear equations. In matrix form, the whole system fits on one line, called the **normal equation**:
+
+$$
+\mathbf{X}^\top\mathbf{X}\,\boldsymbol{\theta} = \mathbf{X}^\top\mathbf{y}
+$$
+
+You do not need matrix calculus to understand it. Move the right-hand side to the left and factor out $\mathbf{X}^\top$: the equation becomes $\mathbf{X}^\top\left(\mathbf{X}\boldsymbol{\theta} - \mathbf{y}\right) = \mathbf{0}$. Row $j$ of the left-hand side is the dot product of column $j$ of $\mathbf{X}$ with $\mathbf{X}\boldsymbol{\theta} - \mathbf{y}$, which is $\sum_{i} x^{(i)}_j\left(\hat{y}^{(i)} - y^{(i)}\right)$. Multiplied by $\frac{2}{m}$, row $j$ is exactly $\partial\mathcal{L}/\partial w_j$ (the chain rule, as in step 2), and the last row, which belongs to the column of ones, is $\partial\mathcal{L}/\partial b$. So the normal equation is just the "derivative equals 0" equations stacked into a matrix. For the apartment table, it is a system with two unknowns:
+
+$$
+\begin{aligned}
+30988\,w + 524\,b &= 6320.4 \\
+524\,w + 10\,b &= 109.2
+\end{aligned}
+$$
+
+On the left, 30988, 524 and 10 are $\sum_{i} \left(x^{(i)}\right)^2$, $\sum_{i} x^{(i)}$ and $m$: the entries of $\mathbf{X}^\top\mathbf{X}$. On the right, 6320.4 is $\sum_{i} x^{(i)}y^{(i)}$ and 109.2 is $\sum_{i} y^{(i)}$: the entries of $\mathbf{X}^\top\mathbf{y}$. Dividing the second equation by 10 gives $52.4\,w + b = 10.92$, which is exactly $\bar{x}w + b = \bar{y}$ from step 1.
+
+If $\mathbf{X}^\top\mathbf{X}$ is invertible, you can write the solution as:
+
+$$
+\boldsymbol{\theta} = \left(\mathbf{X}^\top\mathbf{X}\right)^{-1}\mathbf{X}^\top\mathbf{y}
+$$
+
+This is how you **write** the solution, not how you should **compute** it. In code, use `np.linalg.solve(X.T @ X, X.T @ y)`, or better, `np.linalg.lstsq(X, y)`, because it works on $\mathbf{X}$ directly and never forms $\mathbf{X}^\top\mathbf{X}$ (scikit-learn's `LinearRegression` does the same). Forming this matrix squares the **condition number**: how much a relative error in the input, rounding errors included, can be magnified in the result. For the apartment table, the condition number in the 2-norm (the default of `np.linalg.cond`) goes from about 165 to about 165² ≈ 27,000, but the inverse matrix, `solve` and `lstsq` still give the same result to about 14 digits.
+
+### When the solution is not unique
+
+The normal equation always has a solution. The solution is **unique** when $\mathbf{X}^\top\mathbf{X}$ is invertible, that is, when the columns of $\mathbf{X}$ are **linearly independent**: no column can be written as a weighted sum of the other columns. Three common cases break this:
+
+- **Every sample has the same value of a feature.** If every apartment is 40 m², the area column is 40 times the column of ones.
+- **Duplicate features.** For example, the area in both m² and ft²: the ft² column is the m² column times about 10.76. This kind of linear dependence between columns, exact or near, is called **collinearity**.
+- **Fewer samples than parameters**, that is $m < n + 1$, for example 5 apartments but 8 features.
+
+Then $\mathbf{X}^\top\mathbf{X}$ is **singular**, and infinitely many $\boldsymbol{\theta}$ give **the same** predictions on the training set, with the same smallest MSE.
+
+With one feature, the first case shows up clearly in the determinant. Using the entries of $\mathbf{X}^\top\mathbf{X}$ from the system above:
+
+$$
+\begin{aligned}
+\det\left(\mathbf{X}^\top\mathbf{X}\right) &= m\sum_{i}\left(x^{(i)}\right)^2 - \Big(\sum_{i} x^{(i)}\Big)^2 \\
+&= m\Big(\sum_{i}\left(x^{(i)}\right)^2 - m\bar{x}^2\Big) \\
+&= m\sum_{i}\left(x^{(i)} - \bar{x}\right)^2
+\end{aligned}
+$$
+
+The second line substitutes $\sum_{i} x^{(i)} = m\bar{x}$ and factors out $m$. The third line holds because expanding $\sum_{i}\left(x^{(i)} - \bar{x}\right)^2$ gives $\sum_{i}\left(x^{(i)}\right)^2 - 2\bar{x} \cdot m\bar{x} + m\bar{x}^2$, which is $\sum_{i}\left(x^{(i)}\right)^2 - m\bar{x}^2$, exactly the expression in parentheses. The determinant is 0 exactly when all the $x^{(i)}$ are equal, which is also when the denominator in the formula for $w$ is 0. For what this does to your code and how to handle it, see the third box under Common mistakes.
+
+### Limitations
+
+Linear regression is simple, fast and easy to explain, but it has four limitations:
+
+- **It is linear only in the features you give it.** To follow a curve, add features such as $x^2$ (the first box under Common mistakes). How many to add is the topic of the lesson Overfitting and Underfitting.
+- **It is sensitive to outliers.** One odd point can pull the whole line off course (the third code cell).
+- **Extrapolation easily goes wrong.** The data only covers 25 to 85 m² (the second box under Common mistakes).
+- **It gets expensive when $n$ is large.** Forming the $(n + 1) \times (n + 1)$ matrix $\mathbf{X}^\top\mathbf{X}$ takes on the order of $mn^2$ operations, and solving the system about $n^3$ more. The lesson Gradient Descent finds the bottom of the same $\mathcal{L}$ in small steps.
+
+## Illustration
+
+Now find the best line yourself, by hand. The figure below is a scatter plot of the 10 apartments. The $w$ slider turns the line, and the $b$ slider raises or lowers the whole line. The vertical segments are the residuals, and the MSE updates as you drag. The × mark is the mean point $(52.4, 10.92)$. Try this:
+
+1. At the start, $w = 0$ and $b = 10.9$: a flat line, almost line A, with MSE 10.5020.
+2. Raise $w$ a little, then lower $b$ until the line passes through the × again. The MSE goes down. Repeat a few times.
+3. Do not keep raising $w$. At $w = 0.4$, $b = -10.0$, the line still passes close to the × but is far too steep, and the MSE shoots up to 19.1240. Passing through the mean point is necessary, but not enough.
+4. When the MSE is small enough, the figure shows the line "Very close to the best line". Press **Show the best line** to compare with $\hat{y} = 0.1695x + 2.04$, MSE 0.3615. The sliders move in steps of 0.005 and 0.1, so the closest you can get is $w = 0.17$, $b = 2.0$, MSE 0.3617.
+
+{/* VIZ: the best line is the line with the smallest MSE. */}
+<LinearFitViz />
+
+## Code example
+
+The three code cells below redo the steps above in Python. Each cell builds the apartment table itself, so you can run them in any order. The second cell takes longer the first time, because your browser has to download scikit-learn as well.
+
+The first cell builds the design matrix, solves the normal equation with `np.linalg.solve`, then computes the MSE.
+
+<PythonRunner code={normalEquationCode} title="The normal equation with NumPy" />
+
+The result is $b = 2.0394$, $w = 0.1695$ and MSE $= 0.3615$, which matches the one-feature formula and the best line in the Illustration section.
+
+The second cell uses scikit-learn's `LinearRegression`, a class that solves exactly the *ordinary least squares* (OLS) problem above. The cell checks it against the hand formula, predicts the rent of two new apartments, then draws the line.
+
+<PythonRunner
+  code={sklearnFitCode}
+  title="scikit-learn and predicting new apartments"
+  figureAlt={['Scatter plot of the 10 apartments, rent against floor area, with the best straight line. The line runs through the middle of the points, rising from about 5.4 million at 20 m² to about 17.3 million at 90 m².']}
+/>
+
+The first two lines match: scikit-learn and the hand formula give the same $w$ and $b$. Two things to remember when you use scikit-learn:
+
+- `X` must be a two-dimensional table, $m$ rows by $n$ columns, even when there is only one feature. That is why the code calls `reshape(-1, 1)`.
+- The weights are in `coef_`, and $b$ is in `intercept_`. You do not need to add the column of ones yourself.
+
+The 65 m² apartment gets a predicted rent of 13.06 million VND/month, between the rents of the 60 m² apartment (12.0) and the 68 m² one (14.1). That sounds reasonable. The 300 m² apartment gets 52.88 million, a suspicious number (see Common mistakes).
+
+The third cell tries an outlier: a 110 m² apartment whose rent was mistyped as 9.0 instead of 19.0. It uses `np.linalg.lstsq` to fit the line before and after adding that point.
+
+<PythonRunner
+  code={outlierCode}
+  title="One outlier"
+  figureAlt={['Scatter plot of the 10 apartments plus one outlier, marked × at 110 m², 9 million. The solid line, fitted without the outlier, stays close to the points and clearly rises. The dashed line, fitted with the outlier, is much flatter: it lies above the solid line for small apartments, crosses it around 46 m², then falls well below it on the right.']}
+/>
+
+Adding just one point out of 11 cuts the slope by more than half: $w$ drops from 0.1695 to 0.0760 (from about 170,000 to 76,000 VND per m²). Meanwhile, $b$ rises from 2.04 to 6.36. Why does one point have so much pull?
+
+- Compared with the old line, the new point is off by almost 12 million. Squared, that is more than 130, while the squared residuals of the other 10 apartments add up to only about 3.6. To keep the MSE small, the line has to tilt toward this point.
+- The point sits at the far right, a long way from the mean point horizontally, like someone sitting at the end of a seesaw: the farther from the pivot, the more easily it tips the board. A point like this is called a **high-leverage point**.
+
+So plot your data and check any points that lie far from the crowd before you fit a model.
+
+## Common mistakes
+
+:::caution["Linear" does not mean you can only draw straight lines]
+"Linear" here means linear **in the parameters**: the prediction is a sum of features times weights, and what the features are is up to you. Add a column $x^2$ to $\mathbf{X}$, and the model $\hat{y} = w_1x + w_2x^2 + b$ is a curve in $x$, but it is still linear in $w_1$, $w_2$, $b$, so the normal equation still solves it. By contrast, $\hat{y} = e^{wx}$ is not linear in $w$, so you cannot solve it this way.
+:::
+
+:::caution[Trusting predictions outside the data]
+The data only has apartments from 25 to 85 m², yet the second code cell still predicts 52.88 million for a 300 m² apartment: the line just keeps adding about 170,000 VND per m². Nothing in the data says this still holds at 300 m², where the apartments might all be luxury units with very different prices. This is extrapolation: the model still returns a number, but no data stands behind it. Before you trust a prediction, check that the input lies within the range of the *training set*.
+:::
+
+:::caution[Computing the inverse yourself, or keeping duplicate features]
+Put both m² and ft² into the model and $\mathbf{X}^\top\mathbf{X}$ becomes singular: raise the weight of one column, lower the other to make up for it, and the predictions do not change. In theory, the predictions are still usable, but the individual coefficients lose their meaning. And do not count on the computer to raise an error. Typing `np.linalg.inv(X.T @ X) @ X.T @ y` directly still works on this lesson's table, but with two proportional columns, the result depends on rounding errors. Sometimes `inv` and `solve` raise `LinAlgError`; sometimes they quietly return numbers. When there is no error, `solve` usually still gives correct predictions with meaningless coefficients, while `inv` can give badly wrong predictions as well.
+
+The right way: use `np.linalg.lstsq` or `LinearRegression`. When there is a redundant column, `lstsq` still returns a solution (the one with the smallest length), along with the **rank** of $\mathbf{X}$: the number of truly independent columns. A rank below the number of columns means there is a redundant column. But the rank only catches exact duplicates. If the ft² column was rounded to 0.1, `lstsq` reports full rank while the coefficients are still meaningless, and the prediction for a new apartment can be off by almost 1 million compared with the line that uses only m². The warning sign then is a very large condition number: `np.linalg.cond(X)` is about 300,000, compared with about 165 for the original table. In that case, drop the redundant column or collect more data. The lesson Ridge, Lasso, and Elastic Net adds other options; for example, Ridge adds a penalty to $\mathcal{L}$ so that the solution is unique again.
+:::
+
+## Quick check
+
+{/* The questions are in the `quiz` field of the frontmatter. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key ideas:**
+
+- Linear regression predicts $\hat{y} = \mathbf{w}^\top\mathbf{x} + b$ and picks the parameters that make the MSE smallest. Squaring keeps errors from cancelling, punishes large errors more, and lets you take derivatives.
+- With one feature: $b = \bar{y} - w\bar{x}$, and $w$ is the sum of the products of the deviations divided by the sum of the squared deviations of $x$. The best line passes through the mean point.
+- The general form is the normal equation $\mathbf{X}^\top\mathbf{X}\boldsymbol{\theta} = \mathbf{X}^\top\mathbf{y}$, where $\mathbf{X}$ has an extra column of ones. The solution is unique when the columns of $\mathbf{X}$ are linearly independent. In code, use `lstsq` or `LinearRegression`; do not compute the inverse yourself.
+- $w_j$ tells you how much the prediction changes when $x_j$ goes up by 1 unit and the other features stay the same. Watch out for extrapolation and outliers.
+
+**Further reading:**
+
+- Vũ Hữu Tiệp (2016). [*Machine Learning cơ bản*, Bài 3: Linear Regression](https://machinelearningcoban.com/2016/12/28/linearregression/) (in Vietnamese). Includes NumPy and scikit-learn examples. The notation differs slightly: $N$ is the number of samples, and the column of ones comes first.
+- James, G., Witten, D., Hastie, T., Tibshirani, R. (2013). [*An Introduction to Statistical Learning*](https://www.statlearning.com/) (1st edition), chapter 3: Linear Regression. Section 3.1: the one-feature solution. Section 3.3.3: outliers, high-leverage points, collinearity.
+- Ng, A. (2003). [*CS229 Lecture notes*](https://see.stanford.edu/materials/aimlcs229/cs229-notes1.pdf) (PDF), Part I: Linear Regression (older version, Stanford). Derives the normal equation with matrix derivatives.
+- Deisenroth, M. P., Faisal, A. A., Ong, C. S. (2020). [*Mathematics for Machine Learning*](https://mml-book.github.io/), chapter 9: Linear Regression. Section 9.4 explains the normal equation as an orthogonal projection.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*](https://scikit-learn.org/1.8/modules/linear_model.html), section 1.1.1 Ordinary Least Squares. The official documentation of `LinearRegression`.
+
+<LessonProgress />

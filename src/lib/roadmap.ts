@@ -56,6 +56,11 @@ export function isTranslated(lesson: Lesson, locale: Locale): boolean {
   return lesson.status[locale] === 'published';
 }
 
+/** The first lesson in roadmap order that has a page (the homepage's "Start learning"); undefined while none has. */
+export function getFirstOpenLesson(lessons: readonly Lesson[] = LESSONS): Lesson | undefined {
+  return lessons.find(hasPage);
+}
+
 export function getLessonUrl(id: LessonId, locale: Locale): string {
   return `/${locale}/${id}/`;
 }

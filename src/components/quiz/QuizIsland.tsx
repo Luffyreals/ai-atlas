@@ -17,6 +17,11 @@ export interface RenderedQuizQuestion {
 export interface QuizIslandProps {
   questions: RenderedQuizQuestion[];
   strings: UiStrings<'quiz'>;
+  /**
+   * Language of the quiz text when it is not the page's (Starlight's fallback page: an en URL showing the vi
+   * file). Set as `lang` on the question, the options and the explanation; the strings keep the page's.
+   */
+  contentLang?: string;
 }
 
 interface QuestionState {
@@ -46,7 +51,7 @@ function optionState(state: QuestionState, index: number, answer: number): Optio
 // at build time, from quiz text in this repo (escaped, plus KaTeX and <code>). Never reader input.
 const html = (markup: string) => ({ __html: markup });
 
-export default function QuizIsland({ questions, strings }: QuizIslandProps) {
+export default function QuizIsland({ questions, strings, contentLang }: QuizIslandProps) {
   // Unique per island and stable between build and hydration (section 2.9). Only for id/name/for.
   const uid = useId();
   const [states, setStates] = useState<QuestionState[]>(() => questions.map(() => INITIAL));
@@ -125,7 +130,11 @@ export default function QuizIsland({ questions, strings }: QuizIslandProps) {
           >
             <legend className="atlas-quiz-legend">
               <span className="atlas-quiz-count">{count}</span>{' '}
-              <span className="atlas-quiz-prompt" dangerouslySetInnerHTML={html(question.questionHtml)} />
+              <span
+                className="atlas-quiz-prompt"
+                lang={contentLang}
+                dangerouslySetInnerHTML={html(question.questionHtml)}
+              />
             </legend>
 
             <div className="atlas-quiz-options">
@@ -142,6 +151,7 @@ export default function QuizIsland({ questions, strings }: QuizIslandProps) {
                       name={name}
                       // Same reason as the fieldset: the label's formula has no name in Chrome.
                       aria-label={markText ? `${label}, ${markText}` : label}
+                      lang={contentLang}
                       checked={state.selected === j}
                       disabled={state.checked}
                       onChange={() => select(i, j)}
@@ -154,7 +164,11 @@ export default function QuizIsland({ questions, strings }: QuizIslandProps) {
                       }
                     />
                     <span className="atlas-quiz-option-body">
-                      <span className="atlas-quiz-option-text" dangerouslySetInnerHTML={html(optionHtml)} />
+                      <span
+                        className="atlas-quiz-option-text"
+                        lang={contentLang}
+                        dangerouslySetInnerHTML={html(optionHtml)}
+                      />
                       {markText && (
                         <span className="atlas-quiz-mark">
                           <span className={mark === 'correct' ? 'atlas-check' : 'atlas-cross'} aria-hidden="true" />
@@ -188,7 +202,7 @@ export default function QuizIsland({ questions, strings }: QuizIslandProps) {
                   </p>
                   <p className="atlas-quiz-explanation">
                     <strong>{strings.explanation}:</strong>{' '}
-                    <span dangerouslySetInnerHTML={html(question.explanationHtml)} />
+                    <span lang={contentLang} dangerouslySetInnerHTML={html(question.explanationHtml)} />
                   </p>
                 </>
               )}

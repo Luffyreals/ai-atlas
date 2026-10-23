@@ -152,4 +152,28 @@ M2 có một bước **chờ bạn duyệt**. Mọi bài sau đều theo templat
 16. **Điểm dừng Tab thừa khi radio có focus trước lúc quiz hydrate:** sửa ngay ở M1.
 17. **Performance trang demo 87–90:** chấp nhận cho M1. Phần còn lại do CSS chung (Starlight, KaTeX, font), không do component M1. Tối ưu ở M4 cùng với LCP trang chủ, đo trên bài học thật.
 
+Đã quyết ngày 23/10/2026 (mốc M2, bài mẫu Hồi quy tuyến tính):
+
+18. **Mức toán:** dẫn đầy đủ trường hợp một đặc trưng (đạo hàm riêng theo $w$, $b$, từng bước). Dạng ma trận chỉ nêu phương trình chuẩn $\mathbf{X}^\top\mathbf{X}\boldsymbol{\theta} = \mathbf{X}^\top\mathbf{y}$ và giải thích bằng lời, không chứng minh đạo hàm ma trận.
+19. **Dữ liệu ví dụ:** bảng nhỏ tự tạo, 8–12 căn hộ, diện tích (m²) → giá thuê (triệu đồng/tháng). Dùng chung một bảng cho phần Trực giác, minh họa và code.
+20. **Minh họa:** một VIZ tương tác `LinearFitViz`. Hai thanh trượt $w$ và $b$ vẽ lại đường thẳng, các đoạn phần dư và số MSE. Có nút "Hiện đường tốt nhất".
+21. **Độ dài bài mẫu:** vừa. Khoảng 10–12 phút đọc, 3 ô code (phương trình chuẩn bằng NumPy, scikit-learn, điểm ngoại lai), 4 câu quiz.
+22. **Dấu thập phân trong bài tiếng Việt:** số kỹ thuật dùng dấu chấm. Gồm bảng dữ liệu, VIZ, code, và lời văn khi nhắc lại các số đó (ví dụ $w \approx 0.21$), để khớp output Python. Số đời thường trong lời văn viết bình thường. Áp dụng cho mọi bài.
+23. **Độ dài bài Hồi quy tuyến tính sau review:** cắt khoảng 600–700 từ mà không bỏ ý nào, đưa từ khoảng 14–16 phút đọc về khoảng 12–13 phút. Gộp đoạn "nghiệm không duy nhất" với hộp "Lỗi hay gặp" thứ ba; rút gọn đoạn số điều kiện, mục Giới hạn và phần giải thích của quiz.
+24. **`LinearFitViz` đánh dấu điểm trung bình $(\bar{x}, \bar{y})$**, và hạ `b.min` xuống khoảng −10.5. Mục đích: người đọc giữ được đường thẳng đi qua điểm trung bình khi tăng $w$, khớp với kết quả $b = \bar{y} - w\bar{x}$.
+25. **Tên truy cập cho công thức riêng dòng:** một bước rehype lúc build gắn `role="group"` và `aria-label` (chữ "Công thức" / "Formula" cộng mã TeX) cho mọi `.katex-display`. Không thêm JS. Áp dụng cho mọi bài.
+26. **Nút "Bắt đầu học" ở hero trang chủ:** làm ngay ở M2, dẫn tới bài đã mở. Chữ "Hồi quy tuyến tính" trong thư ngỏ cũng thành link.
+27. **Ngân sách `viz.css`:** giữ ngưỡng 2,5 KB gzip, nhưng đo sau khi bỏ comment.
+28. **Độ dài bài Hồi quy tuyến tính:** giữ nguyên sau lượt cắt. Thân bài khoảng 12.7 phút đọc, tính cả quiz khoảng 14.3 phút.
+29. **Performance của bài học thấp hơn trang demo (87 so với 90, Lighthouse mobile):** chấp nhận cho M2. Nguyên nhân là DOM do KaTeX sinh ra (64% HTML của bài), không phải VIZ: bỏ VIZ vẫn 86. Ở M4 thử KaTeX `output: 'mathml'`, đo được 89 và DOM giảm từ 11 869 còn 5 259 phần tử. Trước khi đổi phải kiểm tra hiển thị trên Chrome, Firefox và Safari.
+30. **Trang fallback (bài chưa dịch, hiện bản vi trên URL `/en/`):** loại khỏi sitemap, thêm `noindex`, bỏ `hreflang="en"` cho tới khi bài có bản en. Người đọc vẫn mở được trang. Áp dụng cho mọi bài.
+31. **Mục "Đọc thêm":** gắn link vào tên tài liệu, không dùng chữ "Link" hay "PDF" làm chữ của link.
+32. **Bản vi bài Hồi quy tuyến tính đã được người dùng duyệt (23/10/2026), không cần sửa.** Bài thành bài mẫu. Template cập nhật theo bài này trước khi dịch sang en.
+
+Đã quyết ngày 23/10/2026 (đánh giá cuối M2):
+
+33. **Trang fallback ra khỏi tìm kiếm Pagefind:** trang fallback có `pagefind: false` (route middleware `src/routeData.ts`), để chữ tiếng Việt không lọt vào chỉ mục tìm kiếm tiếng Anh. Bổ sung cho quyết định 30.
+34. **Mọi trang không phải bài học phải có đủ bản vi và en**, kiểm bằng test trong `roadmap-files.test.ts`. Nhờ vậy `src/lib/seo.ts` chỉ cần xét bài học khi quyết định trang nào chưa dịch.
+35. **Sửa nhỏ bài Hồi quy tuyến tính sau review vi/en:** "cùng dự đoán **trên tập huấn luyện**" khi $\mathbf{X}^\top\mathbf{X}$ suy biến; `LinearRegression` "cũng giải trực tiếp trên $\mathbf{X}$" thay vì "như `np.linalg.lstsq`"; ghi tiếng Anh lần đầu cho "tham số", "độ lệch", "nghiệm có độ dài nhỏ nhất"; thêm 3 thuật ngữ vào glossary.
+
 Còn mở: tên miền (trước M4).

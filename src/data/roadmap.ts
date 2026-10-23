@@ -199,7 +199,7 @@ export const LESSONS: readonly Lesson[] = [
     id: 'ml/linear-regression',
     title: { vi: 'Hồi quy tuyến tính', en: 'Linear Regression' },
     prerequisites: ['ml/ml-overview', 'math/linear-algebra', 'math/calculus'],
-    status: { vi: 'planned', en: 'planned' },
+    status: { vi: 'published', en: 'published' },
   },
   {
     id: 'ml/overfitting-underfitting',

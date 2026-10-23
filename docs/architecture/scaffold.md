@@ -76,7 +76,7 @@ Lưu ý: Starlight từ 0.39 **bỏ** cú pháp `{ label, autogenerate }`. Nhóm
 
 ### 2.5. Bài chưa dịch và bài chưa viết
 
-- **Bài chưa dịch** (có `vi/`, chưa có `en/`): dùng fallback có sẵn của Starlight. Đã kiểm chứng: `/en/ml/linear-regression/` vẫn được build, hiện nội dung tiếng Việt kèm thông báo có sẵn "This content is not available in your language yet." `starlightRoute.isFallback === true`. Không cần tự viết gì.
+- **Bài chưa dịch** (có `vi/`, chưa có `en/`): dùng fallback có sẵn của Starlight. Đã kiểm chứng: `/en/ml/linear-regression/` vẫn được build, hiện nội dung tiếng Việt kèm thông báo có sẵn "This content is not available in your language yet." `starlightRoute.isFallback === true`. Không cần tự viết gì để có trang. Từ M2 (quyết định 30), trang này có `noindex`, không vào sitemap và không được trang nào khai trong `hreflang`: xem [README.md](README.md) mục 3.1.
 - **Bài chưa viết** (`status.vi === 'planned'`): **không tạo file, không có trang**. Bài vẫn có trong `roadmap.ts` để `RoadmapMap` và `Prerequisites` (M1) hiện nhãn "Sắp có" không kèm link. Test M0 bắt buộc: bài `planned` không được có file MDX; bài `published` phải có file (xem [roadmap-data.md](roadmap-data.md) mục 6).
 
 ### 2.6. Chuỗi giao diện song ngữ
@@ -279,7 +279,7 @@ Ghi chú:
 
 - `description` của Starlight là chuỗi chung; mô tả từng trang lấy từ frontmatter `description` của trang đó.
 - KaTeX CSS nạp toàn site qua `customCss` (khoảng 23 KB, font KaTeX chỉ tải khi trang có công thức). Đã kiểm chứng: CSS vào bundle chung `common.*.css`.
-- Starlight tự sinh `hreflang` vi/en/x-default và `sitemap-index.xml` khi có `site` (đã kiểm chứng). Đây là một phần tiêu chí M4.
+- Starlight tự sinh `hreflang` vi/en/x-default và `sitemap-index.xml` khi có `site` (đã kiểm chứng). Từ M2, bài chưa dịch không có `hreflang="en"` (quyết định 30, [README.md](README.md) mục 3.1). Đây là một phần tiêu chí M4.
 - Từ M1, `integrations` có thêm `sitemap({ i18n, filter })` của `@astrojs/sitemap` để bỏ trang `/dev/`. Starlight thấy đã có integration này nên không thêm bản của nó. Xem [components.md](components.md) mục 2.10.
 - Không bật `editLink` vì repo private.
 

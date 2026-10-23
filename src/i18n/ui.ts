@@ -1,8 +1,11 @@
 // Single source of truth for custom UI string keys.
 // Adding a string = add the key here + in src/content/i18n/vi.json + en.json.
 export const UI_KEYS = {
-  common: ['comingSoon', 'notTranslated', 'learned', 'needsScript', 'lessonsOn'],
-  home: ['openMap', 'linkRoute', 'linkTerms', 'otherLanguage', 'otherLanguageName', 'quickLinks', 'previous', 'next'],
+  common: ['comingSoon', 'notTranslated', 'learned', 'needsScript', 'lessonsOn', 'formulaLabel'],
+  home: [
+    'openMap', 'startLearning', 'startLearningLabel', 'linkRoute', 'linkTerms', 'otherLanguage',
+    'otherLanguageName', 'quickLinks', 'previous', 'next',
+  ],
   notFound: ['title', 'text', 'homeLink'],
   roadmap: [
     'lessons', 'branchNote', 'routeLabel', 'routeResult', 'showOnMap', 'legendOpen', 'legendSoon',
@@ -23,6 +26,12 @@ export const UI_KEYS = {
     'hintNameError', 'hintSyntaxError', 'hintIndentationError', 'hintTypeError', 'hintValueError',
     'hintIndexError', 'hintKeyError', 'hintAttributeError', 'hintZeroDivisionError',
     'hintModuleNotFoundError', 'hintEOFError', 'hintGeneric',
+  ],
+  // One namespace per VIZ, named viz<Name> (docs/architecture/viz.md, section 2.6).
+  vizLinearFit: [
+    'caption', 'plotLabel', 'controls', 'wLabel', 'bLabel', 'wValueText', 'bValueText',
+    'yourLine', 'bestLine', 'residual', 'mseValue', 'showBest', 'nearBest', 'bestNote',
+    'announce', 'announceBest', 'meanPoint', 'meanNote',
   ],
 } as const satisfies Record<string, readonly string[]>;
 

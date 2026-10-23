@@ -1,0 +1,354 @@
+/*
+ * Every VIZ (docs/architecture/viz.md, sections 2.3, 4.4, 4.7). The only CSS file under src/components/viz/,
+ * loaded on every page through Starlight's customCss, so it styles the build HTML before hydration.
+ * Colours exist here only: role variables on .atlas-viz point at theme tokens. Classes are named by role,
+ * never by VIZ. Budget: 2.5 KB gzip (tests/unit/viz-conventions.test.ts).
+ */
+.atlas-viz {
+  --atlas-viz-plot-bg: var(--sl-color-bg);
+  --atlas-viz-ink: var(--sl-color-white);
+  --atlas-viz-primary: var(--sl-color-accent);
+  --atlas-viz-reference: var(--sl-color-blue-high);
+  --atlas-viz-error: var(--sl-color-red-high);
+  --atlas-viz-muted: var(--sl-color-gray-3);
+  --atlas-viz-grid: var(--sl-color-gray-5);
+  container-type: inline-size;
+  padding: 16px;
+  background: var(--sl-color-gray-6);
+  color: var(--sl-color-text);
+}
+
+.atlas-viz-figure {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+}
+
+.atlas-viz-caption {
+  color: var(--sl-color-text);
+}
+
+/* Parts the reader has not switched on keep their room (no layout shift). */
+.atlas-viz [data-off] {
+  visibility: hidden;
+}
+
+/* Plot: y title on top, y ticks | plot, x ticks, x title. Text is HTML; marks are SVG in percent. */
+.atlas-viz-chart {
+  display: grid;
+  grid-template-columns: calc(var(--atlas-viz-ytick-ch, 2) * 1ch + 8px) minmax(0, 1fr);
+  grid-template-areas: 't t' 'y p' '. x' '. u';
+  /* The last x tick sticks out half its width past the plot. */
+  padding-inline-end: 2ch;
+}
+
+.atlas-viz-xticks,
+.atlas-viz-yticks,
+.atlas-viz-axis-title,
+.atlas-viz-key {
+  font-size: var(--sl-text-sm);
+  color: var(--atlas-viz-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.atlas-viz-ytitle {
+  grid-area: t;
+  margin-bottom: 12px;
+}
+
+.atlas-viz-xtitle {
+  grid-area: u;
+  text-align: end;
+}
+
+.atlas-viz-yticks {
+  grid-area: y;
+  position: relative;
+}
+
+.atlas-viz-xticks {
+  grid-area: x;
+  position: relative;
+  height: 2em;
+}
+
+.atlas-viz-xticks > span,
+.atlas-viz-yticks > span {
+  position: absolute;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.atlas-viz-yticks > span {
+  right: 8px;
+  transform: translateY(-50%);
+}
+
+.atlas-viz-xticks > span {
+  top: 8px;
+  transform: translateX(-50%);
+}
+
+.atlas-viz-plot {
+  grid-area: p;
+  position: relative;
+  aspect-ratio: 4 / 3;
+  background: var(--atlas-viz-plot-bg);
+}
+
+.atlas-viz-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Marks: each kind differs in shape as well as colour (solid, dashed, thin and upright). */
+.atlas-viz-grid-line,
+.atlas-viz-axis {
+  stroke-width: 1px;
+  shape-rendering: crispEdges;
+}
+
+.atlas-viz-grid-line {
+  stroke: var(--atlas-viz-grid);
+}
+
+.atlas-viz-axis {
+  stroke: var(--atlas-viz-muted);
+}
+
+.atlas-viz-point {
+  fill: var(--atlas-viz-ink);
+  stroke: var(--atlas-viz-plot-bg);
+  stroke-width: 2px;
+}
+
+.atlas-viz-primary {
+  stroke: var(--atlas-viz-primary);
+  stroke-width: 3px;
+}
+
+.atlas-viz-reference {
+  stroke: var(--atlas-viz-reference);
+  stroke-width: 3px;
+  stroke-dasharray: 8 6;
+}
+
+.atlas-viz-error {
+  stroke: var(--atlas-viz-error);
+  stroke-width: 2px;
+}
+
+/* A computed point to find (a mean, a minimum): an ×, with a halo of the plot background under it. */
+.atlas-viz-marker {
+  stroke: var(--atlas-viz-ink);
+  stroke-width: 3px;
+}
+
+.atlas-viz-halo {
+  stroke: var(--atlas-viz-plot-bg);
+  stroke-width: 7px;
+}
+
+/* Key and readouts: a swatch draws the same mark with the same class. */
+.atlas-viz-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.atlas-viz-key > li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.atlas-viz-swatch {
+  flex: none;
+  width: 24px;
+  height: 1.75em;
+  height: 1lh;
+  overflow: visible;
+}
+
+.atlas-viz-swatch .atlas-viz-point {
+  stroke-width: 0;
+}
+
+/* Two rows on one grid, so the two MSE values sit one above the other. */
+.atlas-viz-readouts {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  align-items: start;
+  color: var(--sl-color-white);
+}
+
+.atlas-viz-readout {
+  display: contents;
+}
+
+.atlas-viz-readout-text {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 12px;
+}
+
+.atlas-viz-num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.atlas-viz-readouts .atlas-viz-num:last-child {
+  text-align: end;
+}
+
+/* Controls */
+.atlas-viz-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.atlas-viz-control-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0 12px;
+}
+
+.atlas-viz-control-head .atlas-viz-num {
+  color: var(--sl-color-white);
+}
+
+.atlas-viz-slider {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  accent-color: var(--sl-color-accent);
+  cursor: pointer;
+}
+
+.atlas-viz :focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 2px;
+}
+
+.atlas-viz-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  justify-self: start;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 20px 0 16px;
+  border: 0;
+  /* Room for the 4px bar of the pressed state, so the label does not move. */
+  border-inline-start: 4px solid transparent;
+  border-radius: 0;
+  background: var(--sl-color-gray-5);
+  color: var(--sl-color-white);
+  font: inherit;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.atlas-viz-toggle:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.atlas-viz-toggle:active {
+  transform: translateY(0);
+}
+
+.atlas-viz-toggle[aria-pressed='true'] {
+  border-inline-start-color: var(--sl-color-accent);
+  background: var(--sl-color-accent-low);
+}
+
+.atlas-viz-slider:disabled,
+.atlas-viz-toggle:disabled {
+  color: var(--sl-color-gray-3);
+  cursor: not-allowed;
+}
+
+.atlas-viz-toggle-box {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--sl-color-gray-3);
+  background: var(--sl-color-bg);
+  color: var(--sl-color-black);
+}
+
+.atlas-viz-toggle-box .atlas-check {
+  width: 14px;
+  height: 14px;
+}
+
+.atlas-viz-toggle:not([aria-pressed='true']) .atlas-check {
+  display: none;
+}
+
+.atlas-viz-toggle[aria-pressed='true'] .atlas-viz-toggle-box {
+  border-color: var(--sl-color-accent);
+  background: var(--sl-color-accent);
+}
+
+/* Status: one line kept free, so a message does not move the page while dragging. */
+.atlas-viz-status {
+  min-height: 1.75em;
+  min-height: 1lh;
+}
+
+.atlas-viz-status > p {
+  margin: 0;
+}
+
+.atlas-viz-near {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--sl-color-green-high);
+  font-weight: 600;
+}
+
+.atlas-viz-noscript {
+  margin: 12px 0 0;
+  padding-inline-start: 12px;
+  border-inline-start: 4px solid var(--sl-color-orange-high);
+  color: var(--sl-color-text);
+}
+
+@container (min-width: 32rem) {
+  .atlas-viz-plot {
+    aspect-ratio: 3 / 2;
+  }
+}
+
+@media (min-width: 50rem) {
+  .atlas-viz {
+    padding: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .atlas-viz-toggle {
+    transition: none;
+  }
+
+  .atlas-viz-toggle:hover:not(:disabled) {
+    transform: none;
+  }
+}

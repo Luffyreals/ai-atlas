@@ -5,8 +5,9 @@
 // Styles: src/styles/roadmap-map.css, loaded on every page through Starlight's customCss (astro.config.ts).
 import { formatString } from '@i18n/format';
 import { getStrings } from '@i18n/ui';
-import { LESSONS, PARTS, type LessonId, type Lesson, type Locale, type Part, type PartId } from '@data/roadmap';
+import { LESSONS, PARTS, type LessonId, type Lesson, type Part, type PartId } from '@data/roadmap';
 import { lessonLinkView } from '@lib/lesson-link';
+import { getPageLocale } from '@lib/page-locale';
 import { toScriptJson } from '@lib/script-json';
 import { getLessonsByPart, getPartIdOf, hasPage, requireLesson } from '@lib/roadmap';
 import { countParts, routeTo } from '@lib/route';
@@ -30,7 +31,7 @@ interface Props {
 }
 
 const { id = 'roadmap', parts: only, routeFinder = false, destination, showProgress = true } = Astro.props;
-const locale = (Astro.locals.starlightRoute.locale ?? 'vi') as Locale;
+const locale = getPageLocale(Astro.locals.starlightRoute);
 const t = getStrings(Astro.locals.t, 'roadmap');
 const tCommon = getStrings(Astro.locals.t, 'common');
 

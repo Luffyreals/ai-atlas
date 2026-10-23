@@ -60,8 +60,8 @@ export const HOME = {
       en: 'Every lesson follows the same order: intuition first, then the theory, then example code.',
     },
     note: {
-      vi: 'Từ Python tới Học máy, code sẽ chạy ngay trên trang. Đây là phác thảo bài Hồi quy tuyến tính, bài mẫu sẽ viết trước tiên.',
-      en: 'From Python to Machine Learning, the code will run right on the page. This is a sketch of Linear Regression, the sample lesson to be written first.',
+      vi: 'Từ Python tới Học máy, code chạy ngay trên trang. Đây là phác thảo bài Hồi quy tuyến tính, bài đầu tiên đã mở.',
+      en: 'From Python to Machine Learning, the code runs right on the page. This is a sketch of Linear Regression, the first lesson to open.',
     },
     slips: [
       {
@@ -164,20 +164,21 @@ export const HOME = {
 
   letter: {
     heading: { vi: 'Vì sao có AI Atlas', en: 'Why AI Atlas exists' },
+    /** **phrase** is marked; [label](lesson:<id>) links to the lesson's page in the page's language. */
     paragraphs: {
       vi: [
         'Chào bạn,',
         'AI Atlas bắt đầu từ một giáo án học AI. Mình sắp các buổi học lại thành một tấm bản đồ, để ai cũng thấy nên học gì trước, học gì sau, và vì sao.',
         'Mỗi bài viết bằng tiếng Việt trước, rồi mới dịch sang tiếng Anh. Code trong bài đều được chạy thử, nguồn tham khảo đều có thật.',
-        'Trang này miễn phí và **không cần tài khoản**. Tiến độ học sẽ được lưu ngay trên trình duyệt của bạn, không gửi đi đâu cả.',
-        'Bài đầu tiên được viết sẽ là Hồi quy tuyến tính. Hẹn gặp bạn ở đó.',
+        'Trang này miễn phí và **không cần tài khoản**. Tiến độ học được lưu ngay trên trình duyệt của bạn, không gửi đi đâu cả.',
+        'Bài đầu tiên đã mở: [Hồi quy tuyến tính](lesson:ml/linear-regression). Hẹn gặp bạn ở đó.',
       ],
       en: [
         'Hello,',
         'AI Atlas began as a course syllabus for learning AI. I rearranged its sessions into one map, so anyone can see what to learn first, what comes next, and why.',
         'Each lesson is written in Vietnamese first, then translated into English. Every code example is run, every source is real.',
-        'The site is free and needs **no account**. Your progress will be kept in your own browser and sent nowhere.',
-        'The first lesson to go live will be Linear Regression. See you there.',
+        'The site is free and needs **no account**. Your progress is kept in your own browser and sent nowhere.',
+        'The first lesson is now open: [Linear Regression](lesson:ml/linear-regression). See you there.',
       ],
     },
     signName: { vi: 'Luffyreals', en: 'Luffyreals' },
@@ -190,10 +191,10 @@ export const HOME = {
   },
 
   footer: {
-    signoff: { vi: 'Hẹn gặp ở bài đầu tiên', en: 'See you at the first lesson' },
+    signoff: { vi: 'Hẹn gặp bạn trên bản đồ', en: 'See you on the map' },
     message: {
-      vi: 'Tấm bản đồ sẽ sáng dần lên mỗi khi một bài được mở. Bài viết trước tiên: Hồi quy tuyến tính.',
-      en: 'The map will light up as each lesson opens. Written first: Linear Regression.',
+      vi: 'Tấm bản đồ sáng dần lên mỗi khi một bài được mở. Điểm sáng đầu tiên: Hồi quy tuyến tính.',
+      en: 'The map lights up as each lesson opens. The first to light up: Linear Regression.',
     },
     linkMap: { vi: 'Bản đồ {{count}} bài', en: 'The {{count}}-lesson map' },
     linkTerms: { vi: 'Một ý, hai cái tên', en: 'One idea, two names' },

@@ -4,6 +4,7 @@
 // Styles: src/styles/lesson-progress.css, loaded on every page through Starlight's customCss (astro.config.ts).
 import { getStrings } from '@i18n/ui';
 import type { LessonId } from '@data/roadmap';
+import { getPageLocale } from '@lib/page-locale';
 import { getRouteLessonId, requireLesson } from '@lib/roadmap';
 
 interface Props {
@@ -18,11 +19,12 @@ if (!id) {
 }
 requireLesson(id);
 
+const locale = getPageLocale(route);
 const t = getStrings(Astro.locals.t, 'progress');
 const tCommon = getStrings(Astro.locals.t, 'common');
 ---
 
-<atlas-lesson-progress class="atlas-progress not-content" data-lesson-id={id}>
+<atlas-lesson-progress class="atlas-progress not-content" lang={locale} data-lesson-id={id}>
   <button type="button" class="atlas-progress-toggle" aria-pressed="false" disabled>
     <span class="atlas-progress-box" aria-hidden="true"><span class="atlas-check"></span></span>
     <span>{t.markDone}</span>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { escapeHtml, inlineMarkupLabel, renderInlineMarkup } from '../../src/lib/inline-markup';
+import { escapeHtml, inlineMarkupLabel, proseLessonIds, renderInlineMarkup, renderProseMarkup } from '../../src/lib/inline-markup';
 
 /** Tags that KaTeX (HTML + MathML output) and the `code` token may produce. Nothing else is allowed. */
 const ALLOWED_TAGS = new Set([
@@ -153,5 +153,99 @@ describe('inlineMarkupLabel (accessible names, decision 12)', () => {
 
   it('leaves a lone "$" as it is, like renderInlineMarkup', () => {
     expect(inlineMarkupLabel('Giá 5$')).toBe('Giá 5$');
+  });
+});
+
+describe('renderProseMarkup (homepage letter: **marks** and lesson links)', () => {
+  const hrefs: Record<string, string> = { 'ml/linear-regression': '/vi/ml/linear-regression/' };
+  const lessonHref = (id: string) => hrefs[id];
+
+  it('turns [label](lesson:<id>) into a link to the URL the resolver gives', () => {
+    expect(renderProseMarkup('Bài đầu tiên: [Hồi quy tuyến tính](lesson:ml/linear-regression). Hẹn gặp.', lessonHref)).toBe(
+      'Bài đầu tiên: <a href="/vi/ml/linear-regression/">Hồi quy tuyến tính</a>. Hẹn gặp.',
+    );
+  });
+
+  it('keeps the label as plain text when the lesson has no page', () => {
+    expect(renderProseMarkup('Soon: [Gradient descent](lesson:ml/gradient-descent).', lessonHref)).toBe(
+      'Soon: Gradient descent.',
+    );
+  });
+
+  it('still marks **phrase**, also inside a link label', () => {
+    expect(renderProseMarkup('needs **no account**', lessonHref)).toBe('needs <mark>no account</mark>');
+    expect(renderProseMarkup('[**open**](lesson:ml/linear-regression)', lessonHref)).toBe(
+      '<a href="/vi/ml/linear-regression/"><mark>open</mark></a>',
+    );
+  });
+
+  it('escapes the label and the text around it', () => {
+    expect(renderProseMarkup(`<b>x</b> [a "b" & 'c' <i>](lesson:ml/linear-regression)`, lessonHref)).toBe(
+      '&lt;b&gt;x&lt;/b&gt; <a href="/vi/ml/linear-regression/">a &quot;b&quot; &amp; &#39;c&#39; &lt;i&gt;</a>',
+    );
+  });
+
+  it('escapes the URL the resolver returns', () => {
+    expect(renderProseMarkup('[x](lesson:ml/a)', () => '/a?b="c"&d=<e>')).toBe(
+      '<a href="/a?b=&quot;c&quot;&amp;d=&lt;e&gt;">x</a>',
+    );
+  });
+
+  it('makes links from lesson: targets only: any other target stays text, and the resolver is not asked', () => {
+    const asked: string[] = [];
+    const spy = (id: string) => {
+      asked.push(id);
+      return '/x/';
+    };
+    for (const input of ['[x](javascript:alert(1))', '[x](https://example.com)', '[x](/vi/ml/a/)']) {
+      const html = renderProseMarkup(input, spy);
+      expect(html, input).not.toContain('<a');
+      expect(html, input).toBe(escapeHtml(input));
+    }
+    expect(asked).toEqual([]);
+  });
+
+  it('throws on a lesson link with a malformed id, so the build fails, and never asks the resolver', () => {
+    const asked: string[] = [];
+    const spy = (id: string) => {
+      asked.push(id);
+      return '/x/';
+    };
+    const inputs = [
+      '[x](lesson:ML/x)',
+      '[x](lesson:ml/x/)',
+      '[x](lesson:ml/x-)',
+      '[x](lesson: ml/x)',
+      '[x](lesson:javascript:alert(1))',
+      '[x](lesson:ml/a" onmouseover="alert(1))',
+      '[x](lesson:)',
+      '[x\ny](lesson:ml/a)',
+      'Fine: [a](lesson:ml/a), broken: [b](lesson:ml/b/).',
+    ];
+    for (const input of inputs) {
+      expect(() => renderProseMarkup(input, spy), input).toThrow(/malformed lesson link/);
+    }
+    // The good link of the last input was resolved before the check; no malformed id ever was.
+    expect(asked).toEqual(['ml/a']);
+  });
+
+  it('throws when **marks** cross a link instead of nesting', () => {
+    for (const input of ['**a [b** c](lesson:ml/linear-regression)', '[a **b](lesson:ml/linear-regression) c**']) {
+      expect(() => renderProseMarkup(input, lessonHref), input).toThrow(/crosses a lesson link/);
+    }
+  });
+
+  it('accepts **marks** around a whole link, or inside its label', () => {
+    expect(renderProseMarkup('**see [this](lesson:ml/linear-regression) now**', lessonHref)).toBe(
+      '<mark>see <a href="/vi/ml/linear-regression/">this</a> now</mark>',
+    );
+    expect(renderProseMarkup('[a **b** c](lesson:ml/linear-regression)', lessonHref)).toBe(
+      '<a href="/vi/ml/linear-regression/">a <mark>b</mark> c</a>',
+    );
+  });
+
+  it('proseLessonIds lists the linked ids in order', () => {
+    expect(proseLessonIds('[a](lesson:ml/a) and [b](lesson:python/b-c) and [c](https://x)')).toEqual(['ml/a', 'python/b-c']);
+    expect(proseLessonIds('no links')).toEqual([]);
   });
 });

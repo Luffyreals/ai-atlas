@@ -34,7 +34,9 @@ Mốc M1 (công cụ trình bày) xong phần kỹ thuật, theo `docs/architect
 
 Trang demo: `/vi/dev/components/` và `/en/dev/components/` (không vào sitemap). Còn chờ: người dùng duyệt giao diện (M1-10) và chạy thử trên bản deploy.
 
-Nhận diện và trang chủ thiết kế bằng skill `design-taste-frontend`: bảng màu "walnut and tan", font Barlow, logo con đường rẽ ba, trang chủ dạng tấm bản đồ atlas. Xem `docs/architecture/homepage.md`. Chưa có bài học nào. Bước tiếp theo: M2, bài mẫu Hồi quy tuyến tính.
+Nhận diện và trang chủ thiết kế bằng skill `design-taste-frontend`: bảng màu "walnut and tan", font Barlow, logo con đường rẽ ba, trang chủ dạng tấm bản đồ atlas. Xem `docs/architecture/homepage.md`.
+
+Mốc M2 (bài mẫu) xong: bài `ml/linear-regression` có bản vi (người dùng đã duyệt, là bài mẫu) và bản en, VIZ `LinearFitViz` (thiết kế ở `docs/architecture/viz.md`), bảng dữ liệu `DatasetTable`, SEO cho trang fallback (`src/lib/seo.ts`, `src/routeData.ts`), nút "Bắt đầu học" ở trang chủ. Template đã chốt theo bài này. Bước tiếp theo: M3, 4 bài ML còn lại của MVP.
 
 ## Công nghệ
 
@@ -48,6 +50,11 @@ src/content/docs/en/<phần>/<bài>.mdx   # Bài tiếng Anh, CÙNG đường d�
 src/content/i18n/                      # Chuỗi giao diện vi/en
 src/components/                        # Component tương tác (React/Astro)
 src/components/home/                   # Các khối của trang chủ (render qua override Hero của Starlight)
+src/components/viz/                    # Minh họa tương tác (VIZ) của từng bài, kit dùng chung, viz.css
+src/lib/viz/                           # Toán và thang đo của VIZ (thuần TypeScript, có unit test)
+src/code/<phần>/<bài>/<tên>.vi.py      # Code ví dụ của bài, mỗi ô một file .vi.py và .en.py
+src/data/datasets/                     # Bảng dữ liệu dùng chung cho bài, VIZ và code
+src/routeData.ts                       # Route middleware của Starlight (SEO cho trang fallback)
 src/data/roadmap.ts                    # Lộ trình: thứ tự bài, quan hệ "cần biết trước"
 src/data/home.ts, home-pictures.ts     # Chữ và ảnh (kèm nguồn) của trang chủ, vi và en
 src/styles/custom.css                  # Token màu (--sl-color-*, --atlas-*) và font

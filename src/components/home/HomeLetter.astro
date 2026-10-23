@@ -2,7 +2,9 @@
 // A short letter on a sheet of paper with a scalloped edge and a tear-off stub carrying the licence.
 import { CC_LICENCE_URL, HOME } from '@data/home';
 import type { Locale } from '@data/roadmap';
-import { escapeHtml } from '@lib/inline-markup';
+import { renderProseMarkup } from '@lib/inline-markup';
+import { lessonLinkView } from '@lib/lesson-link';
+import { requireLesson } from '@lib/roadmap';
 import RouteMark from './RouteMark.astro';
 
 interface Props {
@@ -11,8 +13,9 @@ interface Props {
 
 const { locale } = Astro.props;
 const { letter } = HOME;
-// **phrase** becomes a phrase on a flat marker colour.
-const withMarks = (text: string) => escapeHtml(text).replace(/\*\*(.+?)\*\*/g, '<mark>$1</mark>');
+// **phrase** sits on a flat marker colour; [label](lesson:<id>) links to that lesson in this language
+// (an untranslated en lesson opens Starlight's fallback page, as in RoadmapMap). Unknown ids fail the build.
+const lessonHref = (id: string) => lessonLinkView(requireLesson(id), locale).href;
 ---
 
 <section class="letter" aria-labelledby="letter-title">
@@ -20,7 +23,7 @@ const withMarks = (text: string) => escapeHtml(text).replace(/\*\*(.+?)\*\*/g, '
     <div class="sheet-body">
       <span class="sheet-avatar" aria-hidden="true"><RouteMark /></span>
       <h2 id="letter-title">{letter.heading[locale]}</h2>
-      {letter.paragraphs[locale].map((paragraph) => <p set:html={withMarks(paragraph)} />)}
+      {letter.paragraphs[locale].map((paragraph) => <p set:html={renderProseMarkup(paragraph, lessonHref)} />)}
       <p class="sheet-sign">
         <span class="sheet-name">{letter.signName[locale]}</span>
         <span class="sheet-role">{letter.signRole[locale]}</span>
@@ -80,6 +83,19 @@ const withMarks = (text: string) => escapeHtml(text).replace(/\*\*(.+?)\*\*/g, '
     background: var(--atlas-paper-ink);
     color: var(--atlas-paper);
     font-size: 22px;
+  }
+
+  .sheet-body :global(a) {
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 4px;
+    text-decoration-color: var(--atlas-field);
+    transition: text-decoration-color 0.2s ease;
+  }
+
+  .sheet-body :global(a:hover) {
+    text-decoration-color: var(--atlas-paper-ink);
   }
 
   .sheet-body :global(mark) {

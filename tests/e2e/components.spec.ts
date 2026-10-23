@@ -2,21 +2,12 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type ConsoleMessage, type Locator, type Page } from '@playwright/test';
 import { getLessonsByPart } from '../../src/lib/roadmap';
-import { LESSONS } from '../../src/data/roadmap';
+import { LESSONS, LOCALES, type Locale } from '../../src/data/roadmap';
+import { s, scrollThrough } from './helpers';
 
 // M1 components on the demo page (docs/architecture/components.md, plan row M1-7). Runs in CI, no network:
 // nothing here may download Pyodide. All URLs end with "/" (trailingSlash 'always').
 
-const LOCALES = ['vi', 'en'] as const;
-type Locale = (typeof LOCALES)[number];
-const readStrings = (locale: Locale): Record<string, string> =>
-  JSON.parse(readFileSync(fileURLToPath(new URL(`../../src/content/i18n/${locale}.json`, import.meta.url)), 'utf8'));
-const STRINGS: Record<Locale, Record<string, string>> = { vi: readStrings('vi'), en: readStrings('en') };
-const s = (locale: Locale, key: string) => {
-  const value = STRINGS[locale][`atlas.${key}`];
-  if (!value) throw new Error(`missing atlas.${key} in ${locale}.json`);
-  return value;
-};
 const fill = (template: string, values: Record<string, string | number>) =>
   template.replace(/\{\{(\w+)\}\}/g, (_, name: string) => String(values[name]));
 
@@ -34,16 +25,6 @@ function pyodideChunks(): string[] {
   const workers = files.filter((file) => file.startsWith('worker-'));
   const clients = files.filter((file) => workers.some((worker) => readFileSync(dir + file, 'utf8').includes(worker)));
   return [...workers, ...clients];
-}
-
-/** Scrolls to every part of the page so every client:visible island hydrates. */
-async function scrollThrough(page: Page): Promise<void> {
-  const height = await page.evaluate(() => document.documentElement.scrollHeight);
-  const step = page.viewportSize()?.height ?? 800;
-  for (let y = 0; y <= height; y += step) {
-    await page.evaluate((top) => window.scrollTo(0, top), y);
-    await page.waitForTimeout(100);
-  }
 }
 
 /** Astro removes `ssr` from an island once it has hydrated; a click before that is lost. */
@@ -261,10 +242,24 @@ for (const locale of LOCALES) {
       await expect(quiz.locator('astro-island[ssr]')).toHaveCount(1);
       const group = question(quiz, locale, 1, 2);
       const first = group.getByRole('radio').first();
-      await first.evaluate((radio) => (radio as HTMLInputElement).focus({ preventScroll: true }));
+      await first.evaluate((radio) => {
+        // Astro drops `ssr` as soon as it calls hydrateRoot; React commits and runs the island's effects
+        // 10-30 ms later. A Tab pressed in between hit the stale radio group (1 run in 20-80 failed).
+        // Wait for the island's own fix instead: the same radio blurred, then focused again.
+        const seen = { blurred: false, refocused: false };
+        (window as unknown as { atlasRefocus: typeof seen }).atlasRefocus = seen;
+        radio.addEventListener('blur', () => (seen.blurred = true));
+        radio.addEventListener('focus', () => (seen.refocused = seen.blurred));
+        (radio as HTMLInputElement).focus({ preventScroll: true });
+      });
       await expect(quiz.locator('astro-island[ssr]')).toHaveCount(1);
 
       await hydrated(quiz);
+      await page.waitForFunction(
+        () => (window as unknown as { atlasRefocus: { refocused: boolean } }).atlasRefocus.refocused,
+        undefined,
+        { timeout: 5_000 },
+      );
       await expect(first).toBeFocused();
       await page.keyboard.press('Tab');
       await expect(group.getByRole('button', { name: s(locale, 'quiz.check') })).toBeFocused();

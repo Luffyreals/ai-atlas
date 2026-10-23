@@ -40,7 +40,8 @@ src/content/docs/{vi,en}/index.mdx   # chỉ frontmatter; `hero:` bật trang ch
 src/components/starlight/Hero.astro  # override component Hero của Starlight → HomePage
 src/components/home/
   HomePage.astro      # ghép các khối, token, CSS gỡ khung Starlight (chỉ :root[data-has-hero]), hiệu ứng xuất hiện
-  HomeHero.astro      # thẻ bìa atlas + bản đồ cổ chuyển cảnh: chỉ trên màn ≥64rem, ảnh phụ tải sau khi trang tải xong,
+  HomeHero.astro      # thẻ bìa atlas (nút "Bắt đầu học" + link "Mở bản đồ") + bản đồ cổ chuyển cảnh:
+                      # chỉ trên màn ≥64rem, ảnh phụ tải sau khi trang tải xong,
                       # một vòng 6,5 s/ảnh, dừng khi hover/focus/hero khuất, tắt khi reduced-motion
   HomeRoute.astro     # hàng cột kéo ngang: 7 phần + cột "ngã ba"
   HomeLesson.astro    # 6 mảnh giấy của một bài học trên nền atlas mở
@@ -54,7 +55,7 @@ src/data/home.ts                     # toàn bộ chữ của trang chủ, vi v�
 src/data/home-pictures.ts            # ảnh, alt, chú thích, nguồn
 src/assets/home/                     # ảnh gốc đã thu nhỏ (Astro sinh AVIF/WebP lúc build)
 src/lib/route.ts                     # routeTo(), countParts(): dùng lúc build và trong trình duyệt
-src/lib/inline-markup.ts             # renderInlineMarkup(): escape HTML + $toán$ + `code`
+src/lib/inline-markup.ts             # renderInlineMarkup(): escape HTML + $toán$ + `code`; renderProseMarkup(): **chữ** + [chữ](lesson:<id>)
 src/i18n/format.ts                   # formatString('{{count}} bài', { count })
 ```
 
@@ -69,7 +70,14 @@ Trang chủ **không tải React**. Mỗi khối có một script nhỏ (crossfa
   3. Chỉ dùng ảnh phạm vi công cộng, CC0 hoặc CC BY/BY-SA, và ghi nguồn. Danh sách nguồn tự hiện ở footer, bằng ngôn ngữ của trang.
   4. Xem kỹ trang nguồn trên Commons: bản scan của David Rumsey Map Collection (ảnh atlas de Wit, trang bìa Mercator 1635) theo **CC BY-NC-SA 3.0**, phải ghi dòng nguồn của bộ sưu tập.
 - **Điểm đến mặc định của bản đồ:** prop `destination` trong `HomePage.astro`. Hiện là `ml/linear-regression`, đường đi gồm 8 bài qua 3 phần.
-- **Khi bài đầu tiên được mở:** thêm nút "Bắt đầu học" ở hero. Link validator sẽ báo lỗi nếu nút trỏ tới trang chưa có.
+- **Nút "Bắt đầu học" ở hero (đã làm, quyết định 26):**
+  - Bài đích chọn từ dữ liệu: `getFirstOpenLesson()` trong `src/lib/roadmap.ts`, tức bài đầu tiên theo thứ tự lộ trình có `hasPage`. Không bài nào mở thì không có nút, và "Mở bản đồ" trở lại làm nút chính.
+  - Link lấy từ `lessonLinkView()` như `RoadmapMap`: trên `/en/`, bài chưa dịch vẫn trỏ tới `/en/<bài>/`, nơi Starlight hiện bản vi kèm thông báo.
+  - Chữ: `atlas.home.startLearning` ("Bắt đầu học" / "Start learning"). Tên truy cập thêm tên bài: `atlas.home.startLearningLabel` ("Bắt đầu học: Hồi quy tuyến tính"), cộng "(Chưa dịch)" / "(Not translated yet)" khi bài chưa dịch, như ghi chú của `RoadmapMap`.
+  - **Hình thức:** "Bắt đầu học" là nút chính (nền đặc `.atlas-button`). "Mở bản đồ" thành link gạch chân màu tan, cao bằng nút, đứng cạnh. Lý do: mỗi hero chỉ một hành động có màu nhấn (skill: "one primary action"). "Bắt đầu học" là việc trang muốn người đọc làm và dẫn ra trang khác. "Mở bản đồ" chỉ nhảy xuống trong trang, cùng loại với link nhanh "Lộ trình", "Thuật ngữ", nên làm link là tự nhiên. Ở 375px hai nút vẫn nằm trên một hàng.
+  - **Màn hẹp hơn 375px** (`max-width: 23rem`, tức 320–368px), trong `HomeHero.astro`. Ảnh bản đồ giữ tỉ lệ 10:7 như ở 375px, không cao hơn mức đó. Viền sọc còn 28px, bằng viền của tấm bản đồ trên điện thoại. Khoảng cách trong thẻ bìa thu lại. Kết quả: ở 360px bản en hai nút vẫn một hàng. Ở 320px bản en "Mở bản đồ" xuống hàng dưới. Ở cả 320×800 và 360×800, hai nút và link đổi ngôn ngữ vẫn nằm trọn trong màn hình đầu (test `home.spec.ts`). Màn 375px trở lên không đổi.
+- **Link trong thư ngỏ:** đoạn văn trong `HOME.letter.paragraphs` hỗ trợ `**chữ**` (tô nền) và `[chữ](lesson:<id>)` (link tới bài). URL lấy từ lộ trình qua `lessonLinkView()`, nên đúng ngôn ngữ của trang. Id sai thì build lỗi. Bài chưa có trang thì chữ giữ nguyên, không có link. Chỉ nhận id bài, không nhận URL. Renderer: `renderProseMarkup()` trong `src/lib/inline-markup.ts`, có test escape.
+- Link validator báo lỗi nếu nút hay link trỏ tới trang chưa có.
 
 ## 5. Kiểm tra
 

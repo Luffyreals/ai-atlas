@@ -36,6 +36,19 @@ describe('roadmap matches the files in src/content/docs', () => {
     expect(readdirSync(DOCS_DIR).sort()).toEqual([...LOCALES].sort());
   });
 
+  // src/lib/seo.ts reads "has no file in this locale" from the roadmap, so it only knows about lessons.
+  // A page that is not a lesson must therefore exist in every locale, or its fallback would stay in the sitemap.
+  it('every page that is not a lesson has a file in every locale', () => {
+    const lessonIds = new Set<string>(LESSONS.map((l) => l.id));
+    const pages = new Map(LOCALES.map((locale) => [locale, new Set(listPages(locale))]));
+    for (const locale of LOCALES) {
+      for (const page of pages.get(locale) ?? []) {
+        if (lessonIds.has(page)) continue;
+        for (const other of LOCALES) expect(pages.get(other)?.has(page), `${other}/${page}`).toBe(true);
+      }
+    }
+  });
+
   for (const locale of LOCALES) {
     it(`[${locale}] status is "published" exactly when the lesson file exists`, () => {
       for (const lesson of LESSONS) {

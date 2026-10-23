@@ -6,6 +6,10 @@ import { unified } from '@astrojs/markdown-remark';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import starlightLinksValidator from 'starlight-links-validator';
+import enStrings from './src/content/i18n/en.json';
+import viStrings from './src/content/i18n/vi.json';
+import rehypeKatexA11y from './src/lib/rehype-katex-a11y';
+import { isInSitemap } from './src/lib/seo';
 import { buildSidebar } from './src/lib/sidebar';
 
 export default defineConfig({
@@ -17,7 +21,14 @@ export default defineConfig({
     // Astro 7 defaults to Sätteri, which does not run remark/rehype plugins.
     processor: unified({
       remarkPlugins: [remarkMath],
-      rehypePlugins: [rehypeKatex],
+      rehypePlugins: [
+        rehypeKatex,
+        // Names every display formula, "Công thức: <TeX>" / "Formula: <TeX>" (decision 25 in docs/mvp.md).
+        [
+          rehypeKatexA11y,
+          { labels: { vi: viStrings['atlas.common.formulaLabel'], en: enStrings['atlas.common.formulaLabel'] } },
+        ],
+      ],
     }),
   },
   integrations: [
@@ -39,6 +50,8 @@ export default defineConfig({
         Hero: './src/components/starlight/Hero.astro',
       },
       sidebar: buildSidebar(),
+      // Fallback pages: noindex, and no hreflang to a missing translation (decision 30 in docs/mvp.md).
+      routeMiddleware: './src/routeData.ts',
       customCss: [
         // Self-hosted Barlow; unicode-range keeps downloads to the latin + vietnamese subsets in use.
         '@fontsource/barlow/400.css',
@@ -54,6 +67,8 @@ export default defineConfig({
         './src/styles/lesson-progress.css',
         './src/components/quiz/quiz.css',
         './src/components/python-runner/python-runner.css',
+        // The one CSS file of every VIZ (docs/architecture/viz.md, section 2.3). Keep it last.
+        './src/components/viz/viz.css',
       ],
       disable404Route: true,
       lastUpdated: false,
@@ -68,8 +83,9 @@ export default defineConfig({
     // (node_modules/@astrojs/starlight/dist/integrations/sitemap.js), plus a filter.
     sitemap({
       i18n: { defaultLocale: 'vi', locales: { vi: 'vi', en: 'en' } },
-      // Internal pages (/vi/dev/…, /en/dev/…) stay deployed and noindex, but out of the sitemap.
-      filter: (page) => !/^\/(vi|en)\/dev\//.test(new URL(page).pathname),
+      // Internal pages (/vi/dev/…, /en/dev/…) and fallback pages (a lesson not yet translated, decision 30
+      // in docs/mvp.md) stay deployed and noindex, but out of the sitemap.
+      filter: isInSitemap,
     }),
     react(),
   ],

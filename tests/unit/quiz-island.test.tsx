@@ -583,6 +583,63 @@ describe('QuizIsland: English strings', () => {
   });
 });
 
+describe('QuizIsland: language of the quiz text (Starlight fallback page)', () => {
+  const langs = (root: ParentNode, selector: string) =>
+    [...root.querySelectorAll(selector)].map((element) => element.getAttribute('lang'));
+
+  it('marks the question, the options and the explanation with contentLang, never the strings', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<QuizIsland questions={QUESTIONS} strings={EN} contentLang="vi" />);
+    const q1 = question(1, 3, EN);
+    await user.click(option(q1, 'Bravo'));
+    await user.click(within(q1).getByRole('button', { name: 'Check' }));
+
+    expect(langs(container, '.atlas-quiz-prompt')).toEqual(['vi', 'vi', 'vi']);
+    expect(langs(q1, '.atlas-quiz-option-text')).toEqual(['vi', 'vi', 'vi']);
+    expect(radios(q1).map((radio) => radio.getAttribute('lang'))).toEqual(['vi', 'vi', 'vi']);
+    expect(langs(q1, '.atlas-quiz-explanation span[lang]')).toEqual(['vi']);
+    // The strings: count, mark, verdict, "Explanation:", buttons. None is inside an element with a lang.
+    for (const element of container.querySelectorAll('.atlas-quiz-count, .atlas-quiz-mark, .atlas-quiz-verdict, strong, button')) {
+      expect(element.closest('[lang]'), element.textContent ?? '').toBeNull();
+    }
+  });
+
+  it('sets no lang at all without contentLang (the page and the quiz text share a language)', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<QuizIsland questions={QUESTIONS} strings={VI} />);
+    const q1 = question(1, 3);
+    await user.click(option(q1, 'Bravo'));
+    await user.click(within(q1).getByRole('button', { name: VI.check }));
+    expect(container.querySelectorAll('[lang]')).toHaveLength(0);
+  });
+
+  it('hydrates the build-time HTML with contentLang without mismatch', async () => {
+    const element = <QuizIsland questions={QUESTIONS} strings={EN} contentLang="vi" />;
+    const markup = renderToString(element, { identifierPrefix: 'r2' });
+    expect(markup).toContain('lang="vi"');
+    const host = document.createElement('div');
+    host.innerHTML = markup;
+    document.body.append(host);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const recoverable: unknown[] = [];
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+    await act(async () => {
+      root = hydrateRoot(host, element, {
+        identifierPrefix: 'r2',
+        onRecoverableError: (error) => recoverable.push(error),
+      });
+    });
+    try {
+      expect(recoverable).toEqual([]);
+      expect(errors).not.toHaveBeenCalled();
+      expect(langs(host, '.atlas-quiz-prompt')).toEqual(['vi', 'vi', 'vi']);
+    } finally {
+      act(() => root?.unmount());
+      host.remove();
+    }
+  });
+});
+
 describe('QuizIsland: server render and hydration', () => {
   it('hydrates the build-time HTML without mismatch and then works', async () => {
     // @astrojs/react passes the same identifierPrefix to renderToString and hydrateRoot (section 2.9).
