@@ -74,6 +74,8 @@ function collectErrors(page: Page): string[] {
 for (const locale of LOCALES) {
   test.describe(`demo page /${locale}/dev/components/`, () => {
     test('(a) opening and scrolling the whole page sends no request to Pyodide', async ({ page }) => {
+      // Scrolls the whole page: on a loaded machine this took 25 s once, against about 2 s normally.
+      test.slow();
       const urls: string[] = [];
       page.on('request', (request) => urls.push(request.url()));
       page.on('worker', (worker) => urls.push(`worker: ${worker.url()}`));

@@ -27,10 +27,12 @@ Dùng thống nhất cho toàn bộ AI Atlas. Gặp thuật ngữ mới thì th�
 | Dữ liệu mất cân bằng | Imbalanced data | Dịch |
 | Đặc trưng | Feature | Dịch |
 | Điểm ngoại lai | Outlier | Dịch. Điểm nằm xa hẳn phần còn lại của dữ liệu. Không gọi là "nhiễu" |
+| Huấn luyện | Training | Dịch. Chọn tham số của mô hình để hàm mất mát trên tập huấn luyện nhỏ. Trong scikit-learn là `fit` |
 | Mẫu | Sample | Dịch |
 | Mô hình | Model | Dịch |
 | Nhãn | Label | Dịch |
 | Nhiễu | Noise | Dịch. Phần biến động của nhãn mà các đặc trưng không giải thích được. Khác "điểm ngoại lai" |
+| Rò rỉ dữ liệu | Data leakage | Dịch. Thông tin của tập kiểm tra lọt vào quá trình huấn luyện (mẫu trùng, chọn mô hình hay xử lý dữ liệu bằng tập kiểm tra), làm điểm kiểm tra lạc quan |
 | Siêu tham số | Hyperparameter | Dịch |
 | Tăng cường dữ liệu | Data augmentation | Dịch |
 | Tập huấn luyện | Training set | Dịch |
@@ -54,15 +56,21 @@ Dùng thống nhất cho toàn bộ AI Atlas. Gặp thuật ngữ mới thì th�
 | Hồi quy | Regression | Dịch |
 | Hồi quy Logistic | Logistic regression | Dịch |
 | Hồi quy tuyến tính | Linear regression | Dịch |
+| K-Nearest Neighbors (KNN) | K-nearest neighbors (KNN) | Giữ, viết tắt KNN. Lần đầu có thể giải thích "k láng giềng gần nhất" |
+| Kiểm định chéo | Cross-validation | Dịch. Tách train/kiểm định nhiều lần rồi lấy trung bình điểm |
+| Môi trường | Environment | Dịch. Trong học tăng cường: nơi tác nhân hành động và nhận phần thưởng |
 | Ngoại suy | Extrapolation | Dịch. Dự đoán ở ngoài khoảng giá trị của dữ liệu huấn luyện |
 | Overfitting / Underfitting | Overfitting / Underfitting | Giữ |
 | Phân cụm | Clustering | Dịch |
 | Phân loại | Classification | Dịch |
 | Phần dư | Residual | Dịch. $e^{(i)} = y^{(i)} - \hat{y}^{(i)}$, khác "sai số" (error) chưa quan sát được |
+| Phần thưởng | Reward | Dịch. Trong học tăng cường: tín hiệu (dương hoặc âm) tác nhân nhận sau mỗi hành động |
 | Phương trình chuẩn | Normal equation | Dịch, lần đầu kèm "normal equation" |
 | Regularization | Regularization | Giữ |
 | Sai số bình phương trung bình | Mean squared error (MSE) | Dịch, viết tắt MSE. Site dùng hệ số $\frac{1}{m}$ |
+| Tác nhân | Agent | Dịch. Trong học tăng cường: bên chọn hành động và học từ phần thưởng |
 | Tốc độ học | Learning rate | Dịch |
+| Tổng quát hóa | Generalization | Dịch. Khả năng làm tốt trên dữ liệu chưa thấy khi huấn luyện. Ước lượng bằng điểm trên tập kiểm tra |
 | Trọng số | Weight | Dịch |
 
 ## Deep Learning

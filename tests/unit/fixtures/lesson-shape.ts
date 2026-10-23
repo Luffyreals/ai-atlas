@@ -112,6 +112,20 @@ export function lessonShape(source: string): LessonShape {
   };
 }
 
+/**
+ * Static figure tags written in a lesson file (docs/architecture/viz.md, section 8.2 h): tags of the
+ * components it imports from @components/figures/ (the kit under figures/kit/ is not for lessons).
+ * Same way as vizCount in tests/e2e/viz.spec.ts.
+ */
+export function figureCount(source: string): number {
+  const shape = lessonShape(source);
+  const names = shape.imports.flatMap((statement) => {
+    const match = /^import (\w+) from '@components\/figures\/[\w-]+\.astro'$/.exec(statement);
+    return match?.[1] ? [match[1]] : [];
+  });
+  return names.reduce((sum, name) => sum + (shape.components[name] ?? 0), 0);
+}
+
 /** The import the en file must have for a vi import: only "<name>.vi.py" becomes "<name>.en.py". */
 export function toEnImport(statement: string): string {
   return statement.replace(/\.vi\.py(?=[?'"])/g, '.en.py');

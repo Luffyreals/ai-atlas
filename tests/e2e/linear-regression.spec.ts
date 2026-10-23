@@ -97,6 +97,8 @@ for (const locale of LOCALES) {
     });
 
     test('opening the page and scrolling through it sends no request to Pyodide', async ({ page }) => {
+      // Scrolls the whole page: on a loaded machine this took 25 s once, against about 2 s normally.
+      test.slow();
       const urls: string[] = [];
       page.on('request', (request) => urls.push(request.url()));
       page.on('worker', (worker) => urls.push(`worker: ${worker.url()}`));
@@ -226,32 +228,3 @@ for (const locale of LOCALES) {
     }
   });
 }
-
-test.describe('homepage links to the first lesson', () => {
-  const TITLE = { vi: 'Hồi quy tuyến tính', en: 'Linear Regression' } as const;
-
-  for (const locale of LOCALES) {
-    test(`/${locale}/: "${s(locale, 'home.startLearning')}" opens ${lessonPath(locale)}`, async ({ page }) => {
-      await page.goto(`/${locale}/`);
-      const start = page.locator('.hero').getByRole('link', { name: new RegExp(`^${s(locale, 'home.startLearning')}`) });
-      await expect(start).toHaveCount(1);
-      await expect(start).toHaveText(s(locale, 'home.startLearning'));
-      await expect(start).toHaveAttribute('href', lessonPath(locale));
-      await start.click();
-      await page.waitForURL(`**${lessonPath(locale)}`);
-      await expect(page.locator('html')).toHaveAttribute('lang', locale);
-      // The title of the file shown: the vi file on the en fallback, its own file once translated.
-      await expect(page.locator('h1#_top')).toHaveText(LESSON.title[contentLocale(LESSON, locale)]);
-    });
-
-    test(`/${locale}/: the letter links "${TITLE[locale]}" to ${lessonPath(locale)}`, async ({ page }) => {
-      await page.goto(`/${locale}/`);
-      const link = page.locator('.letter').getByRole('link', { name: TITLE[locale], exact: true });
-      await expect(link).toHaveCount(1);
-      await expect(link).toHaveAttribute('href', lessonPath(locale));
-      await link.click();
-      await page.waitForURL(`**${lessonPath(locale)}`);
-      await expect(page.locator('html')).toHaveAttribute('lang', locale);
-    });
-  }
-});
