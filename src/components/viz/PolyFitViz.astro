@@ -5,13 +5,12 @@
 // section 9.2.2). The island fits the 15 degrees itself, from the 24 points, with the same code at build time
 // and in the browser (section 9.2.3), so bad data fails the build.
 // The island hydrates 200px before it scrolls into view. Styles: viz.css, through Starlight's customCss.
-import type { AxisText } from './kit/types';
 import PolyFitVizIsland from './poly-fit-viz/PolyFitVizIsland';
 import { SINE_POLY_FIT, SINE_TEST, SINE_TRAIN, SINE_TRUTH } from '@data/datasets/sine';
-import type { DatasetColumn } from '@data/datasets/types';
 import { getStrings } from '@i18n/ui';
 import { inlineMarkupLabel, renderInlineMarkup } from '@lib/inline-markup';
 import { getPageLocale } from '@lib/page-locale';
+import { axisText } from '@lib/viz/axis';
 import { sampleCurve, toPolyline } from '@lib/viz/poly-fit';
 
 const route = Astro.locals.starlightRoute;
@@ -25,12 +24,6 @@ const truthPoints = toPolyline(
   config.xDomain,
   config.yDomain,
 );
-// x and y have no unit: the title is the name alone (section 9.4.1, the rule of DatasetTable).
-const axis = (column: DatasetColumn): AxisText => {
-  const name = column.name[locale];
-  const unit = column.unit[locale];
-  return { name, unit, title: unit === '' ? name : `${name} (${unit})` };
-};
 const description = [SINE_TRAIN.description, SINE_TEST.description, SINE_TRUTH.description]
   .map((text) => text[locale])
   .join(' ');
@@ -43,7 +36,7 @@ const description = [SINE_TRAIN.description, SINE_TEST.description, SINE_TRUTH.d
     test={SINE_TEST.rows}
     config={config}
     truthPoints={truthPoints}
-    axes={{ x: axis(SINE_TRAIN.x), y: axis(SINE_TRAIN.y) }}
+    axes={{ x: axisText(SINE_TRAIN.x, locale), y: axisText(SINE_TRAIN.y, locale) }}
     itemLabels={{ train: SINE_TRAIN.itemLabel[locale], test: SINE_TEST.itemLabel[locale] }}
     description={description}
     labels={{ degreeHtml: renderInlineMarkup(strings.degreeLabel), degreeText: inlineMarkupLabel(strings.degreeLabel) }}

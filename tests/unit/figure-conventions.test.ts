@@ -1,4 +1,4 @@
-// Rules of every static figure (docs/architecture/viz.md, section 8.2 h, points 1–5): one shared figures.css
+// Rules of every static figure (docs/architecture/viz.md, section 8.2 h, points 1–5, and 6 of section 11.5 U2): one shared figures.css
 // in customCss just before viz.css, within its gzip budget; 0 JS and no colour code in the components; each
 // <Name>Figure.astro has its words file and registry entry; the words are complete in vi and en.
 // Generic on purpose (decision 39 in docs/mvp.md): a new figure is checked without a test of its own, and
@@ -41,7 +41,7 @@ describe('figure files (point 1)', () => {
   });
 
   it('has the kit', () => {
-    for (const part of ['FigureFrame', 'FigNode', 'FigArrow', 'FigText']) expect(files).toContain(`kit/${part}.astro`);
+    for (const part of ['FigureFrame', 'FigNode', 'FigArrow', 'FigText', 'FigMath']) expect(files).toContain(`kit/${part}.astro`);
   });
 
   it.each(sources)('%s ships no JS and no CSS of its own', (file) => {
@@ -80,6 +80,19 @@ describe('figures.css (points 2 and 3)', () => {
 
   it('figures.css has no colour code: colours come from theme tokens or system colours only', () => {
     expect(stripCssComments(read('figures.css'))).not.toMatch(COLOUR_CODE);
+  });
+
+  // SVG fills black by default: a mistyped class turns a region or a dot into a black blot, lost in dark mode.
+  it('every atlas-fig-* class used in a figure component is styled in figures.css (point 6)', () => {
+    const css = stripCssComments(read('figures.css'));
+    const styled = new Set([...css.matchAll(/\.(atlas-fig-[a-z0-9-]+)/g)].map((match) => match[1]));
+    const used = files
+      .filter((file) => file.endsWith('.astro'))
+      .flatMap((file) =>
+        [...read(file).matchAll(/(?<![-\w])(atlas-fig-[a-z0-9-]+)/g)].map((match) => ({ file, name: match[1] ?? '' })),
+      );
+    expect(used.length).toBeGreaterThan(0);
+    expect(used.filter(({ name }) => !styled.has(name)).map(({ file, name }) => `${name} in ${file}`)).toEqual([]);
   });
 
   it('figures.css scopes every rule by the atlas-fig prefix', () => {

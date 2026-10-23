@@ -25,6 +25,7 @@ import { pct, toPercentX, toPercentY } from '../../../lib/viz/scale';
 import AtPoint from '../kit/AtPoint';
 import PlotCurve from '../kit/PlotCurve';
 import PlotFrame from '../kit/PlotFrame';
+import { DotSwatch, Swatch } from '../kit/Swatch';
 import type { AxisText } from '../kit/types';
 import { useHydrated } from '../kit/use-hydrated';
 import { useSettled } from '../kit/use-settled';
@@ -46,28 +47,6 @@ export interface PolyFitVizIslandProps {
 const TRIANGLE_BELOW = '0,1 6,11 -6,11';
 /** The same triangle centred on the anchor, for the key. */
 const TRIANGLE_CENTRED = '0,-5 6,5 -6,5';
-
-/**
- * A short line in a swatch, drawn with the same class as the mark on the plot; an optional point on it. With a
- * point the swatch is 36px wide (atlas-viz-swatch-wide), so a 6 4 dash still shows on both sides of the ring.
- */
-function Swatch({ className, dot }: { className: string; dot?: 'point' | 'ring' }) {
-  return (
-    <svg className={dot ? 'atlas-viz-swatch atlas-viz-swatch-wide' : 'atlas-viz-swatch'} aria-hidden="true" focusable="false">
-      <line className={className} x1="0%" y1="50%" x2="100%" y2="50%" />
-      {dot && <circle className={`atlas-viz-${dot}`} cx="50%" cy="50%" r="4" />}
-    </svg>
-  );
-}
-
-/** A point mark alone in a 24px swatch. */
-function DotSwatch({ dot }: { dot: 'point' | 'ring' }) {
-  return (
-    <svg className="atlas-viz-swatch" aria-hidden="true" focusable="false">
-      <circle className={`atlas-viz-${dot}`} cx="50%" cy="50%" r="6" />
-    </svg>
-  );
-}
 
 export default function PolyFitVizIsland({
   train,
@@ -185,11 +164,11 @@ export default function PolyFitVizIsland({
 
       <ul className="atlas-viz-key">
         <li>
-          <DotSwatch dot="point" />
+          <DotSwatch className="atlas-viz-point" />
           {itemLabels.train}
         </li>
         <li>
-          <DotSwatch dot="ring" />
+          <DotSwatch className="atlas-viz-ring" />
           {itemLabels.test}
         </li>
         <li>

@@ -1,0 +1,354 @@
+---
+title: Ridge, Lasso, Elastic Net
+description: Đa thức bậc 15 overfit vì hệ số khổng lồ. Ridge (L2) và Lasso (L1) phạt hệ số lớn. Vì sao L1 cho hệ số đúng 0, chuẩn hóa đặc trưng, chọn λ bằng kiểm định chéo.
+quiz:
+  - question: 'Bạn khớp Ridge trên hai đặc trưng: chiều dài đo bằng mét và cân nặng đo bằng kg, không chuẩn hóa. Đồng nghiệp đổi cột chiều dài sang centimét rồi khớp lại với cùng $\lambda$. Chuyện gì xảy ra?'
+    options:
+      - 'Không gì thay đổi, vì dự đoán không phụ thuộc đơn vị'
+      - 'Hệ số của chiều dài nhỏ đi 100 lần nên bị phạt nhẹ hơn hẳn, và mô hình khớp ra khác trước'
+      - 'Hệ số của chiều dài lớn lên 100 lần nên bị phạt nặng hơn hẳn'
+      - 'Chỉ hệ số tự do $b$ thay đổi'
+    answer: 1
+    explanation: 'Cột lớn lên 100 lần thì cùng một dự đoán chỉ cần hệ số nhỏ đi 100 lần, nên phạt $\lambda w^2$ nhỏ đi 10 000 lần. Phạt đã đổi, nên nghiệm cũng đổi. Với bình phương tối thiểu không phạt, dự đoán quả thật không phụ thuộc đơn vị, nhưng có phạt thì có. Chuẩn hóa đặc trưng trước khi phạt sẽ xóa sự phụ thuộc này.'
+  - question: 'Một đặc trưng đã chuẩn hóa, bình phương tối thiểu cho $c = -0.5$. Với Lasso, hàm mục tiêu là $(w - c)^2 + \lambda\lvert w\rvert$ (bỏ hằng số). Với $\lambda = 0.6$, $w$ bằng bao nhiêu?'
+    options: ['$0$', '$-0.3125$', '$0.1$', '$-0.2$']
+    answer: 3
+    explanation: 'Ngưỡng là $\lambda/2 = 0.3$. Vì $\lvert c\rvert = 0.5$ lớn hơn ngưỡng, $w$ chưa về 0: Lasso kéo $c$ về phía 0 một đoạn $0.3$, được $w = -0.5 + 0.3 = -0.2$. Số $-0.3125$ là của Ridge, $c/(1 + \lambda)$. Số $0.1$ là kết quả khi quên chia đôi $\lambda$ và kéo quá qua 0. Lasso chỉ cho đúng 0 khi $\lvert c\rvert \le \lambda/2$.'
+  - question: 'Với $m = 50$ điểm train và $\lambda = 0.02$, bạn muốn khớp Ridge với hàm mục tiêu $\mathcal{L} + \lambda\lVert\mathbf{w}\rVert_2^2$ và Lasso với $\mathcal{L} + \lambda\lVert\mathbf{w}\rVert_1$, trong đó $\mathcal{L}$ là MSE (chia $m$). Viết bằng scikit-learn thế nào cho đúng?'
+    options:
+      - '`Ridge(alpha=1.0)` và `Lasso(alpha=0.01)`'
+      - '`Ridge(alpha=0.02)` và `Lasso(alpha=0.02)`'
+      - '`Ridge(alpha=0.01)` và `Lasso(alpha=1.0)`'
+      - '`Ridge(alpha=0.0004)` và `Lasso(alpha=0.01)`'
+    answer: 0
+    explanation: '`Ridge` của scikit-learn dùng tổng bình phương, không chia $m$, nên `alpha` $= m\lambda = 50 \cdot 0.02 = 1$. `Lasso` dùng $\frac{1}{2m}$ trước tổng bình phương, tức nửa MSE, nên `alpha` $= \lambda/2 = 0.01$. Truyền thẳng $\lambda$ vào cả hai (phương án thứ hai) là lỗi hay gặp nhất: Ridge khi đó bị phạt nhẹ đi 50 lần.'
+  - question: 'Kiểm định chéo trên tập train chọn $\lambda = 1$. Sau đó bạn thử vài mức trên tập test và thấy $\lambda = 0.01$ có MSE test nhỏ hơn. Nên làm gì?'
+    options:
+      - 'Đổi sang $\lambda = 0.01$ và báo MSE test của nó, vì tập test là dữ liệu thật'
+      - 'Lấy trung bình hai mức, $\lambda \approx 0.5$'
+      - 'Giữ $\lambda = 1$ và báo MSE test của nó; mức tốt nhất trên tập test chỉ để tham khảo'
+      - 'Chọn $\lambda$ có MSE train nhỏ nhất'
+    answer: 2
+    explanation: 'Chọn $\lambda$ theo tập test là để tập test tham gia chọn mô hình, nên MSE test của mức đó lạc quan, không còn ước lượng trung thực cho dữ liệu mới. Kiểm định chéo có thể thận trọng hơn mức tốt nhất trên tập test, như ô code thứ ba của bài, nhưng nó là cách chọn không chạm vào tập test. MSE train thì luôn nhỏ nhất ở $\lambda$ nhỏ nhất, nên không dùng để chọn được.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import DatasetTable from '@components/DatasetTable.astro';
+import RegularizationGeometryFigure from '@components/figures/RegularizationGeometryFigure.astro';
+import RegularizationViz from '@components/viz/RegularizationViz.astro';
+import ridgeCode from '@code/ml/regularization/ridge.vi.py?raw';
+import lassoCode from '@code/ml/regularization/lasso.vi.py?raw';
+import chooseLambdaCode from '@code/ml/regularization/choose-lambda.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu regularization là cộng vào hàm mất mát một khoản phạt cho trọng số lớn, và vì sao điều đó làm đa thức bậc cao bớt overfitting.
+- Tự dẫn được nghiệm dạng đóng (closed-form solution) của hồi quy Ridge (Ridge regression) từ phương trình chuẩn.
+- Giải thích được vì sao Lasso đưa nhiều hệ số về đúng 0 còn Ridge thì không, bằng một ví dụ một biến và bằng hình học.
+- Cài đặt được Ridge, Lasso, Elastic Net trong scikit-learn có chuẩn hóa đặc trưng (feature standardization), đổi đúng $\lambda$ sang `alpha`, và chọn $\lambda$ bằng kiểm định chéo (cross-validation).
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài này dùng lại hai thứ. Thứ nhất là **phương trình chuẩn** (normal equation) $\mathbf{X}^\top\mathbf{X}\boldsymbol{\theta} = \mathbf{X}^\top\mathbf{y}$ ở bài [Hồi quy tuyến tính](/vi/ml/linear-regression/): các phương trình "đạo hàm của MSE bằng 0" xếp vào một ma trận. Thứ hai là đường **bậc 15** ở bài [Overfitting và Underfitting](/vi/ml/overfitting-underfitting/), khớp trên 16 điểm train của bộ dữ liệu sin: MSE train 0.0000, MSE test khoảng 133, trong khi bậc 3 chỉ có MSE test 0.0754.
+:::
+
+## Trực giác
+
+Nhớ lại Chi ở bài trước: đường bậc 15 của Chi đi qua đúng cả 16 điểm train, nhưng giữa các điểm thì vọt lên, cắm xuống. Bài trước chữa bằng cách hạ bậc xuống 3. Bài này thử cách thứ ba đã hẹn: **giữ nguyên bậc 15**, nhưng không cho đường cong uốn tùy thích.
+
+Đường bậc 15 uốn được như vậy nhờ các hệ số lớn tới hàng chục tỉ, đổi dấu xen kẽ: số hạng này kéo đường lên rất mạnh, số hạng kế bên kéo xuống gần mạnh như thế. Tại 16 điểm train, các lực kéo triệt tiêu nhau gần như hoàn hảo; giữa các điểm, chỉ lệch nhau một chút là đường vọt khỏi khung. Đường cong mềm bậc 3 của Bình không cần hệ số lớn như thế. Vậy **hệ số khổng lồ là triệu chứng của overfitting**.
+
+Hãy tưởng tượng mỗi hệ số phải đóng thuế theo độ lớn của nó. Mô hình phải cân giữa đi gần các điểm train (MSE nhỏ) và giữ hệ số nhỏ (thuế ít). Hệ số chỉ để uốn theo một hạt nhiễu thì không đáng tiền thuế. Còn hai câu hỏi:
+
+- **Thuế bao nhiêu?** Quá nhẹ thì vẫn overfitting. Quá nặng thì mọi hệ số bị ép về gần 0, đường gần như nằm ngang: underfitting. Mức thuế là con số $\lambda$ bạn phải chọn.
+- **Tính thuế thế nào?** Theo bình phương hệ số (Ridge) hay trị tuyệt đối (Lasso). Lasso đưa nhiều hệ số về **đúng 0**, Ridge thì không.
+
+Dữ liệu vẫn là 24 điểm của bài trước: 16 điểm train để khớp, 8 điểm test để chấm.
+
+<details>
+<summary>Xem bảng 24 điểm</summary>
+
+<DatasetTable dataset="sine-train" />
+
+<DatasetTable dataset="sine-test" />
+
+</details>
+
+Bài toán của bài này là: **giữ đa thức bậc 15, cộng vào MSE một khoản phạt cho hệ số lớn, rồi chọn mức phạt bằng dữ liệu, sao cho đường cong mềm vừa đủ để đoán tốt điểm mới.**
+
+## Lý thuyết
+
+### Hàm mục tiêu có phạt
+
+Mô hình vẫn là đa thức bậc 15, tức hồi quy tuyến tính trên $n = 15$ đặc trưng: $\hat{y} = \mathbf{w}^\top\mathbf{x} + b$. Hàm mất mát $\mathcal{L}$ vẫn là MSE trên $m = 16$ điểm train. **Regularization** thay việc làm nhỏ $\mathcal{L}$ bằng việc làm nhỏ một **hàm mục tiêu** (objective function) $J$, gồm $\mathcal{L}$ cộng một khoản phạt:
+
+$$
+\begin{aligned}
+\text{Ridge:}\quad J(\mathbf{w}, b) &= \mathcal{L}(\mathbf{w}, b) + \lambda\lVert\mathbf{w}\rVert_2^2 \\
+\text{Lasso:}\quad J(\mathbf{w}, b) &= \mathcal{L}(\mathbf{w}, b) + \lambda\lVert\mathbf{w}\rVert_1
+\end{aligned}
+$$
+
+- $\lambda \ge 0$ là **hệ số phạt** (penalty strength), một siêu tham số. $\lambda = 0$ cho lại bình phương tối thiểu thường, tức đường bậc 15 của Chi.
+- $\lVert\mathbf{w}\rVert_2^2 = w_1^2 + \dots + w_n^2$ là bình phương của **chuẩn L2** (L2 norm), tức bình phương độ dài vectơ $\mathbf{w}$. $\lVert\mathbf{w}\rVert_1 = \lvert w_1\rvert + \dots + \lvert w_n\rvert$ là **chuẩn L1** (L1 norm). Vì vậy Ridge còn gọi là phạt L2, Lasso là phạt L1.
+- **Hệ số tự do (bias, còn gọi là intercept) $b$ không bị phạt.** $b$ chỉ dời cả đường lên xuống, không làm đường uốn. Phạt $b$ sẽ kéo đường về phía $y = 0$ một cách vô cớ.
+
+Ridge do Hoerl và Kennard đề xuất (1970). Lasso của Tibshirani (1996) viết tắt "least absolute shrinkage and selection operator": vừa **co** (shrinkage) hệ số, vừa **chọn** đặc trưng.
+
+### Chuẩn hóa đặc trưng trước khi phạt
+
+Khoản phạt đối xử mọi $w_j$ như nhau, nhưng độ lớn của $w_j$ phụ thuộc đơn vị của đặc trưng. Đổi $x_j$ từ mét sang centimét, cột số lớn lên 100 lần, $w_j$ phải nhỏ đi 100 lần, nên phạt $\lambda w_j^2$ nhỏ đi 10 000 lần. Chỉ vì đổi đơn vị mà mô hình khớp ra khác.
+
+Cách chữa là **chuẩn hóa đặc trưng**: $z_j = (x_j - \mu_j)/\sigma_j$, với $\mu_j$, $\sigma_j$ là trung bình và độ lệch chuẩn của $x_j$ **trên tập train** (`StandardScaler`). Mọi đặc trưng khi đó có trung bình 0, độ lệch chuẩn 1, nên bị phạt công bằng. Với đa thức, $z_k = (x^k - \mu_k)/\sigma_k$, và từ đây $w_k$ là hệ số của $z_k$, không còn của $x^k$.
+
+### Ridge: nghiệm dạng đóng
+
+Gọi $\mathbf{X}$ là ma trận $m \times n$ có phần tử ở hàng $i$, cột $k$ là $z^{(i)}_k$. Khác bài Hồi quy tuyến tính, $\mathbf{X}$ **không** có cột số 1, vì $b$ được tính riêng. Mỗi cột có trung bình 0 nên tổng bằng 0: $\mathbf{X}^\top\mathbf{1} = \mathbf{0}$, với $\mathbf{1}$ là vectơ toàn số 1. Hàm mục tiêu của Ridge là:
+
+$$
+J(\mathbf{w}, b) = \frac{1}{m}\left\lVert\mathbf{X}\mathbf{w} + b\mathbf{1} - \mathbf{y}\right\rVert^2 + \lambda\lVert\mathbf{w}\rVert_2^2
+$$
+
+**Bước 1: tìm $b$.** Khoản phạt không chứa $b$, nên đạo hàm riêng theo $b$ giống bài Hồi quy tuyến tính: $\frac{2}{m}\sum_{i}\left(\hat{y}^{(i)} - y^{(i)}\right)$. Cho nó bằng 0 rồi thay $\hat{y}^{(i)} = \sum_{k} w_k z^{(i)}_k + b$:
+
+$$
+\sum_{k} w_k \underbrace{\sum_{i} z^{(i)}_k}_{=\,0} + mb = \sum_{i} y^{(i)}
+\quad\Longrightarrow\quad b = \bar{y}
+$$
+
+Mỗi tổng theo cột bằng 0 vì cột đã trừ trung bình. Vậy $b$ luôn bằng $\bar{y}$ của tập train, **với mọi** $\lambda$.
+
+**Bước 2: thay $b = \bar{y}$ vào.** Đặt $\mathbf{y}_c = \mathbf{y} - \bar{y}\mathbf{1}$ (nhãn đã trừ trung bình). Khi đó $\mathbf{X}\mathbf{w} + \bar{y}\mathbf{1} - \mathbf{y} = \mathbf{X}\mathbf{w} - \mathbf{y}_c$, và hàm mục tiêu chỉ còn theo $\mathbf{w}$:
+
+$$
+J(\mathbf{w}) = \frac{1}{m}\left\lVert\mathbf{X}\mathbf{w} - \mathbf{y}_c\right\rVert^2 + \lambda\left(w_1^2 + \dots + w_n^2\right)
+$$
+
+**Bước 3: đạo hàm theo $\mathbf{w}$, cho bằng 0.** Như bài Hồi quy tuyến tính, đạo hàm riêng của phần MSE theo $w_j$ là hàng $j$ của $\frac{2}{m}\mathbf{X}^\top(\mathbf{X}\mathbf{w} - \mathbf{y}_c)$. Đạo hàm của $\lambda w_j^2$ là $2\lambda w_j$, xếp lại thành $2\lambda\mathbf{w}$:
+
+$$
+\frac{2}{m}\mathbf{X}^\top\left(\mathbf{X}\mathbf{w} - \mathbf{y}_c\right) + 2\lambda\mathbf{w} = \mathbf{0}
+$$
+
+**Bước 4: gom $\mathbf{w}$ về một vế.**
+
+$$
+\begin{aligned}
+\mathbf{X}^\top\mathbf{X}\mathbf{w} - \mathbf{X}^\top\mathbf{y}_c + m\lambda\mathbf{w} &= \mathbf{0} \\
+\mathbf{X}^\top\mathbf{X}\mathbf{w} + m\lambda\mathbf{I}\mathbf{w} &= \mathbf{X}^\top\mathbf{y}_c \\
+\left(\mathbf{X}^\top\mathbf{X} + m\lambda\mathbf{I}\right)\mathbf{w} &= \mathbf{X}^\top\mathbf{y}_c
+\end{aligned}
+$$
+
+Dòng đầu nhân hai vế với $\frac{m}{2}$ rồi phá ngoặc. Dòng thứ hai chuyển $\mathbf{X}^\top\mathbf{y}_c$ sang phải và viết $\mathbf{w} = \mathbf{I}\mathbf{w}$, với $\mathbf{I}$ là ma trận đơn vị (identity matrix) $n \times n$. Dòng thứ ba đặt $\mathbf{w}$ ra ngoài. Cuối cùng, $\mathbf{X}^\top\mathbf{y}_c = \mathbf{X}^\top\mathbf{y} - \bar{y}\,\mathbf{X}^\top\mathbf{1} = \mathbf{X}^\top\mathbf{y}$, nên:
+
+$$
+\left(\mathbf{X}^\top\mathbf{X} + m\lambda\mathbf{I}\right)\mathbf{w} = \mathbf{X}^\top\mathbf{y}, \qquad b = \bar{y}
+$$
+
+So với phương trình chuẩn, chỉ khác số $m\lambda$ cộng vào đường chéo. Số nhỏ này đổi hẳn tình thế:
+
+- **Luôn có nghiệm duy nhất khi $\lambda > 0$.** Với mọi $\mathbf{v} \ne \mathbf{0}$, $\mathbf{v}^\top\left(\mathbf{X}^\top\mathbf{X} + m\lambda\mathbf{I}\right)\mathbf{v} = \lVert\mathbf{X}\mathbf{v}\rVert^2 + m\lambda\lVert\mathbf{v}\rVert^2 > 0$, nên ma trận khả nghịch, kể cả khi các cột cộng tuyến (collinearity) hay có ít mẫu hơn đặc trưng.
+- **Đây là $m\lambda$ trong code.** `Ridge` của scikit-learn làm nhỏ $\lVert\mathbf{y} - \mathbf{X}\mathbf{w}\rVert^2 + \alpha\lVert\mathbf{w}\rVert_2^2$, tức $m \cdot J$ khi $\alpha = m\lambda$, nên code viết `Ridge(alpha=m * lam)`.
+
+:::note[Ghi nhớ]
+Ridge trên đặc trưng đã chuẩn hóa: $\left(\mathbf{X}^\top\mathbf{X} + m\lambda\mathbf{I}\right)\mathbf{w} = \mathbf{X}^\top\mathbf{y}$ và $b = \bar{y}$. Đó là phương trình chuẩn cộng thêm $m\lambda$ vào đường chéo, luôn có nghiệm duy nhất khi $\lambda > 0$.
+:::
+
+### Vì sao hệ số co lại: ví dụ một biến
+
+Xét một đặc trưng đã chuẩn hóa $z$, nên $\frac{1}{m}\sum_i \left(z^{(i)}\right)^2 = 1$. Gọi $c = \frac{1}{m}\sum_i z^{(i)}y^{(i)}_c$ và $s = \frac{1}{m}\sum_i\left(y^{(i)}_c\right)^2$. Khai triển MSE theo $w$:
+
+$$
+\begin{aligned}
+\frac{1}{m}\sum_{i}\left(wz^{(i)} - y^{(i)}_c\right)^2
+&= w^2\cdot\frac{1}{m}\sum_i\left(z^{(i)}\right)^2 - 2w\cdot\frac{1}{m}\sum_i z^{(i)}y^{(i)}_c + s \\
+&= w^2 - 2wc + s \\
+&= (w - c)^2 + s - c^2
+\end{aligned}
+$$
+
+Dòng đầu khai triển $(a - b)^2 = a^2 - 2ab + b^2$ và đưa $w$ ra ngoài các tổng. Dòng thứ hai dùng $\frac{1}{m}\sum_i\left(z^{(i)}\right)^2 = 1$ và định nghĩa của $c$. Dòng cuối dùng $w^2 - 2wc = (w - c)^2 - c^2$. Vì $s - c^2$ không chứa $w$, MSE là parabol theo $w$ với đáy ở $c$, nghiệm khi không phạt.
+
+Với Ridge, làm nhỏ $(w - c)^2 + \lambda w^2$. Đạo hàm theo $w$ cho bằng 0:
+
+$$
+2(w - c) + 2\lambda w = 0 \quad\Longrightarrow\quad w = \frac{c}{1 + \lambda}
+$$
+
+Ridge **chia** $c$ cho $1 + \lambda > 1$: hệ số nhỏ lại, giữ dấu, nhưng không bao giờ bằng đúng 0 (trừ khi $c = 0$).
+
+Khi có nhiều đặc trưng, Ridge co mạnh nhất theo những hướng mà dữ liệu "nói" ít nhất. Các cột $z_k$ gần như trùng nhau ($z_{14}$ và $z_{15}$ có hệ số tương quan 0.9996), nên "tăng $w_{14}$ thật nhiều, giảm $w_{15}$ thật nhiều" là một hướng mà đổi theo nó thì dự đoán đổi rất ít. Các hệ số hàng chục tỉ sinh ra theo những hướng như vậy, và một chút phạt rất nhỏ đã đủ dập chúng.
+
+### Vì sao Lasso cho hệ số đúng bằng 0
+
+**Ví dụ một biến.** Với Lasso, làm nhỏ $(w - c)^2 + \lambda\lvert w\rvert$. Hàm $\lvert w\rvert$ gãy góc ở 0, nên xét từng phía:
+
+- **$w > 0$**: đạo hàm là $2(w - c) + \lambda$, bằng 0 khi $w = c - \frac{\lambda}{2}$. Chỉ hợp lệ khi kết quả dương, tức $c > \frac{\lambda}{2}$.
+- **$w < 0$**: đạo hàm là $2(w - c) - \lambda$, cho $w = c + \frac{\lambda}{2}$. Hợp lệ khi $c < -\frac{\lambda}{2}$.
+- **Khi $\lvert c\rvert \le \frac{\lambda}{2}$**: bên phải 0 đạo hàm $2w + (\lambda - 2c)$ luôn dương, bên trái 0 đạo hàm $2w - (\lambda + 2c)$ luôn âm. Hàm tăng khi rời 0 theo cả hai hướng, nên nhỏ nhất tại **$w = 0$**.
+
+$$
+w =
+\begin{cases}
+c - \frac{\lambda}{2}, & c > \frac{\lambda}{2} \\
+0, & \lvert c\rvert \le \frac{\lambda}{2} \\
+c + \frac{\lambda}{2}, & c < -\frac{\lambda}{2}
+\end{cases}
+$$
+
+Lasso **trừ** một lượng cố định $\frac{\lambda}{2}$ khỏi độ lớn của $c$ rồi cắt ở 0, gọi là soft-thresholding. So hai cách với $c = 0.3$:
+
+| $\lambda$ | Ridge: $c/(1 + \lambda)$ | Lasso |
+|---:|---:|---:|
+| 0.2 | 0.25 | 0.2 |
+| 0.4 | 0.2143 | 0.1 |
+| 1 | 0.15 | 0 |
+
+Gốc rễ nằm ở **độ dốc của khoản phạt gần 0**. Phạt Ridge $\lambda w^2$ có độ dốc $2\lambda w$, sát 0 thì gần như phẳng, nên dữ liệu kéo yếu mấy cũng đưa được $w$ ra khỏi 0. Phạt Lasso $\lambda\lvert w\rvert$ có độ dốc $\lambda$ ngay cả sát 0: lực kéo của dữ liệu ($2\lvert c\rvert$) phải thắng $\lambda$ thì $w$ mới rời 0.
+
+**Hình học.** Có thể chứng minh rằng với mỗi $\lambda$ có một "ngân sách" $t$ sao cho bài toán có phạt cùng nghiệm với bài toán: **làm MSE nhỏ nhất, với điều kiện độ lớn của $\mathbf{w}$ không vượt quá $t$**. Với hai trọng số, vùng cho phép của Ridge, $w_1^2 + w_2^2 \le t$, là **hình tròn**; của Lasso, $\lvert w_1\rvert + \lvert w_2\rvert \le t$, là **hình thoi** có bốn đỉnh trên hai trục. Đường đồng mức của MSE là những elip quanh nghiệm bình phương tối thiểu. Khi nghiệm đó nằm ngoài vùng cho phép, phình elip ra tới khi chạm vùng: điểm chạm là nghiệm.
+
+Hình tròn không có góc nhô ra, nên điểm chạm thường có cả hai tọa độ khác 0. Hình thoi có đỉnh nhọn nằm đúng trên các trục, và elip rất dễ chạm ở một đỉnh, nơi một tọa độ bằng 0. Với 15 trọng số, "hình thoi" có rất nhiều đỉnh và cạnh như vậy, nên nhiều hệ số bằng 0 cùng lúc: mô hình **thưa** (sparse).
+
+{/* FIG: elip đồng mức chạm hình tròn ở chỗ cả hai trọng số khác 0, chạm hình thoi ở một đỉnh nằm trên trục. */}
+<RegularizationGeometryFigure />
+
+Lasso không có nghiệm dạng đóng. scikit-learn giải bằng coordinate descent: lần lượt cập nhật từng hệ số, mỗi lần dùng phép soft-thresholding ở trên.
+
+### Elastic Net
+
+Elastic Net (Zou và Hastie, 2005) cộng cả hai khoản phạt:
+
+$$
+J(\mathbf{w}, b) = \mathcal{L}(\mathbf{w}, b) + \lambda_1\lVert\mathbf{w}\rVert_1 + \lambda_2\lVert\mathbf{w}\rVert_2^2
+$$
+
+$\lambda_2 = 0$ là Lasso, $\lambda_1 = 0$ là Ridge. Khi vài đặc trưng tương quan rất mạnh, như $z_{14}$ và $z_{15}$, Lasso thường giữ một cái, bỏ cái kia khá tùy ý. Phần L2 chia trọng số đều hơn giữa các đặc trưng giống nhau, phần L1 vẫn cho hệ số đúng 0. Đổi lại, có hai siêu tham số phải chọn. `ElasticNet` viết chúng thành `alpha` và `l1_ratio` (cách đổi ở comment của ô code thứ ba).
+
+### Chọn λ
+
+$\lambda$ là siêu tham số, nên chọn như chọn bậc ở bài trước: thử một lưới $\lambda$ (thường cách nhau theo lũy thừa của 10), giữ mức có MSE kiểm định chéo nhỏ nhất, khớp lại trên cả tập train, rồi chấm tập test **một lần**. Đặt `StandardScaler` **trong** pipeline, để mỗi lần khớp nó chỉ học từ phần đang dùng để khớp.
+
+### Giới hạn
+
+- **Không thắng được việc chọn đúng mô hình.** Ở bộ dữ liệu này, Ridge và Lasso bậc 15 vẫn kém đa thức bậc 3 (cuối mục Ví dụ code).
+- **$\lambda$ chọn ra dao động khi dữ liệu ít** (ô code thứ ba).
+- **Lasso chọn đặc trưng khá tùy ý khi chúng tương quan mạnh.** Đừng coi tập nó giữ lại là "đặc trưng quan trọng thật".
+- **Không chỉ cho hồi quy tuyến tính.** Hồi quy logistic và mạng nơ-ron cũng phạt trọng số (phạt L2 ở đó thường gọi là weight decay).
+
+## Minh họa
+
+Hình dưới vẽ điểm train (chấm đặc), điểm test (vòng rỗng) và đa thức bậc 15 khớp với hệ số phạt $\lambda$. Thanh trượt đổi $\lambda$ qua 17 mức: 0, rồi $10^{-14}, \dots, 1, 10$. Hai nút **Ridge** và **Lasso** đổi kiểu phạt, giữ nguyên $\lambda$. Bên dưới là hai MSE, số hệ số bằng đúng 0 (vòng "0" trên biểu đồ cột) và 15 cột hệ số $w_k$. Hãy thử:
+
+1. Lúc đầu là Ridge, $\lambda = 0$: đường bậc 15 của bài trước, MSE test 133.20, cả 15 cột vượt khung.
+2. Kéo tới $\lambda = 0.001$: MSE train 0.0491, MSE test 0.0894, nhỏ nhất trên thanh trượt (dấu ✓). Mọi cột nằm trong khung.
+3. Bấm **Lasso**: MSE train 0.0314, MSE test 0.0851, và 10/15 hệ số bằng đúng 0, chỉ còn $k = 1, 2, 4, 9, 15$.
+4. Kéo tới $\lambda = 10$: Ridge có MSE train 0.3148, MSE test 0.4750, underfitting. Lasso có cả 15 hệ số bằng 0, đường nằm ngang ở $\bar{y} = 0.0831$.
+
+Dấu ✓ nhìn vào tập test, việc mà khi làm thật bạn không được làm. Phần Lasso của hình được tính sẵn bằng một cách giải chính xác, vì ở $\lambda$ rất nhỏ coordinate descent hội tụ rất chậm.
+
+{/* VIZ: λ vừa cho MSE test nhỏ nhất; Lasso đưa nhiều hệ số về đúng 0, Ridge chỉ làm chúng nhỏ lại. */}
+<RegularizationViz />
+
+## Ví dụ code
+
+Ba ô dưới đây chạy độc lập. Ô chạy đầu tiên lâu hơn một chút, vì trình duyệt phải tải thêm scikit-learn. Mọi ô dùng cùng pipeline: `PolynomialFeatures` tạo các cột $x, \dots, x^{15}$, `StandardScaler` chuẩn hóa chúng, rồi tới mô hình có phạt. `model[-1]` là bước cuối, có `coef_` (các $w_k$) và `intercept_` ($b$).
+
+### Ridge với vài mức λ
+
+Ô đầu tiên khớp Ridge với năm mức $\lambda$, in hai MSE, hệ số lớn nhất về trị tuyệt đối, và $b$.
+
+<PythonRunner code={ridgeCode} title="Ridge trên đa thức bậc 15" />
+
+Chỉ $\lambda = 10^{-12}$ đã kéo MSE test từ khoảng 133 xuống 0.5375, hệ số lớn nhất từ hàng chục tỉ còn 26594.49: đó là các "hướng mà dữ liệu nói ít". Ở $\lambda = 0.001$, MSE test nhỏ nhất (0.0894) và hệ số lớn nhất chỉ còn 2.75. Ở $\lambda = 10$, MSE train 0.3148, gần gấp đôi đường thẳng bậc 1 của bài trước (0.1663): underfitting. MSE train tăng dần theo $\lambda$, còn MSE test giảm rồi tăng: hình chữ U như khi đổi bậc, chỉ là trục ngang đảo chiều. $b = 0.0831$ ở cả năm mức, đúng bằng $\bar{y}$, như Bước 1.
+
+### Lasso và các hệ số bằng 0
+
+Ô thứ hai khớp Lasso với ba mức $\lambda$, đếm số hệ số bằng **đúng** 0 (`w == 0`) và in các $k$ còn giữ lại. Cuối ô là Ridge ở $\lambda = 0.001$ để so sánh.
+
+<PythonRunner code={lassoCode} title="Lasso: đếm hệ số bằng 0" />
+
+- Ở $\lambda = 0.001$, Lasso có MSE test 0.0851, nhỉnh hơn Ridge cùng mức (0.0894), và chỉ giữ 5 hệ số: $k = 1, 2, 4, 9, 15$. Ở $\lambda = 0.01$ còn 4, ở $\lambda = 0.1$ còn 3 (lý thuyết không bảo đảm lúc nào cũng tăng như vậy).
+- Ridge cùng mức 0.001 có 0/15 hệ số bằng 0; nhỏ nhất là 0.07, nhỏ nhưng khác 0.
+
+Các $k$ được giữ đổi khá tùy ý (4 và 9, rồi 6 và 7), vì các cột $z_k$ gần như trùng nhau: đó là lý do của Elastic Net. Ô không dùng $\lambda$ từ $10^{-4}$ trở xuống, vì ở đó coordinate descent không kịp hội tụ (hộp thứ ba ở mục Lỗi hay gặp).
+
+### Chọn λ bằng kiểm định chéo
+
+Ô thứ ba chọn $\lambda$ chỉ bằng 16 điểm train, với `KFold(n_splits=4, shuffle=True, random_state=0)` như bài trước. Ridge thử $\lambda$ từ $10^{-6}$ tới 10. Lasso và Elastic Net ($\lambda_1 = \lambda_2 = \lambda$) chỉ thử 0.01 và 0.1, vì ở 0.001 Lasso không hội tụ kịp trong các fold. `alpha` của Ridge giữ là $16\lambda$ cả trong các fold chỉ có 12 điểm, như `RidgeCV` vẫn làm, nên $\lambda$ thật trong fold là $\frac{4}{3}\lambda$. Thử với `alpha` $= 12\lambda$ vẫn chọn cùng mức.
+
+<PythonRunner code={chooseLambdaCode} title="Chọn λ bằng kiểm định chéo" />
+
+Kiểm định chéo chọn **Ridge $\lambda = 0.1$** (MSE kiểm định chéo 0.1605), cho MSE test 0.1747. Nó **không** chọn $\lambda = 0.001$, mức tốt nhất trên tập test ở ô đầu: ở đó MSE kiểm định chéo là 0.3409, lớn gấp đôi.
+
+Vì sao lệch nhau? Điểm test nằm xen giữa điểm train (từ $x = 0.06$ tới $0.94$), nên không bắt đường cong đoán ở chỗ trống. Kiểm định chéo thì có: fold giữ lại $x = 0.03$ hay $0.98$ bắt đa thức bậc 15 phải **ngoại suy** (extrapolation), fold giữ lại cả $0.85$ lẫn $0.9$ để trống từ 0.77 tới 0.98. Ở đó, đường phạt nhẹ vung mạnh: khi giữ lại $x = 0.98$, bình phương sai số tại điểm này là 0.88 với $\lambda = 0.001$, chỉ 0.02 với $\lambda = 0.1$. Nên ở đây kiểm định chéo nghiêng về phạt nặng. Nó vẫn là cách đúng: 0.0894 lạc quan vì đã nhìn tập test để chọn, còn 0.1747 thì trung thực.
+
+Lasso chọn $\lambda = 0.01$: MSE test 0.1341, 11 hệ số bằng 0. Elastic Net cũng chọn $\lambda = 0.01$, MSE kiểm định chéo 0.1696 (Lasso là 0.1765), MSE test 0.1481, và chỉ 6 hệ số bằng 0, vì phần L2 chia trọng số cho các cột giống nhau thay vì bỏ hẳn chúng.
+
+### Vậy regularization có đáng không?
+
+| Mô hình | $\lambda$ chọn bằng | MSE test |
+|---|---|---:|
+| Bậc 15, không phạt | | khoảng 133 |
+| Bậc 3, không phạt | kiểm định chéo (bài trước) | 0.0754 |
+| Ridge bậc 15, $\lambda = 0.001$ | nhìn tập test (không được làm) | 0.0894 |
+| Lasso bậc 15, $\lambda = 0.001$ | nhìn tập test (không được làm) | 0.0851 |
+| Ridge bậc 15, $\lambda = 0.1$ | kiểm định chéo | 0.1747 |
+| Lasso bậc 15, $\lambda = 0.01$ | kiểm định chéo | 0.1341 |
+| Elastic Net bậc 15, $\lambda = 0.01$ | kiểm định chéo | 0.1481 |
+
+Nói thẳng: **ở bộ dữ liệu này, chọn đúng bậc 3 vẫn tốt nhất**. Ngay cả ở mức $\lambda$ tốt nhất trên lưới, chọn bằng tập test, Ridge kém bậc 3 khoảng 19%, Lasso khoảng 13%. Ridge với $\lambda$ khoảng $3 \times 10^{-4}$, giữa hai nấc của lưới, cho khoảng 0.085, vẫn kém khoảng 12%. Quy luật thật rất gần một đa thức bậc 3, nên "chọn bậc" là đúng núm vặn cho bài toán này. Vậy vì sao vẫn cần regularization?
+
+- **Không phải dò từng tập đặc trưng.** Ở đây các đặc trưng có thứ tự tự nhiên, nên thử bậc 1 tới 15 là đủ. Với 50 đặc trưng như diện tích, số phòng, khoảng cách tới trung tâm, không có "bậc" để dò, còn số tập con là $2^{50}$, tức hơn một triệu tỉ. $\lambda$ là một núm duy nhất cho mọi đặc trưng.
+- **Chặn thảm họa.** Từ khoảng 133 xuống 0.1747 chỉ bằng một tham số, kể cả khi kiểm định chéo chọn thận trọng.
+- **Lasso tự chọn đặc trưng**, và kiểm định chéo có thể chọn cùng lúc cả bậc lẫn $\lambda$.
+
+## Lỗi hay gặp
+
+:::caution[Truyền thẳng λ vào `alpha`]
+`Ridge` dùng tổng bình phương, không chia $m$: `alpha` $= m\lambda$. `Lasso` dùng nửa MSE: `alpha` $= \lambda/2$. Cùng một số `alpha` vì thế **không** cho cùng mức phạt ở hai lớp: `Ridge(alpha=0.001)` trên 16 điểm ứng với $\lambda \approx 6 \times 10^{-5}$. Sách và khóa học cũng mỗi nơi một kiểu, nên khi chép $\lambda$ từ tài liệu khác, hãy xem hàm mục tiêu của họ trước.
+:::
+
+:::caution[Quên chuẩn hóa, hoặc chuẩn hóa ngoài pipeline]
+Không chuẩn hóa thì mức phạt mỗi đặc trưng nhận phụ thuộc vào đơn vị của nó. Nhưng chuẩn hóa **cả** tập dữ liệu rồi mới chia fold cũng sai: trung bình và độ lệch chuẩn đã "thấy" phần dữ liệu dùng để chấm, một dạng rò rỉ dữ liệu (data leakage). Hãy đặt `StandardScaler` trong `make_pipeline` như ba ô code của bài.
+:::
+
+:::caution[`ConvergenceWarning` khi λ quá nhỏ]
+Coordinate descent là thuật toán lặp. Khi các đặc trưng gần như trùng nhau và $\lambda$ rất nhỏ, nó hội tụ rất chậm. Ở bộ dữ liệu này, `Lasso` với $\lambda \le 10^{-4}$ báo `ConvergenceWarning` dù đã đặt `max_iter=100_000`, và số hệ số bằng 0 khi đó sai. Đừng bỏ qua cảnh báo này: chuẩn hóa đặc trưng, tăng `max_iter`, hoặc dùng $\lambda$ lớn hơn.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Regularization làm nhỏ MSE cộng một khoản phạt: Ridge $\lambda\lVert\mathbf{w}\rVert_2^2$, Lasso $\lambda\lVert\mathbf{w}\rVert_1$, Elastic Net cả hai; $b$ không bị phạt. $\lambda$ nhỏ quá là overfitting, lớn quá là underfitting.
+- Ridge: $\left(\mathbf{X}^\top\mathbf{X} + m\lambda\mathbf{I}\right)\mathbf{w} = \mathbf{X}^\top\mathbf{y}$, $b = \bar{y}$ (đặc trưng đã chuẩn hóa). Mọi hệ số co lại nhưng không về đúng 0.
+- Lasso trừ một lượng cố định rồi cắt ở 0 (một biến: $w = 0$ khi $\lvert c\rvert \le \lambda/2$), nên cho mô hình thưa. Hình thoi L1 có đỉnh trên các trục, hình tròn L2 thì không.
+- Chuẩn hóa đặc trưng trong pipeline. Đổi đúng $\lambda$ sang `alpha` (Ridge: $m\lambda$, Lasso: $\lambda/2$). Chọn $\lambda$ bằng kiểm định chéo, kể cả khi nó thận trọng hơn mức tốt nhất trên tập test.
+
+**Đọc thêm:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Bài 15: Overfitting](https://machinelearningcoban.com/2017/03/04/overfitting/), mục regularization. Tiếng Việt, giới thiệu L2 (weight decay), L1 và Elastic Net. Ký hiệu: $N$ là số mẫu, $J$ là hàm mất mát.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Linear Models](https://scikit-learn.org/1.8/modules/linear_model.html), các mục Ridge, Lasso và Elastic-Net. Hàm mục tiêu chính xác của từng lớp, để đổi `alpha` cho đúng.
+- James, G., Witten, D., Hastie, T., Tibshirani, R. (2013). [*An Introduction to Statistical Learning*](https://www.statlearning.com/s/ISLR-Seventh-Printing.pdf) (PDF), bản 1, chương 6: Linear Model Selection and Regularization. Ký hiệu khác: $n$ là số mẫu, $p$ là số đặc trưng, $\beta$ là trọng số.
+- Tibshirani, R. (1996). [*Regression Shrinkage and Selection via the Lasso*](https://doi.org/10.1111/j.2517-6161.1996.tb02080.x). *Journal of the Royal Statistical Society: Series B* 58(1), 267–288. Bài báo đề xuất Lasso.
+- Hoerl, A. E., Kennard, R. W. (1970). [*Ridge Regression: Biased Estimation for Nonorthogonal Problems*](https://doi.org/10.1080/00401706.1970.10488634). *Technometrics* 12(1), 55–67. Và Zou, H., Hastie, T. (2005). [*Regularization and Variable Selection via the Elastic Net*](https://doi.org/10.1111/j.1467-9868.2005.00503.x). *Journal of the Royal Statistical Society: Series B* 67(2), 301–320. Hai bài báo đề xuất Ridge và Elastic Net.
+
+<LessonProgress />

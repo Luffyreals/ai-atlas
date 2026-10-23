@@ -1,0 +1,87 @@
+---
+// ml/regularization, "Lasso": why L1 gives exact zeros. One loss for both panels (decision 49); its level
+// ellipses touch the circle |w|₂ ≤ 1 (Ridge) where both weights are non-zero, and the diamond |w|₁ ≤ 1 (Lasso)
+// at its vertex on the w1 axis, where w2 = 0. A schematic plot drawn with the kit (docs/architecture/viz.md,
+// section 11.4.4): one PlotBox per panel, one unit for both axes, so the circle stays round. Narrow layout only.
+// Words and numbers: src/data/figures/regularization-geometry.ts.
+import { REGULARIZATION_GEOMETRY, REGULARIZATION_GEOMETRY_PLOT as PLOT } from '@data/figures/regularization-geometry';
+import type { Pt } from '@lib/figures/geometry';
+import { ellipseAttrs, levelEllipse, pointsAttr, toView, type PlotBox } from '@lib/figures/plot';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigMath from './kit/FigMath.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = REGULARIZATION_GEOMETRY[getPageLocale(Astro.locals.starlightRoute)];
+
+const HEIGHT = 260;
+const TOP = 28;
+const TITLE_Y = 12;
+const NOTE_Y = [202, 220] as const;
+const KEY = { x: 12, y: 246, textX: 22 };
+const DOT_R = { centre: 3.5, touch: 5 };
+const AXIS = { x: [-1.15, 2.55], y: [-1.15, 2.3] } as const;
+const { budget: r } = PLOT;
+
+const panels = [
+  { key: 'ridge' as const, x: 4, titleX: 88, touch: PLOT.ridgeTouch as Pt },
+  { key: 'lasso' as const, x: 188, titleX: 272, touch: PLOT.lassoTouch as Pt },
+].map((panel) => {
+  const box: PlotBox = { x: panel.x, y: TOP, unit: PLOT.unit, xDomain: PLOT.xDomain, yDomain: PLOT.yDomain };
+  const origin = toView(box, [0, 0]);
+  const xTip = toView(box, [AXIS.x[1], 0]);
+  const yTip = toView(box, [0, AXIS.y[1]]);
+  return {
+    ...panel,
+    box,
+    origin,
+    xAxis: [toView(box, [AXIS.x[0], 0]), xTip] as const,
+    yAxis: [toView(box, [0, AXIS.y[0]]), yTip] as const,
+    w1: { x: xTip[0], y: origin[1] + 13 },
+    w2: { x: origin[0] - 6, y: yTip[1] + 8 },
+    diamond: pointsAttr(box, [[r, 0], [0, r], [-r, 0], [0, -r]]),
+    levels: PLOT.levelScales.map((scale) => ellipseAttrs(box, levelEllipse(PLOT.loss, panel.touch, scale))),
+    centre: toView(box, PLOT.loss.centre),
+    touchView: toView(box, panel.touch),
+  };
+});
+---
+
+<FigureFrame id="regularization-geometry" text={t} narrowHeight={HEIGHT}>
+  <Fragment slot="narrow">
+    {
+      panels.map((p) => (
+        <>
+          {p.key === 'ridge' ? (
+            <circle class="atlas-fig-region" cx={p.origin[0]} cy={p.origin[1]} r={r * PLOT.unit} />
+          ) : (
+            <polygon class="atlas-fig-region" points={p.diamond} />
+          )}
+          <FigArrow from={p.xAxis[0]} to={p.xAxis[1]} />
+          <FigArrow from={p.yAxis[0]} to={p.yAxis[1]} />
+          {p.levels.map((e, i) => (
+            <ellipse
+              class="atlas-fig-level"
+              data-tone={i === p.levels.length - 1 ? 'touch' : undefined}
+              cx={e.cx}
+              cy={e.cy}
+              rx={e.rx}
+              ry={e.ry}
+              transform={e.transform}
+            />
+          ))}
+          <circle class="atlas-fig-dot" cx={p.centre[0]} cy={p.centre[1]} r={DOT_R.centre} />
+          <circle class="atlas-fig-dot" data-tone="touch" cx={p.touchView[0]} cy={p.touchView[1]} r={DOT_R.touch} />
+          <FigText x={p.titleX} y={TITLE_Y} lines={t.labels[p.key]} />
+          <FigMath x={p.w1.x} y={p.w1.y} symbol="w" sub="1" anchor="end" />
+          <FigMath x={p.w2.x} y={p.w2.y} symbol="w" sub="2" anchor="end" />
+          <FigText x={p.titleX} y={NOTE_Y[0]} lines={t.labels.touch} size="small" />
+          <FigText x={p.titleX} y={NOTE_Y[1]} lines={p.key === 'ridge' ? t.labels.bothNonZero : t.labels.onAxis} />
+        </>
+      ))
+    }
+    <circle class="atlas-fig-dot" cx={KEY.x} cy={KEY.y} r={DOT_R.centre} />
+    <FigText x={KEY.textX} y={KEY.y} lines={t.labels.ols} size="small" anchor="start" />
+  </Fragment>
+</FigureFrame>

@@ -213,5 +213,24 @@ M2 có một bước **chờ bạn duyệt**. Mọi bài sau đều theo templat
 46. **Bản vi bài Overfitting và Underfitting đã được người dùng duyệt (23/10/2026).** Gồm các lựa chọn tự quyết khi làm bài:
     - quiz câu 2 thu phạm vi về bậc 1–12;
     - chưa gộp phần trùng lặp giữa `PolyFitViz` và `LinearFitViz` (mẫu nét, hàm `axis()`).
+47. **Bài Ridge, Lasso, Elastic Net (`ml/regularization`):**
+    - **Phạm vi:** Ridge và Lasso đi kỹ: hàm mục tiêu, vì sao hệ số co lại, vì sao L1 cho hệ số đúng bằng 0, chuẩn hóa đặc trưng, chọn λ bằng kiểm định chéo. Elastic Net chỉ một mục ngắn.
+    - **Toán:** viết $\mathcal{L} + \lambda\lVert\mathbf{w}\rVert_2^2$ và $\mathcal{L} + \lambda\lVert\mathbf{w}\rVert_1$. Dẫn nghiệm dạng đóng của Ridge từ phương trình chuẩn. Lasso giải thích bằng hình học và ví dụ một biến, không dẫn thuật toán.
+    - **Dữ liệu:** dùng lại bộ `sine`, với đa thức bậc 15.
+    - **VIZ:** thanh trượt λ. Hiện đường bậc 15, MSE train/test và cột 15 hệ số; có nút chuyển Ridge/Lasso. Phần Lasso tính sẵn bằng Python lúc viết bài.
+    - **Độ dài:** khoảng 10–12 phút đọc, 4 câu quiz, 3 ô code: Ridge với vài giá trị λ; Lasso và số hệ số bằng 0; chọn λ bằng kiểm định chéo, có Elastic Net.
+48. **VIZ bài Regularization** (thiết kế ở `docs/architecture/viz.md` mục 10):
+    - **Thanh trượt λ:** 17 mức, gồm 0 và 10⁻¹⁴ … 10, mỗi nấc một bậc mười.
+    - **Chuyển Ridge/Lasso:** hai nút có `aria-pressed`.
+    - **Biểu đồ cột hệ số:** thang tuyến tính [−10, 10]. Cột vượt khung có tam giác ở mép. Hệ số bằng đúng 0 có vòng "0".
+    - **Bài phải nói rõ:**
+      - Ở λ tốt nhất, Ridge (0.0894) và Lasso (0.0851) vẫn kém việc chọn thẳng bậc 3 (0.0754).
+      - Kiểm định chéo chọn λ = 0.1 cho Ridge, khác mức tốt nhất trên tập test. Lý do: đa thức bậc 15 phải ngoại suy tới các điểm mép bị giữ lại.
+49. **Hình L1/L2 của bài Regularization** (người dùng đồng ý thêm hình; thiết kế ở `docs/architecture/viz.md` mục 11): mở rộng kit hình tĩnh để vẽ được đồ thị tĩnh. Hai ô cạnh nhau dùng **chung một hàm mất mát**, để thấy chỉ có vùng ràng buộc khác nhau. Điểm chạm của Ridge chỉ lệch trục 24°. Phiên chính tự chọn cách này, đổi được khi người dùng duyệt.
+50. **Sau review RegularizationViz:**
+    - Nút Ridge/Lasso đang chọn dùng nền accent, chữ đậm màu.
+    - Gộp ngay phần lặp giữa ba VIZ vào kit: `Swatch`, `DotSwatch`, hàm dựng trục `axis()`. Mục đích là để VIZ của bài Gradient Descent dùng luôn.
+
+51. **Bản vi bài Ridge, Lasso, Elastic Net đã được người dùng duyệt (24/10/2026).** Duyệt cùng các lựa chọn phiên chính đã tự chọn: hai trục hình L1/L2 ghi ký hiệu $w_1$, $w_2$; `alpha` cố định qua các fold khi kiểm định chéo (có câu giải thích trong bài).
 
 Còn mở: tên miền (trước M4).
