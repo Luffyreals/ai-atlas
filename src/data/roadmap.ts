@@ -211,7 +211,7 @@ export const LESSONS: readonly Lesson[] = [
     id: 'ml/regularization',
     title: { vi: 'Ridge, Lasso, Elastic Net', en: 'Ridge, Lasso, and Elastic Net' },
     prerequisites: ['ml/overfitting-underfitting'],
-    status: { vi: 'planned', en: 'planned' },
+    status: { vi: 'published', en: 'planned' },
   },
   {
     id: 'ml/gradient-descent',

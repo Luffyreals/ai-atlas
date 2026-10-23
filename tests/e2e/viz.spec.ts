@@ -104,6 +104,25 @@ function ownJs(islandFile: string, rendererFile: string): { files: string[]; gzi
 
 // --- Contrast (WCAG 2.x): the core (rgba, backgroundOf, luminance, pair) is in helpers.ts. Runs in the page. ---
 
+/**
+ * States a contrast test walks through, so marks that only some states draw are measured too: every toggle
+ * pressed in turn (Ridge then Lasso: the last one wins), then every slider at its end (RegularizationViz
+ * draws its "exactly 0" rings only with Lasso at a λ above 0; at λ = 0 it draws bars and triangles).
+ */
+const CONTRAST_STATES = ['as loaded', 'toggles on', 'sliders at the end'] as const;
+type ContrastState = (typeof CONTRAST_STATES)[number];
+
+/** Moves a hydrated VIZ from the previous state of CONTRAST_STATES to `state`. */
+async function enterState(page: Page, viz: Locator, state: ContrastState): Promise<void> {
+  if (state === 'toggles on') for (const button of await viz.getByRole('button').all()) await button.click();
+  if (state === 'sliders at the end') {
+    for (const slider of await viz.getByRole('slider').all()) {
+      await slider.focus();
+      await page.keyboard.press('End');
+    }
+  }
+}
+
 /** Contrast of plot marks, key swatches and text of one VIZ. Needs installContrast(page) first. */
 function measureContrast(root: Element): {
   marks: Contrast[];
@@ -115,8 +134,8 @@ function measureContrast(root: Element): {
   const SHAPES = 'line, circle, polyline, polygon, path, rect, ellipse';
 
   // Marks on every plot (a VIZ may have more than one, e.g. an error chart) against the plot background.
-  // Not measured on purpose (sections 4.9 and 9.4.7): the grid (decoration), the halo of the ×, the outline
-  // of the points and the inside of a ring or a triangle (all three the plot background colour).
+  // Not measured on purpose (sections 4.9, 9.4.7 and 10.4.6): the grid (decoration), the halo of the ×, the
+  // outline of the points and the inside of a ring, a triangle or a zero ring (the plot background colour).
   const marks: Contrast[] = [];
   const unmeasured: string[] = [];
   for (const [n, plot] of [...root.querySelectorAll('.atlas-viz-plot')].entries()) {
@@ -135,6 +154,8 @@ function measureContrast(root: Element): {
       ['line.atlas-viz-axis', 'stroke'],
       ['line.atlas-viz-marker', 'stroke'],
       ['line.atlas-viz-cursor', 'stroke'],
+      ['line.atlas-viz-bar', 'stroke'], // a coefficient bar and its 2px stub (section 10.4.5)
+      ['circle.atlas-viz-zero', 'stroke'], // a coefficient exactly 0: a hollow ring on the zero line
     ] as const) {
       for (const el of plot.querySelectorAll(selector)) {
         measured.add(el);
@@ -150,13 +171,14 @@ function measureContrast(root: Element): {
   }
 
   // Swatches of the key and the readouts against the block (section 4.9, second table): 3:1 like any mark.
-  // A filled point is measured by its fill; a ring, a triangle and every line by their stroke (the inside of
-  // a ring is the plot background on purpose, section 9.4.7).
+  // A filled point is measured by its fill; a ring, a zero ring, a triangle and every line by their stroke
+  // (the inside of a ring is the plot background on purpose, sections 9.4.7 and 10.4.6).
   const swatches: Contrast[] = [];
   for (const swatch of root.querySelectorAll('svg.atlas-viz-swatch')) {
     const background = backgroundOf(swatch);
     for (const el of swatch.querySelectorAll(SHAPES)) {
-      const property = el.tagName.toLowerCase() === 'circle' && !el.classList.contains('atlas-viz-ring') ? 'fill' : 'stroke';
+      const hollow = el.matches('.atlas-viz-ring, .atlas-viz-zero');
+      const property = el.tagName.toLowerCase() === 'circle' && !hollow ? 'fill' : 'stroke';
       const what = `swatch ${el.tagName.toLowerCase()}.${el.getAttribute('class')?.trim().replace(/\s+/g, '.')} ${property}`;
       swatches.push(pair(what, getComputedStyle(el).getPropertyValue(property), background));
     }
@@ -288,9 +310,9 @@ for (const { path, locale, count } of PAGES) {
         await page.goto(path);
         await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
         for (const viz of await hydrateAll(page)) {
-          // Measure with every toggle on as well, so parts hidden at first are measured too.
-          for (const pass of ['as loaded', 'toggles on']) {
-            if (pass === 'toggles on') for (const button of await viz.getByRole('button').all()) await button.click();
+          // Measure in every state of CONTRAST_STATES, so parts hidden at first are measured too.
+          for (const pass of CONTRAST_STATES) {
+            await enterState(page, viz, pass);
             await page.mouse.move(0, 0); // no hover style on a button
             await installContrast(page);
             const { marks, swatches, text, unmeasured } = await viz.evaluate(measureContrast);
@@ -316,38 +338,55 @@ for (const { path, locale, count } of PAGES) {
       await page.goto(path);
       const viz = page.locator('.atlas-viz').first();
       await hydrate(viz);
-      // One mark of each of these kinds that the VIZ has, on its plots and in its swatches, made the colour of
-      // what is behind it (a ring by its stroke: its inside is that colour already).
-      const broken = await viz.evaluate((root) => {
-        const kinds = [
-          ['line.atlas-viz-error', 'stroke'],
-          ['circle.atlas-viz-ring', 'stroke'],
-          ['polygon.atlas-viz-ring', 'stroke'],
-        ] as const;
-        const out: { where: 'plot' | 'swatch'; what: string }[] = [];
-        for (const [where, scope, behind] of [
-          ['plot', '.atlas-viz-plot', '.atlas-viz-plot'],
-          ['swatch', 'svg.atlas-viz-swatch', '.atlas-viz'],
-        ] as const) {
-          for (const [selector, property] of kinds) {
-            const el = root.querySelector(`${scope} ${selector}`);
-            if (!el) continue;
-            const bg = getComputedStyle(el.closest(behind) as Element).backgroundColor;
-            el.setAttribute('style', `${property}: ${bg}`);
-            out.push({ where, what: `${selector} ${property}` });
+      let brokenInPlots = 0;
+      // In each state (a zero ring is only drawn in the last one), one mark of each of these kinds that the
+      // VIZ has, on its plots and in its swatches, made the colour of what is behind it (a ring by its
+      // stroke: its inside is that colour already). The inline style stays until React redraws the mark.
+      for (const state of CONTRAST_STATES) {
+        await enterState(page, viz, state);
+        await page.mouse.move(0, 0);
+        const broken = await viz.evaluate((root) => {
+          const kinds = [
+            ['line.atlas-viz-error', 'stroke'],
+            ['circle.atlas-viz-ring', 'stroke'],
+            ['polygon.atlas-viz-ring', 'stroke'],
+            ['line.atlas-viz-bar', 'stroke'],
+            ['circle.atlas-viz-zero', 'stroke'],
+          ] as const;
+          // Undo the previous state's breaks first, so each state is checked on its own.
+          for (const el of root.querySelectorAll('[data-atlas-broken]')) {
+            el.removeAttribute('style');
+            el.removeAttribute('data-atlas-broken');
           }
+          const out: { where: 'plot' | 'swatch'; what: string }[] = [];
+          for (const [where, scope, behind] of [
+            ['plot', '.atlas-viz-plot', '.atlas-viz-plot'],
+            ['swatch', 'svg.atlas-viz-swatch', '.atlas-viz'],
+          ] as const) {
+            for (const [selector, property] of kinds) {
+              const el = root.querySelector(`${scope} ${selector}`);
+              if (!el) continue;
+              const bg = getComputedStyle(el.closest(behind) as Element).backgroundColor;
+              el.setAttribute('style', `${property}: ${bg}`);
+              el.setAttribute('data-atlas-broken', '');
+              out.push({ where, what: `${selector} ${property}` });
+            }
+          }
+          (root.querySelector('figcaption') as HTMLElement).style.color = getComputedStyle(root).backgroundColor;
+          return out;
+        });
+        brokenInPlots += broken.filter((b) => b.where === 'plot').length;
+        await installContrast(page);
+        const result = await viz.evaluate(measureContrast);
+        for (const { where, what } of broken) {
+          const list = where === 'plot' ? result.marks : result.swatches;
+          expect(list.some((m) => m.what.includes(what) && m.ratio < 1.1), `${state}, ${where}: ${what} seen as too faint`).toBe(
+            true,
+          );
         }
-        (root.querySelector('figcaption') as HTMLElement).style.color = getComputedStyle(root).backgroundColor;
-        return out;
-      });
-      expect(broken.filter((b) => b.where === 'plot').length, 'a mark kind to break').toBeGreaterThan(0);
-      await installContrast(page);
-      const result = await viz.evaluate(measureContrast);
-      for (const { where, what } of broken) {
-        const list = where === 'plot' ? result.marks : result.swatches;
-        expect(list.some((m) => m.what.includes(what) && m.ratio < 1.1), `${where}: ${what} seen as too faint`).toBe(true);
+        expect(result.text.some((m) => m.ratio < 1.1), `${state}: the faint caption seen`).toBe(true);
       }
-      expect(result.text.some((m) => m.ratio < 1.1)).toBe(true);
+      expect(brokenInPlots, 'a mark kind to break').toBeGreaterThan(0);
     });
 
     test('(5) Tab goes through every control in DOM order, each with the focus ring, then leaves the VIZ', async ({

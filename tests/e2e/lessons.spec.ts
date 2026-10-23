@@ -62,8 +62,12 @@ interface FigureReport {
   duplicateIds: string[];
   /** Elements that are JS or load another file. */
   forbidden: string[];
+  /** Without the KaTeX of the caption (section 11.5 T3): the budget is for the hand-drawn SVG. */
   chars: number;
   elements: number;
+  /** The KaTeX trees of the caption, counted apart for the annotation. */
+  katexChars: number;
+  katexElements: number;
   texts: number;
   smallestPx: number;
   /** Text too small, outside the viewBox, or out of its box. */
@@ -117,6 +121,10 @@ function inspectFigure(figure: Element, minPx: number): FigureReport {
       }
     }
   }
+  // Outermost .katex trees only (none sits inside another), so nothing is subtracted twice.
+  const katex = [...figure.querySelectorAll('.katex')].filter((el) => !el.parentElement?.closest('.katex'));
+  const katexChars = katex.reduce((sum, el) => sum + el.outerHTML.length, 0);
+  const katexElements = figure.querySelectorAll('.katex, .katex *').length;
   return {
     id: figure.id,
     lang: figure.getAttribute('lang'),
@@ -129,44 +137,97 @@ function inspectFigure(figure: Element, minPx: number): FigureReport {
     },
     duplicateIds: ids.filter((id) => document.querySelectorAll(`[id="${CSS.escape(id)}"]`).length !== 1),
     forbidden,
-    chars: figure.outerHTML.length,
-    elements: figure.querySelectorAll('*').length + 1,
+    chars: figure.outerHTML.length - katexChars,
+    elements: figure.querySelectorAll('*').length + 1 - katexElements,
+    katexChars,
+    katexElements,
     texts,
     smallestPx,
     textIssues,
   };
 }
 
-/** Text ≥ 4.5 against the nearest background (its box, or the page); box borders and arrows ≥ 3 against the page. */
-function figureContrast(figure: Element): { text: Contrast[]; marks: Contrast[] } {
+/**
+ * Text ≥ 4.5 against the nearest background: its box, a shaded region its centre lies in (section 11.5 T2),
+ * or the page. Marks ≥ 3 against the page (T1), and also against the fill of every region they run over
+ * (an axis through a region, section 11.4.3). Not measured on purpose: the inside of a box (the background
+ * of its text), the fill of a region (decoration) and the halo of a touch dot (the page colour). Any other
+ * shape is returned as unmeasured, so a new kind of mark is added here, not left out silently.
+ */
+function figureContrast(figure: Element): { text: Contrast[]; marks: Contrast[]; unmeasured: string[] } {
   const { backgroundOf, over, rgba, pair } = window.atlasContrast!;
   const text: Contrast[] = [];
   const marks: Contrast[] = [];
+  const unmeasured: string[] = [];
   const caption = figure.querySelector('figcaption');
   if (caption) text.push(pair('figcaption', getComputedStyle(caption).color, backgroundOf(caption)));
+
+  // A point of `el`'s user space, in `region`'s user space (through the svg viewport: an ellipse is rotated).
+  const inRegion = (el: SVGGraphicsElement, x: number, y: number, region: SVGGeometryElement): boolean => {
+    const from = el.getCTM();
+    const to = region.getCTM();
+    if (!from || !to) return false;
+    return region.isPointInFill(new DOMPoint(x, y).matrixTransform(from).matrixTransform(to.inverse()));
+  };
+  // The centre, and points along the outline of a shape (its stroke, or the edge of its fill).
+  const samples = (el: SVGGeometryElement): [number, number][] => {
+    const length = el.getTotalLength();
+    const along = Array.from({ length: 24 }, (_, i) => el.getPointAtLength((length * i) / 24));
+    const box = el.getBBox();
+    return [[box.x + box.width / 2, box.y + box.height / 2], ...along.map((p): [number, number] => [p.x, p.y])];
+  };
+  // "ellipse.atlas-fig-level[touch]", or "g.atlas-fig-node > rect[accent]" for a shape without a class.
+  const describe = (el: Element) => {
+    const tone = el.closest('[data-tone]')?.getAttribute('data-tone');
+    const name = (node: Element) =>
+      `${node.tagName.toLowerCase()}${(node.getAttribute('class') ?? '').trim().replace(/^|\s+/g, '.').replace(/^\.$/, '')}`;
+    const self = el.getAttribute('class') || !el.parentElement ? name(el) : `${name(el.parentElement)} > ${name(el)}`;
+    return `${self}${tone ? `[${tone}]` : ''}`;
+  };
+
   for (const svg of figure.querySelectorAll('svg.atlas-fig-svg')) {
     if (!svg.checkVisibility()) continue;
     const page = backgroundOf(svg);
-    for (const el of svg.querySelectorAll('text')) {
+    const regions = [...svg.querySelectorAll<SVGGeometryElement>('.atlas-fig-region')];
+    const regionBg = (region: Element) => over(rgba(getComputedStyle(region).fill), page);
+
+    for (const el of svg.querySelectorAll<SVGTextElement>('text')) {
       const spans = [...el.querySelectorAll('tspan')];
       const words = (spans.length > 0 ? spans : [el]).map((line) => (line.textContent ?? '').trim()).join(' / ');
       if (!words.replace(/[\s/]/g, '')) continue;
       const rect = el.closest('.atlas-fig-node')?.querySelector(':scope > rect');
-      const background = rect ? over(rgba(getComputedStyle(rect).fill), page) : page;
-      text.push(pair(`"${words.slice(0, 40)}"`, getComputedStyle(el).fill, background));
+      const b = el.getBBox();
+      const region = rect ? undefined : regions.find((r) => inRegion(el, b.x + b.width / 2, b.y + b.height / 2, r));
+      const background = rect ? over(rgba(getComputedStyle(rect).fill), page) : region ? regionBg(region) : page;
+      text.push(pair(`"${words.slice(0, 40)}"${region ? ' on a region' : ''}`, getComputedStyle(el).fill, background));
     }
+
+    const measured = new Set<Element>();
     for (const [selector, property] of [
       ['.atlas-fig-node > rect', 'stroke'],
       ['.atlas-fig-arrow', 'stroke'],
       ['.atlas-fig-arrow-head', 'fill'],
+      ['.atlas-fig-region', 'stroke'],
+      ['.atlas-fig-level', 'stroke'],
+      ['.atlas-fig-dot', 'fill'],
     ] as const) {
-      for (const el of svg.querySelectorAll(selector)) {
-        const tone = el.closest('.atlas-fig-node')?.getAttribute('data-tone');
-        marks.push(pair(`${selector}${tone ? `[${tone}]` : ''} ${property}`, getComputedStyle(el).getPropertyValue(property), page));
+      for (const el of svg.querySelectorAll<SVGGeometryElement>(selector)) {
+        measured.add(el);
+        const colour = getComputedStyle(el).getPropertyValue(property);
+        const what = `${describe(el)} ${property}`;
+        marks.push(pair(what, colour, page));
+        const points = samples(el);
+        for (const region of regions) {
+          if (region === el || !points.some(([x, y]) => inRegion(el, x, y, region))) continue;
+          marks.push(pair(`${what} on ${describe(region)}`, colour, regionBg(region)));
+        }
       }
     }
+    for (const el of svg.querySelectorAll('line, circle, ellipse, polyline, polygon, path, rect')) {
+      if (!measured.has(el)) unmeasured.push(`<${el.tagName.toLowerCase()} class="${el.getAttribute('class') ?? ''}">`);
+    }
   }
-  return { text, marks };
+  return { text, marks, unmeasured };
 }
 
 /** Every lesson of a RoadmapMap: a link when it has a page, "(coming soon)" text otherwise; and the legend. */
@@ -490,7 +551,9 @@ for (const lesson of WITH_PAGE) {
             if (scheme === 'light') {
               test.info().annotations.push({
                 type: `figure #${report.id}`,
-                description: `${report.chars} characters, ${report.elements} elements, ${report.texts} texts, smallest ${report.smallestPx}px`,
+                description:
+                  `${report.chars} characters, ${report.elements} elements (KaTeX apart: ${report.katexChars} characters, ` +
+                  `${report.katexElements} elements), ${report.texts} texts, smallest ${report.smallestPx}px`,
               });
               // The figure follows the page's language, even on a fallback page (section 8.2 c).
               expect.soft(report.lang, `${where}: lang`).toBe(locale);
@@ -506,11 +569,83 @@ for (const lesson of WITH_PAGE) {
               expect.soft(report.texts, `${where}: texts measured`).toBeGreaterThan(0);
               expect.soft(report.textIssues, `${where}: text too small or overflowing`).toEqual([]);
             }
-            const { text, marks } = await figure.evaluate(figureContrast);
+            const { text, marks, unmeasured } = await figure.evaluate(figureContrast);
+            expect.soft(unmeasured, `${where}: shapes that figureContrast does not know`).toEqual([]);
+            const lowest = (list: Contrast[]) =>
+              list.length ? list.reduce((low, c) => (c.ratio < low.ratio ? c : low)) : { what: '-', ratio: NaN };
+            test.info().annotations.push({
+              type: `figure #${report.id} contrast (${scheme})`,
+              description: `${marks.length} marks, lowest ${lowest(marks).what} ${lowest(marks).ratio} | ${text.length} texts, lowest ${lowest(text).what} ${lowest(text).ratio}`,
+            });
             expect.soft(text.length, `${where}: texts measured for contrast`).toBeGreaterThan(1);
             expect.soft(marks.length, `${where}: marks measured for contrast`).toBeGreaterThan(0);
             expect.soft(text.filter((c) => c.ratio < 4.5), `${where}: text below 4.5:1`).toEqual([]);
             expect.soft(marks.filter((c) => c.ratio < 3), `${where}: marks below 3:1`).toEqual([]);
+          }
+        }
+      });
+
+      test('static figures, control: figureContrast sees a faint mark of each kind and a faint text on a region', async ({
+        page,
+      }) => {
+        test.skip(figures === 0, 'the lesson has no static figure');
+        await page.goto(path);
+        await page.evaluate(() => document.fonts.ready);
+        await installContrast(page);
+        for (const figure of await page.locator('figure.atlas-figure').all()) {
+          // In the visible svg: the first mark of each kind made the page colour; and, when there is a region,
+          // a short text ("Tt") centred on it, with the region filled in the text's colour.
+          const broken = await figure.evaluate((root) => {
+            const svg = [...root.querySelectorAll<SVGSVGElement>('svg.atlas-fig-svg')].find((el) => el.checkVisibility());
+            if (!svg) return { kinds: [] as { name: string; property: string }[], onRegion: false };
+            const [r, g, b] = window.atlasContrast!.backgroundOf(svg);
+            const pageColour = `rgb(${r}, ${g}, ${b})`;
+            // Named as figureContrast names them, e.g. "polyline.atlas-fig-arrow", "g.atlas-fig-node > rect".
+            const kinds: { name: string; property: string }[] = [];
+            for (const [selector, property, name] of [
+              ['.atlas-fig-node > rect', 'stroke', 'g.atlas-fig-node > rect'],
+              ['.atlas-fig-arrow', 'stroke', 'polyline.atlas-fig-arrow'],
+              ['.atlas-fig-arrow-head', 'fill', 'polygon.atlas-fig-arrow-head'],
+              ['.atlas-fig-region', 'stroke', '.atlas-fig-region'],
+              ['.atlas-fig-level', 'stroke', 'ellipse.atlas-fig-level'],
+              ['.atlas-fig-dot', 'fill', 'circle.atlas-fig-dot'],
+            ] as const) {
+              const el = svg.querySelector(selector);
+              if (!el) continue;
+              el.setAttribute('style', `${property}: ${pageColour}`);
+              kinds.push({ name, property });
+            }
+            const region = svg.querySelector<SVGGraphicsElement>('.atlas-fig-region');
+            if (region) {
+              const box = region.getBBox();
+              const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+              text.setAttribute('class', 'atlas-fig-text');
+              text.setAttribute('x', String(box.x + box.width / 2));
+              text.setAttribute('y', String(box.y + box.height / 2));
+              text.setAttribute('font-size', '15');
+              text.setAttribute('text-anchor', 'middle');
+              text.setAttribute('dominant-baseline', 'central');
+              text.textContent = 'Tt';
+              svg.append(text);
+              region.style.fill = getComputedStyle(text).fill;
+            }
+            return { kinds, onRegion: !!region };
+          });
+          expect(broken.kinds.length, 'a mark kind to break').toBeGreaterThan(0);
+          const result = await figure.evaluate(figureContrast);
+          const faint = result.marks.filter((m) => m.ratio < 1.1).map((m) => m.what);
+          // Each broken kind is seen as too faint against the page.
+          for (const { name, property } of broken.kinds) {
+            expect(
+              faint.some((what) => what.includes(name) && what.endsWith(` ${property}`)),
+              `${name} ${property} seen as too faint; faint: ${faint.join(', ')}`,
+            ).toBe(true);
+          }
+          if (broken.onRegion) {
+            expect(
+              result.text.some((m) => m.what === '"Tt" on a region' && m.ratio < 1.1),
+              'a text on a region is measured against the region',
+            ).toBe(true);
           }
         }
       });

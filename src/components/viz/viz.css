@@ -194,6 +194,34 @@
   stroke-width: 7px;
 }
 
+/* A coefficient bar, in the colour of the fit it belongs to; also its 2px stub, so a tiny w_k still shows. */
+.atlas-viz-bar {
+  stroke: var(--atlas-viz-primary);
+  stroke-width: 10px;
+}
+
+/* A coefficient exactly 0: a hollow ring in ink on the zero line (not blue, so it is no test point). */
+.atlas-viz-zero {
+  fill: var(--atlas-viz-plot-bg);
+  stroke: var(--atlas-viz-ink);
+  stroke-width: 2px;
+}
+
+/* One-of-two buttons in a row (aria-pressed toggles without a check box). */
+.atlas-viz-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* The chosen one: filled with the accent, text in the page background's ink on it (7.42 dark / 6.42 light).
+   Its fill against an unchosen button's gray-5 is 4.63 / 3.79, so the two never look alike. */
+.atlas-viz-choice > .atlas-viz-toggle[aria-pressed='true'] {
+  border-inline-start-color: var(--sl-color-accent);
+  background: var(--sl-color-accent);
+  color: var(--sl-color-black);
+}
+
 /* Key and readouts: a swatch draws the same mark with the same class. */
 .atlas-viz-key {
   display: flex;
@@ -385,6 +413,10 @@
 
   .atlas-viz-chart[data-shape='short'] .atlas-viz-plot {
     aspect-ratio: 3 / 1;
+  }
+
+  .atlas-viz-bar {
+    stroke-width: 16px;
   }
 }
 

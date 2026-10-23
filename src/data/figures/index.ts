@@ -3,10 +3,12 @@
 // fig-<id>, fig-<id>-desc. tests/unit/figure-conventions.test.ts keeps components, files and keys in step.
 import { ML_FAMILIES } from './ml-families';
 import { ML_WORKFLOW } from './ml-workflow';
+import { REGULARIZATION_GEOMETRY } from './regularization-geometry';
 import type { FigureText } from './types';
 
 export const FIGURES = {
   'ml-families': ML_FAMILIES,
   'ml-workflow': ML_WORKFLOW,
+  'regularization-geometry': REGULARIZATION_GEOMETRY,
 } as const satisfies Record<string, FigureText<string>>;
 export type FigureId = keyof typeof FIGURES;

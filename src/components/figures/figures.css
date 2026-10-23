@@ -12,6 +12,7 @@
   --atlas-fig-accent: var(--sl-color-accent);
   --atlas-fig-accent-fill: var(--sl-color-accent-low);
   --atlas-fig-alt: var(--sl-color-blue-high);
+  --atlas-fig-bg: var(--sl-color-bg);
   container-type: inline-size;
   display: grid;
   gap: 12px;
@@ -87,6 +88,41 @@
   fill: var(--atlas-fig-muted);
 }
 
+/* Schematic plots (viz.md 11.4.3): a shaded region with a 2px border, level curves, dots, math labels. */
+.atlas-fig-region {
+  fill: var(--atlas-fig-node);
+  stroke: var(--atlas-fig-accent);
+  stroke-width: 2;
+}
+
+.atlas-fig-level {
+  fill: none;
+  stroke: var(--atlas-fig-alt);
+  stroke-width: 1.5;
+}
+
+.atlas-fig-level[data-tone='touch'] {
+  stroke-width: 2;
+}
+
+.atlas-fig-dot {
+  fill: var(--atlas-fig-alt);
+}
+
+/* Not colour alone: the touch point is larger (r 5) and has a halo of the page background. */
+.atlas-fig-dot[data-tone='touch'] {
+  fill: var(--atlas-fig-ink);
+  stroke: var(--atlas-fig-bg);
+  stroke-width: 2.5;
+  paint-order: stroke;
+}
+
+/* Weight 400: only Barlow 400 italic is loaded; 600 would make the browser slant a bold face (fake italic). */
+.atlas-fig-math {
+  fill: var(--atlas-fig-ink);
+  font-weight: 400;
+}
+
 .atlas-fig-caption {
   color: var(--sl-color-text);
   font-size: var(--sl-text-sm);
@@ -101,5 +137,6 @@
     --atlas-fig-accent: Highlight;
     --atlas-fig-accent-fill: Canvas;
     --atlas-fig-alt: CanvasText;
+    --atlas-fig-bg: Canvas;
   }
 }

@@ -4,6 +4,7 @@
 // (i % 3 == 1, by increasing x) is a test point. The rounded numbers below ARE the data: no code regenerates them.
 // Relative imports only: Playwright e2e imports this file too.
 import type { PolyFitConfig } from '../../lib/viz/poly-fit';
+import type { RegularizationConfig } from '../../lib/viz/regularized-fit';
 import type { XYDataset } from './types';
 
 const X = { name: { vi: 'x', en: 'x' }, unit: { vi: '', en: '' }, digits: 2 } as const;
@@ -11,7 +12,7 @@ const Y = { name: { vi: 'y', en: 'y' }, unit: { vi: '', en: '' }, digits: 2 } as
 
 export const SINE_TRAIN = {
   id: 'sine-train',
-  lessons: ['ml/overfitting-underfitting'], // + 'ml/regularization' when that lesson is written
+  lessons: ['ml/overfitting-underfitting', 'ml/regularization'],
   caption: {
     vi: '16 điểm train, tự sinh từ đường sin y = sin(2πx) cộng nhiễu. Không phải số liệu thật.',
     en: '16 training points, generated from the sine curve y = sin(2πx) plus noise. Not real data.',
@@ -35,7 +36,7 @@ export const SINE_TRAIN = {
 
 export const SINE_TEST = {
   id: 'sine-test',
-  lessons: ['ml/overfitting-underfitting'],
+  lessons: ['ml/overfitting-underfitting', 'ml/regularization'],
   caption: {
     vi: '8 điểm test, sinh cùng cách với tập train và không dùng khi khớp.',
     en: '8 test points, generated like the training set and never used for fitting.',
@@ -83,5 +84,51 @@ export const SINE_POLY_FIT: PolyFitConfig = {
   mseTicks: [0, 0.1, 0.2, 0.3, 0.4],
   samples: 201,
   truthSamples: 61,
+  digits: { mse: 4, mseLarge: 2 },
+};
+
+/**
+ * RegularizationViz on SINE_TRAIN / SINE_TEST (viz.md, sections 10.2.2, 10.2.6, 10.4.3; decision 48;
+ * tests/unit/regularization-sine.test.ts checks it).
+ * - 17 levels: λ = 0 (the degree-15 fit of PolyFitViz), then 10⁻¹⁴ … 10, one per power of ten. The 15 features
+ *   are nearly the same column, so a tiny λ already tames the fit: the grid goes down to 10⁻¹⁴ so that both Ridge
+ *   and Lasso pass through overfit, good and underfit. The slider moves over the index, the label shows λ.
+ *   scripts/sine-lasso-path.py uses the same levels: change both, then run the script again.
+ * - Starts with Ridge at λ = 0, where the curve leaves the plot and every bar is off the chart.
+ * - Bar chart: k over [0.5, 15.5]; w_k linear over [−10, 10], cut at the edges (the bars off the chart get a
+ *   triangle), so every level from 10⁻⁵ up reads in full (but one Lasso coefficient, −11.1 at 10⁻⁵).
+ */
+export const SINE_REGULARIZATION: RegularizationConfig = {
+  degree: 15,
+  levels: [
+    { lambda: 0, exp: null },
+    { lambda: 1e-14, exp: -14 },
+    { lambda: 1e-13, exp: -13 },
+    { lambda: 1e-12, exp: -12 },
+    { lambda: 1e-11, exp: -11 },
+    { lambda: 1e-10, exp: -10 },
+    { lambda: 1e-9, exp: -9 },
+    { lambda: 1e-8, exp: -8 },
+    { lambda: 1e-7, exp: -7 },
+    { lambda: 1e-6, exp: -6 },
+    { lambda: 1e-5, exp: -5 },
+    { lambda: 1e-4, exp: -4 },
+    { lambda: 1e-3, exp: -3 },
+    { lambda: 1e-2, exp: -2 },
+    { lambda: 1e-1, exp: -1 },
+    { lambda: 1, exp: 0 },
+    { lambda: 10, exp: 1 },
+  ],
+  slider: { min: 0, max: 16, step: 1, initial: 0 },
+  initialPenalty: 'ridge',
+  xDomain: [0, 1],
+  yDomain: [-2, 2],
+  xTicks: [0, 0.2, 0.4, 0.6, 0.8, 1],
+  yTicks: [-2, -1, 0, 1, 2],
+  featureDomain: [0.5, 15.5],
+  featureTicks: [1, 5, 10, 15],
+  coefDomain: [-10, 10],
+  coefTicks: [-10, -5, 0, 5, 10],
+  samples: 201,
   digits: { mse: 4, mseLarge: 2 },
 };

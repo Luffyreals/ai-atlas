@@ -38,6 +38,11 @@ export const UI_KEYS = {
     'curve', 'truth', 'showTruth', 'trainMse', 'testMse', 'degreeAxis', 'mseAxis', 'overNote',
     'underfit', 'goodFit', 'overfit', 'bestDegree', 'announce',
   ],
+  vizRegularization: [
+    'caption', 'plotLabel', 'barsLabel', 'barsDesc', 'controls', 'lambdaLabel', 'lambdaValueText',
+    'pow10Spoken', 'zeroLambda', 'penalty', 'ridge', 'lasso', 'curve', 'trainMse', 'testMse', 'zeros',
+    'featureAxis', 'coefAxis', 'overNote', 'underfit', 'goodFit', 'overfit', 'bestLambda', 'announce',
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 export type UiNamespace = keyof typeof UI_KEYS;
