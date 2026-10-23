@@ -1,19 +1,61 @@
 ---
-# Template bài học chuẩn của AI Atlas.
-# Sao chép file này sang src/content/docs/vi/<phần>/<tên-bài>.mdx rồi điền nội dung.
-# Sidebar sinh từ src/data/roadmap.ts, nên không cần `sidebar.order`.
-# Bốn component bên dưới tự gắn `client:*`, không viết `client:*` trong MDX.
-# Code ví dụ nằm ở src/code/<phần>/<bài>/, mỗi ví dụ hai file: example.vi.py và example.en.py
-# (chỉ khác comment). Bản en của bài import example.en.py.
+# TEMPLATE BÀI HỌC AI ATLAS. Chốt ở M2 theo bài mẫu src/content/docs/vi/ml/linear-regression.mdx
+# (đã duyệt). Xem bài mẫu khi cần một ví dụ cụ thể, nhưng không chép nội dung của nó sang bài mới.
+#
+# CÁCH DÙNG
+# - Chép file sang src/content/docs/vi/<phần>/<tên-bài>.mdx. Cùng lần đó, đổi status.vi của bài trong
+#   src/data/roadmap.ts thành 'published' (test roadmap-files đòi file và status khớp nhau).
+#   Sidebar sinh từ roadmap.ts, không cần sidebar.order.
+# - Viết xong thì xóa mọi comment "#" trong frontmatter và mọi khối {/* Hướng dẫn: ... */} trong thân bài.
+#   Giữ các comment còn lại: ở "Cần biết trước", "Minh họa" và "Kiểm tra nhanh".
+#
+# GỢI Ý QUY MÔ (không phải luật cứng): thân bài khoảng 10–13 phút đọc, 2–3 ô code, 1 VIZ (tối đa 2),
+# 3–5 câu quiz.
+#
+# KÝ HIỆU. Nơi chính thức là CLAUDE.md, mục "Quy tắc nội dung". Các dòng dưới đây có từ bài mẫu,
+# có thể sẽ được bổ sung vào CLAUDE.md:
+#   mẫu thứ i: \mathbf{x}^{(i)}, y^{(i)}. Chỉ số (i) viết ở trên, không phải số mũ
+#   đặc trưng thứ j: x_j. Đặc trưng j của mẫu i: x^{(i)}_j
+#   trung bình \bar{x}. Độ lệch khỏi trung bình: \tilde{x}^{(i)} = x^{(i)} - \bar{x}
+#   phần dư: e^{(i)} = y^{(i)} - \hat{y}^{(i)}
+#   MSE dùng \frac{1}{m}, khớp scikit-learn: \mathcal{L} = \frac{1}{m}\sum_{i=1}^{m}(\hat{y}^{(i)} - y^{(i)})^2
+#   ma trận thiết kế \mathbf{X}: m hàng, cột toàn số 1 đặt cuối, nên \boldsymbol{\theta} = [\mathbf{w}; b],
+#   tức [w_1, ..., w_n, b]^\top
+#
+# QUY ƯỚC CHUNG
+# - Thuật ngữ theo docs/glossary.md. Lần đầu xuất hiện thì ghi kèm tiếng Anh: "phần dư (residual)".
+#   Thuật ngữ mới thì thêm vào glossary.
+# - Số kỹ thuật dùng dấu chấm thập phân: w ≈ 0.17, không viết 0,17 (quyết định 22 trong docs/mvp.md).
+#   Gồm số trong bảng dữ liệu, VIZ, code, và lời văn khi nhắc lại các số đó. Số đời thường trong lời văn
+#   viết bình thường. Số trích từ code phải khớp kết quả chạy thật.
+# - Link nội bộ viết tuyệt đối, có "/" ở cuối: /vi/<phần>/<bài>/. Chỉ link tới bài đã xuất bản.
+#   Bài chưa có thì ghi tên bài, không gắn link.
 title: Tên bài học # phải trùng title trong roadmap.ts
-description: Một câu mô tả bài học, dùng cho SEO và thẻ chia sẻ (tối đa khoảng 160 ký tự).
-# Câu hỏi cho <Quiz /> ở mục "Kiểm tra nhanh". Luôn dùng nháy đơn '...' cho chuỗi có $ hoặc \
-# (trong nháy đơn, \ giữ nguyên). Muốn có dấu ' thì gõ ''. Chỉ hỗ trợ $công thức$ và `code`.
-# answer: chỉ số của đáp án đúng, đếm từ 0. explanation: bắt buộc.
+# Câu đầu là tình huống của bài, sau đó kể các ý chính. Dùng cho SEO và thẻ chia sẻ, tối đa khoảng 160 ký tự.
+description: Một câu mô tả bài học.
+# QUIZ cho <Quiz /> ở mục "Kiểm tra nhanh". Gợi ý 3–5 câu, mỗi câu 2–6 phương án.
+# - Chuỗi luôn dùng nháy đơn '...': trong nháy đơn, \ giữ nguyên. Dấu ' trong chuỗi thì gõ ''.
+#   Bẫy của nháy kép: "\frac" thành ký tự điều khiển (form feed) cộng "rac", "\theta" thành tab cộng "heta",
+#   mà build không báo lỗi. "\hat" thì YAML báo lỗi.
+# - Trong chuỗi chỉ dùng được $công thức$ và `code`. Chữ đậm hay link sẽ hiện nguyên ký tự.
+# - Mỗi câu kiểm tra hiểu, không chỉ nhớ: đổi số, đổi tình huống, hỏi "vì sao" hay "nếu ... thì sao".
+#   Không lặp y nguyên ví dụ trong bài.
+# - Phương án sai là những hiểu nhầm có thật. Đáp án đúng nằm ở vị trí khác nhau giữa các câu.
+# - answer: chỉ số của đáp án đúng, đếm từ 0. explanation: bắt buộc, ngắn (khoảng 2–4 câu), nói vì sao
+#   đáp án đúng, và vì sao phương án sai dễ chọn nhất lại sai.
+# - Phương án dài thì viết mỗi phương án một dòng, như câu thứ hai.
 quiz:
+  - question: 'Câu hỏi, có thể có $\hat{y}$ hoặc `code`?'
+    options: ['Phương án A', 'Phương án B', 'Phương án C']
+    answer: 1
+    explanation: 'Vì sao B đúng. Vì sao A, phương án dễ nhầm nhất, lại sai.'
   - question: '...'
-    options: ['...', '...']
-    answer: 0
+    options:
+      - '...'
+      - '...'
+      - '...'
+      - '...'
+    answer: 3
     explanation: '...'
 ---
 
@@ -21,15 +63,33 @@ import Prerequisites from '@components/Prerequisites.astro';
 import PythonRunner from '@components/PythonRunner.astro';
 import Quiz from '@components/Quiz.astro';
 import LessonProgress from '@components/LessonProgress.astro';
-import exampleCode from '@code/<phần>/<bài>/example.vi.py?raw';
+import DatasetTable from '@components/DatasetTable.astro';
+import TenMinhHoa from '@components/viz/TenMinhHoa.astro';
+import numpyCode from '@code/<phần>/<bài>/<tên-1>.vi.py?raw';
+import sklearnCode from '@code/<phần>/<bài>/<tên-2>.vi.py?raw';
+
+{/* Hướng dẫn: import.
+    - Bốn dòng đầu: bài nào cũng có. Component tự gắn client:*, không viết client:* trong MDX.
+    - DatasetTable: khi bài dùng một bộ dữ liệu chung. Dữ liệu dùng chung nằm ở src/data/datasets/<id>.ts,
+      đăng ký trong src/data/datasets/index.ts (khuôn ở docs/architecture/viz.md mục 4.1).
+      Bài không có bộ dữ liệu chung thì xóa dòng này.
+    - VIZ: import wrapper @components/viz/<Name>.astro, không có client:*. Chỉ thêm khi component đã có
+      (giai đoạn 2 ở mục Minh họa). Trước đó thì xóa dòng này.
+    - Code: mỗi ô một cặp file src/code/<phần>/<bài>/<tên>.vi.py và <tên>.en.py, chỉ khác comment,
+      cùng số dòng (test code-pairs). Chưa dịch thì .en.py là bản sao của .vi.py.
+      Tên biến import theo nội dung ô, ví dụ outlierCode. Bản en của bài import <tên>.en.py. */}
 
 ## Mục tiêu
+
+{/* Hướng dẫn: 3–4 ý. Mỗi ý là một việc người đọc làm được: hiểu, tự dẫn được, cài đặt được, nhận ra.
+    Thuật ngữ chính của bài xuất hiện lần đầu ở đây thì ghi kèm tiếng Anh. */}
 
 Sau bài này, bạn sẽ:
 
 - Hiểu ...
-- Giải thích được ...
-- Tự cài đặt được ...
+- Tự dẫn được ...
+- Cài đặt được ...
+- Nhận ra ...
 
 ## Cần biết trước
 
@@ -37,50 +97,148 @@ Sau bài này, bạn sẽ:
 
 <Prerequisites />
 
+{/* Hướng dẫn: khối "Nhắc nhanh", tùy chọn. Dùng khi có bài cần biết trước chưa xuất bản: khoảng 2–3 câu
+    nhắc đúng phần kiến thức mà bài này dùng tới, thuật ngữ in đậm và kèm tiếng Anh.
+    Khi các bài đó đã xuất bản thì có thể bỏ khối này, vì Prerequisites đã có link. */}
+
+:::tip[Nhắc nhanh]
+**Khái niệm thứ nhất** (English term) là ... **Khái niệm thứ hai** (English term) là ...
+:::
+
 ## Trực giác
 
-Bắt đầu bằng một tình huống đời thường hoặc một câu hỏi cụ thể. Chưa dùng công thức.
-Mục tiêu: người đọc "cảm" được vấn đề và lời giải trước khi gặp toán.
+{/* Hướng dẫn: mở bằng một tình huống đời thường hoặc một câu hỏi cụ thể. Chưa dùng công thức.
+    - Bài có bộ dữ liệu chung: đưa bảng ra ngay ở đây bằng DatasetTable, không gõ tay. Dùng lại đúng bảng đó
+      ở Minh họa và Ví dụ code. Bảng nhỏ chỉ dùng một lần thì viết bảng Markdown, cột số căn phải (---:).
+    - Phần này dài thì chia H3: thử vài cách làm đơn giản, chỉ ra chỗ chưa ổn, rồi đi tới ý tưởng chính.
+    - Kết thúc bằng bài toán phát biểu bằng lời, in đậm. Người đọc "cảm" được vấn đề trước khi gặp toán. */}
+
+Một tình huống cụ thể, dẫn tới câu hỏi mà bài sẽ trả lời.
+
+<DatasetTable dataset="<id>" />
 
 ## Lý thuyết
 
+{/* Hướng dẫn: cấu trúc H3 gợi ý, theo bài mẫu. Đổi tên hoặc bỏ bớt cho hợp chủ đề.
+    1. Phát biểu bài toán: đầu vào, đầu ra, mô hình. Giải thích từng ký hiệu ngay khi dùng.
+    2. Đại lượng cần làm nhỏ nhất (hoặc lớn nhất), và vì sao chọn nó.
+    3. Lời giải ở trường hợp đơn giản trước (ví dụ một đặc trưng): dẫn từng bước, rồi áp vào số của bài.
+    4. Dạng tổng quát sau (ví dụ dạng ma trận). Chỉ ra nó gặp lại kết quả của trường hợp đơn giản.
+    5. Khi nào cách làm hỏng, nếu có (nghiệm không duy nhất, không hội tụ...).
+    6. Giới hạn: vài gạch đầu dòng, mỗi ý trỏ tới chỗ trong bài (ô code, hộp Lỗi hay gặp) hoặc tên bài sau.
+    Toán: mỗi biến đổi có một câu giải thích bằng lời, không nhảy bước. Bước dài thì mở đoạn bằng
+    "**Bước k: ...**". Chuỗi biến đổi nhiều dòng dùng aligned, mỗi dòng một bước, để công thức không tràn
+    màn hình điện thoại. Kết quả quan trọng thì tóm lại trong :::note[Ghi nhớ]. */}
+
 ### Phát biểu bài toán
 
-Định nghĩa đầu vào, đầu ra, ký hiệu (theo bảng ký hiệu trong CLAUDE.md).
+Định nghĩa đầu vào, đầu ra và từng ký hiệu, theo bảng ký hiệu ở đầu template.
 
 $$
 \hat{y} = \mathbf{w}^\top \mathbf{x} + b
 $$
 
-### Từng bước
+### Lời giải từng bước
 
-Mỗi bước biến đổi phải có một câu giải thích bằng lời.
+**Bước 1: ...** Bước này làm gì, và vì sao.
+
+$$
+\begin{aligned}
+... &= ... \\
+&= ...
+\end{aligned}
+$$
+
+Dòng thứ hai có được nhờ ...
 
 :::note[Ghi nhớ]
-Một ý quan trọng cần nhớ.
+Kết quả chính của mục, viết lại bằng lời.
 :::
+
+### Giới hạn
+
+- **Giới hạn thứ nhất.** Một câu, kèm chỗ trong bài hoặc tên bài sau xử lý nó.
 
 ## Minh họa
 
-Hình SVG hoặc component minh họa tương tác giúp người đọc "thấy" khái niệm.
+{/* Hướng dẫn: chọn loại hình theo docs/architecture/viz.md mục 2.1.
+    - Người đọc cần đổi một tham số và thấy hệ quả ngay: VIZ tương tác. Một VIZ một ý, tối đa 2 VIZ mỗi bài.
+    - Chỉ cần nhìn: hình tĩnh, là component .astro vẽ bằng SVG, không có client:*.
+      Cần đọc số liệu: DatasetTable hoặc bảng Markdown.
+    - Bài không cần VIZ: giữ mục này với hình tĩnh hoặc bảng. Nếu không có hình nào thật sự giúp hiểu thì bỏ
+      cả mục (heading lẫn nội dung) và báo lại lý do.
+    Trước hình: một đoạn nói hình cho thấy gì và mỗi điều khiển làm gì, rồi danh sách "Hãy thử" 3–4 bước,
+    mỗi bước có giá trị cụ thể và điều người đọc sẽ thấy. Số trong các bước phải khớp số VIZ hiện ra:
+    ở giai đoạn 1 viết theo mô tả, có VIZ rồi thì điền hoặc kiểm lại số.
+    Comment VIZ có hai giai đoạn (viz.md mục 4.10). Giữ đúng một trong hai khối bên dưới:
+    - Giai đoạn 1, chưa có component (lesson-writer viết): comment giữ chỗ nhiều dòng, đủ năm dòng
+      VIZ, Ý, Tương tác, Dữ liệu, Ký hiệu. Xóa khối giai đoạn 2 và dòng import VIZ.
+    - Giai đoạn 2, đã có component (viz-builder thay): xóa comment giữ chỗ, thêm import và thẻ. Giữ ý chính
+      trong comment một dòng, đặt liền ngay trên thẻ, không có dòng trống ở giữa. */}
 
-{/* <TenMinhHoa /> */}
+Hình cho thấy gì, mỗi điều khiển làm gì. Hãy thử:
+
+1. Lúc đầu ...: bạn thấy ...
+2. Kéo ... tới ...: số ... đổi thành ...
+
+{/* VIZ: TenMinhHoa
+    Ý: một câu, điều người đọc phải thấy được.
+    Tương tác: người đọc kéo hoặc bấm gì, mỗi thao tác làm hình đổi thế nào.
+    Dữ liệu: id trong src/data/datasets/, hoặc mô tả dữ liệu tự sinh.
+    Ký hiệu: các ký hiệu xuất hiện trên hình, đúng như mục Lý thuyết. */}
+
+{/* VIZ: ý chính của hình, một câu. */}
+<TenMinhHoa />
 
 ## Ví dụ code
 
-Đoạn code ngắn (khoảng 40 dòng trở xuống) thể hiện đúng phần lý thuyết ở trên.
+{/* Hướng dẫn: 2–3 ô.
+    - Mở mục bằng một đoạn: các ô chạy độc lập (ô nào cũng tự import và tự tạo dữ liệu), và ô nào lần đầu
+      chạy lâu hơn vì trình duyệt phải tải thêm thư viện (scikit-learn, pandas, SciPy).
+    - Thứ tự gợi ý: ô NumPy làm lại phần Lý thuyết trước, ô scikit-learn sau, rồi một ô thử một giới hạn.
+    - Mỗi ô: một câu nói ô làm gì, rồi PythonRunner có title, rồi một đoạn giải thích output và nối lại với
+      lý thuyết. Số nhắc lại phải đúng như output.
+    Quy ước code (file src/code/<phần>/<bài>/<tên>.vi.py):
+    - Mỗi file ≤ 40 dòng, mỗi dòng ≤ 79 ký tự. Comment ngắn được đặt cuối dòng, comment dài đặt trên dòng
+      riêng. Dùng ngẫu nhiên thì đặt seed, ví dụ rng = np.random.default_rng(0).
+    - Chữ in ra và nhãn biểu đồ (label, xlabel, title) bằng tiếng Anh ngắn, vì code của .vi.py và .en.py
+      phải giống hệt nhau. In số với số chữ số cố định, ví dụ f"w = {w:.4f}".
+    - Ô dùng bộ dữ liệu chung: dòng "# dataset: <id>", ngay sau là hai dòng "<x> = np.array([...])" và
+      "<y> = np.array([...])", mỗi mảng một dòng, đúng số và thứ tự như src/data/datasets/<id>.ts.
+      Tên biến <x>, <y> lấy từ trường python của từng cột trong dataset. Muốn đổi dữ liệu thì sửa ở dòng
+      sau (ví dụ np.append), không sửa hai dòng này. Test datasets.test.ts so từng số.
+    - Code vẽ hình: thêm figureAlt={['...']}, mỗi hình một câu mô tả đúng hình đó: loại biểu đồ, trên hình
+      có gì, xu hướng chính. Code có input(): thêm stdin={'dòng 1\ndòng 2'}.
+    - Chạy thử bằng Python khớp phiên bản Pyodide (venv ghi ở docs/architecture/viz.md mục 2.5) trước khi
+      trích số vào bài.
+    - Phần DL, NLP, CV, LLM có code cần PyTorch hoặc GPU: dùng khối code python thường, không dùng PythonRunner. */}
 
-{/* Phần DL, NLP, CV, LLM có code cần PyTorch hoặc GPU: dùng khối ```python thường, không dùng PythonRunner.
-    Code có input(): thêm stdin={'dòng 1\ndòng 2'}. Code vẽ hình: thêm figureAlt={['Mô tả hình 1']}. */}
+Các ô dưới đây chạy độc lập. Ô thứ hai lần đầu chạy lâu hơn, vì trình duyệt phải tải thêm scikit-learn.
 
-<PythonRunner code={exampleCode} />
+Ô thứ nhất làm gì.
 
-Giải thích kết quả in ra và liên hệ lại với lý thuyết.
+<PythonRunner code={numpyCode} title="Tên ngắn của ô" />
+
+Giải thích kết quả in ra và nối lại với lý thuyết.
+
+Ô thứ hai làm gì.
+
+<PythonRunner
+  code={sklearnCode}
+  title="Tên ngắn của ô"
+  figureAlt={['Loại biểu đồ, trên hình có gì, xu hướng chính.']}
+/>
+
+Giải thích kết quả in ra và hình.
 
 ## Lỗi hay gặp
 
-:::caution[Hiểu nhầm phổ biến]
-Mô tả hiểu nhầm, vì sao sai, cách hiểu đúng.
+{/* Hướng dẫn: 2–3 hộp. Tiêu đề hộp là chính điều hay hiểu sai hoặc làm sai, viết thành một cụm ngắn.
+    Thân hộp: vì sao sai, cách hiểu hoặc cách làm đúng, kèm ví dụ cụ thể. Dùng lại dữ liệu và ô code của bài
+    khi được. Lỗi trong code thì nêu đúng hàm nên dùng thay. */}
+
+:::caution[Điều hay hiểu sai, viết thành một cụm ngắn]
+Vì sao sai, rồi cách hiểu hoặc cách làm đúng.
 :::
 
 ## Kiểm tra nhanh
@@ -93,11 +251,23 @@ Mô tả hiểu nhầm, vì sao sai, cách hiểu đúng.
 
 **Ý chính:**
 
+{/* Hướng dẫn: 3–4 ý, mỗi ý 1–2 câu, đủ để ôn lại bài mà không cần đọc lại. Được nhắc công thức chính. */}
+
 - ...
 - ...
 
 **Đọc thêm:**
 
-- Tác giả (Năm). *Tên tài liệu*. [Link](https://...)
+{/* Hướng dẫn: 3–5 nguồn có thật, có tác giả, năm và link. Không bịa nguồn.
+    - Gắn link vào chính tên tài liệu. Không dùng chữ "Link" hay "PDF" làm chữ của link, vì trình đọc màn hình
+      đọc danh sách link theo chữ của link (quyết định 31). Link tới file PDF thì ghi "(PDF)" ngay sau link,
+      ngoài link.
+    - Sau link: chương hoặc mục nên đọc, rồi một câu chú thích vì sao nên đọc.
+    - Có nguồn tiếng Việt tốt thì nên đưa vào, đặt đầu danh sách. Nguồn dùng ký hiệu khác bài thì nói rõ
+      khác ở đâu.
+    - Tài liệu chính thức của thư viện: link tới đúng phiên bản có trong Pyodide, ví dụ scikit-learn 1.8. */}
+
+- Tác giả (Năm). [*Tên tài liệu*](https://...), chương hoặc mục. Một câu chú thích.
+- Tác giả (Năm). [*Tên tài liệu*](https://.../file.pdf) (PDF), chương hoặc mục. Một câu chú thích.
 
 <LessonProgress />

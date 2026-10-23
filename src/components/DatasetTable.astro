@@ -1,0 +1,48 @@
+---
+// A shared lesson dataset as a table (docs/architecture/viz.md, sections 2.5, 3, 4.10). 0 JS, no CSS of its own:
+// the plain <table> picks up Starlight's Markdown table style, like a `|---:|` table written in the lesson.
+// Numbers use formatNumber (decimal point, decision 22), with the column's fixed decimals.
+// The caption names the table and says the numbers are made up. Browsers centre a caption; the one inline
+// declaration sets it to start, like the rest of the page (no colour, no stylesheet).
+import { DATASETS, type DatasetId } from '@data/datasets/index';
+import type { DatasetColumn } from '@data/datasets/types';
+import { getPageLocale } from '@lib/page-locale';
+import { formatNumber } from '@lib/viz/format';
+
+interface Props {
+  /** Key of src/data/datasets/index.ts, e.g. "apartments". */
+  dataset: DatasetId;
+}
+
+const route = Astro.locals.starlightRoute;
+const locale = getPageLocale(route);
+const data = Object.hasOwn(DATASETS, Astro.props.dataset) ? DATASETS[Astro.props.dataset] : undefined;
+if (!data) {
+  throw new Error(
+    `<DatasetTable dataset="${String(Astro.props.dataset)}" /> on "${route.id}": unknown dataset. ` +
+      `Known: ${Object.keys(DATASETS).join(', ')} (src/data/datasets/index.ts).`,
+  );
+}
+
+const header = (column: DatasetColumn) => `${column.name[locale]} (${column.unit[locale]})`;
+---
+
+<table lang={locale}>
+  <caption style="text-align: start">{data.caption[locale]}</caption>
+  <thead>
+    <tr>
+      <th scope="col" align="right">{header(data.x)}</th>
+      <th scope="col" align="right">{header(data.y)}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {
+      data.rows.map(([x, y]) => (
+        <tr>
+          <td align="right">{formatNumber(x, data.x.digits)}</td>
+          <td align="right">{formatNumber(y, data.y.digits)}</td>
+        </tr>
+      ))
+    }
+  </tbody>
+</table>

@@ -262,6 +262,7 @@ integrations: [
 ],
 ```
 
+- Từ M2, `filter` chuyển thành `isInSitemap` trong `src/lib/seo.ts`, bỏ thêm trang fallback của bài chưa dịch (quyết định 30, [README.md](README.md) mục 3.1).
 - Trang demo vẫn giữ `noindex` và `pagefind: false` trong frontmatter.
 - Kiểm tra (e2e, chạy trong CI):
   - `GET /sitemap-0.xml` không chứa `/dev/`.
@@ -430,6 +431,16 @@ Bảng quy tắc (fixture trong `lesson-link.test.ts` phải phủ đủ 5 dòng
 | published | published | `open`, `/vi/<id>/` | `open`, `/en/<id>/` |
 
 Thêm hai dòng: `opts.short` dùng `shortTitle` khi có, và quay về `title` khi không có.
+
+**Thuộc tính `lang` (WCAG 3.1.2, thêm ở M2).**
+
+- Phần tử gốc của mỗi component bài học (`Prerequisites`, `LessonProgress`, `Quiz`, `PythonRunner`, `DatasetTable`, mọi VIZ) có `lang={locale}`, đặt ở wrapper `.astro`, ngoài island.
+- Lý do: trang fallback `/en/<bài>/` có `<main lang="vi">` vì hiện file vi, còn chữ giao diện của component là tiếng Anh. Không khai báo lại thì trình đọc màn hình đọc chữ tiếng Anh bằng giọng Việt.
+- Phần lấy từ file bài giữ ngôn ngữ của file. Khi `starlightRoute.isFallback`, các phần này có `lang={starlightRoute.entryMeta.lang}`:
+  - `Quiz`: câu hỏi, đáp án (cả radio) và giải thích. Island nhận giá trị qua prop `contentLang`, nên HTML lúc build và lúc hydrate giống nhau.
+  - `PythonRunner`: tiêu đề và khối code tĩnh. Nút sao chép của Expressive Code nằm trong khối code nên theo ngôn ngữ của file, giống mọi khối code khác trên trang.
+- Chưa đánh dấu: code đang sửa và output của `PythonRunner` (trong island), tên nhóm của câu hỏi quiz (`aria-label` ghép "Question n of N" với câu hỏi). Hết khi bài có bản en.
+- Trang thường (không fallback) không có `lang` nào bên trong component.
 
 ### 4.2. Bảng chuỗi giao diện của M1 (cuối cùng)
 
@@ -632,8 +643,9 @@ interface Props {
   questions?: QuizQuestion[];
 }
 // Uses props.questions ?? starlightRoute.entry.data.quiz; build error if neither exists.
-// Renders <div class="atlas-quiz not-content"><QuizIsland client:visible questions={rendered}
-//   strings={getStrings(t, 'quiz')} /><noscript>…common.needsScript…</noscript></div>
+// Renders <div class="atlas-quiz not-content" lang={locale}><QuizIsland client:visible questions={rendered}
+//   strings={getStrings(t, 'quiz')} contentLang={…} /><noscript>…common.needsScript…</noscript></div>
+//   (contentLang: section 4.1, attribute lang)
 ```
 
 ```ts
@@ -674,6 +686,7 @@ Hành vi:
   - `fieldset` có `aria-label` = "Câu n/total" + khoảng trắng + chuỗi của câu hỏi. `legend` giữ nguyên HTML của KaTeX để đọc ở chế độ duyệt. Giữa hai `span` trong `legend` có một khoảng trắng, để chữ của `legend` không dính ("Câu 1/3First…").
   - Kiểm tra: unit test (`quiz-island.test.tsx`, `inline-markup.test.ts`) và e2e đọc cây trợ năng thật của Chrome qua CDP (`Accessibility.getFullAXTree`): mọi radio có tên khác rỗng, đáp án `$\frac{1}{2}$` có tên `\frac{1}{2}`.
 - **Focus có trước khi hydrate** (quyết định 16): sau khi hydrate, nếu focus đang ở một radio của quiz thì island `blur()` rồi `focus()` lại radio đó một lần. Không làm vậy thì Chrome cho Tab dừng thêm ở radio thứ hai (rủi ro 13, mục 7).
+  - Dùng `useEffect`. Đã thử `useLayoutEffect` ở M2 và không được gì. Lúc hydrate, React chạy effect ngay sau commit (đo được 0–0,3 ms sau layout effect). Khoảng 4–6 ms từ lúc Astro bỏ `ssr` tới lúc focus lại là thời gian render hydrate, đổi loại effect không rút ngắn được.
 - **Bấm Kiểm tra lần nữa khi vẫn chưa chọn** (thêm ngày 23/10/2026): vùng live chỉ đọc khi nội dung đổi. Vì vậy island xóa dòng `chooseOne`, rồi đặt lại sau `REANNOUNCE_MS` (100 ms) bằng một node mới. Chọn đáp án trong lúc chờ thì không đặt lại. Timer được hủy khi unmount.
 
 ### 4.5. `LessonProgress` (Astro + custom element)
@@ -687,7 +700,7 @@ interface Props {
 ```
 
 ```html
-<atlas-lesson-progress class="atlas-progress not-content" data-lesson-id="ml/linear-regression">
+<atlas-lesson-progress class="atlas-progress not-content" lang="vi" data-lesson-id="ml/linear-regression">
   <button type="button" class="atlas-progress-toggle" aria-pressed="false" disabled>
     <span class="atlas-progress-box" aria-hidden="true"></span>
     <span>Tôi đã học xong bài này</span>
@@ -720,9 +733,9 @@ interface Props {
   figureAlt?: string[];    // alt text per figure; default: runner.figure "Biểu đồ {{n}}"
 }
 // Renders:
-// <div class="atlas-runner not-content">
-//   {title && <p class="atlas-runner-title">{title}</p>}
-//   <div class="atlas-runner-static" data-runner-static>
+// <div class="atlas-runner not-content" lang={locale}>
+//   {title && <p class="atlas-runner-title" lang={contentLang}>{title}</p>}   <!-- contentLang: section 4.1 -->
+//   <div class="atlas-runner-static" lang={contentLang} data-runner-static>
 //     <Code code={code} lang="python" />      <!-- static, highlighted, outside the island (section 2.4) -->
 //   </div>
 //   <PythonRunnerIsland client:visible code={code} stdin={stdin} figureAlt={figureAlt}

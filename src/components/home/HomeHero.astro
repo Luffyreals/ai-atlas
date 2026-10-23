@@ -6,6 +6,8 @@ import { HERO_PLATES } from '@data/home-pictures';
 import { LESSONS, type Locale } from '@data/roadmap';
 import { formatString } from '@i18n/format';
 import { getStrings } from '@i18n/ui';
+import { lessonLinkView } from '@lib/lesson-link';
+import { getFirstOpenLesson } from '@lib/roadmap';
 import RouteMark from './RouteMark.astro';
 import Stripe from './Stripe.astro';
 
@@ -15,7 +17,17 @@ interface Props {
 
 const { locale } = Astro.props;
 const t = getStrings(Astro.locals.t, 'home');
+const tCommon = getStrings(Astro.locals.t, 'common');
 const otherLocale: Locale = locale === 'vi' ? 'en' : 'vi';
+
+// "Start learning" opens the first lesson in roadmap order that has a page; no button while none has.
+// Same link as RoadmapMap: an untranslated lesson keeps its /en/ URL, where Starlight shows the vi page.
+const firstLesson = getFirstOpenLesson();
+const start = firstLesson ? lessonLinkView(firstLesson, locale) : undefined;
+const startLabel =
+  start &&
+  formatString(t.startLearningLabel, { lesson: start.title }) +
+    (start.state === 'untranslated' ? ` (${tCommon.notTranslated})` : '');
 ---
 
 <section class="hero" aria-labelledby="home-title">
@@ -28,7 +40,16 @@ const otherLocale: Locale = locale === 'vi' ? 'en' : 'vi';
       </p>
       <h1 id="home-title" class="hero-title">{HOME.hero.title[locale]}</h1>
       <p class="hero-lead">{formatString(HOME.hero.lead[locale], { count: LESSONS.length })}</p>
-      <a class="atlas-button" href="#map">{t.openMap}</a>
+      <div class="hero-actions">
+        {
+          start?.href && (
+            <a class="atlas-button" href={start.href} aria-label={startLabel} data-start-learning>
+              {t.startLearning}
+            </a>
+          )
+        }
+        <a class={start?.href ? 'hero-map-link' : 'atlas-button'} href="#map">{t.openMap}</a>
+      </div>
     </div>
     <nav class="hero-links" aria-label={t.quickLinks}>
       <a href="#route">{t.linkRoute}</a>
@@ -128,6 +149,32 @@ const otherLocale: Locale = locale === 'vi' ? 'en' : 'vi';
     text-wrap: balance;
   }
 
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 8px 28px;
+  }
+
+  /* One filled action. Next to "Start learning" the map is a plain link, as tall as the button. */
+  .hero-map-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 52px;
+    color: var(--atlas-paper-ink);
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 6px;
+    text-decoration-color: var(--atlas-field);
+    transition: text-decoration-color 0.2s ease;
+  }
+
+  .hero-map-link:hover {
+    text-decoration-color: var(--atlas-paper-ink);
+  }
+
   .hero-links {
     display: flex;
     flex-wrap: wrap;
@@ -192,6 +239,28 @@ const otherLocale: Locale = locale === 'vi' ? 'en' : 'vi';
     color: var(--atlas-ground-ink);
     font-size: var(--step-small);
     line-height: 1.4;
+  }
+
+  /* Phones narrower than 375px (320–360). The plate keeps its 375px proportions (10:7) instead of growing
+     taller than it is wide; the neatline matches the map's on phones; the card's spacing tightens. In English
+     the two actions still need two rows at 320px, and the language link stays on the first 800px screen. */
+  @media (max-width: 23rem) {
+    .hero-card {
+      --stripe-height: 28px;
+    }
+
+    .hero-body {
+      gap: 12px;
+      padding: 20px 16px;
+    }
+
+    .hero-actions {
+      column-gap: 20px;
+    }
+
+    .hero-plates {
+      height: min(30svh, (100vw - 2 * var(--edge)) * 0.7);
+    }
   }
 
   @media (min-width: 64rem) {

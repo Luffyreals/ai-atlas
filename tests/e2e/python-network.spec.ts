@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { LOCALES, type Locale } from '../../src/data/roadmap';
+import { s as atlas } from './helpers';
 
 // PythonRunner with the real Pyodide from the CDN (docs/architecture/components.md, plan row M1-8).
 // Needs the network, so every test is tagged @network: `npm run test:e2e:network` runs them (desktop only),
@@ -9,16 +11,8 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 // Same as test.setTimeout(120_000) in every test: the first run downloads Pyodide.
 test.describe.configure({ timeout: 120_000 });
 
-const LOCALES = ['vi', 'en'] as const;
-type Locale = (typeof LOCALES)[number];
-const readStrings = (locale: Locale): Record<string, string> =>
-  JSON.parse(readFileSync(fileURLToPath(new URL(`../../src/content/i18n/${locale}.json`, import.meta.url)), 'utf8'));
-const STRINGS: Record<Locale, Record<string, string>> = { vi: readStrings('vi'), en: readStrings('en') };
-const s = (locale: Locale, key: string) => {
-  const value = STRINGS[locale][`atlas.runner.${key}`];
-  if (!value) throw new Error(`missing atlas.runner.${key} in ${locale}.json`);
-  return value;
-};
+/** A string of the runner: atlas.runner.<key>. */
+const s = (locale: Locale, key: string) => atlas(locale, `runner.${key}`);
 const fill = (template: string, values: Record<string, string | number>) =>
   template.replace(/\{\{(\w+)\}\}/g, (_, name: string) => String(values[name]));
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -41,6 +35,9 @@ const HELLO_OUTPUT = 'Hello from Python!\n2 + 3 = 5\nLine 1\nLine 2\nLine 3\n';
 async function runner(page: Page, n: number): Promise<Locator> {
   const box = page.locator('.atlas-runner').nth(n);
   await box.scrollIntoViewIfNeeded();
+  // A runner taller than the screen (lesson code) keeps its island (Run, output) below the code, still off
+  // screen: client:visible watches the island's own element, so scroll to that.
+  await box.locator('astro-island > *').first().scrollIntoViewIfNeeded();
   await expect(box.locator('astro-island:not([ssr])')).toHaveCount(1);
   return box;
 }
@@ -307,4 +304,69 @@ test('Restore after an edited run shows the original code, and it runs the origi
   await hello.run.click();
   await expect(hello.status).toHaveText(done('vi'), { timeout: LOAD });
   await expect(hello.output).toHaveText(HELLO_OUTPUT, { useInnerText: false });
+});
+
+// --- The lesson ml/linear-regression (vi): its three runners, with the real Pyodide. ---
+
+const LESSON = '/vi/ml/linear-regression/';
+const LESSON_SOURCE = readFileSync(
+  fileURLToPath(new URL('../../src/content/docs/vi/ml/linear-regression.mdx', import.meta.url)),
+  'utf8',
+);
+/** figureAlt={['…']} of each <PythonRunner> in the lesson, in order (undefined when it has none). */
+const LESSON_ALTS = [...LESSON_SOURCE.matchAll(/<PythonRunner\b([\s\S]*?)\/>/g)].map(
+  (match) => /figureAlt=\{\['([^']+)'\]\}/.exec(match[1] ?? '')?.[1],
+);
+// Output of `python -I src/code/ml/linear-regression/<name>.vi.py` (venv of viz.md 2.5, the versions Pyodide
+// 314.0.7 ships). The lesson quotes these numbers: b = 2.0394, w = 0.1695, MSE = 0.3615; 65 m² -> 13.06,
+// 300 m² -> 52.88; with the outlier w = 0.0760, b = 6.36.
+const LESSON_RUNS = [
+  { name: 'normal-equation', output: 'b = 2.0394\nw = 0.1695\nMSE = 0.3615\n', figures: 0 },
+  {
+    name: 'sklearn-fit',
+    output: 'sklearn: w = 0.1695, b = 2.0394\nformula: w = 0.1695, b = 2.0394\n65 m² -> 13.06\n300 m² -> 52.88\n',
+    figures: 1,
+  },
+  {
+    name: 'outlier',
+    output: 'without outlier: w = 0.1695, b = 2.04\nwith outlier:    w = 0.0760, b = 6.36\n',
+    figures: 1,
+  },
+] as const;
+
+test('ml/linear-regression: the three runners print the numbers the lesson quotes, and draw their figures', { tag: '@network' }, async ({
+  page,
+}) => {
+  test.setTimeout(180_000); // three runs, the second one loads scikit-learn
+  const errors = trackPageErrors(page);
+  const requests: string[] = [];
+  page.on('request', (request) => requests.push(request.url()));
+  await page.goto(LESSON);
+  await expect(page.locator('.atlas-runner')).toHaveCount(LESSON_RUNS.length);
+  expect(LESSON_ALTS).toHaveLength(LESSON_RUNS.length);
+
+  for (const [n, run] of LESSON_RUNS.entries()) {
+    const box = await runner(page, n);
+    const ui = parts(box, 'vi');
+    // The code shown is the file, so the output belongs to it.
+    const lines = readFileSync(
+      fileURLToPath(new URL(`../../src/code/ml/linear-regression/${run.name}.vi.py`, import.meta.url)),
+      'utf8',
+    ).trim().split(/\r?\n/);
+    await expect(box.locator('[data-runner-static]')).toContainText(lines.at(-1)!.trim());
+    if (n === 0) expect(requests.filter((url) => /pyodide/i.test(url)), 'before the first Run').toEqual([]);
+
+    await ui.run.click();
+    await expect(ui.status).toHaveText(done('vi'), { timeout: LOAD });
+    await expect(ui.output).toHaveText(run.output, { useInnerText: false });
+    await expect(box.locator('.atlas-runner-error')).toHaveCount(0);
+    await expect(box).not.toContainText(s('vi', 'errorTitle'));
+    await expect(ui.images).toHaveCount(run.figures);
+    for (const image of await ui.images.all()) {
+      await expect(image).toHaveAttribute('src', /^data:image\/png;base64,/);
+      await expect(image).toHaveAttribute('alt', LESSON_ALTS[n] ?? '');
+      expect(await image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+    }
+  }
+  expect(errors).toEqual([]);
 });

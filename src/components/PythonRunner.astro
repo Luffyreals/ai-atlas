@@ -10,7 +10,7 @@
 import { Code } from '@astrojs/starlight/components';
 import PythonRunnerIsland from './python-runner/PythonRunnerIsland';
 import { getStrings } from '@i18n/ui';
-import type { Locale } from '@data/roadmap';
+import { getContentLang, getPageLocale } from '@lib/page-locale';
 
 interface Props {
   /** Usually imported with `?raw` from src/code/... */
@@ -28,14 +28,17 @@ const route = Astro.locals.starlightRoute;
 if (!code?.trim()) {
   throw new Error(`<PythonRunner /> on "${route.id}": the \`code\` prop is empty. Import a file with ?raw.`);
 }
-const locale = (route.locale ?? 'vi') as Locale;
+const locale = getPageLocale(route);
 const strings = getStrings(Astro.locals.t, 'runner');
 const tCommon = getStrings(Astro.locals.t, 'common');
+// The strings are in the page's language (lang on the root). On Starlight's fallback page the title and the
+// code (its comments) come from the vi file, so they keep that language.
+const contentLang = getContentLang(route);
 ---
 
-<div class="atlas-runner not-content">
-  {title && <p class="atlas-runner-title">{title}</p>}
-  <div class="atlas-runner-static" data-runner-static>
+<div class="atlas-runner not-content" lang={locale}>
+  {title && <p class="atlas-runner-title" lang={contentLang}>{title}</p>}
+  <div class="atlas-runner-static" lang={contentLang} data-runner-static>
     <Code code={code} lang="python" />
   </div>
   <PythonRunnerIsland client:visible code={code} stdin={stdin} figureAlt={figureAlt} lang={locale} strings={strings} />

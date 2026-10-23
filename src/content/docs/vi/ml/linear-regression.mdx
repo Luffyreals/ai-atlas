@@ -1,0 +1,428 @@
+---
+title: Hồi quy tuyến tính
+description: Đoán giá thuê căn hộ bằng một đường thẳng. Phần dư, MSE, lời giải bình phương tối thiểu, phương trình chuẩn, code NumPy và scikit-learn.
+quiz:
+  - question: 'Vì sao MSE dùng bình phương phần dư, thay vì cộng thẳng các phần dư lại?'
+    options:
+      - 'Vì bình phương làm các phần dư nhỏ quan trọng hơn các phần dư lớn'
+      - 'Vì cộng thẳng thì máy tính không tính được'
+      - 'Vì phần dư dương và âm triệt tiêu nhau, nên một đường rất tệ vẫn có thể có tổng phần dư bằng 0'
+      - 'Vì bình phương làm đường thẳng luôn đi qua gốc tọa độ'
+    answer: 2
+    explanation: 'Đường nằm ngang ở giá trung bình có tổng phần dư bằng $0$, dù nó đoán mọi căn cùng một giá. Bình phương luôn không âm nên không triệt tiêu, lại phạt nặng sai số lớn (ngược với phương án đầu) và lấy đạo hàm được.'
+  - question: 'Mô hình học được $\hat{y} = 0.17x + 2.04$, với $x$ là diện tích (m²) và $\hat{y}$ là giá thuê (triệu đồng/tháng). Hai căn hơn kém nhau 10 m² thì giá dự đoán chênh nhau bao nhiêu?'
+    options:
+      - 'Khoảng 1.7 triệu đồng/tháng'
+      - 'Khoảng 0.17 triệu đồng/tháng'
+      - 'Khoảng 2.04 triệu đồng/tháng'
+      - 'Không tính được nếu không biết diện tích của từng căn'
+    answer: 0
+    explanation: 'Mỗi m² thêm vào cộng $0.17$ triệu, ở căn nhỏ hay căn lớn đều vậy, nên chênh 10 m² thì chênh $10 \times 0.17 = 1.7$ triệu. Lấy hiệu hai dự đoán thì $b$ bị trừ mất, nên không cần biết diện tích từng căn.'
+  - question: 'Thay cho căn 110 m² ở ô code thứ ba, bạn thêm vào bảng gốc một căn 52 m², rất gần diện tích trung bình $\bar{x} = 52.4$, với giá gõ nhầm 10.0 thành 1.0. Đường bình phương tối thiểu thay đổi thế nào?'
+    options:
+      - 'Xoay mạnh, $w$ giảm hơn một nửa như ở ô code thứ ba'
+      - 'Hạ thấp gần như song song, $w$ gần như giữ nguyên'
+      - 'Không đổi chút nào, vì điểm nằm gần điểm trung bình'
+      - 'Dốc hơn hẳn, vì phần dư của điểm mới rất lớn'
+    answer: 1
+    explanation: 'Điểm nằm gần $\bar{x}$ nên gần như không làm đường nghiêng. Nó chỉ kéo $\bar{y}$ xuống $(10.92 - 1.0)/11 \approx 0.9$ triệu, mà đường luôn đi qua điểm trung bình, nên cả đường hạ theo. Chạy thử: $w$ chỉ đổi khoảng 0.6%. Phần dư lớn vẫn kéo đường, nên không phải "không đổi".'
+  - question: 'Trường hợp nào làm $\mathbf{X}^\top\mathbf{X}$ không khả nghịch?'
+    options:
+      - 'Có hai căn hộ cùng diện tích'
+      - 'Có 1000 căn hộ nhưng chỉ 3 đặc trưng'
+      - 'Có một điểm ngoại lai trong dữ liệu'
+      - 'Có cả cột diện tích theo m² lẫn cột diện tích theo ft²'
+    answer: 3
+    explanation: 'Cột ft² bằng cột m² nhân khoảng $10.76$ (nếu cột ft² tính thẳng từ cột m², không làm tròn), nên hai cột phụ thuộc tuyến tính và có vô số $\boldsymbol{\theta}$ cho cùng một dự đoán. Hai căn cùng diện tích không sao, chỉ hỏng khi mọi căn cùng diện tích. Nhiều mẫu hơn tham số là điều tốt. Ngoại lai làm lệch nghiệm, không làm mất tính duy nhất.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import DatasetTable from '@components/DatasetTable.astro';
+import LinearFitViz from '@components/viz/LinearFitViz.astro';
+import normalEquationCode from '@code/ml/linear-regression/normal-equation.vi.py?raw';
+import sklearnFitCode from '@code/ml/linear-regression/sklearn-fit.vi.py?raw';
+import outlierCode from '@code/ml/linear-regression/outlier.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu hồi quy tuyến tính (linear regression) dự đoán thế nào, và vì sao đường tốt nhất là đường có sai số bình phương trung bình (mean squared error, MSE) nhỏ nhất.
+- Tự dẫn được công thức của $w$ và $b$ khi có một đặc trưng (feature), và đọc được phương trình chuẩn (normal equation) $\mathbf{X}^\top\mathbf{X}\boldsymbol{\theta} = \mathbf{X}^\top\mathbf{y}$.
+- Cài đặt bằng NumPy và scikit-learn, và giải thích được ý nghĩa của $w$, $b$.
+- Nhận ra các giới hạn chính, như điểm ngoại lai (outlier), ngoại suy (extrapolation), và lúc phương trình chuẩn có vô số nghiệm.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+**Tích vô hướng** (dot product) của hai vectơ cùng độ dài là tổng các tích từng cặp phần tử: $\mathbf{w}^\top\mathbf{x} = w_1x_1 + w_2x_2 + \dots + w_nx_n$. **Đạo hàm** (derivative) của một hàm tại một điểm là độ dốc của đồ thị tại đó. Ở đáy một cái bát, độ dốc bằng 0. **Đạo hàm riêng** (partial derivative) theo một biến là độ dốc khi chỉ biến đó thay đổi, các biến khác giữ nguyên.
+:::
+
+## Trực giác
+
+Bạn đang tìm thuê căn hộ. Bạn hỏi giá 10 căn quanh khu mình muốn ở và ghi lại thành bảng dưới đây. Cả bài sẽ dùng bảng này.
+
+<DatasetTable dataset="apartments" />
+
+Rồi một người quen báo có căn 65 m² sắp trống. Giá bao nhiêu thì hợp lý?
+
+Nhìn bảng, bạn thấy ngay căn càng rộng thì càng đắt. Nhưng không đều: căn 30 m² lại rẻ hơn căn 25 m², căn 75 m² rẻ hơn căn 68 m². Giá còn phụ thuộc vị trí, tầng, nội thất, những thứ bảng không ghi. Vì vậy không đường thẳng nào đi qua đủ 10 điểm.
+
+Điều bạn làm được là tìm một đường đi **gần** các điểm nhất, rồi dùng nó để đoán giá căn 65 m². Đó là toàn bộ ý tưởng của **hồi quy tuyến tính**.
+
+### Thử kẻ vài đường
+
+Hãy thử hai cách đoán đơn giản:
+
+- **Đường A:** bỏ qua diện tích, căn nào cũng đoán bằng giá trung bình của bảng, 10.92 triệu. Đây là một đường nằm ngang.
+- **Đường B:** "mỗi m² 200 nghìn đồng". Căn 25 m² đoán 5.0 triệu, căn 85 m² đoán 17.0 triệu.
+
+Với mỗi căn, lấy giá thật trừ giá mà đường đoán. Hiệu này gọi là **phần dư** (residual).
+
+Với đường B, căn 25 m² có phần dư 6.7 − 5.0 = 1.7: điểm nằm *trên* đường. Căn 75 m² có phần dư 13.9 − 15.0 = −1.1: điểm nằm *dưới* đường. Trên đồ thị, phần dư là đoạn thẳng đứng nối điểm dữ liệu với đường. Muốn so hai đường, bạn cần **một con số** gom phần dư của cả 10 căn lại.
+
+### Vì sao bình phương phần dư
+
+Cách nghĩ đầu tiên là cộng các phần dư lại. Nhưng tổng phần dư của đường A đúng bằng 0, vì phần dư dương và âm quanh giá trung bình bù trừ nhau vừa khít. Vậy mà đường A rất tệ: nó đoán căn 25 m² và căn 85 m² cùng một giá.
+
+Cách sửa là **bình phương** từng phần dư, rồi lấy trung bình. Con số này chính là **sai số bình phương trung bình**, viết tắt MSE. Có ba lý do để chọn bình phương:
+
+1. **Không triệt tiêu.** Bình phương luôn không âm, nên sai về phía nào cũng bị tính.
+2. **Phạt nặng sai số lớn.** Lệch 1 triệu tính 1 điểm, lệch 2 triệu tính 4 điểm. Nên hai căn cùng lệch 1 triệu (2 điểm) tốt hơn một căn đúng hẳn và một căn lệch 2 triệu (4 điểm). Mặt trái: một điểm nằm rất xa sẽ kéo cả đường về phía nó, như bạn sẽ thấy ở ô code thứ ba.
+3. **Lấy đạo hàm được.** Hàm bình phương trơn, còn hàm trị tuyệt đối có góc nhọn tại 0, ở đó không có đạo hàm. Nhờ đạo hàm, bạn tìm được đường tốt nhất bằng đại số thay vì thử mò.
+
+MSE của các đường, tính bằng Python trên bảng trên:
+
+| Đường | MSE |
+|---|---:|
+| A: nằm ngang ở giá trung bình 10.92 | 10.50 |
+| B: mỗi m² 200 nghìn đồng | 0.88 |
+| Đường tốt nhất, sẽ tìm ở phần sau | 0.36 |
+
+Đường B tốt hơn đường A rất nhiều, nhưng vẫn có đường tốt hơn nữa. Bài toán giờ đã rõ: **trong mọi đường thẳng, tìm đường có MSE nhỏ nhất.**
+
+## Lý thuyết
+
+### Phát biểu bài toán
+
+Bảng có $m$ mẫu (sample), mỗi mẫu là một căn hộ, nên $m = 10$. Mẫu thứ $i$ gồm đặc trưng $x^{(i)}$ là diện tích, và nhãn (label) $y^{(i)}$ là giá thuê thật. Chỉ số $(i)$ viết ở trên nghĩa là "căn thứ $i$", không phải số mũ.
+
+Mô hình đoán giá bằng một đường thẳng:
+
+$$
+\hat{y} = wx + b
+$$
+
+- $\hat{y}$ (đọc là "y mũ") là giá **dự đoán**, để phân biệt với giá thật $y$.
+- $w$ là **trọng số** (weight). Khi chỉ có một đặc trưng, $w$ chính là **độ dốc** (slope) của đường: diện tích tăng 1 m² thì giá dự đoán tăng $w$ triệu.
+- $b$ là **hệ số tự do** (bias, còn gọi là intercept), chỗ đường thẳng cắt trục tung.
+
+Phần lớn bài dùng một đặc trưng cho dễ nhìn. Mục dạng ma trận sẽ mở rộng cho nhiều đặc trưng.
+
+### Hàm mất mát MSE
+
+Với căn thứ $i$, giá dự đoán là $\hat{y}^{(i)} = wx^{(i)} + b$, và phần dư là
+
+$$
+e^{(i)} = y^{(i)} - \hat{y}^{(i)}
+$$
+
+Hàm mất mát (loss function) $\mathcal{L}$ là MSE, trung bình bình phương phần dư trên cả $m$ căn:
+
+$$
+\begin{aligned}
+\mathcal{L}(w, b) &= \frac{1}{m}\sum_{i=1}^{m}\left(\hat{y}^{(i)} - y^{(i)}\right)^2 \\
+&= \frac{1}{m}\sum_{i=1}^{m}\left(wx^{(i)} + b - y^{(i)}\right)^2
+\end{aligned}
+$$
+
+Vài điều cần để ý:
+
+- $\hat{y}^{(i)} - y^{(i)}$ chỉ là phần dư đổi dấu. Bình phương lên thì như nhau.
+- Dữ liệu đã cố định, nên $\mathcal{L}$ chỉ còn là hàm của hai tham số (parameter) $w$ và $b$.
+- Nhiều sách dùng $\frac{1}{2m}$ để số 2 triệt tiêu khi lấy đạo hàm. Nhân $\mathcal{L}$ với một hằng số dương không dời điểm thấp nhất, nên nghiệm không đổi. Bài này dùng $\frac{1}{m}$ cho khớp với MSE của scikit-learn.
+
+Bài toán là tìm $w$ và $b$ làm $\mathcal{L}(w, b)$ nhỏ nhất. Lời giải gọi là nghiệm **bình phương tối thiểu** (least squares).
+
+### Lời giải khi có một đặc trưng
+
+$\mathcal{L}$ là tổng bình phương của các biểu thức bậc nhất theo $w$ và $b$, nên đồ thị của nó theo $(w, b)$ là một cái bát ngửa lên. Chỗ duy nhất mặt bát nằm phẳng (mọi đạo hàm riêng bằng 0) là đáy bát, nên chỉ cần cho hai đạo hàm riêng bằng 0 rồi giải. Điều này cần các căn không cùng một diện tích (xem mục "Khi nào nghiệm không duy nhất").
+
+Gọi $\bar{x} = \frac{1}{m}\sum_{i=1}^{m} x^{(i)}$ là diện tích trung bình và $\bar{y} = \frac{1}{m}\sum_{i=1}^{m} y^{(i)}$ là giá trung bình.
+
+**Bước 1: đạo hàm riêng theo $b$.** Theo quy tắc hàm hợp (chain rule), đạo hàm của $u^2$ bằng $2u$ nhân đạo hàm của $u$. Ở đây $u = wx^{(i)} + b - y^{(i)}$ có đạo hàm theo $b$ bằng 1. Vậy:
+
+$$
+\frac{\partial\mathcal{L}}{\partial b} = \frac{2}{m}\sum_{i=1}^{m}\left(wx^{(i)} + b - y^{(i)}\right)
+$$
+
+Cho đạo hàm này bằng 0 rồi chia hai vế cho 2. Tổng trong ngoặc tách thành $w\sum_{i} x^{(i)} + mb - \sum_{i} y^{(i)}$. Chia cho $m$, ba phần lần lượt thành $w\bar{x}$, $b$ và $\bar{y}$:
+
+$$
+\begin{aligned}
+0 &= \frac{1}{m}\sum_{i=1}^{m}\left(wx^{(i)} + b - y^{(i)}\right) \\
+&= w\bar{x} + b - \bar{y}
+\end{aligned}
+$$
+
+Chuyển vế:
+
+$$
+b = \bar{y} - w\bar{x}
+$$
+
+Đọc bằng lời: $\bar{y} = w\bar{x} + b$, tức **đường tốt nhất luôn đi qua điểm trung bình (mean point) $(\bar{x}, \bar{y})$**, và trung bình phần dư bằng 0. Đường A cũng đi qua điểm này (nên tổng phần dư bằng 0) mà vẫn tệ: điều kiện này cần nhưng chưa đủ, còn phải chọn đúng độ dốc.
+
+**Bước 2: đạo hàm riêng theo $w$.** Lần này $u$ có đạo hàm theo $w$ là $x^{(i)}$:
+
+$$
+\frac{\partial\mathcal{L}}{\partial w} = \frac{2}{m}\sum_{i=1}^{m}x^{(i)}\left(wx^{(i)} + b - y^{(i)}\right)
+$$
+
+Cho đạo hàm này bằng 0, rồi bỏ hệ số $\frac{2}{m}$ vì nó khác 0:
+
+$$
+\sum_{i=1}^{m}x^{(i)}\left(wx^{(i)} + b - y^{(i)}\right) = 0
+$$
+
+**Bước 3: thay $b$ từ bước 1 vào.** Gọi độ lệch (deviation) so với trung bình là $\tilde{x}^{(i)} = x^{(i)} - \bar{x}$ và $\tilde{y}^{(i)} = y^{(i)} - \bar{y}$. Biểu thức trong ngoặc trở thành:
+
+$$
+\begin{aligned}
+& wx^{(i)} + b - y^{(i)} \\
+&= wx^{(i)} + \left(\bar{y} - w\bar{x}\right) - y^{(i)} \\
+&= w\left(x^{(i)} - \bar{x}\right) - \left(y^{(i)} - \bar{y}\right) \\
+&= w\tilde{x}^{(i)} - \tilde{y}^{(i)}
+\end{aligned}
+$$
+
+Dòng thứ ba gom riêng hai số hạng có $w$ và hai số hạng còn lại. Phương trình ở bước 2 thành:
+
+$$
+\sum_{i=1}^{m}x^{(i)}\left(w\tilde{x}^{(i)} - \tilde{y}^{(i)}\right) = 0
+$$
+
+**Bước 4: đổi $x^{(i)}$ đứng trước ngoặc thành $\tilde{x}^{(i)}$.** Các độ lệch khỏi trung bình luôn có tổng bằng 0: $\sum_{i} \tilde{x}^{(i)} = \sum_{i} x^{(i)} - m\bar{x} = 0$, tương tự $\sum_{i} \tilde{y}^{(i)} = 0$. Do đó:
+
+$$
+\begin{aligned}
+& \bar{x}\sum_{i=1}^{m}\left(w\tilde{x}^{(i)} - \tilde{y}^{(i)}\right) \\
+&= \bar{x}\,(w \cdot 0 - 0) = 0
+\end{aligned}
+$$
+
+Lấy phương trình ở bước 3 trừ đẳng thức này, mỗi $x^{(i)}$ trước ngoặc thành $x^{(i)} - \bar{x}$, tức $\tilde{x}^{(i)}$:
+
+$$
+\sum_{i=1}^{m}\tilde{x}^{(i)}\left(w\tilde{x}^{(i)} - \tilde{y}^{(i)}\right) = 0
+$$
+
+**Bước 5: rút $w$.** Phá ngoặc, phương trình tách thành hai tổng:
+
+$$
+w\sum_{i=1}^{m}\left(\tilde{x}^{(i)}\right)^2 - \sum_{i=1}^{m}\tilde{x}^{(i)}\tilde{y}^{(i)} = 0
+$$
+
+Chuyển tổng thứ hai sang vế phải, chia cho tổng thứ nhất, rồi viết lại theo $x$, $y$ ban đầu:
+
+$$
+w = \frac{\sum_{i=1}^{m}\left(x^{(i)} - \bar{x}\right)\left(y^{(i)} - \bar{y}\right)}{\sum_{i=1}^{m}\left(x^{(i)} - \bar{x}\right)^2}
+$$
+
+Có $w$ rồi thì $b = \bar{y} - w\bar{x}$ theo bước 1.
+
+:::note[Ghi nhớ]
+Với một đặc trưng, $w$ bằng tổng tích các độ lệch chia cho tổng bình phương độ lệch của $x$, còn $b = \bar{y} - w\bar{x}$. Đường tốt nhất luôn đi qua điểm trung bình $(\bar{x}, \bar{y})$.
+:::
+
+**Đọc công thức.** Căn có hai độ lệch cùng dấu (rộng hơn và đắt hơn trung bình, hoặc nhỏ hơn và rẻ hơn) góp vào tử số một số dương, trái dấu thì góp số âm. Khi các số dương lấn át số âm thì $w > 0$ và đường dốc lên. Mẫu số đo các diện tích trải rộng tới đâu, và chỉ bằng 0 khi mọi căn cùng diện tích.
+
+**Áp vào bảng căn hộ.** Ở đây $\bar{x} = 52.4$, $\bar{y} = 10.92$, tử số bằng 598.32 và mẫu số bằng 3530.4. Do đó:
+
+$$
+\begin{aligned}
+w &= \frac{598.32}{3530.4} \approx 0.1695 \\
+b &\approx 10.92 - 0.1695 \times 52.4 \approx 2.04
+\end{aligned}
+$$
+
+Đường tốt nhất là $\hat{y} = 0.1695x + 2.04$, với MSE khoảng 0.3615. Mỗi m² thêm vào làm giá dự đoán tăng khoảng 0.17 triệu (170 nghìn đồng). Còn $b \approx 2.04$ chỉ là chỗ đường cắt trục tung, không phải "giá thuê căn 0 m²": dữ liệu không có căn nào nhỏ như vậy.
+
+### Dạng ma trận và phương trình chuẩn
+
+Với nhiều đặc trưng, ví dụ thêm số phòng ngủ, mỗi căn là một vectơ $\mathbf{x} = [x_1, \dots, x_n]^\top$, mỗi $x_j$ có trọng số $w_j$ riêng, và dự đoán là tích vô hướng cộng $b$:
+
+$$
+\hat{y} = \mathbf{w}^\top\mathbf{x} + b
+$$
+
+Ký hiệu ma trận giúp viết gọn bài toán cho mọi $n$. Xếp dữ liệu thành **ma trận thiết kế** (design matrix) $\mathbf{X}$: mỗi hàng là một căn, mỗi cột là một đặc trưng, thêm một **cột toàn số 1** ở cuối. Giá thật xếp thành vectơ $\mathbf{y}$. Với bảng căn hộ:
+
+$$
+\mathbf{X} = \begin{bmatrix} 25 & 1 \\ 30 & 1 \\ \vdots & \vdots \\ 85 & 1 \end{bmatrix}, \qquad
+\mathbf{y} = \begin{bmatrix} 6.7 \\ 6.5 \\ \vdots \\ 16.8 \end{bmatrix}
+$$
+
+Tham số gộp vào vectơ $\boldsymbol{\theta} = [w, b]^\top$. Với $n$ đặc trưng, hàng $i$ của $\mathbf{X}$ là $[\,x^{(i)}_1, \dots, x^{(i)}_n, 1\,]$ ($x^{(i)}_j$ là đặc trưng thứ $j$ của căn thứ $i$) và $\boldsymbol{\theta} = [w_1, \dots, w_n, b]^\top$, nên $\mathbf{X}$ có $m$ hàng và $n + 1$ cột.
+
+Vì sao cần cột số 1? Tích vô hướng của hàng $i$ với $\boldsymbol{\theta}$ là $x^{(i)}w + 1 \cdot b = \hat{y}^{(i)}$: cột số 1 để $b$ được cộng vào mọi dự đoán. Vậy $\mathbf{X}\boldsymbol{\theta}$ chứa cả $m$ giá dự đoán, và $\mathbf{X}\boldsymbol{\theta} - \mathbf{y}$ chứa các $\hat{y}^{(i)} - y^{(i)}$. Bình phương độ dài của một vectơ, $\lVert\mathbf{v}\rVert^2 = v_1^2 + \dots + v_m^2$, là tổng bình phương các phần tử, nên MSE viết gọn thành:
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = \frac{1}{m}\left\lVert\mathbf{X}\boldsymbol{\theta} - \mathbf{y}\right\rVert^2
+$$
+
+Cho mọi đạo hàm riêng của hàm này (theo $w_1, \dots, w_n$ và $b$) bằng 0, bạn được $n + 1$ phương trình bậc nhất. Viết bằng ma trận, cả hệ chỉ còn một dòng, gọi là **phương trình chuẩn**:
+
+$$
+\mathbf{X}^\top\mathbf{X}\,\boldsymbol{\theta} = \mathbf{X}^\top\mathbf{y}
+$$
+
+Không cần đạo hàm ma trận để hiểu nó. Chuyển vế phải sang vế trái rồi đặt $\mathbf{X}^\top$ ra ngoài, phương trình thành $\mathbf{X}^\top\left(\mathbf{X}\boldsymbol{\theta} - \mathbf{y}\right) = \mathbf{0}$. Hàng $j$ của vế trái là tích vô hướng giữa cột $j$ của $\mathbf{X}$ và $\mathbf{X}\boldsymbol{\theta} - \mathbf{y}$, tức $\sum_{i} x^{(i)}_j\left(\hat{y}^{(i)} - y^{(i)}\right)$. Nhân với $\frac{2}{m}$, hàng $j$ chính là $\partial\mathcal{L}/\partial w_j$ (quy tắc hàm hợp như bước 2), còn hàng cuối, ứng với cột số 1, là $\partial\mathcal{L}/\partial b$. Vậy phương trình chuẩn chỉ là các phương trình "đạo hàm bằng 0" xếp vào ma trận. Với bảng căn hộ, nó là hệ hai ẩn:
+
+$$
+\begin{aligned}
+30988\,w + 524\,b &= 6320.4 \\
+524\,w + 10\,b &= 109.2
+\end{aligned}
+$$
+
+Ở vế trái, 30988, 524 và 10 lần lượt là $\sum_{i} \left(x^{(i)}\right)^2$, $\sum_{i} x^{(i)}$ và $m$, các phần tử của $\mathbf{X}^\top\mathbf{X}$. Ở vế phải, 6320.4 là $\sum_{i} x^{(i)}y^{(i)}$ và 109.2 là $\sum_{i} y^{(i)}$, các phần tử của $\mathbf{X}^\top\mathbf{y}$. Chia phương trình thứ hai cho 10 được $52.4\,w + b = 10.92$, đúng là $\bar{x}w + b = \bar{y}$ của bước 1.
+
+Nếu $\mathbf{X}^\top\mathbf{X}$ khả nghịch (invertible), nghiệm viết được thành:
+
+$$
+\boldsymbol{\theta} = \left(\mathbf{X}^\top\mathbf{X}\right)^{-1}\mathbf{X}^\top\mathbf{y}
+$$
+
+Đây là cách **viết** nghiệm, không phải cách nên **tính**. Trong code, hãy dùng `np.linalg.solve(X.T @ X, X.T @ y)`, hoặc tốt hơn là `np.linalg.lstsq(X, y)`, vì nó giải trực tiếp trên $\mathbf{X}$ mà không lập $\mathbf{X}^\top\mathbf{X}$ (`LinearRegression` của scikit-learn cũng vậy): lập ma trận này sẽ bình phương **số điều kiện** (condition number), mức mà sai số tương đối ở đầu vào, kể cả sai số làm tròn, có thể bị phóng đại ở kết quả. Với bảng căn hộ, số điều kiện theo chuẩn 2 (2-norm, mặc định của `np.linalg.cond`) tăng từ khoảng 165 lên khoảng 165² ≈ 27 nghìn, nhưng tính bằng ma trận nghịch đảo (inverse), bằng `solve` hay bằng `lstsq` thì vẫn cùng kết quả tới khoảng 14 chữ số.
+
+### Khi nào nghiệm không duy nhất
+
+Phương trình chuẩn luôn có nghiệm. Nghiệm là **duy nhất** khi $\mathbf{X}^\top\mathbf{X}$ khả nghịch, tức là khi các cột của $\mathbf{X}$ **độc lập tuyến tính** (linearly independent): không cột nào viết được thành tổng có hệ số của các cột khác. Ba trường hợp hay làm hỏng điều này:
+
+- **Mọi mẫu có cùng giá trị của một đặc trưng.** Nếu căn nào cũng 40 m², cột diện tích bằng 40 lần cột số 1.
+- **Đặc trưng trùng lặp.** Ví dụ có cả diện tích theo m² lẫn theo ft²: cột ft² bằng cột m² nhân khoảng 10.76. Các cột phụ thuộc tuyến tính như vậy, hoặc gần như vậy, gọi là **cộng tuyến** (collinearity).
+- **Ít mẫu hơn tham số**, tức $m < n + 1$, ví dụ 5 căn hộ nhưng 8 đặc trưng.
+
+Khi đó $\mathbf{X}^\top\mathbf{X}$ **suy biến** (singular), và có vô số $\boldsymbol{\theta}$ cho **cùng một** dự đoán trên tập huấn luyện, với cùng MSE nhỏ nhất.
+
+Với một đặc trưng, trường hợp đầu hiện rõ qua định thức (determinant). Dùng các phần tử của $\mathbf{X}^\top\mathbf{X}$ trong hệ ở trên:
+
+$$
+\begin{aligned}
+\det\left(\mathbf{X}^\top\mathbf{X}\right) &= m\sum_{i}\left(x^{(i)}\right)^2 - \Big(\sum_{i} x^{(i)}\Big)^2 \\
+&= m\Big(\sum_{i}\left(x^{(i)}\right)^2 - m\bar{x}^2\Big) \\
+&= m\sum_{i}\left(x^{(i)} - \bar{x}\right)^2
+\end{aligned}
+$$
+
+Dòng thứ hai thay $\sum_{i} x^{(i)} = m\bar{x}$ rồi đặt $m$ ra ngoài. Dòng thứ ba đúng vì khai triển $\sum_{i}\left(x^{(i)} - \bar{x}\right)^2$ được $\sum_{i}\left(x^{(i)}\right)^2 - 2\bar{x} \cdot m\bar{x} + m\bar{x}^2$, tức $\sum_{i}\left(x^{(i)}\right)^2 - m\bar{x}^2$, đúng bằng biểu thức trong ngoặc. Định thức bằng 0 đúng khi mọi $x^{(i)}$ bằng nhau, cũng là lúc mẫu số trong công thức của $w$ bằng 0. Hậu quả trong code và cách xử lý: xem hộp thứ ba ở mục Lỗi hay gặp.
+
+### Giới hạn
+
+Hồi quy tuyến tính đơn giản, nhanh, dễ giải thích, nhưng có bốn giới hạn:
+
+- **Chỉ tuyến tính theo các đặc trưng bạn đưa vào.** Muốn bám đường cong thì thêm đặc trưng như $x^2$ (hộp đầu ở mục Lỗi hay gặp). Thêm bao nhiêu là vừa thì xem bài Overfitting và Underfitting.
+- **Nhạy với điểm ngoại lai.** Một điểm lạ có thể kéo lệch cả đường (ô code thứ ba).
+- **Ngoại suy dễ sai.** Dữ liệu chỉ có từ 25 đến 85 m² (hộp thứ hai ở mục Lỗi hay gặp).
+- **Tốn kém khi $n$ lớn.** Lập $\mathbf{X}^\top\mathbf{X}$ cỡ $(n + 1) \times (n + 1)$ tốn cỡ $mn^2$ phép tính, giải hệ thêm cỡ $n^3$. Bài Gradient Descent tìm đáy của cùng hàm $\mathcal{L}$ bằng từng bước nhỏ.
+
+## Minh họa
+
+Giờ bạn tự tìm đường tốt nhất bằng tay. Hình dưới là biểu đồ phân tán (scatter plot) của 10 căn hộ. Thanh trượt $w$ làm đường xoay, thanh trượt $b$ nâng hoặc hạ cả đường. Các đoạn thẳng đứng là phần dư, MSE cập nhật ngay khi bạn kéo. Dấu × là điểm trung bình $(52.4, 10.92)$. Hãy thử:
+
+1. Lúc đầu $w = 0$, $b = 10.9$: đường nằm ngang, gần như đường A, MSE 10.5020.
+2. Tăng $w$ một chút, rồi hạ $b$ cho đường đi lại qua dấu ×. MSE giảm. Lặp lại vài lần.
+3. Đừng tăng $w$ mãi. Ở $w = 0.4$, $b = -10.0$, đường vẫn đi sát dấu × nhưng quá dốc, MSE vọt lên 19.1240. Đi qua điểm trung bình là cần, nhưng chưa đủ.
+4. Khi MSE đủ nhỏ, hình hiện dòng "Rất gần đường tốt nhất". Bấm **Hiện đường tốt nhất** để so với $\hat{y} = 0.1695x + 2.04$, MSE 0.3615. Thanh trượt đi theo bước 0.005 và 0.1, nên điểm gần nhất bạn chạm được là $w = 0.17$, $b = 2.0$, MSE 0.3617.
+
+{/* VIZ: đường tốt nhất là đường có MSE nhỏ nhất. */}
+<LinearFitViz />
+
+## Ví dụ code
+
+Ba ô code dưới đây làm lại các bước trên bằng Python. Ô nào cũng tự tạo bảng căn hộ, nên chạy ô nào trước cũng được. Ô thứ hai lần đầu chạy lâu hơn, vì trình duyệt phải tải thêm scikit-learn.
+
+Ô đầu tiên lập ma trận thiết kế, giải phương trình chuẩn bằng `np.linalg.solve`, rồi tính MSE.
+
+<PythonRunner code={normalEquationCode} title="Phương trình chuẩn bằng NumPy" />
+
+Kết quả là $b = 2.0394$, $w = 0.1695$ và MSE $= 0.3615$, khớp với công thức một đặc trưng và với đường tốt nhất trong phần Minh họa.
+
+Ô thứ hai dùng `LinearRegression` của scikit-learn, lớp giải đúng bài toán bình phương tối thiểu thông thường (ordinary least squares, OLS) ở trên. Ô này đối chiếu với công thức tay, dự đoán giá hai căn mới, rồi vẽ đường.
+
+<PythonRunner
+  code={sklearnFitCode}
+  title="scikit-learn và dự đoán căn mới"
+  figureAlt={['Biểu đồ phân tán 10 căn hộ, giá thuê theo diện tích, cùng đường thẳng tốt nhất. Đường đi xuyên giữa đám điểm, dốc lên từ khoảng 5.4 triệu ở 20 m² tới khoảng 17.3 triệu ở 90 m².']}
+/>
+
+Hai dòng đầu khớp nhau: scikit-learn và công thức tay cho cùng $w$, $b$. Hai điều cần nhớ khi dùng scikit-learn:
+
+- `X` phải là bảng hai chiều, $m$ hàng và $n$ cột, kể cả khi chỉ có một đặc trưng. Đó là lý do có `reshape(-1, 1)`.
+- Trọng số nằm trong `coef_`, còn $b$ nằm trong `intercept_`. Bạn không cần tự thêm cột số 1.
+
+Căn 65 m² được đoán 13.06 triệu đồng/tháng, nằm giữa giá căn 60 m² (12.0) và căn 68 m² (14.1). Nghe hợp lý. Căn 300 m² được đoán 52.88 triệu, một con số đáng ngờ (xem mục Lỗi hay gặp).
+
+Ô thứ ba thử một điểm ngoại lai: một căn 110 m² bị gõ nhầm giá 19.0 thành 9.0. Ô này dùng `np.linalg.lstsq` để khớp đường trước và sau khi thêm điểm đó.
+
+<PythonRunner
+  code={outlierCode}
+  title="Một điểm ngoại lai"
+  figureAlt={['Biểu đồ phân tán 10 căn hộ cùng một điểm ngoại lai đánh dấu × ở 110 m², 9 triệu. Đường liền, khớp khi chưa có ngoại lai, đi sát các điểm và dốc lên rõ. Đường đứt, khớp khi có ngoại lai, thoải hơn hẳn: nó nằm cao hơn đường liền ở các căn nhỏ, cắt đường liền quanh 46 m², rồi thấp hơn hẳn ở phía bên phải.']}
+/>
+
+Chỉ thêm một điểm trong 11, độ dốc đã giảm hơn một nửa: $w$ từ 0.1695 xuống 0.0760 (từ khoảng 170 nghìn còn 76 nghìn đồng mỗi m²). Còn $b$ tăng từ 2.04 lên 6.36. Vì sao một điểm lại mạnh đến vậy?
+
+- So với đường cũ, điểm mới lệch gần 12 triệu. Bình phương lên được hơn 130, trong khi tổng bình phương phần dư của cả 10 căn kia chỉ khoảng 3.6. Muốn MSE nhỏ, đường buộc phải nghiêng về phía điểm này.
+- Điểm nằm ở mép phải, xa điểm trung bình theo chiều ngang, như người ngồi ở đầu bập bênh: càng xa trục, càng dễ làm tấm ván nghiêng. Điểm như vậy gọi là **điểm đòn bẩy cao** (high-leverage point).
+
+Vì vậy, hãy vẽ dữ liệu ra xem và kiểm tra các điểm nằm xa đám đông trước khi khớp mô hình.
+
+## Lỗi hay gặp
+
+:::caution["Tuyến tính" không có nghĩa là chỉ vẽ được đường thẳng]
+"Tuyến tính" ở đây là tuyến tính **theo tham số**: dự đoán là tổng các đặc trưng nhân với trọng số, còn đặc trưng là gì thì tùy bạn chọn. Thêm cột $x^2$ vào $\mathbf{X}$, mô hình $\hat{y} = w_1x + w_2x^2 + b$ là một đường cong theo $x$, nhưng vẫn tuyến tính theo $w_1$, $w_2$, $b$, nên vẫn giải bằng phương trình chuẩn. Ngược lại, $\hat{y} = e^{wx}$ không tuyến tính theo $w$, nên không giải được theo cách này.
+:::
+
+:::caution[Tin vào dự đoán ở ngoài vùng dữ liệu]
+Dữ liệu chỉ có các căn từ 25 đến 85 m², vậy mà ô code thứ hai vẫn đoán căn 300 m² giá 52.88 triệu: đường thẳng cứ cộng khoảng 170 nghìn cho mỗi m². Không gì trong dữ liệu cho biết điều đó còn đúng ở 300 m², nơi có thể toàn căn hộ cao cấp với giá khác hẳn. Đây là ngoại suy: mô hình vẫn trả về một con số, nhưng không có dữ liệu nào đứng sau nó. Trước khi tin một dự đoán, hãy xem đầu vào có nằm trong khoảng giá trị của tập huấn luyện (training set) không.
+:::
+
+:::caution[Tự tính nghịch đảo, hoặc để đặc trưng trùng lặp]
+Đưa cả m² lẫn ft² vào mô hình thì $\mathbf{X}^\top\mathbf{X}$ suy biến: tăng trọng số cột này, giảm cột kia cho bù nhau, dự đoán không đổi. Về lý thuyết, dự đoán vẫn dùng được, nhưng từng hệ số mất ý nghĩa. Và đừng trông chờ máy báo lỗi. Gõ thẳng `np.linalg.inv(X.T @ X) @ X.T @ y` vẫn đúng trên bảng của bài, nhưng với hai cột tỉ lệ nhau, kết quả tùy vào sai số làm tròn. Có lúc `inv` và `solve` báo `LinAlgError`, có lúc chúng lặng lẽ trả về số. Khi không báo lỗi, `solve` thường vẫn cho dự đoán đúng nhưng hệ số vô nghĩa, còn `inv` có thể cho cả dự đoán sai hẳn.
+
+Cách làm đúng: dùng `np.linalg.lstsq` hoặc `LinearRegression`. Khi có cột thừa, `lstsq` vẫn trả về một nghiệm (nghiệm có độ dài nhỏ nhất, minimum-norm solution) kèm **hạng** (rank) của $\mathbf{X}$, tức số cột thật sự độc lập. Hạng nhỏ hơn số cột là có cột thừa. Nhưng hạng chỉ bắt được cột trùng chính xác: nếu cột ft² đã làm tròn tới 0.1, `lstsq` báo đủ hạng mà hệ số vẫn vô nghĩa, và dự đoán cho căn mới có thể lệch gần 1 triệu so với đường chỉ dùng m². Dấu hiệu lúc này là số điều kiện rất lớn, `np.linalg.cond(X)` khoảng 300 nghìn so với khoảng 165 của bảng gốc. Khi đó, bỏ cột thừa hoặc thêm dữ liệu. Bài Ridge, Lasso, Elastic Net có thêm cách khác, ví dụ Ridge cộng vào $\mathcal{L}$ một khoản phạt để nghiệm lại duy nhất.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Hồi quy tuyến tính dự đoán $\hat{y} = \mathbf{w}^\top\mathbf{x} + b$ và chọn tham số làm MSE nhỏ nhất. Bình phương để sai số không triệt tiêu, phạt nặng sai số lớn, và lấy đạo hàm được.
+- Với một đặc trưng: $b = \bar{y} - w\bar{x}$, còn $w$ bằng tổng tích các độ lệch chia cho tổng bình phương độ lệch của $x$. Đường tốt nhất đi qua điểm trung bình.
+- Dạng tổng quát là phương trình chuẩn $\mathbf{X}^\top\mathbf{X}\boldsymbol{\theta} = \mathbf{X}^\top\mathbf{y}$, với $\mathbf{X}$ có thêm cột số 1. Nghiệm duy nhất khi các cột của $\mathbf{X}$ độc lập tuyến tính. Trong code, dùng `lstsq` hoặc `LinearRegression`, không tự tính nghịch đảo.
+- $w_j$ cho biết dự đoán đổi bao nhiêu khi $x_j$ tăng 1 đơn vị và các đặc trưng khác giữ nguyên. Cẩn thận với ngoại suy và điểm ngoại lai.
+
+**Đọc thêm:**
+
+- Vũ Hữu Tiệp (2016). [*Machine Learning cơ bản*, Bài 3: Linear Regression](https://machinelearningcoban.com/2016/12/28/linearregression/). Tiếng Việt, có ví dụ NumPy và scikit-learn. Ký hiệu hơi khác: $N$ là số mẫu, cột số 1 đặt ở đầu.
+- James, G., Witten, D., Hastie, T., Tibshirani, R. (2013). [*An Introduction to Statistical Learning*](https://www.statlearning.com/) (bản 1), chương 3: Linear Regression. Mục 3.1: lời giải một đặc trưng. Mục 3.3.3: điểm ngoại lai, điểm đòn bẩy cao, cộng tuyến.
+- Ng, A. (2003). [*CS229 Lecture notes*](https://see.stanford.edu/materials/aimlcs229/cs229-notes1.pdf) (PDF), Part I: Linear Regression (bản cũ, Stanford). Dẫn phương trình chuẩn bằng đạo hàm ma trận.
+- Deisenroth, M. P., Faisal, A. A., Ong, C. S. (2020). [*Mathematics for Machine Learning*](https://mml-book.github.io/), chương 9: Linear Regression. Mục 9.4 giải thích phương trình chuẩn bằng hình chiếu vuông góc (orthogonal projection).
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*](https://scikit-learn.org/1.8/modules/linear_model.html), mục 1.1.1 Ordinary Least Squares. Tài liệu chính thức của `LinearRegression`.
+
+<LessonProgress />

@@ -7,6 +7,7 @@ import QuizIsland, { type RenderedQuizQuestion } from './quiz/QuizIsland';
 import { getStrings } from '@i18n/ui';
 import { inlineMarkupLabel, renderInlineMarkup } from '@lib/inline-markup';
 import { quizSchema, type QuizQuestion } from '@lib/quiz-schema';
+import { getContentLang, getPageLocale } from '@lib/page-locale';
 
 interface Props {
   /** Demo page and a rare second quiz on one page. Strings must not contain "\" (JS escapes). */
@@ -53,9 +54,13 @@ const rendered: RenderedQuizQuestion[] = questionsToRender().map((q) => ({
 
 const strings = getStrings(Astro.locals.t, 'quiz');
 const tCommon = getStrings(Astro.locals.t, 'common');
+// The strings are in the page's language (lang on the root, outside the island). On Starlight's fallback page
+// the questions come from the vi file, so the island marks them with that language.
+const locale = getPageLocale(route);
+const contentLang = getContentLang(route);
 ---
 
-<div class="atlas-quiz not-content">
-  <QuizIsland client:visible questions={rendered} strings={strings} />
+<div class="atlas-quiz not-content" lang={locale}>
+  <QuizIsland client:visible questions={rendered} strings={strings} contentLang={contentLang} />
   <noscript><p class="atlas-quiz-noscript">{tCommon.needsScript}</p></noscript>
 </div>

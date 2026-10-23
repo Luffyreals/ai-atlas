@@ -1,5 +1,5 @@
-// Build-time renderer for short strings that may carry $math$ or `code`.
-// Used by components that take text from data files (homepage slips; Quiz in M1).
+// Build-time renderers for short strings from data files: $math$ and `code` (homepage slips, Quiz),
+// **marks** and lesson links (homepage letter).
 import katex from 'katex';
 
 const HTML_ESCAPES: Record<string, string> = {
@@ -33,6 +33,42 @@ export function renderInlineMarkup(text: string): string {
     last = index + match[0].length;
   }
   return html + escapeHtml(text.slice(last));
+}
+
+// [label](lesson:<id>), e.g. [Linear Regression](lesson:ml/linear-regression). Ids only, never a URL.
+const LESSON_LINK = /\[([^\]\n]+)\]\(lesson:([a-z0-9]+(?:[/-][a-z0-9]+)*)\)/g;
+
+const count = (text: string, part: string) => text.split(part).length - 1;
+
+/**
+ * Prose from data files (the homepage letter). Escapes HTML, then **phrase** becomes <mark>phrase</mark>
+ * and [label](lesson:<id>) a link to that lesson. `lessonHref(id)` returns the URL from the roadmap, or
+ * undefined when the lesson has no page; the label then stays plain text. Build-time only.
+ * Throws, so the build fails, on a link that is not [label](lesson:<part>/<slug>) (e.g. `lesson:ML/x`,
+ * a trailing "/") and on **marks** that cross a link (`**a [b** c](lesson:ml/x)`).
+ */
+export function renderProseMarkup(text: string, lessonHref: (id: string) => string | undefined): string {
+  const html = escapeHtml(text)
+    .replace(LESSON_LINK, (_, label: string, id: string) => {
+      const href = lessonHref(id);
+      return href === undefined ? label : `<a href="${escapeHtml(href)}">${label}</a>`;
+    })
+    .replace(/\*\*(.+?)\*\*/g, (_, inner: string) => {
+      // Escaped text holds no "<", so every <a and </a> here is a link made above.
+      if (count(inner, '<a ') !== count(inner, '</a>')) {
+        throw new Error(`renderProseMarkup: **…** crosses a lesson link in "${text}". Keep the marks inside or outside the link.`);
+      }
+      return `<mark>${inner}</mark>`;
+    });
+  if (html.includes('](lesson:')) {
+    throw new Error(`renderProseMarkup: malformed lesson link in "${text}". Write [label](lesson:<part>/<slug>), lowercase, no "/" at the end.`);
+  }
+  return html;
+}
+
+/** Lesson ids linked with [label](lesson:<id>) in `text`, in order. */
+export function proseLessonIds(text: string): string[] {
+  return [...text.matchAll(LESSON_LINK)].map((match) => match[2] ?? '');
 }
 
 /**

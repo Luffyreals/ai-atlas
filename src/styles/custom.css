@@ -80,6 +80,19 @@
   color: var(--sl-color-black);
 }
 
+/*
+ * A display formula wider than the column scrolls inside its own box, so the page never scrolls sideways.
+ * overflow-x: auto alone turns overflow-y to auto too; a fraction or a hat reaches a few px past the box,
+ * so it would scroll a little and Chrome would make every formula a Tab stop. Hence overflow-y: hidden,
+ * plus padding-block so nothing is cut (KaTeX's 1em margin shrinks by the same amount).
+ */
+.sl-markdown-content .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-block: calc(1em - 6px);
+  padding-block: 6px;
+}
+
 /* Show the whole label of the theme and language selects (Vietnamese labels are longer). */
 :is(starlight-theme-select, starlight-lang-select) select {
   width: auto;

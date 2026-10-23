@@ -23,11 +23,14 @@ Dùng thống nhất cho toàn bộ AI Atlas. Gặp thuật ngữ mới thì th�
 
 | Tiếng Việt | Tiếng Anh | Cách dùng |
 |---|---|---|
+| Biểu đồ phân tán | Scatter plot | Dịch |
 | Dữ liệu mất cân bằng | Imbalanced data | Dịch |
 | Đặc trưng | Feature | Dịch |
+| Điểm ngoại lai | Outlier | Dịch. Điểm nằm xa hẳn phần còn lại của dữ liệu. Không gọi là "nhiễu" |
 | Mẫu | Sample | Dịch |
 | Mô hình | Model | Dịch |
 | Nhãn | Label | Dịch |
+| Nhiễu | Noise | Dịch. Phần biến động của nhãn mà các đặc trưng không giải thích được. Khác "điểm ngoại lai" |
 | Siêu tham số | Hyperparameter | Dịch |
 | Tăng cường dữ liệu | Data augmentation | Dịch |
 | Tập huấn luyện | Training set | Dịch |
@@ -39,16 +42,26 @@ Dùng thống nhất cho toàn bộ AI Atlas. Gặp thuật ngữ mới thì th�
 
 | Tiếng Việt | Tiếng Anh | Cách dùng |
 |---|---|---|
+| Bình phương tối thiểu | Least squares | Dịch. Không dùng "bình phương nhỏ nhất" |
+| Bình phương tối thiểu thông thường | Ordinary least squares (OLS) | Dịch, viết tắt OLS. Tên scikit-learn dùng cho `LinearRegression` |
+| Cộng tuyến | Collinearity | Dịch. Các đặc trưng phụ thuộc tuyến tính, hoặc gần như vậy, ví dụ diện tích theo m² và theo ft² |
+| Điểm đòn bẩy cao | High-leverage point | Dịch. Điểm có đặc trưng nằm xa phần còn lại, có thể kéo mạnh đường hồi quy |
+| Điểm trung bình | Mean point | Dịch. Điểm $(\bar{x}, \bar{y})$. Đường bình phương tối thiểu (có hệ số tự do) luôn đi qua điểm này |
+| Độ dốc | Slope | Dịch. Trong hồi quy: chỉ gọi $w$ là độ dốc khi có một đặc trưng. Nhiều đặc trưng thì gọi "trọng số" |
 | Gradient descent | Gradient descent | Giữ |
 | Hàm mất mát | Loss function | Dịch |
-| Hệ số tự do | Bias (term) | Dịch, lần đầu ghi "bias" |
+| Hệ số tự do | Bias (term) | Dịch, lần đầu ghi "bias, còn gọi là intercept". Sách thống kê và scikit-learn (`intercept_`) gọi là intercept |
 | Hồi quy | Regression | Dịch |
 | Hồi quy Logistic | Logistic regression | Dịch |
 | Hồi quy tuyến tính | Linear regression | Dịch |
+| Ngoại suy | Extrapolation | Dịch. Dự đoán ở ngoài khoảng giá trị của dữ liệu huấn luyện |
 | Overfitting / Underfitting | Overfitting / Underfitting | Giữ |
 | Phân cụm | Clustering | Dịch |
 | Phân loại | Classification | Dịch |
+| Phần dư | Residual | Dịch. $e^{(i)} = y^{(i)} - \hat{y}^{(i)}$, khác "sai số" (error) chưa quan sát được |
+| Phương trình chuẩn | Normal equation | Dịch, lần đầu kèm "normal equation" |
 | Regularization | Regularization | Giữ |
+| Sai số bình phương trung bình | Mean squared error (MSE) | Dịch, viết tắt MSE. Site dùng hệ số $\frac{1}{m}$ |
 | Tốc độ học | Learning rate | Dịch |
 | Trọng số | Weight | Dịch |
 
@@ -78,11 +91,25 @@ Dùng thống nhất cho toàn bộ AI Atlas. Gặp thuật ngữ mới thì th�
 
 | Tiếng Việt | Tiếng Anh | Cách dùng |
 |---|---|---|
+| Chuẩn (của vectơ, ma trận) | Norm | Dịch. Ví dụ "chuẩn 2" (2-norm). Với vectơ, chuẩn 2 là độ dài $\lVert\mathbf{v}\rVert$ |
 | Chuyển vị | Transpose | Dịch |
 | Đạo hàm | Derivative | Dịch |
 | Đạo hàm riêng | Partial derivative | Dịch |
+| Định thức | Determinant | Dịch |
+| Độ lệch (so với trung bình) | Deviation | Dịch. Ví dụ $x^{(i)} - \bar{x}$. Không nhầm với bias |
+| Độc lập tuyến tính | Linearly independent | Dịch |
+| Hạng (của ma trận) | Rank | Dịch |
+| Hình chiếu vuông góc | Orthogonal projection | Dịch |
 | Kỳ vọng | Expectation | Dịch |
 | Ma trận | Matrix | Dịch |
+| Ma trận khả nghịch / suy biến | Invertible / singular matrix | Dịch |
+| Ma trận nghịch đảo | Inverse matrix | Dịch |
+| Ma trận thiết kế | Design matrix | Dịch. Mỗi hàng một mẫu, mỗi cột một đặc trưng, thêm cột toàn số 1 cho hệ số tự do |
+| Nghiệm có độ dài nhỏ nhất | Minimum-norm solution | Dịch. Nghiệm mà `np.linalg.lstsq` trả về khi có vô số nghiệm |
 | Phân phối xác suất | Probability distribution | Dịch |
+| Phụ thuộc tuyến tính | Linearly dependent | Dịch |
 | Phương sai | Variance | Dịch |
+| Quy tắc hàm hợp | Chain rule | Dịch |
+| Số điều kiện | Condition number | Dịch |
+| Tích vô hướng | Dot product | Dịch |
 | Vectơ | Vector | Dịch |

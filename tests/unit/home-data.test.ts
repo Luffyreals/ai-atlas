@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { CC_LICENCE_URL, HOME, type Slip } from '../../src/data/home';
 import { ALL_PICTURES, HERO_PLATES, LESSON_PICTURE, PART_PICTURES, STAMP_PICTURE, TERMS_PICTURE } from '../../src/data/home-pictures';
 import { PART_IDS } from '../../src/data/roadmap';
+import { proseLessonIds } from '../../src/lib/inline-markup';
+import { getLesson, hasPage } from '../../src/lib/roadmap';
 
 type LocalizedValue = string | readonly string[];
 
@@ -66,6 +68,18 @@ describe('homepage copy (src/data/home.ts, home-pictures.ts)', () => {
     for (const [path, value] of localized) {
       expect(typeof value.en, path).toBe(typeof value.vi);
       if (Array.isArray(value.vi)) expect((value.en as readonly string[]).length, path).toBe(value.vi.length);
+    }
+  });
+
+  it('letter: vi and en link the same lessons in the same paragraphs, and each one has a page', () => {
+    const vi = HOME.letter.paragraphs.vi.map(proseLessonIds);
+    expect(HOME.letter.paragraphs.en.map(proseLessonIds)).toEqual(vi);
+    const ids = vi.flat();
+    expect(ids).toContain('ml/linear-regression');
+    for (const id of ids) {
+      const lesson = getLesson(id);
+      expect(lesson, id).toBeDefined();
+      expect(hasPage(lesson!), `${id} has a page`).toBe(true);
     }
   });
 

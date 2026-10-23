@@ -398,7 +398,7 @@ Gợi ý `shortTitle` cho tiêu đề dài, dùng ở sidebar (developer thêm �
 
 ### 6.3. `tests/unit/sidebar.test.ts`
 
-1. Dữ liệu thật ở M0 (mọi bài planned): `buildSidebar()` trả `[]`.
+1. Dữ liệu thật (`LESSONS`): `buildSidebar()` có đúng các bài có `status.vi === 'published'`, theo thứ tự lộ trình, nhãn là `shortTitle ?? title` (vi làm nhãn, en trong `translations`); mỗi phần có bài là một nhóm, theo thứ tự phần, không nhóm nào rỗng. Kỳ vọng tính từ `LESSONS`, nên test vẫn đúng khi xuất bản thêm bài. Khi mọi bài đều `planned` (fixture), `buildSidebar()` trả `[]`.
 2. Fixture có 2 bài published trong `ml`: một nhóm "Học máy" với `translations.en === 'Machine Learning'`, đúng 2 mục theo thứ tự lộ trình, mỗi mục có `slug` không tiền tố ngôn ngữ và có `translations.en`.
 3. Bài chỉ có `vi` published vẫn có trong sidebar.
 4. Fixture `llm` có bài ở `build` nhưng không có ở `apps`: chỉ có nhóm con `build`.

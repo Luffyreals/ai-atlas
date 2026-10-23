@@ -1,16 +1,18 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page, type Request } from '@playwright/test';
-import { LESSONS } from '../../src/data/roadmap';
-import { requireLesson } from '../../src/lib/roadmap';
+import { HOME } from '../../src/data/home';
+import { LESSONS, LOCALES, type Locale } from '../../src/data/roadmap';
+import { formatString } from '../../src/i18n/format';
+import { lessonLinkView } from '../../src/lib/lesson-link';
+import { getFirstOpenLesson, isTranslated, requireLesson } from '../../src/lib/roadmap';
 import { countParts, routeTo } from '../../src/lib/route';
+import { isNarrow, scrollThrough, STRINGS } from './helpers';
 
 // Homepage (src/components/home/*, RoadmapMap.astro). All URLs end with "/" (trailingSlash 'always').
 
-const LOCALES = ['vi', 'en'] as const;
-type Locale = (typeof LOCALES)[number];
-
 const OPEN_MAP: Record<Locale, string> = { vi: 'Mở bản đồ', en: 'Open the map' };
+const FIRST_OPEN = getFirstOpenLesson();
 /** Parses "…: {{count}} bài, qua {{parts}} phần." / "… Lessons on the way: {{count}}. Parts: {{parts}}." */
 const RESULT_PATTERN: Record<Locale, RegExp> = {
   vi: /:\s*(\d+) bài, qua (\d+) phần\.$/,
@@ -22,10 +24,6 @@ const titleOf = (id: string, locale: Locale) => {
   const lesson = requireLesson(id);
   return (lesson.shortTitle ?? lesson.title)[locale];
 };
-
-function isNarrow(page: Page): boolean {
-  return (page.viewportSize()?.width ?? 1280) <= 375;
-}
 
 async function readResult(page: Page, locale: Locale): Promise<{ text: string; count: number; parts: number }> {
   const text = ((await page.locator('[data-route-result]').textContent()) ?? '').trim();
@@ -91,6 +89,16 @@ for (const locale of LOCALES) {
       await expect(button).toBeInViewport({ ratio: 1 });
       expect(await page.evaluate(() => window.scrollY)).toBe(0);
 
+      // "Start learning" too, on the same row as the map link.
+      const start = page.locator('.hero [data-start-learning]');
+      await expect(start).toHaveCount(FIRST_OPEN ? 1 : 0);
+      if (FIRST_OPEN) {
+        await expect(start).toBeInViewport({ ratio: 1 });
+        await page.evaluate(() => document.fonts.ready);
+        const [startBox, mapBox] = [await start.boundingBox(), await button.boundingBox()];
+        expect(startBox && mapBox && Math.abs(startBox.y + startBox.height / 2 - (mapBox.y + mapBox.height / 2))).toBeLessThan(4);
+      }
+
       const languageLink = page.locator(`.hero a[hreflang="${other}"]`);
       await expect(languageLink).toHaveCount(1);
       await expect(languageLink).toBeVisible();
@@ -99,7 +107,84 @@ for (const locale of LOCALES) {
       await page.waitForURL(`**/${other}/`);
       await expect(page.locator('html')).toHaveAttribute('lang', other);
     });
+
+    test('"Start learning" opens the first lesson with a page; beside it the map is a plain link', async ({ page }) => {
+      await page.goto(`/${locale}/`);
+      const start = page.locator('.hero [data-start-learning]');
+      const map = page.locator('.hero').getByRole('link', { name: OPEN_MAP[locale], exact: true });
+      if (!FIRST_OPEN) {
+        await expect(start).toHaveCount(0);
+        await expect(map).toHaveClass(/\batlas-button\b/);
+        return;
+      }
+
+      // Same link as the roadmap map: an untranslated lesson keeps its /en/ URL (Starlight's fallback page).
+      const view = lessonLinkView(FIRST_OPEN, locale);
+      const note = view.state === 'untranslated' ? ` (${STRINGS[locale]['atlas.common.notTranslated']})` : '';
+      await expect(start).toHaveCount(1);
+      await expect(start).toHaveText(STRINGS[locale]['atlas.home.startLearning']!);
+      await expect(start).toHaveAccessibleName(
+        formatString(STRINGS[locale]['atlas.home.startLearningLabel']!, { lesson: FIRST_OPEN.title[locale] }) + note,
+      );
+      await expect(start).toHaveAttribute('href', `/${locale}/${FIRST_OPEN.id}/`);
+      await expect(start).toHaveClass(/\batlas-button\b/);
+      await expect(map).toHaveClass(/\bhero-map-link\b/);
+      await expect(map).not.toHaveClass(/\batlas-button\b/);
+
+      await start.click();
+      await page.waitForURL(`**/${locale}/${FIRST_OPEN.id}/`);
+      await expect(page.locator('h1#_top')).toHaveText(FIRST_OPEN.title[isTranslated(FIRST_OPEN, locale) ? locale : 'vi']);
+    });
+
+    test('the letter links each [label](lesson:<id>) to that lesson in this language', async ({ page }) => {
+      const links = HOME.letter.paragraphs[locale].flatMap((paragraph) =>
+        [...paragraph.matchAll(/\[([^\]]+)\]\(lesson:([^)]+)\)/g)].map(([, label, id]) => ({ label, id: id ?? '' })),
+      );
+      expect(links.length).toBeGreaterThan(0);
+      await page.goto(`/${locale}/`);
+      const seen = await page.locator('.letter .sheet-body a').evaluateAll((items) =>
+        items.map((a) => ({ label: (a.textContent ?? '').trim(), href: a.getAttribute('href') })),
+      );
+      expect(seen).toEqual(links.map(({ label, id }) => ({ label, href: lessonLinkView(requireLesson(id), locale).href })));
+      // No markup is left over as text.
+      await expect(page.locator('.letter')).not.toContainText('](lesson:');
+    });
   });
+}
+
+// Phones narrower than the mobile project: 320px (the narrowest common width) and 360px (a common Android
+// width). Same height as the mobile project (800), so only the width differs from the 375px test above: the
+// English labels are longer, and the two actions may wrap onto two rows.
+for (const width of [320, 360]) {
+  for (const locale of LOCALES) {
+    test(`at ${width}px (${locale}) the first screen still shows both hero actions and the other-language link`, async ({
+      page,
+    }, testInfo) => {
+      test.skip(testInfo.project.name !== 'mobile', 'the viewport is set here; one project is enough');
+      test.skip(!FIRST_OPEN, 'no lesson has a page yet, so there is no "Start learning" button');
+      const other: Locale = locale === 'vi' ? 'en' : 'vi';
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto(`/${locale}/`);
+      await page.evaluate(() => document.fonts.ready);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+
+      const targets = {
+        start: page.locator('.hero [data-start-learning]'),
+        map: page.locator('.hero').getByRole('link', { name: OPEN_MAP[locale], exact: true }),
+        language: page.locator(`.hero a[hreflang="${other}"]`),
+      };
+      const boxes = Object.fromEntries(
+        await Promise.all(
+          Object.entries(targets).map(async ([name, target]) => [name, await target.boundingBox()] as const),
+        ),
+      );
+      const where = JSON.stringify(boxes);
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
+      for (const [name, target] of Object.entries(targets)) {
+        await expect(target, `${name} in the first ${width}×800 screen: ${where}`).toBeInViewport({ ratio: 1 });
+      }
+    });
+  }
 }
 
 /** JS files in dist/_astro that contain React (e.g. the @astrojs/react client renderer). */
@@ -114,17 +199,6 @@ function reactChunksInDist(): string[] {
   }
 }
 
-/** Scrolls to every part of the page so lazy images and client:visible islands would load. */
-async function scrollThrough(page: Page): Promise<void> {
-  const height = await page.evaluate(() => document.documentElement.scrollHeight);
-  const step = page.viewportSize()?.height ?? 800;
-  for (let y = 0; y <= height; y += step) {
-    await page.evaluate((top) => window.scrollTo(0, top), y);
-    await page.waitForTimeout(100);
-  }
-  await page.waitForLoadState('networkidle');
-}
-
 test('/vi/ loads no React and no Pyodide', async ({ page }) => {
   const requests: Request[] = [];
   page.on('request', (request) => requests.push(request));
@@ -136,7 +210,7 @@ test('/vi/ loads no React and no Pyodide', async ({ page }) => {
   });
 
   await page.goto('/vi/');
-  await scrollThrough(page);
+  await scrollThrough(page, { networkIdle: true });
 
   const urls = requests.map((request) => request.url());
   const reactChunks = reactChunksInDist();

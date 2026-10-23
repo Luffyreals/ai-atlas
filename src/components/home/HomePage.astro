@@ -2,7 +2,8 @@
 // The homepage, rendered through Starlight's Hero slot (see src/components/starlight/Hero.astro).
 import RoadmapMap from '@components/RoadmapMap.astro';
 import { HOME } from '@data/home';
-import { LESSONS, type Locale } from '@data/roadmap';
+import { LESSONS } from '@data/roadmap';
+import { getPageLocale } from '@lib/page-locale';
 import { formatString } from '@i18n/format';
 import HomeFooter from './HomeFooter.astro';
 import HomeHero from './HomeHero.astro';
@@ -11,7 +12,7 @@ import HomeLetter from './HomeLetter.astro';
 import HomeRoute from './HomeRoute.astro';
 import HomeTerms from './HomeTerms.astro';
 
-const locale = (Astro.locals.starlightRoute.locale ?? 'vi') as Locale;
+const locale = getPageLocale(Astro.locals.starlightRoute);
 const lessonCount = { count: LESSONS.length };
 ---
 

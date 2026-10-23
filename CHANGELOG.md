@@ -26,6 +26,13 @@ Mọi thay đổi đáng chú ý của AI Atlas được ghi ở đây. Mỗi m�
   - Trang demo `/dev/components/`, 5 file code mẫu vi/en trong `src/code/dev/`.
   - Sitemap (`@astrojs/sitemap`, lọc `/dev/`), 59 key i18n mới.
   - Test: unit 88 lên 244 (Vitest + jsdom), e2e 47 lên 111, thêm e2e `@network` (`npm run test:e2e:network`).
+- Mốc M2, bài mẫu ([báo cáo](docs/progress/2026-10-23-m2.md)):
+  - Bài Hồi quy tuyến tính, bản vi và en (`ml/linear-regression`), 3 ô code, 4 câu quiz.
+  - VIZ `LinearFitViz` (hai thanh trượt $w$, $b$, phần dư, MSE, "Hiện đường tốt nhất"), kit VIZ dùng chung, [viz.md](docs/architecture/viz.md).
+  - `DatasetTable` và bảng căn hộ `src/data/datasets/apartments.ts` dùng chung cho bài, VIZ và code.
+  - Tên truy cập cho công thức riêng dòng (`rehype-katex-a11y`).
+  - SEO cho trang fallback: `noindex`, ra khỏi sitemap, bỏ `hreflang` tới bản chưa có, ra khỏi tìm kiếm Pagefind.
+  - Nút "Bắt đầu học" ở hero trang chủ, link trong thư ngỏ.
 
 ### Sửa lỗi
 

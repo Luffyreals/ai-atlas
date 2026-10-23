@@ -1,17 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
+import { showPreferences } from './helpers';
 
 // All URLs end with "/": with trailingSlash 'always', `astro preview` returns 404 without it.
 
 /** Starlight moves the theme and language selects into the mobile menu below 50rem (800px). */
 const MOBILE_BREAKPOINT = 800;
 
-function isNarrow(page: Page): boolean {
+/** Below Starlight's 50rem breakpoint (not isNarrow() of helpers.ts, which means the 375px project). */
+function belowMenuBreakpoint(page: Page): boolean {
   return (page.viewportSize()?.width ?? MOBILE_BREAKPOINT) < MOBILE_BREAKPOINT;
-}
-
-/** Opens the mobile menu on narrow viewports so the preference selects become visible. */
-async function showPreferences(page: Page): Promise<void> {
-  if (isNarrow(page)) await page.locator('button.sl-menu-button').click();
 }
 
 function visibleSelect(page: Page, element: 'starlight-lang-select' | 'starlight-theme-select') {
@@ -33,7 +30,7 @@ test('pages declare the right language', async ({ page }) => {
 
 test('language select on /vi/ leads to /en/', async ({ page }) => {
   // Splash pages (home) have no sidebar, so Starlight renders no mobile menu and no language select there.
-  test.skip(isNarrow(page), 'Starlight shows no language select on splash pages below 50rem');
+  test.skip(belowMenuBreakpoint(page), 'Starlight shows no language select on splash pages below 50rem');
   await page.goto('/vi/');
   await visibleSelect(page, 'starlight-lang-select').selectOption({ label: 'English' });
   await page.waitForURL('**/en/');

@@ -5,6 +5,7 @@ import {
   LESSON_ID_PATTERN,
   findCycle,
   getDependents,
+  getFirstOpenLesson,
   getLessonUrl,
   getPartIdOf,
   getPrerequisites,
@@ -147,6 +148,15 @@ describe('lookup helpers', () => {
 
   it('builds lesson urls with a trailing slash', () => {
     expect(getLessonUrl('ml/linear-regression', 'en')).toBe('/en/ml/linear-regression/');
+  });
+
+  it('getFirstOpenLesson: the first lesson in roadmap order with a vi page, or undefined', () => {
+    const open = { status: { vi: 'published', en: 'planned' } } as const;
+    expect(getFirstOpenLesson([lesson('python/a'), lesson('python/b')])).toBeUndefined();
+    expect(getFirstOpenLesson([lesson('python/a'), lesson('ml/b', [], open), lesson('ml/c', [], open)])?.id).toBe('ml/b');
+    // An en-only status is not a page (the vi page comes first).
+    expect(getFirstOpenLesson([lesson('python/a', [], { status: { vi: 'planned', en: 'published' } })])).toBeUndefined();
+    expect(getFirstOpenLesson()).toBe(LESSONS.find((item) => item.status.vi === 'published'));
   });
 
   it('maps route ids to lesson ids', () => {

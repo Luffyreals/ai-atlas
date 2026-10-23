@@ -4,8 +4,9 @@
 // Styles: src/styles/prerequisites.css, loaded on every page through Starlight's customCss (astro.config.ts).
 import { formatString } from '@i18n/format';
 import { getStrings } from '@i18n/ui';
-import type { LessonId, Locale } from '@data/roadmap';
+import type { LessonId } from '@data/roadmap';
 import { lessonLinkView } from '@lib/lesson-link';
+import { getPageLocale } from '@lib/page-locale';
 import { getPart, getPartIdOf, getPrerequisites, getRouteLessonId, requireLesson } from '@lib/roadmap';
 
 interface Props {
@@ -15,7 +16,7 @@ interface Props {
 
 const { ids } = Astro.props;
 const route = Astro.locals.starlightRoute;
-const locale = (route.locale ?? 'vi') as Locale;
+const locale = getPageLocale(route);
 const t = getStrings(Astro.locals.t, 'prereq');
 const tCommon = getStrings(Astro.locals.t, 'common');
 
@@ -38,9 +39,9 @@ const items = lessonsToShow().map((lesson) => ({
 
 {
   items.length === 0 ? (
-    <p class="atlas-prereq-empty not-content">{t.none}</p>
+    <p class="atlas-prereq-empty not-content" lang={locale}>{t.none}</p>
   ) : (
-    <ul class="atlas-prereq not-content" data-prereq>
+    <ul class="atlas-prereq not-content" lang={locale} data-prereq>
       {items.map(({ view, part }) => (
         <li class="atlas-prereq-item" data-lesson-id={view.id}>
           <span class="atlas-prereq-lesson">
