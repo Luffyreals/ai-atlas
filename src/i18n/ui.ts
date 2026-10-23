@@ -1,11 +1,29 @@
 // Single source of truth for custom UI string keys.
 // Adding a string = add the key here + in src/content/i18n/vi.json + en.json.
 export const UI_KEYS = {
-  common: ['comingSoon', 'notTranslated'],
+  common: ['comingSoon', 'notTranslated', 'learned', 'needsScript', 'lessonsOn'],
   home: ['openMap', 'linkRoute', 'linkTerms', 'otherLanguage', 'otherLanguageName', 'quickLinks', 'previous', 'next'],
   notFound: ['title', 'text', 'homeLink'],
-  roadmap: ['lessons', 'branchNote', 'routeLabel', 'routeResult', 'showOnMap', 'legendOpen', 'legendSoon', 'legendNone'],
-  // M1 adds: prereq, quiz, progress, runner (see docs/architecture/components.md)
+  roadmap: [
+    'lessons', 'branchNote', 'routeLabel', 'routeResult', 'showOnMap', 'legendOpen', 'legendSoon',
+    'legendNone', 'progressSummary', 'progressTotal', 'legendDone',
+  ],
+  prereq: ['none'],
+  quiz: [
+    'question', 'check', 'retry', 'chooseOne', 'correct', 'incorrect', 'correctAnswer', 'yourAnswer',
+    'explanation', 'score',
+  ],
+  progress: ['markDone', 'doneStatus', 'storageBlocked'],
+  runner: [
+    'run', 'stop', 'edit', 'reset', 'retry', 'editorLabel', 'editorHint', 'input',
+    'firstRunNote', 'queued', 'loadingPython', 'loadingPackages', 'running', 'longRunning',
+    'done', 'stopped', 'loadFailed',
+    'output', 'noOutput', 'outputTruncated', 'figure', 'figuresTruncated', 'figuresBeforeError',
+    'errorTitle', 'errorLine', 'showTraceback', 'stdinMissing',
+    'hintNameError', 'hintSyntaxError', 'hintIndentationError', 'hintTypeError', 'hintValueError',
+    'hintIndexError', 'hintKeyError', 'hintAttributeError', 'hintZeroDivisionError',
+    'hintModuleNotFoundError', 'hintEOFError', 'hintGeneric',
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 export type UiNamespace = keyof typeof UI_KEYS;

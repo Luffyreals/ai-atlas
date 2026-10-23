@@ -139,4 +139,17 @@ M2 có một bước **chờ bạn duyệt**. Mọi bài sau đều theo templat
 6. **Cách viết bài:** link nội bộ viết tuyệt đối (`/vi/...`, `/en/...`). Comment trong code ví dụ viết theo ngôn ngữ của bài (`<tên>.vi.py`, `<tên>.en.py`). Quiz đặt trong frontmatter. Mỗi ô code chạy độc lập.
 7. **Trang gốc `/`:** luôn chuyển sang `/vi/`.
 
+Đã quyết ngày 23/10/2026 (mốc M1):
+
+8. **Duyệt giao diện component:** duyệt trên trang demo `/vi/dev/components/` sau khi developer làm xong, không duyệt bản mô tả trước.
+9. **E2E tải Pyodide thật (`@network`):** tách thành script `test:e2e:network`, chạy tay khi cần, không chạy trong CI. Test "mở trang không tải Pyodide" vẫn chạy trong CI.
+10. **Code chạy lâu:** không tự ngắt. Có nút Dừng, và sau khoảng 10 giây thì hiện gợi ý bấm Dừng.
+11. **Trang demo `/dev/components/`:** giữ trên bản deploy để thử trên điện thoại thật, giữ `noindex` và lọc khỏi `sitemap.xml`.
+12. **Tên truy cập của công thức trong quiz:** tự sinh `aria-label` từ chữ thường cộng mã TeX. Tác giả không phải viết lời đọc.
+13. **CSS của component bài học:** gộp vào `customCss` của Starlight. Mọi trang thêm khoảng 2,3 KB gzip, nhưng bài học không còn file CSS chặn render riêng.
+14. **Mốc Lighthouse trang chủ:** tiêu chí M1 đổi thành "không thấp hơn bản trước M1, đo cùng lúc trên cùng máy". Mốc 91 cũ không tái hiện được (bản trước M1 đo lại ngày 23/10/2026 ra 74–79). Việc cải thiện LCP ảnh hero để lại cho M4.
+15. **Lỗi Python với trình đọc màn hình:** vùng trạng thái có thêm một dòng ẩn (`sr-only`) báo code có lỗi. Giao diện nhìn thấy không đổi.
+16. **Điểm dừng Tab thừa khi radio có focus trước lúc quiz hydrate:** sửa ngay ở M1.
+17. **Performance trang demo 87–90:** chấp nhận cho M1. Phần còn lại do CSS chung (Starlight, KaTeX, font), không do component M1. Tối ưu ở M4 cùng với LCP trang chủ, đo trên bài học thật.
+
 Còn mở: tên miền (trước M4).

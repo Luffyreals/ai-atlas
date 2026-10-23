@@ -1,5 +1,6 @@
 ---
 // The neatline of an atlas plate: alternating bars of ink and paper, drawn as filled shapes.
+// Styles: src/styles/roadmap-map.css (customCss), at zero specificity so a parent's class wins.
 interface Props {
   /** Unique id for the SVG pattern (two stripes on one page must not share it). */
   id: string;
@@ -17,11 +18,3 @@ const { id, class: className } = Astro.props;
   </defs>
   <rect width="100%" height="100%" fill={`url(#${id})`}></rect>
 </svg>
-
-<style>
-  .stripe {
-    display: block;
-    width: 100%;
-    height: var(--stripe-height, 40px);
-  }
-</style>

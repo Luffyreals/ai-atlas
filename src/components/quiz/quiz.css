@@ -1,0 +1,250 @@
+/*
+ * Quiz (docs/architecture/components.md, section 4.9.3). Loaded on every page through Starlight's
+ * customCss (astro.config.ts): no extra render-blocking file on lessons, and it already applies to
+ * the server-rendered markup before the island hydrates. Every class starts with "atlas-quiz".
+ * Right and wrong always show an icon and words, never colour alone.
+ *
+ * Text that may hold KaTeX scrolls sideways inside its box. overflow-x: auto alone turns overflow-y
+ * to auto as well, and a fraction reaches about 5px past the line, so the box would scroll a little
+ * and Chrome would make it a Tab stop. Hence overflow-y: hidden, plus padding-block so the fraction
+ * is not cut (the negative margin keeps the layout where it was).
+ */
+/* Margins rather than a grid gap: the empty score region at the end must not add space. */
+.atlas-quiz-question + .atlas-quiz-question {
+  margin-top: 16px;
+}
+
+.atlas-quiz-question {
+  /* A fieldset defaults to min-inline-size: min-content, which would push the page wider at 375px. */
+  min-width: 0;
+  margin: 0;
+  padding: 16px;
+  border: 0;
+  background: var(--sl-color-gray-6);
+}
+
+/* Floated so the legend sits inside the block instead of on its top edge. */
+.atlas-quiz-legend {
+  float: left;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.atlas-quiz-count {
+  display: block;
+  font-size: var(--sl-text-sm);
+  color: var(--sl-color-gray-3);
+}
+
+.atlas-quiz-prompt {
+  display: block;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-block: -6px;
+  padding-block: 6px;
+  font-size: var(--sl-text-base);
+  font-weight: 600;
+  color: var(--sl-color-white);
+}
+
+.atlas-quiz-options {
+  clear: both;
+  display: grid;
+  gap: 4px;
+}
+
+.atlas-quiz-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 48px;
+  padding: 12px 16px;
+  /* Room for the 4px state bar without moving the text. */
+  border-inline-start: 4px solid transparent;
+  background: var(--sl-color-bg);
+  color: var(--sl-color-text);
+  cursor: pointer;
+}
+
+.atlas-quiz-option input {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0.1em 0 0;
+  accent-color: var(--sl-color-accent);
+  cursor: inherit;
+}
+
+.atlas-quiz-question:not([data-checked]) .atlas-quiz-option:not([data-state]):hover {
+  background: var(--sl-color-gray-5);
+  color: var(--sl-color-white);
+}
+
+.atlas-quiz-option:has(:focus-visible) {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 2px;
+}
+
+/* The radio already shows the focus through its label. */
+.atlas-quiz-option input:focus-visible {
+  outline: none;
+}
+
+.atlas-quiz-option[data-state='selected'] {
+  border-inline-start-color: var(--sl-color-accent);
+  background: var(--sl-color-accent-low);
+  color: var(--sl-color-white);
+}
+
+.atlas-quiz-option[data-state='correct'] {
+  border-inline-start-color: var(--sl-color-green-high);
+  background: var(--sl-color-green-low);
+  color: var(--sl-color-green-high);
+}
+
+.atlas-quiz-option[data-state='wrong'] {
+  border-inline-start-color: var(--sl-color-red-high);
+  background: var(--sl-color-red-low);
+  color: var(--sl-color-red-high);
+}
+
+/* Locked after checking, but the text keeps its colour (no fading). */
+.atlas-quiz-question[data-checked] .atlas-quiz-option {
+  cursor: default;
+}
+
+/* Text and mark share one wrapping row: on a narrow screen the mark drops under the text. */
+.atlas-quiz-option-body {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  min-width: 0;
+}
+
+.atlas-quiz-option-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* A long formula scrolls inside the answer instead of widening the page. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-block: -6px;
+  padding-block: 6px;
+}
+
+.atlas-quiz-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: auto;
+  font-size: var(--sl-text-sm);
+  font-weight: 600;
+}
+
+.atlas-quiz-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.atlas-quiz-button {
+  min-height: 44px;
+  margin: 0;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 0;
+  background: var(--sl-color-gray-5);
+  color: var(--sl-color-white);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.atlas-quiz-button-primary {
+  background: var(--sl-color-accent);
+  color: var(--sl-color-black);
+}
+
+.atlas-quiz-button:hover {
+  transform: translateY(-1px);
+}
+
+.atlas-quiz-button:active {
+  transform: translateY(0);
+}
+
+.atlas-quiz-button:focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 2px;
+}
+
+.atlas-quiz-feedback > p {
+  margin: 12px 0 0;
+}
+
+/* The site ships Barlow 400 and 600 only; 700 would be a synthesised bold. */
+.atlas-quiz-feedback strong {
+  font-weight: 600;
+}
+
+.atlas-quiz-choose {
+  color: var(--sl-color-orange-high);
+}
+
+.atlas-quiz-verdict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.atlas-quiz-verdict[data-correct='true'] {
+  color: var(--sl-color-green-high);
+}
+
+.atlas-quiz-verdict[data-correct='false'] {
+  color: var(--sl-color-red-high);
+}
+
+/* The padding is taken back from the 12px gap above, and from below. */
+.atlas-quiz-feedback > .atlas-quiz-explanation {
+  margin: 6px 0 -6px;
+  padding-block: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  color: var(--sl-color-text);
+}
+
+.atlas-quiz-score {
+  margin: 16px 0 0;
+  padding: 12px 16px;
+  background: var(--sl-color-accent-low);
+  color: var(--sl-color-white);
+  font-weight: 600;
+}
+
+.atlas-quiz-noscript {
+  margin: 12px 0 0;
+  padding-inline-start: 12px;
+  border-inline-start: 4px solid var(--sl-color-orange-high);
+  color: var(--sl-color-text);
+}
+
+@media (min-width: 50rem) {
+  .atlas-quiz-question {
+    padding: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .atlas-quiz-button {
+    transition: none;
+  }
+
+  .atlas-quiz-button:hover {
+    transform: none;
+  }
+}

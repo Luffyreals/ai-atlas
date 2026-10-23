@@ -1,0 +1,341 @@
+/*
+ * RoadmapMap (homepage.md, components.md section 4.9.6), with the Stripe and RouteMark it draws.
+ * Moved out of the components' scoped <style> into Starlight's customCss (decision 13): the map is on
+ * the homepage and on content pages (the demo page now, part overviews later), and as page CSS
+ * shared by both it became one more render-blocking file, loaded after the homepage's own CSS.
+ * Scope kept by hand: ":where(.roadmap)" in front of every class that is not roadmap-specific, so the
+ * rules reach nothing outside the map and keep the specificity Astro's ":where(.astro-…)" gave them.
+ */
+
+/* Stripe and RouteMark (src/components/home/) are also drawn by the homepage. Zero specificity:
+   the class a parent passes in (e.g. .fork-mark { height: 96px }) wins whatever the CSS order. */
+:where(.stripe) {
+  display: block;
+  width: 100%;
+  height: var(--stripe-height, 40px);
+}
+
+:where(.route-mark) {
+  display: inline-block;
+  width: auto;
+  height: 1em;
+  vertical-align: -0.1em;
+}
+
+.roadmap {
+  background: var(--atlas-paper);
+  color: var(--atlas-paper-ink);
+  --stripe-height: 28px;
+}
+
+:where(.roadmap) .roadmap-stripe {
+  color: var(--atlas-paper-ink);
+}
+
+:where(.roadmap) .roadmap-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 32px;
+  padding: 32px 20px 48px;
+}
+
+:where(.roadmap) .roadmap-head {
+  display: grid;
+  gap: 16px;
+}
+
+:where(.roadmap) .roadmap-title h2 {
+  margin: 0;
+  font-size: var(--step-head, var(--sl-text-h2));
+}
+
+:where(.roadmap) .roadmap-intro p {
+  max-width: 44ch;
+  margin: 0;
+  font-size: var(--step-lead, var(--sl-text-h4));
+  line-height: 1.3;
+}
+
+:where(.roadmap) .route-finder {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  background: var(--atlas-paper-step);
+}
+
+:where(.roadmap) .route-finder label {
+  font-weight: 600;
+}
+
+:where(.roadmap) .route-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+:where(.roadmap) .route-finder select {
+  flex: 1 1 18rem;
+  /* A long lesson title must not widen the plate on a phone. */
+  min-width: 0;
+  width: 100%;
+  max-width: 32rem;
+  min-height: 48px;
+  padding: 0 12px;
+  border: 0;
+  background: var(--atlas-paper-ink);
+  color: var(--atlas-paper);
+  font: inherit;
+  cursor: pointer;
+}
+
+:where(.roadmap) .route-show {
+  min-height: 48px;
+  padding: 0 20px;
+  border: 0;
+  background: var(--atlas-field);
+  color: var(--atlas-field-ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+:where(.roadmap) .route-show:hover {
+  transform: translateY(-2px);
+}
+
+:where(.roadmap) .route-result {
+  max-width: 60ch;
+  min-height: 1.5em;
+  margin: 0;
+  font-size: var(--step-lead, var(--sl-text-h4));
+  line-height: 1.3;
+}
+
+:where(.roadmap) .route-path {
+  max-width: 70ch;
+  margin: 6px 0 0;
+  color: var(--atlas-paper-muted);
+}
+
+:where(.roadmap) .roadmap-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+  margin: 0;
+  font-size: var(--step-small, var(--sl-text-sm));
+}
+
+:where(.roadmap) .legend-open {
+  font-weight: 600;
+}
+
+:where(.roadmap) .legend-soon {
+  color: var(--atlas-paper-muted);
+}
+
+:where(.roadmap) .legend-total {
+  font-weight: 600;
+}
+
+:where(.roadmap) .legend-done .atlas-check {
+  margin-inline-end: 6px;
+  vertical-align: -0.1em;
+}
+
+:where(.roadmap) .roadmap-parts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 40px;
+}
+
+:where(.roadmap) .part-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin: 0 0 12px;
+  padding: 12px 0 10px;
+  border-bottom: 4px solid var(--atlas-paper-ink);
+}
+
+:where(.roadmap) .part-title {
+  /* Keeps "14 lessons" and "Learned x/y" together at the end of the line. */
+  margin-inline-end: auto;
+  font-size: var(--step-lead, var(--sl-text-h4));
+}
+
+:where(.roadmap) .part-count {
+  margin: 0;
+  font-size: var(--step-small, var(--sl-text-sm));
+  color: var(--atlas-paper-muted);
+}
+
+:where(.roadmap) .part-progress {
+  margin: 0;
+  font-size: var(--step-small, var(--sl-text-sm));
+  font-weight: 600;
+  color: var(--atlas-paper-ink);
+}
+
+/* A solid 8px square as the separator, instead of a "·" character. */
+:where(.roadmap) .part-progress::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-inline-end: 8px;
+  vertical-align: 0.15em;
+  background: var(--atlas-paper-ink);
+}
+
+/* A map of one part (e.g. a part overview page) uses the whole plate. */
+:where(.roadmap) .roadmap-part:only-child {
+  grid-column: 1 / -1;
+}
+
+:where(.roadmap) .part-groups {
+  display: grid;
+  gap: 20px;
+}
+
+:where(.roadmap) .part-section {
+  margin: 0 0 6px;
+  font-family: var(--sl-font);
+  font-size: var(--step-small, var(--sl-text-sm));
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+
+:where(.roadmap) .part-lessons {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--step-body, 1.0625rem);
+}
+
+:where(.roadmap) .part-lessons li {
+  margin: 0 -8px;
+  padding: 4px 8px;
+  line-height: 1.35;
+  scroll-margin: 40vh 0;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+:where(.roadmap) .part-lessons a {
+  color: var(--atlas-paper-ink);
+  font-weight: 600;
+  text-decoration-color: var(--atlas-field);
+  text-underline-offset: 3px;
+}
+
+:where(.roadmap) .is-soon {
+  color: var(--atlas-paper-muted);
+}
+
+:where(.roadmap) .lesson-note {
+  margin-inline-start: 6px;
+  font-size: var(--step-small, var(--sl-text-sm));
+  font-weight: 400;
+}
+
+:where(.roadmap) .part-lessons li[data-on-route] {
+  background: var(--atlas-field);
+  color: var(--atlas-field-ink);
+}
+
+:where(.roadmap) .part-lessons li[data-on-route] .is-soon {
+  color: var(--atlas-field-ink);
+}
+
+:where(.roadmap) .part-lessons li[data-destination] {
+  background: var(--atlas-paper-ink);
+  color: var(--atlas-paper);
+}
+
+/* The tick takes the row's text colour (set above for route and destination rows). */
+:where(.roadmap) .part-lessons .done-mark {
+  width: 0.9em;
+  height: 0.9em;
+  margin-inline-start: 6px;
+  vertical-align: -0.1em;
+}
+
+/* No tick and no reserved space until the reader has learned the lesson. */
+:where(.roadmap) .part-lessons li:not([data-done='true']) :is(.done-mark, .done-text) {
+  display: none;
+}
+
+:where(.roadmap) .part-lessons li[data-destination] :is(a, .is-soon) {
+  color: var(--atlas-paper);
+}
+
+:where(.roadmap) .roadmap-fork {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 8px 0 0;
+  font-family: var(--atlas-font-display);
+  font-size: var(--step-lead, var(--sl-text-h4));
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+:where(.roadmap) .roadmap-fork-mark {
+  height: 48px;
+  color: var(--atlas-paper-ink);
+}
+
+:where(.roadmap) .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (min-width: 40rem) {
+  :where(.roadmap) .roadmap-inner {
+    padding: 40px 40px 56px;
+  }
+
+  :where(.roadmap) .roadmap-parts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 64rem) {
+  .roadmap {
+    --stripe-height: 40px;
+  }
+
+  :where(.roadmap) .roadmap-inner {
+    gap: 40px;
+    padding: 56px 56px 72px;
+  }
+
+  :where(.roadmap) .roadmap-head {
+    grid-template-columns: 5fr 7fr;
+    align-items: end;
+    gap: 40px;
+  }
+
+  :where(.roadmap) .roadmap-parts.is-core {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  /* The large LLM part takes two columns, one per section, so the plate ends evenly. */
+  :where(.roadmap) .roadmap-parts.is-branches {
+    grid-template-columns: 1fr 1fr 2fr;
+  }
+
+  :where(.roadmap) .roadmap-part.has-sections .part-groups {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 32px;
+  }
+}

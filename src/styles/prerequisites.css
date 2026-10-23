@@ -1,0 +1,80 @@
+/*
+ * Prerequisites (components.md, section 4.9.2). Loaded on every page through Starlight's customCss
+ * (astro.config.ts) instead of a scoped <style>, so lessons get no extra render-blocking file.
+ * Every class starts with "atlas-prereq"; nothing else on the site uses them.
+ */
+.atlas-prereq {
+  display: grid;
+  gap: 4px;
+  margin-inline: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.atlas-prereq-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 16px;
+  padding: 8px 12px;
+  background: var(--sl-color-gray-6);
+}
+
+.atlas-prereq-lesson {
+  min-width: 0;
+  font-size: var(--sl-text-base);
+  font-weight: 600;
+  color: var(--sl-color-text);
+}
+
+a.atlas-prereq-title {
+  color: var(--sl-color-text-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+a.atlas-prereq-title:hover {
+  text-decoration-thickness: 2px;
+}
+
+a.atlas-prereq-title:focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 2px;
+}
+
+/* A lesson with no page yet is plain text in the normal text colour. */
+span.atlas-prereq-title {
+  color: var(--sl-color-text);
+}
+
+.atlas-prereq-note {
+  margin-inline-start: 6px;
+  font-size: var(--sl-text-sm);
+  font-weight: 400;
+  color: var(--sl-color-gray-3);
+}
+
+.atlas-prereq-done {
+  margin-inline-start: 6px;
+  vertical-align: -0.1em;
+  color: var(--sl-color-green-high);
+}
+
+/* No tick and no reserved space until the reader has learned the lesson. */
+.atlas-prereq-item:not([data-done='true']) :is(.atlas-prereq-done, .atlas-prereq-done-text) {
+  display: none;
+}
+
+/* On a phone the part name sits on its own line under the lesson title. */
+.atlas-prereq-part {
+  flex-basis: 100%;
+  font-size: var(--sl-text-sm);
+  color: var(--sl-color-gray-3);
+}
+
+@media (min-width: 40rem) {
+  .atlas-prereq-part {
+    flex-basis: auto;
+    margin-inline-start: auto;
+  }
+}

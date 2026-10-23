@@ -34,3 +34,15 @@ export function renderInlineMarkup(text: string): string {
   }
   return html + escapeHtml(text.slice(last));
 }
+
+/**
+ * The same string as plain text for an accessible name (aria-label): $...$ becomes its TeX source,
+ * `code` its text. Chrome leaves KaTeX's MathML out of the names it computes, so a label made of
+ * renderInlineMarkup() HTML alone can come out empty there.
+ */
+export function inlineMarkupLabel(text: string): string {
+  return text
+    .replace(TOKEN, (_, math: string | undefined, code: string | undefined) => (math ?? code ?? '').trim())
+    .replace(/\s+/g, ' ')
+    .trim();
+}

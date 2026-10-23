@@ -280,6 +280,7 @@ Ghi chú:
 - `description` của Starlight là chuỗi chung; mô tả từng trang lấy từ frontmatter `description` của trang đó.
 - KaTeX CSS nạp toàn site qua `customCss` (khoảng 23 KB, font KaTeX chỉ tải khi trang có công thức). Đã kiểm chứng: CSS vào bundle chung `common.*.css`.
 - Starlight tự sinh `hreflang` vi/en/x-default và `sitemap-index.xml` khi có `site` (đã kiểm chứng). Đây là một phần tiêu chí M4.
+- Từ M1, `integrations` có thêm `sitemap({ i18n, filter })` của `@astrojs/sitemap` để bỏ trang `/dev/`. Starlight thấy đã có integration này nên không thêm bản của nó. Xem [components.md](components.md) mục 2.10.
 - Không bật `editLink` vì repo private.
 
 ### 4.3. `tsconfig.json` (đã kiểm chứng với TypeScript 6.0.3)
@@ -371,7 +372,7 @@ Cách dùng:
 
 - **Component Astro:** `Astro.locals.t('atlas.notFound.title')` hoặc `getStrings(Astro.locals.t, 'notFound')`. Ngôn ngữ tự theo trang.
 - **Nội suy:** dùng cú pháp i18next `{{name}}`, ví dụ `"atlas.quiz.score": "Đúng {{correct}}/{{total}} câu"` rồi gọi `t('atlas.quiz.score', { correct: 2, total: 3 })` (đã kiểm chứng ra "Đúng 2/3").
-- **Component React:** không tự dịch. Astro wrapper gọi `getStrings(Astro.locals.t, 'quiz')` rồi truyền object `strings` qua props. Chuỗi có biến thì `getStrings` trả nguyên mẫu `{{correct}}` (đã kiểm chứng: i18next giữ nguyên placeholder khi không truyền biến). React thay biến bằng hàm nhỏ `formatString(template, vars)` (M1, `src/i18n/format.ts`).
+- **Component React:** không tự dịch. Astro wrapper gọi `getStrings(Astro.locals.t, 'quiz')` rồi truyền object `strings` qua props. Chuỗi có biến thì `getStrings` trả nguyên mẫu `{{correct}}` (đã kiểm chứng: i18next giữ nguyên placeholder khi không truyền biến). React thay biến bằng hàm nhỏ `formatString(template, vars)` (`src/i18n/format.ts`, đã có từ M0 vì trang chủ dùng).
 - **Ngôn ngữ hiện tại:** `Astro.currentLocale` (`'vi' | 'en'`). Với trang Starlight còn có `Astro.locals.starlightRoute.locale`.
 - **Tiêu đề phần/bài** không nằm trong i18n JSON. Chúng là nội dung, nằm trong `roadmap.ts` dạng `{ vi, en }`.
 - Chữ giao diện có sẵn của Starlight (tìm kiếm, mục lục, thông báo chưa dịch…) đã có bản `vi` dựng sẵn, không cần dịch lại.
@@ -451,12 +452,16 @@ export default getViteConfig({
 ```ts
 import { defineConfig, devices } from '@playwright/test';
 
+// 4322, not Astro's default 4321: `npm run dev` often runs there, and with reuseExistingServer the e2e
+// tests would quietly run against the dev server. "localhost", since preview may listen on [::1] only.
+const PORT = 4322;
+
 export default defineConfig({
   testDir: 'tests/e2e',
-  use: { baseURL: 'http://localhost:4321' },
+  use: { baseURL: `http://localhost:${PORT}` },
   webServer: {
-    command: 'npm run build && npm run preview -- --port 4321',
-    url: 'http://localhost:4321/vi/',
+    command: `npm run build && npm run preview -- --port ${PORT}`,
+    url: `http://localhost:${PORT}/vi/`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
   },
@@ -468,6 +473,8 @@ export default defineConfig({
 ```
 
 Chỉ dùng Chromium để nhẹ máy (`npx playwright install chromium`).
+
+E2E dùng **cổng 4322** (đổi ở mốc M1, ngày 23/10/2026). Cổng 4321 là cổng của `npm run dev`. Nếu e2e cũng dùng 4321 thì khi dev server đang chạy, `reuseExistingServer` sẽ cho test chạy âm thầm trên dev server thay vì bản build. Giữ `localhost` vì trên máy phát triển, `astro preview` chỉ nghe ở `[::1]`.
 
 ### 4.11. Cloudflare Pages
 
@@ -515,13 +522,17 @@ Tra trên npm ngày 2026-10-22. Đã cài và build thử cùng nhau, không xun
 | `vitest` | 5.0.5 | devDependencies | Dùng Vite 8 của Astro |
 | `@playwright/test` | 1.64.1 | devDependencies | |
 
-### 5.2. Cài ở M1 (để tham khảo, chi tiết ở [components.md](components.md))
+### 5.2. Cài ở M1 (để tham khảo, chi tiết ở [components.md](components.md) mục 5)
+
+Kiểm tra lại ngày 23/10/2026.
 
 | Gói | Phiên bản | Loại |
 |---|---|---|
+| `@astrojs/sitemap` | 3.7.4 | dependencies (sitemap tường minh có `filter`, bỏ trang `/dev/`) |
 | `pyodide` | 314.0.7 | devDependencies (chỉ lấy kiểu TypeScript; runtime tải từ CDN) |
 | `jsdom` | 30.1.3 | devDependencies |
 | `@testing-library/react` | 16.3.3 | devDependencies |
+| `@testing-library/dom` | 10.4.2 | devDependencies (peer bắt buộc, ghi tường minh để ghim) |
 | `@testing-library/user-event` | 14.6.8 | devDependencies |
 
 ## 6. Các bước thực hiện
@@ -606,7 +617,7 @@ Thiết kế giao diện trang chủ và component bằng skill `design-taste-fr
 | 4 | `katex` phải giữ 0.16.x chừng nào `rehype-katex` còn dùng 0.16 | Lệch CSS và HTML nếu ai đó nâng katex lên 0.19 | Unit test đọc `package.json`: `katex` phải bắt đầu bằng `0.16.` (thêm vào `tests/unit/deps.test.ts` ở bước 7) |
 | 5 | Cấu hình `site` đang là placeholder | Canonical và sitemap sai cho tới M0-13 | M0-13 |
 | 6 | Trang 404 song ngữ chung một trang | Người đọc tiếng Anh thấy tiếng Việt trước | Chấp nhận ở MVP; có thể làm `/en/404.html` riêng sau bằng file tĩnh |
-| 7 | Trang `dev/components` vẫn có trong sitemap | Nhỏ | Có `noindex`; có thể lọc khỏi sitemap ở M4 |
+| 7 | Trang `dev/components` vẫn có trong sitemap | Nhỏ | Có `noindex`. **Lọc ở M1** (quyết định 23/10/2026): khai báo `@astrojs/sitemap` tường minh có `filter`, xem [components.md](components.md) mục 2.10 |
 
 ### Câu hỏi cho người dùng
 

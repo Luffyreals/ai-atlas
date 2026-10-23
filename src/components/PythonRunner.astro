@@ -1,0 +1,43 @@
+---
+// Runnable Python example. The code is highlighted here at build time by Starlight's <Code> (Expressive Code),
+// so it reads fine without JS and the copy button works. Pyodide only loads when the reader presses Run
+// (docs/architecture/components.md, section 4.6).
+//
+// <Code> sits next to the island, not inside it as children (risk 6 in section 7): as island children,
+// Expressive Code's <link rel="stylesheet"> for the first block of the page went missing from the HTML,
+// leaving every code block unstyled. The island hides this block while editing (`hidden`).
+// Styles: python-runner/python-runner.css, loaded on every page through Starlight's customCss (astro.config.ts).
+import { Code } from '@astrojs/starlight/components';
+import PythonRunnerIsland from './python-runner/PythonRunnerIsland';
+import { getStrings } from '@i18n/ui';
+import type { Locale } from '@data/roadmap';
+
+interface Props {
+  /** Usually imported with `?raw` from src/code/... */
+  code: string;
+  /** Lines fed to input(); shows an editable "Input" box when set. */
+  stdin?: string;
+  /** Optional caption above the block (content, per locale). */
+  title?: string;
+  /** Alt text per figure. Default: runner.figure ("Figure {{n}}"). */
+  figureAlt?: string[];
+}
+
+const { code, stdin, title, figureAlt } = Astro.props;
+const route = Astro.locals.starlightRoute;
+if (!code?.trim()) {
+  throw new Error(`<PythonRunner /> on "${route.id}": the \`code\` prop is empty. Import a file with ?raw.`);
+}
+const locale = (route.locale ?? 'vi') as Locale;
+const strings = getStrings(Astro.locals.t, 'runner');
+const tCommon = getStrings(Astro.locals.t, 'common');
+---
+
+<div class="atlas-runner not-content">
+  {title && <p class="atlas-runner-title">{title}</p>}
+  <div class="atlas-runner-static" data-runner-static>
+    <Code code={code} lang="python" />
+  </div>
+  <PythonRunnerIsland client:visible code={code} stdin={stdin} figureAlt={figureAlt} lang={locale} strings={strings} />
+  <noscript><p class="atlas-runner-noscript">{tCommon.needsScript}</p></noscript>
+</div>

@@ -1,0 +1,61 @@
+---
+// Quiz at the end of a lesson. Questions come from the page's frontmatter `quiz` (or the `questions` prop),
+// are rendered to HTML here at build time ($math$ with KaTeX, `code`), and handed to a React island.
+// The browser never loads KaTeX JS; it only needs the KaTeX CSS the site already ships.
+// Styles: quiz/quiz.css, loaded on every page through Starlight's customCss (astro.config.ts).
+import QuizIsland, { type RenderedQuizQuestion } from './quiz/QuizIsland';
+import { getStrings } from '@i18n/ui';
+import { inlineMarkupLabel, renderInlineMarkup } from '@lib/inline-markup';
+import { quizSchema, type QuizQuestion } from '@lib/quiz-schema';
+
+interface Props {
+  /** Demo page and a rare second quiz on one page. Strings must not contain "\" (JS escapes). */
+  questions?: QuizQuestion[];
+}
+
+const route = Astro.locals.starlightRoute;
+
+// "\f", "\t", "\b", "\v", "\r", "\n" in a JS string become control characters, so "$\frac$" in a prop
+// silently breaks. Frontmatter (YAML, single quotes) keeps "\" as is.
+const CONTROL_CHAR = /[\u0000-\u001f]/;
+
+function questionsToRender(): QuizQuestion[] {
+  const { questions } = Astro.props;
+  if (questions) {
+    const parsed = quizSchema.safeParse(questions);
+    if (!parsed.success) {
+      throw new Error(`<Quiz questions={...} /> on "${route.id}": ${parsed.error.message}`);
+    }
+    const texts = parsed.data.flatMap((q) => [q.question, ...q.options, q.explanation]);
+    if (texts.some((text) => CONTROL_CHAR.test(text))) {
+      throw new Error(
+        `<Quiz questions={...} /> on "${route.id}": a string holds a control character, usually from "\\" ` +
+          'in a JS string. Move the quiz to the frontmatter `quiz` field instead.',
+      );
+    }
+    return parsed.data;
+  }
+  const fromFrontmatter = route.entry.data.quiz;
+  if (!fromFrontmatter) {
+    throw new Error(`<Quiz /> on "${route.id}": add a \`quiz\` field to the frontmatter, or pass questions={[...]}.`);
+  }
+  return fromFrontmatter;
+}
+
+const rendered: RenderedQuizQuestion[] = questionsToRender().map((q) => ({
+  questionHtml: renderInlineMarkup(q.question),
+  optionsHtml: q.options.map((option) => renderInlineMarkup(option)),
+  answer: q.answer,
+  explanationHtml: renderInlineMarkup(q.explanation),
+  questionLabel: inlineMarkupLabel(q.question),
+  optionLabels: q.options.map((option) => inlineMarkupLabel(option)),
+}));
+
+const strings = getStrings(Astro.locals.t, 'quiz');
+const tCommon = getStrings(Astro.locals.t, 'common');
+---
+
+<div class="atlas-quiz not-content">
+  <QuizIsland client:visible questions={rendered} strings={strings} />
+  <noscript><p class="atlas-quiz-noscript">{tCommon.needsScript}</p></noscript>
+</div>

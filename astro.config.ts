@@ -1,6 +1,7 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import react from '@astrojs/react';
+import sitemap from '@astrojs/sitemap';
 import { unified } from '@astrojs/markdown-remark';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -46,6 +47,13 @@ export default defineConfig({
         '@fontsource/barlow-condensed/700.css',
         'katex/dist/katex.min.css',
         './src/styles/custom.css',
+        // Lesson components and the roadmap map: global on purpose (decision 13 in docs/mvp.md), so a
+        // lesson has no render-blocking CSS file of its own. Every selector is scoped by its class prefix.
+        './src/styles/roadmap-map.css',
+        './src/styles/prerequisites.css',
+        './src/styles/lesson-progress.css',
+        './src/components/quiz/quiz.css',
+        './src/components/python-runner/python-runner.css',
       ],
       disable404Route: true,
       lastUpdated: false,
@@ -55,6 +63,13 @@ export default defineConfig({
           errorOnInconsistentLocale: true,
         }),
       ],
+    }),
+    // Declared explicitly so Starlight skips its own copy. Same i18n option as Starlight's
+    // (node_modules/@astrojs/starlight/dist/integrations/sitemap.js), plus a filter.
+    sitemap({
+      i18n: { defaultLocale: 'vi', locales: { vi: 'vi', en: 'en' } },
+      // Internal pages (/vi/dev/…, /en/dev/…) stay deployed and noindex, but out of the sitemap.
+      filter: (page) => !/^\/(vi|en)\/dev\//.test(new URL(page).pathname),
     }),
     react(),
   ],
