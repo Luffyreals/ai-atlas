@@ -108,6 +108,8 @@ function ownJs(islandFile: string, rendererFile: string): { files: string[]; gzi
  * States a contrast test walks through, so marks that only some states draw are measured too: every toggle
  * pressed in turn (Ridge then Lasso: the last one wins), then every slider at its end (RegularizationViz
  * draws its "exactly 0" rings only with Lasso at a λ above 0; at λ = 0 it draws bars and triangles).
+ * A Run button (GradientDescentViz) is pressed too: its animation is still going while 'toggles on' is
+ * measured (step dots appear as it goes; their colour is also measured on the key swatch); no button is ever disabled, so no click waits on it (section 12.2.7).
  */
 const CONTRAST_STATES = ['as loaded', 'toggles on', 'sliders at the end'] as const;
 type ContrastState = (typeof CONTRAST_STATES)[number];
@@ -156,6 +158,9 @@ function measureContrast(root: Element): {
       ['line.atlas-viz-cursor', 'stroke'],
       ['line.atlas-viz-bar', 'stroke'], // a coefficient bar and its 2px stub (section 10.4.5)
       ['circle.atlas-viz-zero', 'stroke'], // a coefficient exactly 0: a hollow ring on the zero line
+      ['polyline.atlas-viz-level', 'stroke'], // a contour line of the MSE (section 12.4.6)
+      ['polyline.atlas-viz-path', 'stroke'], // the gradient descent path, one point at step 0
+      ['circle.atlas-viz-step', 'fill'], // a dot per step of the path
     ] as const) {
       for (const el of plot.querySelectorAll(selector)) {
         measured.add(el);
@@ -352,6 +357,7 @@ for (const { path, locale, count } of PAGES) {
             ['polygon.atlas-viz-ring', 'stroke'],
             ['line.atlas-viz-bar', 'stroke'],
             ['circle.atlas-viz-zero', 'stroke'],
+            ['polyline.atlas-viz-path', 'stroke'],
           ] as const;
           // Undo the previous state's breaks first, so each state is checked on its own.
           for (const el of root.querySelectorAll('[data-atlas-broken]')) {

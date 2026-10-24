@@ -43,6 +43,13 @@ export const UI_KEYS = {
     'pow10Spoken', 'zeroLambda', 'penalty', 'ridge', 'lasso', 'curve', 'trainMse', 'testMse', 'zeros',
     'featureAxis', 'coefAxis', 'overNote', 'underfit', 'goodFit', 'overfit', 'bestLambda', 'announce',
   ],
+  vizGradientDescent: [
+    'caption', 'mapLabel', 'mapDesc', 'wAxis', 'bAxis', 'levels', 'path', 'start', 'current', 'best',
+    'controls', 'etaLabel', 'etaValueText', 'step', 'reset', 'run', 'stop', 'stepsDone', 'mse', 'params',
+    'original', 'lineFormula', 'stepAxis', 'mseAxis', 'chartLabel', 'chartDesc', 'bestLine', 'hint', 'reached', 'notYet',
+    'slowNote', 'zigzagNote', 'diverged', 'announceStep', 'announceEta', 'running', 'stopped', 'atEnd',
+    'resetDone',
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 export type UiNamespace = keyof typeof UI_KEYS;

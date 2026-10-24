@@ -233,4 +233,28 @@ M2 có một bước **chờ bạn duyệt**. Mọi bài sau đều theo templat
 
 51. **Bản vi bài Ridge, Lasso, Elastic Net đã được người dùng duyệt (24/10/2026).** Duyệt cùng các lựa chọn phiên chính đã tự chọn: hai trục hình L1/L2 ghi ký hiệu $w_1$, $w_2$; `alpha` cố định qua các fold khi kiểm định chéo (có câu giải thích trong bài).
 
+52. **Bài Gradient Descent (`ml/gradient-descent`):**
+    - **Phạm vi:** đi kỹ batch GD:
+      - quy tắc cập nhật;
+      - tốc độ học (chậm, vừa, dao động, phân kỳ);
+      - chuẩn hóa đặc trưng;
+      - tiêu chí dừng.
+
+      SGD và mini-batch chỉ là một mục ngắn. Momentum và Adam chỉ nhắc tên, để dành cho bài `ml/optimizers`.
+    - **Toán:** dùng lại đạo hàm riêng đã dẫn ở bài Hồi quy tuyến tính, viết lại dạng vectơ. Giải thích vì sao đi ngược gradient là đi xuống dốc. Nêu ngưỡng $\eta < 2/L$ qua ví dụ một chiều, không chứng minh tổng quát.
+    - **Dữ liệu:** bảng 10 căn hộ, giải lại đúng bài toán của bài Hồi quy tuyến tính (quyết định 38).
+    - **VIZ:** đường mức của MSE theo $(w, b)$ trên dữ liệu đã chuẩn hóa, cùng đường đi của GD. Có các nút Bước / Chạy / Đặt lại, và thanh trượt $\eta$ có các mức chậm, vừa, dao động, phân kỳ. Kèm biểu đồ nhỏ MSE theo số bước.
+    - **Độ dài:** khoảng 10–12 phút đọc, 4 câu quiz. 3 ô code:
+      - GD tự viết bằng NumPy, so với phương trình chuẩn;
+      - thử vài giá trị $\eta$, vẽ MSE theo bước, có và không chuẩn hóa;
+      - SGD/mini-batch, có `SGDRegressor`.
+
+55. **VIZ bài Gradient Descent** (thiết kế ở `docs/architecture/viz.md` mục 12; người dùng chốt ngày 24/10/2026; số 53, 54 đã dùng cho phần LLM ở nhánh khác):
+    - **Chuẩn hóa:** chỉ chuẩn hóa diện tích, theo min-max: $\tilde{x} = (x - 25)/60$. Giữ $y$ gốc. Đường mức là elip với $\kappa = 15.3$, đủ để thấy chậm, zigzag, dao động và phân kỳ. Z-score làm đường mức thành vòng tròn, GD tới đáy sau 1 bước, nên không dùng.
+    - **Biểu đồ MSE theo bước:** trục MSE theo thang log.
+    - **Ký hiệu:** tham số trên dữ liệu đã chuẩn hóa viết $\tilde{w}$, $\tilde{b}$. Có công thức đổi về $w$, $b$ gốc.
+    - **Bản nháp:** do phiên LLM viết (dùng z-score), sẽ viết lại theo spec mục 12.
+
+56. **Bài Gradient Descent không dừng chờ duyệt bản vi** (người dùng chọn, 24/10/2026). Làm hết quy trình, rồi commit và push thẳng vào PR #1 (nhánh `m3-ml-lessons`). Người dùng duyệt trên PR.
+
 Còn mở: tên miền (trước M4).

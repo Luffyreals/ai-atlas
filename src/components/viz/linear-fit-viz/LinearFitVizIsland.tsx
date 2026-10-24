@@ -18,6 +18,7 @@ import {
   type Point,
 } from '../../../lib/viz/linear-fit';
 import { clamp, clipLineToBox, pct, toPercentX, toPercentY } from '../../../lib/viz/scale';
+import CrossMark from '../kit/CrossMark';
 import PlotFrame from '../kit/PlotFrame';
 import { Swatch } from '../kit/Swatch';
 import type { AxisText } from '../kit/types';
@@ -67,25 +68,6 @@ function Equation({ line, config, symbols }: { line: Line; config: LinearFitConf
       <span dangerouslySetInnerHTML={html(symbols.yHat)} /> = {parts.w}
       <span dangerouslySetInnerHTML={html(symbols.x)} /> {parts.sign} {parts.b}
     </span>
-  );
-}
-
-/**
- * A 12px × at a point given in percent: the nested <svg> moves the origin there, so the arms stay in px.
- * The halo (plot background, wider) keeps it readable where a line runs under it.
- */
-function CrossMark({ x, y, halo }: { x: string; y: string; halo?: boolean }) {
-  const arms = (className: string) => (
-    <>
-      <line className={className} x1="-6" y1="-6" x2="6" y2="6" />
-      <line className={className} x1="-6" y1="6" x2="6" y2="-6" />
-    </>
-  );
-  return (
-    <svg x={x} y={y} width="1" height="1" overflow="visible">
-      {halo && arms('atlas-viz-halo')}
-      {arms('atlas-viz-marker')}
-    </svg>
   );
 }
 
