@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Cảm ơn bạn đã báo lỗi. Mẫu này dành cho lỗi của **website** (giao diện, tính năng, link).
-        Lỗi kiến thức trong bài học thì dùng mẫu **Báo lỗi nội dung bài học**. Lỗi bảo mật thì **không** mở issue, xem `SECURITY.md`.
+        Lỗi kiến thức trong bài học thì dùng mẫu **Báo lỗi nội dung bài học**. Lỗi bảo mật thì **không** mở issue, xem `.github/SECURITY.md`.
 
         *You can write in English.*
 

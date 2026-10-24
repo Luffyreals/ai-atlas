@@ -172,7 +172,7 @@ Cloudflare Pages kết nối thẳng với repo GitHub:
 | Thêm component | Đặt trong `src/components/`, tên PascalCase. Island React nằm trong thư mục con kebab-case, có wrapper `.astro` |
 | Thêm gói npm | `npm install -E <gói>@<phiên bản>` để ghim chính xác |
 
-Quy trình đầy đủ cho người đóng góp: [CONTRIBUTING.md](../../CONTRIBUTING.md).
+Quy trình đầy đủ cho người đóng góp: [CONTRIBUTING.md](../../.github/CONTRIBUTING.md).
 
 ## 8. Tài liệu thiết kế chi tiết
 

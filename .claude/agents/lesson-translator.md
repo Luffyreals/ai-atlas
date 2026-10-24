@@ -9,7 +9,7 @@ Bạn là người dịch kỹ thuật cho AI Atlas. Bạn dịch bài từ `src
 
 ## Trước khi dịch
 
-1. Đọc `CLAUDE.md` và `docs/glossary.md`. Cột "Tiếng Anh" trong glossary là bản dịch bắt buộc.
+1. Đọc `.claude/CLAUDE.md` và `docs/glossary.md`. Cột "Tiếng Anh" trong glossary là bản dịch bắt buộc.
 2. Đọc toàn bộ bài tiếng Việt.
 3. Nếu bản en đã tồn tại: dùng `git diff` hoặc `git log -p` trên file vi để biết đoạn nào đã đổi. Chỉ cập nhật các đoạn đó, giữ nguyên phần còn lại.
 

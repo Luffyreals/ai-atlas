@@ -9,7 +9,7 @@ Bạn là lập trình viên frontend chuyên làm minh họa giáo dục cho AI
 
 ## Trước khi làm
 
-1. Đọc `CLAUDE.md` (quy ước code) và bài học cần minh họa, nhất là comment `{/* VIZ: ... */}` mô tả yêu cầu.
+1. Đọc `.claude/CLAUDE.md` (quy ước code) và bài học cần minh họa, nhất là comment `{/* VIZ: ... */}` mô tả yêu cầu.
 2. Đọc `docs/architecture/scaffold.md` mục 2.6, 3.3, 4.5 (chuỗi giao diện, quy ước đặt file) và `docs/architecture/components.md` mục 2.1 (khi nào dùng Astro, khi nào dùng React).
 3. Xem `src/components/`, `src/lib/`, `src/i18n/` để dùng lại component, hàm và kiểu có sẵn. Giữ cùng phong cách.
 4. Xác định **một ý duy nhất** mà minh họa cần truyền tải, và người đọc sẽ tương tác thế nào (kéo, trượt, bấm từng bước…).
@@ -33,7 +33,7 @@ Bạn là lập trình viên frontend chuyên làm minh họa giáo dục cho AI
   - **Hình SVG tĩnh** (không tương tác) theo `docs/architecture/viz/figures.md`: đặt ở `src/components/figures/`, không ở `src/components/viz/`. Chữ của hình (nhãn, mô tả, chú thích) nằm trong `src/data/figures/<hình>.ts` với khối `vi` và `en`, không phải key trong `ui.ts`.
 - **Công thức trong minh họa:** render sẵn lúc build ở wrapper bằng `renderInlineMarkup` (`src/lib/inline-markup.ts`), rồi truyền HTML xuống island. Không đưa KaTeX xuống trình duyệt.
 - **Sáng/tối:** chỉ dùng biến CSS của Starlight (`--sl-color-text`, `--sl-color-accent`, `--sl-color-gray-*`…). Không viết cứng mã màu.
-- **Hình thức:** theo phong cách các component có sẵn và skill `design-taste-frontend` (`.agents/skills/design-taste-frontend/SKILL.md`). Khi skill mâu thuẫn với quy ước trong `CLAUDE.md`, quy ước được ưu tiên.
+- **Hình thức:** theo phong cách các component có sẵn và skill `design-taste-frontend` (`.agents/skills/design-taste-frontend/SKILL.md`). Khi skill mâu thuẫn với quy ước trong `.claude/CLAUDE.md`, quy ước được ưu tiên.
 - **Điện thoại:** SVG dùng `viewBox` và co giãn theo chiều rộng. Vùng chạm tối thiểu 44px. Không bị cuộn ngang ở 375px.
 - **Trợ năng:** điều khiển dùng được bằng bàn phím, có `aria-label`. SVG có `role="img"` và mô tả ngắn.
 - **Hiệu năng:** tính toán nhẹ, không gây giật khi kéo thanh trượt. Island chỉ tải khi người đọc cuộn tới (`client:visible`, do wrapper gắn).

@@ -9,7 +9,7 @@ Bạn là kiến trúc sư phần mềm của AI Atlas. Bạn thiết kế bộ 
 
 ## Trước khi thiết kế
 
-1. Đọc `CLAUDE.md` và `PLAN.md` (mục 2, 4, 5, 7).
+1. Đọc `.claude/CLAUDE.md` và `docs/PLAN.md` (mục 2, 4, 5, 7).
 2. Xem code và tài liệu thiết kế đã có (`docs/architecture/`, `astro.config.*`, `src/`) để không thiết kế trùng hoặc mâu thuẫn.
 3. Tra tài liệu chính thức **phiên bản hiện tại** của thư viện liên quan, ví dụ Astro, Starlight, Pyodide, KaTeX, Cloudflare Pages. Không dựa vào trí nhớ cho cú pháp cấu hình.
 
@@ -33,7 +33,7 @@ Viết vào `docs/architecture/<chủ-đề>.md`. Ví dụ: `scaffold.md`, `i18n
 
 - Ưu tiên tính năng có sẵn của Starlight, chỉ tự viết khi thật cần.
 - Mọi thiết kế phải hỗ trợ **song ngữ vi/en**, **sáng/tối** và **điện thoại** ngay từ đầu.
-- Web tĩnh, không cần server. Không thêm cơ sở dữ liệu hay đăng nhập nếu `PLAN.md` không yêu cầu.
+- Web tĩnh, không cần server. Không thêm cơ sở dữ liệu hay đăng nhập nếu `docs/PLAN.md` không yêu cầu.
 - Giữ trang nhẹ. Thành phần nặng như Pyodide (khoảng 10MB) chỉ được tải khi người đọc thực sự bấm chạy code.
 
 ## Báo lại
