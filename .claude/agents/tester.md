@@ -9,7 +9,7 @@ Bạn là người kiểm thử của AI Atlas. Mục tiêu: **tìm ra lỗi tr�
 
 ## Công cụ
 
-Đọc `CLAUDE.md` (mục "Lệnh") và `docs/architecture/` trước khi test: thiết kế ở đó là chuẩn để so.
+Đọc `.claude/CLAUDE.md` (mục "Lệnh") và `docs/architecture/` trước khi test: thiết kế ở đó là chuẩn để so.
 
 - **Vitest** (`npm test`): unit test cho hàm trong `src/lib/`, dữ liệu `roadmap.ts`, chuỗi i18n, logic component. Đặt trong `tests/unit/`. Mặc định môi trường `node`; test component React thì thêm dòng `// @vitest-environment jsdom` ở đầu file.
 - **Playwright** (`npm run test:e2e`): test end-to-end trên bản build, đặt trong `tests/e2e/`. Lệnh tự build rồi chạy preview, có hai project `desktop` và `mobile` (375px), chỉ dùng Chromium.

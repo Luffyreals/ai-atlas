@@ -3,7 +3,7 @@
 <!-- The CI badge only renders for viewers with access to the repository while it is private. -->
 [![CI](https://github.com/Luffyreals/ai-atlas/actions/workflows/ci.yml/badge.svg)](https://github.com/Luffyreals/ai-atlas/actions/workflows/ci.yml)
 
-**Tiếng Việt** | [English](README.en.md)
+**Tiếng Việt** | [English](docs/README.en.md)
 
 > Tấm bản đồ kiến thức AI: từ Python cơ bản đến các mô hình ngôn ngữ lớn, giải thích dễ hiểu, miễn phí cho tất cả mọi người.
 
@@ -71,8 +71,8 @@ Sau phần 4, bạn có thể chọn đi tiếp nhánh **NLP**, **Computer Visio
 | Tài liệu | Nội dung |
 |---|---|
 | [docs/mvp.md](docs/mvp.md) | Spec bản MVP: phạm vi, tiêu chí hoàn thành, các mốc |
-| [PLAN.md](PLAN.md) | Kế hoạch tổng thể và tiến độ các giai đoạn |
-| [CHANGELOG.md](CHANGELOG.md) | Các thay đổi đã thực hiện |
+| [PLAN.md](docs/PLAN.md) | Kế hoạch tổng thể và tiến độ các giai đoạn |
+| [CHANGELOG.md](docs/CHANGELOG.md) | Các thay đổi đã thực hiện |
 | [docs/](docs/README.md) | Tài liệu cho người viết bài và phát triển |
 | [docs/architecture/](docs/architecture/README.md) | Tổng quan kiến trúc kỹ thuật |
 
@@ -110,7 +110,7 @@ Các lệnh khác:
 | `npm test` | Unit test (Vitest) |
 | `npm run test:e2e` | E2E (Playwright), tự build rồi chạy preview |
 
-Danh sách đầy đủ và các lưu ý: [CONTRIBUTING.md](CONTRIBUTING.md#các-lệnh).
+Danh sách đầy đủ và các lưu ý: [CONTRIBUTING.md](.github/CONTRIBUTING.md#các-lệnh).
 
 ## Cấu trúc dự án
 
@@ -131,13 +131,13 @@ File cấu hình nằm ở gốc repo: `astro.config.ts`, `package.json`, `tscon
 
 Dự án hiện do một người duy trì. Mọi góp ý và báo lỗi đều được hoan nghênh.
 
-- Cài đặt, quy ước commit, quy trình viết bài và định nghĩa hoàn thành: [CONTRIBUTING.md](CONTRIBUTING.md).
+- Cài đặt, quy ước commit, quy trình viết bài và định nghĩa hoàn thành: [CONTRIBUTING.md](.github/CONTRIBUTING.md).
 - Báo lỗi website, lỗi nội dung bài học hoặc đề xuất bài mới: dùng các mẫu issue có sẵn.
-- Lỗi bảo mật: **không** mở issue công khai, xem [SECURITY.md](SECURITY.md).
+- Lỗi bảo mật: **không** mở issue công khai, xem [SECURITY.md](.github/SECURITY.md).
 
 ## Giấy phép
 
 - **Nội dung** (bài học, hình minh họa): [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/deed.vi). Bạn được chia sẻ và chỉnh sửa nếu ghi nguồn, không dùng cho mục đích thương mại, và giữ cùng giấy phép.
 - **Code** (mã nguồn website, code ví dụ): [MIT](LICENSE).
 
-Chi tiết phạm vi từng giấy phép: [LICENSE-CONTENT.md](LICENSE-CONTENT.md).
+Chi tiết phạm vi từng giấy phép: [LICENSE-CONTENT.md](docs/LICENSE-CONTENT.md).

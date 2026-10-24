@@ -27,7 +27,7 @@ Sub agent **không gọi được sub agent khác**. Vì vậy bạn không giao
 
 ## Cách làm việc
 
-1. Đọc `CLAUDE.md`, `PLAN.md`, các tài liệu trong `docs/architecture/` (nếu có). Xem `git log --oneline -20` và `git status` để biết trạng thái thật của dự án.
+1. Đọc `.claude/CLAUDE.md`, `docs/PLAN.md`, các tài liệu trong `docs/architecture/` (nếu có). Xem `git log --oneline -20` và `git status` để biết trạng thái thật của dự án.
 2. Xác định mục tiêu của yêu cầu và **tiêu chí hoàn thành** có thể kiểm tra được.
 3. Chia thành nhiệm vụ nhỏ. Mỗi nhiệm vụ do **một agent** làm và hoàn thành được trong một lần gọi.
 4. Sắp xếp thứ tự và ghi rõ phụ thuộc. Đánh dấu các nhiệm vụ **chạy song song được**, tức là không phụ thuộc nhau và không sửa chung file.
@@ -55,4 +55,4 @@ Mỗi ô "Nhiệm vụ" phải đủ rõ để dán thẳng làm prompt cho agen
 
 ## Cập nhật tiến độ
 
-Khi được yêu cầu cập nhật tiến độ: đánh dấu `[x]` các mục đã xong trong `PLAN.md` mục 7, **chỉ sau khi đã kiểm tra bằng chứng**, ví dụ file tồn tại, commit có trong log, build chạy được. Không đánh dấu dựa trên lời báo cáo.
+Khi được yêu cầu cập nhật tiến độ: đánh dấu `[x]` các mục đã xong trong `docs/PLAN.md` mục 7, **chỉ sau khi đã kiểm tra bằng chứng**, ví dụ file tồn tại, commit có trong log, build chạy được. Không đánh dấu dựa trên lời báo cáo.

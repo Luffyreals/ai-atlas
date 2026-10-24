@@ -5,9 +5,9 @@
 AI Atlas là website wiki **song ngữ Việt – Anh**, công khai và miễn phí. Website tổng hợp kiến thức AI, từ Python đến LLM, và sắp xếp thành lộ trình học. Trọng tâm là **lý thuyết và giải thích dễ hiểu**.
 
 - Đây là dự án cá nhân, một người phát triển. Repo private: `Luffyreals/ai-atlas`, nhánh `main`.
-- Kế hoạch đầy đủ: [PLAN.md](PLAN.md). Đọc file này khi cần biết phạm vi, danh sách bài hoặc giai đoạn hiện tại.
-- Spec bản MVP: [docs/mvp.md](docs/mvp.md). Mục tiêu trước mắt: bộ khung + 5 bài ML đầu, chia thành mốc M0–M4.
-- Giáo án gốc: `giáo án ai.md`. **Chỉ để tham khảo, không sửa.**
+- Kế hoạch đầy đủ: [PLAN.md](../docs/PLAN.md). Đọc file này khi cần biết phạm vi, danh sách bài hoặc giai đoạn hiện tại.
+- Spec bản MVP: [docs/mvp.md](../docs/mvp.md). Mục tiêu trước mắt: bộ khung + 5 bài ML đầu, chia thành mốc M0–M4.
+- Giáo án gốc: `docs/reference/giao-an-ai.md`. **Chỉ để tham khảo, không sửa.**
 - **Ngoài phạm vi:** notebook thực hành Colab/Kaggle (sẽ là dự án riêng). Không thêm bài tập Colab vào website.
 
 ## Giao tiếp
@@ -18,7 +18,7 @@ AI Atlas là website wiki **song ngữ Việt – Anh**, công khai và miễn p
   - Gom câu hỏi lại, tối đa 4 câu mỗi lượt. Mỗi câu 2–4 lựa chọn, phương án đề xuất đặt đầu tiên và ghi "(Recommended)".
   - Mục "Câu hỏi cho người dùng" trong báo cáo của sub agent cũng được gom lại và hỏi theo cách này. Không để câu hỏi nằm lẫn trong đoạn văn.
   - Chỉ tự chọn phương án mặc định khi lựa chọn không chặn việc gì và dễ đổi lại về sau. Khi tự chọn thì nói rõ đã chọn gì.
-  - Ghi quyết định vào tài liệu liên quan (`docs/decisions.md`, `docs/architecture/`, `PLAN.md` mục 8).
+  - Ghi quyết định vào tài liệu liên quan (`docs/decisions.md`, `docs/architecture/`, `docs/PLAN.md` mục 8).
 
 ## Trạng thái hiện tại
 
@@ -66,6 +66,11 @@ src/routeData.ts                       # Route middleware của Starlight (SEO c
 src/data/roadmap.ts                    # Lộ trình: thứ tự bài, quan hệ "cần biết trước"
 src/data/home.ts, home-pictures.ts     # Chữ và ảnh (kèm nguồn) của trang chủ, vi và en
 src/styles/custom.css                  # Token màu (--sl-color-*, --atlas-*) và font
+docs/PLAN.md, docs/CHANGELOG.md        # Kế hoạch và tiến độ; các thay đổi
+docs/README.en.md, docs/LICENSE-CONTENT.md  # README tiếng Anh; phạm vi hai giấy phép
+docs/reference/giao-an-ai.md           # Giáo án gốc (chỉ tham khảo)
+.github/                               # CI, Dependabot, mẫu issue/PR, CONTRIBUTING.md, SECURITY.md
+.claude/                               # CLAUDE.md (file này) và agents/
 docs/lesson-template.mdx               # Template bài học chuẩn
 docs/glossary.md                       # Bảng thuật ngữ Việt – Anh
 docs/decisions.md                      # Nhật ký quyết định đã chốt, đánh số
@@ -110,7 +115,7 @@ Tên thư mục phần: `python`, `math`, `ml`, `dl`, `nlp`, `cv`, `llm`. Tên f
 
 | Agent | Dùng khi |
 |---|---|
-| `team-lead` | Yêu cầu lớn nhiều bước: chia việc, giao agent, đặt tiêu chí hoàn thành, cập nhật tiến độ `PLAN.md` |
+| `team-lead` | Yêu cầu lớn nhiều bước: chia việc, giao agent, đặt tiêu chí hoàn thành, cập nhật tiến độ `docs/PLAN.md` |
 | `architect` | Lên kế hoạch và thiết kế bộ khung, quyết định kiến trúc. Viết vào `docs/architecture/` |
 | `developer` | Viết hoặc sửa code website: cấu hình, component, tính năng, sửa lỗi |
 | `tester` | Viết và chạy test, kiểm tra build, link, song ngữ, giao diện. Chỉ sửa file test |
@@ -132,7 +137,7 @@ Tên thư mục phần: `python`, `math`, `ml`, `dl`, `nlp`, `cv`, `llm`. Tên f
 
 - **Tính năng kỹ thuật:** `architect` → `developer` → `tester` → `analyst` → sửa (nếu có lỗi) → commit
 - **Bài học:** (`summarizer` tóm tắt tài liệu) → `lesson-writer` → `content-reviewer` → sửa → `viz-builder` (nếu có `VIZ`) → `lesson-translator` → `content-reviewer` (kiểm tra khớp vi/en)
-- **Cuối mỗi giai đoạn:** `summarizer` viết báo cáo tiến độ, `team-lead` cập nhật `PLAN.md`
+- **Cuối mỗi giai đoạn:** `summarizer` viết báo cáo tiến độ, `team-lead` cập nhật `docs/PLAN.md`
 
 ## Git
 

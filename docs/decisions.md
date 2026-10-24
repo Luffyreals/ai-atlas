@@ -5,7 +5,7 @@
 Đã quyết ngày 22/10/2026:
 
 1. **Gốc repo git:** đã chuyển `.git` vào `ai-atlas/`.
-2. **Giấy phép:** nội dung **CC BY-NC-SA 4.0**, code **MIT**. Xem [LICENSE](../LICENSE) và [LICENSE-CONTENT.md](../LICENSE-CONTENT.md).
+2. **Giấy phép:** nội dung **CC BY-NC-SA 4.0**, code **MIT**. Xem [LICENSE](../LICENSE) và [LICENSE-CONTENT.md](LICENSE-CONTENT.md).
 3. **Tên miền:** chưa chọn, quyết trước M4. MVP chạy trên `ai-atlas.pages.dev`.
 4. **Bài chưa viết:** không tạo trang trống. Lộ trình hiện đủ 78 bài, bài chưa viết chỉ có nhãn "Sắp có".
 5. **Lộ trình:** chốt bảng slug ở [roadmap-data.md](architecture/roadmap-data.md) mục 5. Giữ bài `python/colab-kaggle` ở dạng bài giới thiệu công cụ. Sidebar dùng `shortTitle` khi tiêu đề dài.
@@ -193,3 +193,10 @@
     - **`SamplingViz`:** top-p chạy trên phân phối sau top-k đã chuẩn hóa lại (như `transformers`); có nhãn "tắt" khi k = 10 hoặc p = 1; đổi thanh trượt thì xóa cả bộ đếm lẫn token vừa lấy; bấm Đặt lại thì vùng live báo ngay (`resetDone`).
     - **Hình tĩnh:** chỉ bố cục hẹp 360 đơn vị; `graph-rag` dùng lại hình RAG vector kèm câu dẫn; nhãn "phạt KL" trên mũi tên tham chiếu → chính sách; router của `MoeFigure` để kiểu thường; `EncoderDecoderFigure` giữ khoảng trống để K, V đi ngang; khung GPU của `ParallelismFigure` viền thường, all-reduce là đường nối không đầu; `deploy-custom-model` dùng `ContainerImageFigure stack="api"`.
     - **Sửa sau analyst:** ô tiêu đề góc của bảng không để trống (14 bảng, thêm vào template); `LocalCode` báo lỗi khi `command`/`hardware` rỗng và khi code dùng `getenv` hay `from os import environ`; CI giữ artifact `dist` 3 ngày. Để riêng: CLS do nạp font của cả site (`llama-family`, `deepseek-family` 0,106–0,117).
+
+63. **Gọn thư mục gốc repo (24/10/2026).** Người dùng chọn qua câu hỏi. Chỉ dời file và sửa link, giữ nguyên nội dung. Làm ở nhánh `repo-layout`, có PR riêng.
+    - `CONTRIBUTING.md`, `SECURITY.md` → `.github/` (GitHub vẫn nhận và hiện ở sidebar).
+    - `PLAN.md`, `CHANGELOG.md`, `README.en.md`, `LICENSE-CONTENT.md` → `docs/`. `giáo án ai.md` → `docs/reference/giao-an-ai.md` (tên ASCII).
+    - `CLAUDE.md` → `.claude/CLAUDE.md` (Claude Code đọc được ở vị trí này).
+    - Giữ ở gốc: `README.md`, `LICENSE`, file cấu hình (`package.json`, `astro.config.ts`, `tsconfig.json`, `playwright.config.ts`, `vitest.config.ts`) để công cụ và IDE tự nhận; `skills-lock.json` và `.agents/` do CLI của skill quản lý.
+    - CI e2e chia **3 shard** (trước là 2) và `timeout-minutes: 30` (trước là 20): shard chậm hơn của 2 shard đã chạm giới hạn 20 phút và bị hủy hai lần trên PR #4, không có test nào lỗi.

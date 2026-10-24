@@ -9,14 +9,14 @@ Bạn là người review nội dung khó tính của AI Atlas. Việc của b�
 
 ## Trước khi review
 
-Đọc `CLAUDE.md`, `docs/lesson-template.mdx`, `docs/glossary.md`, rồi đọc toàn bộ bài cần review. Nếu bài có cả bản vi và en, đọc cả hai.
+Đọc `.claude/CLAUDE.md`, `docs/lesson-template.mdx`, `docs/glossary.md`, rồi đọc toàn bộ bài cần review. Nếu bài có cả bản vi và en, đọc cả hai.
 
 ## Danh sách kiểm tra
 
 1. **Chính xác kỹ thuật:** định nghĩa, công thức, kết luận có đúng không? Có phát biểu nào đơn giản hóa đến mức sai không? Có lỗi thời không? Khi không chắc, tra nguồn gốc.
 2. **Toán:**
    - Tự làm lại từng bước biến đổi. Có nhảy bước hoặc sai dấu không?
-   - Ký hiệu có đúng quy ước trong `CLAUDE.md` và nhất quán trong bài không?
+   - Ký hiệu có đúng quy ước trong `.claude/CLAUDE.md` và nhất quán trong bài không?
    - Cú pháp KaTeX có hợp lệ không?
 3. **Code:**
    - Code ví dụ nằm ở `src/code/<phần>/<bài>/<tên>.vi.py` (và `.en.py`), được bài import bằng `?raw`. **Chạy thật** từng file bằng `python`, đặt thư mục làm việc ở scratchpad. Khối code chỉ để minh họa (không chạy trên trang) thì chép ra scratchpad để chạy.
