@@ -4,25 +4,24 @@
 // U+2080–2089) and an optional upright tail ("= 0", after dx = 3). Language-neutral, so it is written in the
 // figure component; checkMathLabel fails the build when words try to slip in. The tspans sit on ONE line below:
 // a line break between them would draw a space ("w 1"). Colour and weight 400: figures.css (.atlas-fig-math).
-import { FIG_FONT, checkMathLabel, round1 } from '@lib/figures/geometry';
+// Added for the LLM figures (docs/architecture/llm-lessons.md, section 2.9.2): `bold` draws the symbol upright
+// and bold (600, loaded), the site's \mathbf for vectors and matrices (x, W); `before` is an upright math
+// head ("×" of "× N"), dx = 3 before the symbol. FigNode draws one of these as its `math` row.
+// The central baseline and the middle anchor come from figures.css (llm-lessons.md 2.9.3): only start and end
+// are written.
+import { FIG_FONT, checkMathLabel, round1, type MathLabel } from '@lib/figures/geometry';
 
-interface Props {
+interface Props extends MathLabel {
   x: number;
   /** Vertical centre, dominant-baseline: central, like FigText. */
   y: number;
-  /** One Latin or Greek letter, italic. */
-  symbol: string;
-  /** 1–2 digits or Latin letters, always FIG_FONT.small. */
-  sub?: string;
-  /** Math characters only, upright. */
-  after?: string;
   size?: 'label' | 'small';
   anchor?: 'start' | 'middle' | 'end';
 }
 
-const { x, y, symbol, sub, after, size = 'label', anchor = 'middle' } = Astro.props;
+const { x, y, symbol, sub, after, before, bold = false, size = 'label', anchor = 'middle' } = Astro.props;
 try {
-  checkMathLabel(symbol, sub, after);
+  checkMathLabel(symbol, sub, after, before);
 } catch (error) {
   throw new Error(`<FigMath> on "${Astro.locals.starlightRoute.id}": ${error instanceof Error ? error.message : String(error)}`);
 }
@@ -30,4 +29,4 @@ const fontSize = FIG_FONT[size];
 const shift = round1(0.3 * fontSize);
 ---
 
-<text class="atlas-fig-math" font-size={fontSize} text-anchor={anchor} dominant-baseline="central" x={x} y={y}><tspan font-style="italic">{symbol}</tspan>{sub !== undefined && <tspan font-size={FIG_FONT.small} dy={shift}>{sub}</tspan>}{after !== undefined && <tspan dy={sub !== undefined ? -shift : undefined} dx="3">{after}</tspan>}</text>
+<text class="atlas-fig-math" font-size={fontSize} text-anchor={anchor === 'middle' ? undefined : anchor} x={x} y={y}>{before !== undefined && <tspan>{before}</tspan>}<tspan class={bold ? 'atlas-fig-math-bold' : undefined} font-style={bold ? undefined : 'italic'} dx={before !== undefined ? 3 : undefined}>{symbol}</tspan>{sub !== undefined && <tspan font-size={FIG_FONT.small} dy={shift}>{sub}</tspan>}{after !== undefined && <tspan dy={sub !== undefined ? -shift : undefined} dx="3">{after}</tspan>}</text>

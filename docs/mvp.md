@@ -232,5 +232,59 @@ M2 có một bước **chờ bạn duyệt**. Mọi bài sau đều theo templat
     - Gộp ngay phần lặp giữa ba VIZ vào kit: `Swatch`, `DotSwatch`, hàm dựng trục `axis()`. Mục đích là để VIZ của bài Gradient Descent dùng luôn.
 
 51. **Bản vi bài Ridge, Lasso, Elastic Net đã được người dùng duyệt (24/10/2026).** Duyệt cùng các lựa chọn phiên chính đã tự chọn: hai trục hình L1/L2 ghi ký hiệu $w_1$, $w_2$; `alpha` cố định qua các fold khi kiểm định chéo (có câu giải thích trong bài).
+53. **Phần LLM (24/10/2026):** người dùng chọn viết **cả 23 bài** của phần 5c, **chỉ bản vi** (bản en làm sau, như quyết định 43). Làm song song với bài Gradient Descent (M3), vì bài đó do một phiên khác làm trên worktree riêng.
+    - Code gọi API LLM là **code minh họa**, không chạy trên trang (Pyodide không gọi được API và không có PyTorch/GPU). Dùng **SDK OpenAI-compatible** (thư viện `openai`, đổi `base_url` để dùng OpenAI, Gemini, Groq, Ollama...). Không ghi cứng API key trong code: đọc từ biến môi trường.
+54. **Khuôn bài LLM (24/10/2026), theo kế hoạch của team-lead:**
+    - **Code minh họa:** đặt ở `src/code/llm/<bài>/<tên>.vi.py` (kèm `.en.py`), hiển thị qua một component nhỏ có nhãn "Chạy trên máy bạn" và dòng yêu cầu (gói cần cài, biến môi trường). Code không phải Python (Dockerfile, YAML, shell, Cypher) viết thẳng trong MDX.
+    - **Kiểm chứng:** người dùng tự đặt `OPENAI_API_KEY`/`OPENAI_BASE_URL` (gói miễn phí Gemini hoặc Groq) để reviewer chạy thật code gọi API. Code PyTorch chạy ở quy mô nhỏ trong một venv riêng có torch CPU.
+    - **VIZ:** chỉ `SamplingViz` (temperature, top-k, top-p; dùng ở `text-api` và `build-first-llm`), cùng 9 hình SVG tĩnh: pipeline RAG, vòng lặp agent, ba bước RLHF, LoRA, MoE, encoder–decoder, multimodal, các kiểu song song, image và container.
+    - **Nhịp duyệt:** người dùng duyệt khuôn code trên trang demo, rồi bài `text-api`, rồi bài `build-first-llm`. Sau đó duyệt theo đợt, mỗi đợt tối đa 4 bài.
+    - **Phiên chính tự chọn (dễ đổi lại):**
+      - Bài `build` có một ô NumPy chạy được trên trang khi phần lõi toán đủ nhỏ.
+      - Không chọn nhà cung cấp mặc định: code chỉ đọc biến môi trường; bài `text-api` có bảng nhà cung cấp, ghi "kiểm tra lần cuối 10/2026".
+      - Khối "Nhắc nhanh" được nới tới khoảng một đoạn ở `build-first-llm`, `rag-chatbot`, `multimodal`.
+      - Bài không có hình vẫn giữ mục Minh họa, dùng bảng, hội thoại mẫu hoặc kết quả mẫu.
+      - Video ở bài `image-video-api` chỉ ở mức khái niệm. GCN ở `graph-rag` chỉ nhắc tên. `evaluation-peft` được dài tới khoảng 15 phút.
+59. **Hạ tầng bài LLM (24/10/2026), theo `docs/architecture/llm-lessons.md`:**
+    - **CI e2e:** làm ngay, trước bài `text-api`. Test không phụ thuộc kích thước màn hình chỉ chạy ở project desktop. Chia 2 shard dùng chung một bản build. Mục tiêu ≤ 12 phút.
+    - **Prompt trong code minh họa:** tiếng Việt trong `.vi.py`, tiếng Anh trong `.en.py`. Test `code-pairs` bỏ qua nội dung chuỗi, chỉ áp dụng cho `src/code/llm/`.
+    - **API key cho reviewer:** người dùng tự tạo file `.env.llm` ở gốc dự án (đã bị `.gitignore` chặn qua `.env.*`). Agent chỉ nạp biến vào môi trường của từng lệnh, không in nội dung ra.
+    - **Kết quả mẫu:** có, dưới code gọi API. Chỉ lấy từ lần chạy thật, kèm ghi chú "mỗi lần chạy một khác".
+    - Phần làm trên nhánh `llm-lessons`, worktree `../ai-atlas-llm` (quy tắc mỗi phiên một worktree).
+60. **Nhịp làm phần LLM và bài `build-first-llm` (24/10/2026):**
+    - Người dùng chọn **chạy hết 23 bài rồi duyệt một lần ở cuối**, thay cho nhịp duyệt ở quyết định 54. Mỗi bài vẫn qua `content-reviewer` và được sửa. Mỗi đợt vẫn qua check/test/build. Có báo cáo cho từng đợt.
+    - **Các cấp ứng dụng LLM:** chia 4 cấp, ghi rõ đây là cách chia của bài:
+      1. dùng LLM có sẵn qua API;
+      2. prompt, RAG, agent trên LLM có sẵn;
+      3. fine-tune hoặc huấn luyện tiếp;
+      4. pre-train từ đầu.
+    - **Dữ liệu:** dùng 24 câu đầu Truyện Kiều. Bigram NumPy chạy trên trang. Code GPT minh họa dùng cùng dữ liệu và cho thấy overfit (loss kiểm tra tăng), để giải thích vì sao LLM cần nhiều dữ liệu.
+    - **Ký hiệu:** độ dài chuỗi là $L$, nhiệt độ là $T$, dùng chung cho cả phần LLM. GPT-2 chỉ được nhắc như một sự kiện năm 2019, không tải trọng số.
+61. **Các lựa chọn phiên chính tự chốt khi viết phần LLM (24/10/2026).** Đều không chặn việc và dễ đổi lại. Người dùng sẽ duyệt ở lần duyệt cuối.
+    - **Kiểm chứng:** ô `PythonRunner` phải chạy bằng Pyodide thật (`node_modules/pyodide` chạy trong Node), không chạy bằng CPython trên Windows. Lý do: zlib-ng của Windows nén ra kết quả khác zlib gốc của Pyodide, nên số liệu lệch.
+    - **Code LlamaIndex** chạy thử trong venv riêng có `openai` 2.x, vì `llama-index-llms-openai` đòi `openai<3`. `.venv-llm` vẫn giữ `openai` 3.37.0.
+    - **Embedding:** dùng biến `EMBEDDING_MODEL`. Hai biến `EMBEDDING_BASE_URL` và `EMBEDDING_API_KEY` là tùy chọn, dùng khi nhà cung cấp chat không có embeddings.
+    - **`text-api`:**
+      - bỏ `max_tokens` khỏi code chat;
+      - thêm cảnh báo về mô hình suy luận vào bảng nhà cung cấp;
+      - thêm cột Embeddings và JSON mode vào bảng;
+      - bỏ ô `stream`, thay bằng một đoạn trích;
+      - rút gọn phần công thức backoff.
+    - **`image-video-api`:** ảnh thử 48×48, nén zlib mức 9. Ảnh ra 118 byte ở cả CPython lẫn Pyodide.
+    - **`graph-rag`:** dạy cú pháp Cypher mới `{1,3}`, nhắc cú pháp cũ `*1..3`. Ô chạy trên trang dùng Python thuần (dict và BFS).
+    - **`llama-family`:**
+      - RoPE ghép hai chiều liền kề như RoFormer;
+      - `ParallelismFigure` vẽ 3 kiểu, còn ZeRO và FSDP giải thích bằng bảng;
+      - có bảng so sánh Llama 1/2/3;
+      - các số tự tính được ghi rõ là "tự tính".
+    - **`pretraining-data`:** chỉ nhắc chung chuyện bản quyền; suffix array chỉ một câu; không nói về dữ liệu tiếng Việt.
+    - **`gpt-family-finetuning`, `debugging-language-models`:** không cài `transformers`. Chat template và tokenizer chỉ nhắc trong lời văn.
+    - **Prompt trong code demo** ở `src/code/dev/local-*`: viết tiếng Anh ở cả hai bản.
+    - **Khối "Nhắc nhanh":** bài nào đã có bài cần biết trước được xuất bản thì rút khối này còn 2 câu.
+
+62. **VIZ, hình tĩnh và sửa sau analyst của phần LLM (24/10/2026).** Phiên chính tự chốt; người dùng đồng ý giữ cả. Người dùng tự đọc 23 bài trên `npm run dev` rồi gửi nhận xét, chưa commit cho tới khi người dùng bảo; 5 bài dài hơn mục tiêu để nguyên, xem khi duyệt; CLS do font làm thành việc riêng trên `main`. Chi tiết ở `docs/architecture/llm-lessons.md` mục 2.9.1–2.9.3 và 4.6.8.
+    - **`SamplingViz`:** top-p chạy trên phân phối sau top-k đã chuẩn hóa lại (như `transformers`); có nhãn "tắt" khi k = 10 hoặc p = 1; đổi thanh trượt thì xóa cả bộ đếm lẫn token vừa lấy; bấm Đặt lại thì vùng live báo ngay (`resetDone`).
+    - **Hình tĩnh:** chỉ bố cục hẹp 360 đơn vị; `graph-rag` dùng lại hình RAG vector kèm câu dẫn; nhãn "phạt KL" trên mũi tên tham chiếu → chính sách; router của `MoeFigure` để kiểu thường; `EncoderDecoderFigure` giữ khoảng trống để K, V đi ngang; khung GPU của `ParallelismFigure` viền thường, all-reduce là đường nối không đầu; `deploy-custom-model` dùng `ContainerImageFigure stack="api"`.
+    - **Sửa sau analyst:** ô tiêu đề góc của bảng không để trống (14 bảng, thêm vào template); `LocalCode` báo lỗi khi `command`/`hardware` rỗng và khi code dùng `getenv` hay `from os import environ`; CI giữ artifact `dist` 3 ngày. Để riêng: CLS do nạp font của cả site (`llama-family`, `deepseek-family` 0,106–0,117).
 
 Còn mở: tên miền (trước M4).

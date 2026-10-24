@@ -1,0 +1,274 @@
+---
+title: Làm giao diện với Gradio/Streamlit
+description: Biến code gọi API thành ứng dụng chat trên trình duyệt. Gradio gọi một hàm của bạn, Streamlit chạy lại cả script. Streaming và giữ lịch sử hội thoại.
+quiz:
+  - question: 'Trong ứng dụng Streamlit, bạn viết `history = []` ở đầu file (biến Python thường, không dùng `st.session_state`), rồi mỗi lần có tin mới thì thêm vào `history` và vẽ lại cả danh sách. Người dùng gửi tin thứ hai. Màn hình hiện gì?'
+    options:
+      - 'Cả hai lượt, vì biến `history` vẫn còn trong bộ nhớ của server'
+      - 'Báo lỗi `NameError` vì `history` chưa được định nghĩa'
+      - 'Chỉ lượt thứ hai, vì Streamlit chạy lại cả file và `history = []` tạo lại danh sách rỗng'
+      - 'Lượt thứ nhất hai lần'
+    answer: 2
+    explanation: 'Mỗi lần người dùng gửi tin, Streamlit chạy lại script từ dòng đầu, nên dòng `history = []` cũng chạy lại và xóa mọi thứ đã thêm. Chỉ `st.session_state` sống qua các lần chạy lại. Phương án thứ nhất dễ chọn vì trong một chương trình Python bình thường, biến quả thật còn đó; nhưng ở đây chính dòng gán chạy lại.'
+  - question: 'Trong hàm `chat` của Gradio, bạn viết `yield piece` (chỉ mảnh mới nhận) thay cho `yield reply` (cả đoạn đã cộng dồn). Mô hình trả lời "Xin chào, mình là trợ lý." qua năm mảnh. Khi luồng kết thúc, khung chat hiện gì?'
+    options:
+      - 'Chỉ mảnh cuối, ví dụ "trợ lý."'
+      - 'Cả câu, vì Gradio tự cộng dồn các mảnh'
+      - 'Năm tin nhắn riêng, mỗi tin một mảnh'
+      - 'Không hiện gì, vì `yield` phải trả về danh sách'
+    answer: 0
+    explanation: 'Mỗi lần `yield`, Gradio thay toàn bộ tin nhắn đang hiện bằng giá trị vừa nhận. Vì vậy phải `yield` cả đoạn đã có. Gradio chỉ tự tính phần chênh lệch để gửi tới trình duyệt cho nhẹ; nó không cộng dồn hộ bạn. Tin cuối cùng được lưu vào lịch sử cũng chỉ là mảnh cuối.'
+  - question: 'Ứng dụng Streamlit của bài (một tin `system` thêm vào mỗi lần gọi API, lịch sử lưu cả câu hỏi lẫn câu trả lời). Người dùng đang gửi câu hỏi thứ 5. Danh sách `messages` gửi lên API có bao nhiêu tin?'
+    options: ['2', '5', '9', '10']
+    answer: 3
+    explanation: 'Gồm 1 tin `system`, 4 cặp hỏi–đáp của bốn lượt trước (8 tin), và câu hỏi mới: $1 + 8 + 1 = 10$, tức $2k$ với $k = 5$. API không giữ trạng thái, nên mỗi lượt phải gửi lại cả cuộc trò chuyện. Phương án 9 là khi quên tin `system`; phương án 2 là khi nghĩ API tự nhớ.'
+  - question: 'Hàm `chat` của bài không đưa thẳng `history` của Gradio vào `messages`, mà chuyển từng tin qua hàm `to_text`. Vì sao?'
+    options:
+      - 'Vì `history` của Gradio chỉ chứa tin của người dùng'
+      - 'Vì `content` của Gradio 6 là danh sách mảnh, kèm khóa `metadata`, `options`; chuỗi thì nơi nào cũng nhận'
+      - 'Vì `history` của Gradio đã có sẵn tin `system`, gửi thẳng sẽ bị trùng'
+      - 'Vì `to_text` thêm tin `system` vào đầu danh sách'
+    answer: 1
+    explanation: '`history` có đủ tin của người dùng và trợ lý, nhưng ở dạng của Gradio: `content` là danh sách mảnh, kèm các khóa API không định nghĩa. `to_text` chỉ giữ `role` và ghép chữ thành một chuỗi, đúng dạng `{"role": ..., "content": "..."}` mà mọi API kiểu OpenAI nhận. `history` cũng không có tin `system`: tin đó được thêm ở dòng đầu của hàm `chat`, không phải trong `to_text`.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import gradioChatCode from '@code/llm/gradio-streamlit/gradio-chat.vi.py?raw';
+import streamlitChatCode from '@code/llm/gradio-streamlit/streamlit-chat.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu hai cách nghĩ khác nhau: Gradio gọi **một hàm** của bạn mỗi khi có tin mới, còn Streamlit **chạy lại cả script** mỗi khi người dùng làm gì đó.
+- Dựng được một giao diện chat (chat interface) trên trình duyệt, nối với API kiểu OpenAI (OpenAI-compatible), bằng cả hai thư viện.
+- Đưa được câu trả lời lên giao diện theo kiểu streaming: chữ hiện dần thay vì chờ cả câu.
+- Giữ đúng lịch sử hội thoại (conversation history) ở cả hai tầng: giao diện để vẽ lại, và API để mô hình "nhớ".
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Ở bài [Sử dụng API văn bản](/vi/llm/text-api/), bạn gọi mô hình bằng `client.chat.completions.create` với một danh sách **`messages`**, mỗi tin có `role` (`system`, `user`, `assistant`) và `content`. API **không giữ trạng thái** (stateless): mỗi lần gọi, bạn phải gửi lại cả cuộc trò chuyện. Với `stream=True`, kết quả về thành từng **mảnh** (chunk); chữ mới của mỗi mảnh nằm ở `chunk.choices[0].delta.content`, và có thể là `None`.
+:::
+
+## Trực giác
+
+Bạn đã có một đoạn Python gọi mô hình chat, chạy trong cửa sổ dòng lệnh. Giờ bạn muốn đưa cho đồng nghiệp dùng thử. Đồng nghiệp không biết lập trình, và "mở terminal, gõ `python chat.py`" là quá sức. Thứ họ cần là một trang web có ô nhập, nút gửi, và các bong bóng tin nhắn.
+
+Tự làm trang đó nghĩa là viết HTML, CSS, JavaScript, và một server nhận yêu cầu từ trình duyệt. Đó là cả một nghề khác. **Gradio** và **Streamlit** là hai thư viện Python giúp bạn bỏ qua phần đó: vài chục dòng Python thành một ứng dụng web chạy trên máy bạn.
+
+Hai thư viện nghĩ theo hai kiểu rất khác nhau:
+
+- **Gradio giống một cái khung ảnh có sẵn.** Khung chat đã dựng xong: ô nhập, nút gửi, nút dừng, danh sách tin nhắn. Bạn chỉ đưa vào "bức ảnh", tức một hàm nhận câu hỏi và trả câu trả lời.
+- **Streamlit giống một tấm bảng trắng.** Bạn viết script vẽ từ trên xuống dưới. Mỗi lần có người chạm vào bảng (gửi tin, bấm nút), Streamlit **xóa sạch và chạy lại script từ đầu**. Thứ gì cần nhớ qua các lần vẽ lại thì phải ghi vào một cuốn sổ riêng.
+
+Dù dùng thư viện nào, bạn cũng gặp ba câu hỏi: giao diện gọi API ở đâu, làm sao cho chữ hiện dần, và ai nhớ cuộc trò chuyện.
+
+**Bài toán: biến đoạn code gọi API thành một ứng dụng chat trên trình duyệt, chữ hiện dần khi mô hình đang trả lời, và mô hình nhớ được những gì đã nói trong cuộc trò chuyện.**
+
+## Lý thuyết
+
+Bài này không có công thức nào đáng kể. "Lý thuyết" ở đây là cách mỗi thư viện chạy code của bạn. Hiểu đúng điều này thì phần lớn lỗi ở mục Lỗi hay gặp tự biến mất.
+
+### Gradio: bạn viết một hàm
+
+Với Gradio, bạn viết một hàm `chat(message, history)`:
+
+- `message` là chuỗi người dùng vừa gửi.
+- `history` là các lượt trước, dạng danh sách dict có `role` (`"user"` hoặc `"assistant"`) và `content`. Lịch sử này nằm ở giao diện trên trình duyệt; mỗi lần có tin mới, Gradio chuyển nó vào hàm của bạn.
+
+Rồi `gr.ChatInterface(chat)` dựng cả khung chat quanh hàm đó, và `demo.launch()` mở một server trên máy, mặc định ở cổng 7860. Hàm của bạn trả lời theo một trong hai cách:
+
+- **`return` một chuỗi:** câu trả lời hiện ra một lần, khi hàm chạy xong.
+- **`yield` nhiều lần:** hàm là một **generator** (hàm dùng `yield`). Mỗi lần `yield`, Gradio **thay toàn bộ** tin nhắn đang hiện bằng giá trị mới. Vì vậy bạn `yield` cả đoạn đã có, không phải chỉ mảnh mới. Gradio tự tính phần chênh lệch để gửi tới trình duyệt cho nhẹ.
+
+Có hai chi tiết của Gradio 6 mà ví dụ cũ trên mạng hay sai:
+
+- Ở Gradio 6.30.0 (bản bài đã thử), `content` của mỗi tin trong `history` là một **danh sách mảnh**, ví dụ `[{"type": "text", "text": "Xin chào"}]`, và mỗi tin còn có thêm hai khóa `metadata`, `options`. Nội dung dạng danh sách mảnh thì API của OpenAI có nhận, nhưng không phải nhà cung cấp nào cũng nhận (nhất là với tin `assistant`). Còn `metadata`, `options` là khóa mà API không định nghĩa. Vì vậy code của bài chuyển mỗi tin về `{"role": ..., "content": "chuỗi"}`, dạng mà nơi nào cũng nhận.
+- `history` không có tin `system`. Lời dặn cho mô hình là việc của bạn: thêm nó vào đầu danh sách mỗi lần gọi API.
+
+Gradio còn có `gr.load_chat(base_url, model=..., token=...)`, dựng giao diện chat cho một API kiểu OpenAI chỉ bằng một dòng. Bài tự viết hàm `chat` để bạn thấy và sửa được từng bước.
+
+### Streamlit: script chạy lại từ đầu
+
+Với Streamlit, bạn viết một script bình thường, chạy từ trên xuống dưới. Mỗi lệnh `st.*` vẽ một thứ lên trang. Điểm mấu chốt: **mỗi khi người dùng tương tác, Streamlit chạy lại toàn bộ script** (rerun). Với giao diện chat, điều đó dẫn tới ba hệ quả:
+
+1. **Biến Python thường bị tạo lại từ đầu** sau mỗi tin nhắn. Thứ cần nhớ phải nằm trong `st.session_state`, một đối tượng giống dict, sống qua các lần chạy lại, mỗi tab trình duyệt một bản riêng.
+2. **Màn hình được vẽ lại từ đầu**, nên script phải vẽ lại mọi tin nhắn cũ, mỗi tin trong một khối `st.chat_message(role)`.
+3. **`st.chat_input` trả về `None`** ở mọi lần chạy, trừ lần chạy ngay sau khi người dùng gửi tin. Lần đó nó trả về chuỗi vừa gửi. Vì vậy code chat của Streamlit có dạng `if prompt := st.chat_input(...):`: chỉ khi có tin mới thì mới gọi API.
+
+Với hệ quả thứ nhất, chỉ khởi tạo lịch sử khi nó chưa có. Nếu gán thẳng `st.session_state.messages = []`, dòng đó cũng chạy lại sau mỗi tin nhắn và xóa sạch lịch sử:
+
+```python
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+```
+
+Chạy lại cả script nghe có vẻ phí, và quả thật là vậy nếu đầu script có việc nặng như đọc một file dữ liệu lớn hay tải mô hình. Khi đó, Streamlit có `st.cache_resource` và `st.cache_data` để giữ kết quả qua các lần chạy lại. Ứng dụng của bài chỉ tạo `client` (rất nhẹ), nên không cần.
+
+### Lịch sử hội thoại: hai tầng nhớ
+
+"Nhớ cuộc trò chuyện" thật ra là hai việc khác nhau:
+
+- **Giao diện nhớ để vẽ lại.** Gradio tự giữ lịch sử trong khung chat. Ở Streamlit, bạn tự giữ trong `st.session_state.messages`.
+- **Mô hình "nhớ" vì bạn gửi lại.** API không giữ trạng thái, nên mỗi lượt bạn gửi tin `system`, cả lịch sử, và câu hỏi mới. Ở lượt thứ $k$, danh sách gửi đi có $1 + 2(k - 1) + 1 = 2k$ tin: một tin `system`, $k - 1$ cặp hỏi–đáp cũ, và câu hỏi mới.
+
+Hai tầng phải khớp nhau. Nếu giao diện vẽ câu trả lời nhưng bạn quên lưu nó vào lịch sử, lượt sau mô hình không hề thấy câu trả lời đó (hộp thứ hai ở mục Lỗi hay gặp).
+
+Số tin tăng theo $k$, nên số token gửi lên cũng tăng sau mỗi lượt: cuộc trò chuyện càng dài thì mỗi lần gọi càng tốn tiền và càng chậm, cho tới khi vượt **cửa sổ ngữ cảnh** (context window), tức số token tối đa mô hình đọc được một lần. Ứng dụng thật phải cắt bớt hoặc tóm tắt lịch sử cũ. Bài này giữ nguyên cả lịch sử cho đơn giản.
+
+Mặc định, cả hai thư viện đều mất lịch sử khi bạn tải lại trang: lịch sử chỉ sống trong một phiên của trình duyệt. Gradio có `gr.ChatInterface(..., save_history=True)` để lưu các cuộc trò chuyện vào bộ nhớ của trình duyệt (local storage) và hiện chúng ở một khung bên. Muốn giữ trên server thì phải tự lưu vào file hay cơ sở dữ liệu.
+
+### Streaming lên giao diện
+
+Gọi API với `stream=True`, bạn nhận về một luồng mảnh. Mỗi mảnh có một ít chữ mới ở `chunk.choices[0].delta.content`. Có ba loại mảnh không mang chữ: mảnh mở đầu chỉ báo vai trò `assistant` (`content` rỗng), mảnh kết thúc chỉ báo `finish_reason` (`content` là `None`), và mảnh mang số token khi bật `include_usage` (hoặc khi nhà cung cấp tự gửi), có `choices` rỗng. Code phải bỏ qua cả ba, nếu không sẽ gặp `TypeError` khi cộng `None` vào chuỗi, hoặc `IndexError` khi đọc `choices[0]`.
+
+**Gradio:** bạn tự lặp qua luồng, bỏ mảnh rỗng, cộng dồn vào `reply` rồi `yield reply`. Đây là vòng lặp trong hàm `chat`:
+
+```python
+for chunk in stream:
+    if not chunk.choices:  # có nơi gửi mảnh không có choices
+        continue
+    piece = chunk.choices[0].delta.content
+    if piece:  # mảnh có thể là None hoặc chuỗi rỗng
+        reply += piece
+        yield reply  # trả cả đoạn đã có, Gradio vẽ lại tin nhắn
+```
+
+**Streamlit:** bạn đưa thẳng luồng của SDK `openai` vào `st.write_stream`. Hàm này tự bỏ mảnh rỗng, hiện chữ dần, và khi luồng kết thúc thì **trả về cả câu trả lời** dạng chuỗi. Bạn lưu giá trị đó vào lịch sử.
+
+:::note[Ghi nhớ]
+Gradio gọi hàm của bạn với `(message, history)`; bạn `yield` cả đoạn đã có. Streamlit chạy lại cả script mỗi lần tương tác; lịch sử nằm trong `st.session_state`, và câu trả lời là giá trị `st.write_stream` trả về. Ở cả hai, mỗi lượt gửi lên API cả tin `system`, cả lịch sử và câu hỏi mới.
+:::
+
+### Giới hạn
+
+- **Ứng dụng chỉ chạy trên máy bạn**, ở địa chỉ `localhost`. Đóng gói và đưa lên server để người khác truy cập là việc của bài [Docker và Cloud](/vi/llm/docker-cloud/).
+- **Lịch sử không được cắt**, nên cuộc trò chuyện rất dài sẽ tốn token và có thể vượt cửa sổ ngữ cảnh.
+- **Lỗi giữa luồng chưa được xử lý.** SDK không tự thử lại một luồng bị đứt (bài [Sử dụng API văn bản](/vi/llm/text-api/)). Ứng dụng thật nên bắt lỗi và báo cho người dùng.
+- **Mô hình chỉ biết những gì nó đã học.** Cho mô hình đọc tài liệu của bạn trước khi trả lời là việc của bài [RAG chatbot](/vi/llm/rag-chatbot/).
+
+## Minh họa
+
+Bảng dưới đặt hai thư viện cạnh nhau. Bạn nên nhìn kỹ ba hàng đầu: ai gọi code của bạn, lịch sử nằm ở đâu, và streaming làm thế nào.
+
+| Tiêu chí | Gradio | Streamlit |
+|---|---|---|
+| Ai gọi code của bạn | Gradio gọi hàm `chat(message, history)` mỗi khi có tin mới | Streamlit chạy lại cả script mỗi lần người dùng tương tác |
+| Lịch sử nằm ở đâu | Khung chat giữ, truyền vào `history` | Bạn giữ trong `st.session_state` |
+| Streaming | Cộng dồn rồi `yield` cả đoạn | `st.write_stream(luồng)`, nhận lại cả câu trả lời |
+| Khung chat | Dựng sẵn: `gr.ChatInterface(chat)` | Tự ghép: `st.chat_message`, `st.chat_input` |
+| Tin `system` | Bạn thêm vào đầu mỗi lần gọi API | Bạn thêm vào đầu mỗi lần gọi API |
+| Hợp với | Demo nhanh một mô hình, một hàm | Ứng dụng nhiều phần: bảng, biểu đồ, thanh bên |
+| Lệnh chạy | `python gradio_app.py` | `streamlit run streamlit_app.py` |
+| Cổng mặc định | 7860 | 8501 |
+| Python tối thiểu (PyPI, 10/2026) | 3.10 | 3.11 |
+
+Hàng "Hợp với" là nhận xét chung, không phải luật: Gradio cũng dựng được giao diện nhiều phần bằng `gr.Blocks`, và Streamlit cũng làm demo nhanh được.
+
+Để thấy "gửi lại cả lịch sử" cụ thể ra sao, đây là danh sách `messages` mà cả hai ứng dụng của bài gửi lên API ở **lượt thứ 3** của một cuộc trò chuyện. Đúng $2k = 6$ tin. Đây là ví dụ minh họa, chỗ câu trả lời của mô hình chỉ ghi giữ chỗ.
+
+| Vai trò | Nội dung | Lấy từ đâu |
+|---|---|---|
+| `system` | Bạn là trợ lý thân thiện, trả lời ngắn gọn bằng tiếng Việt. | Hằng `SYSTEM` trong code |
+| `user` | Gradio là gì? | Lịch sử, lượt 1 |
+| `assistant` | (câu trả lời của mô hình ở lượt 1) | Lịch sử, lượt 1 |
+| `user` | Còn Streamlit? | Lịch sử, lượt 2 |
+| `assistant` | (câu trả lời của mô hình ở lượt 2) | Lịch sử, lượt 2 |
+| `user` | Vậy để demo nhanh thì nên chọn cái nào? | Ô nhập, vừa gửi |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026, với Python 3.14, `openai` 3.37, `gradio` 6.30.0 và `streamlit` 1.66.1. Cả hai chương trình chạy trên máy bạn, không chạy trên trang: mỗi chương trình là một ứng dụng web, mở một server nhỏ trên máy và cần mạng để gọi API.
+
+Trước khi chạy, đặt ba biến môi trường như ở bài [Sử dụng API văn bản](/vi/llm/text-api/), trong đúng cửa sổ dòng lệnh mà bạn sẽ dùng để chạy ứng dụng. Bảng nhà cung cấp và địa chỉ `OPENAI_BASE_URL` của từng nơi cũng ở bài đó. Hai chương trình dùng chung lời dặn `SYSTEM`, để bạn so sánh cho dễ.
+
+### Ứng dụng chat bằng Gradio
+
+Lưu code thành `gradio_app.py`, chạy bằng `python gradio_app.py`, rồi mở địa chỉ in ra trong cửa sổ dòng lệnh (thường là `http://127.0.0.1:7860`). Bài dùng Gradio 6 trở lên; với Gradio 5 trở về trước, `history` có dạng khác.
+
+<LocalCode
+  code={gradioChatCode}
+  title="Chat bằng Gradio, có streaming"
+  file="gradio_app.py"
+  command="python gradio_app.py"
+  packages={['openai', 'gradio>=6']}
+/>
+
+Đọc code theo thứ tự Gradio gọi nó:
+
+- **Khi khởi động**, `client`, `MODEL` và `demo` được tạo một lần. Thiếu `OPENAI_API_KEY` hay `LLM_MODEL` thì chương trình dừng ngay với `KeyError` nêu tên biến bị thiếu, trước khi mở server.
+- **Mỗi khi bạn gửi tin**, Gradio gọi `chat(message, history)`. Hàm dựng `messages` gồm tin `system`, các lượt cũ (qua `to_text`) và câu hỏi mới, rồi gọi API với `stream=True`.
+- **Mỗi mảnh về**, hàm cộng chữ mới vào `reply` và `yield reply`. Tin nhắn trên màn hình dài dần. Khi luồng hết, giá trị `yield` cuối cùng là câu trả lời đầy đủ, và Gradio lưu nó vào lịch sử cho lượt sau.
+
+Dòng `if __name__ == "__main__":` giúp file vừa chạy thẳng được, vừa `import` được mà không mở server. Hai câu hỏi mẫu hiện trong khung chat lúc còn trống là từ tham số `examples`; bấm vào là gửi luôn.
+
+### Ứng dụng chat bằng Streamlit
+
+Lưu code thành `streamlit_app.py` và chạy bằng `streamlit run streamlit_app.py`, **không** phải `python streamlit_app.py`. Streamlit mở trình duyệt ở `http://localhost:8501`. Streamlit 1.66 cần Python 3.11 trở lên. Khác với Gradio, thiếu biến môi trường thì server Streamlit vẫn mở, nhưng trang hiện lỗi `KeyError` nêu tên biến bị thiếu.
+
+<LocalCode
+  code={streamlitChatCode}
+  title="Chat bằng Streamlit, có streaming"
+  file="streamlit_app.py"
+  command="streamlit run streamlit_app.py"
+  packages={['openai', 'streamlit']}
+/>
+
+Đọc code theo một lần chạy lại của Streamlit:
+
+- **Lần chạy đầu**, `st.session_state.messages` được tạo rỗng, vòng `for` không vẽ gì, `st.chat_input` trả `None`, nên khối `if` bị bỏ qua. Trang chỉ có tiêu đề và ô nhập.
+- **Bạn gửi một câu**, Streamlit chạy lại script từ dòng đầu. Lần này `st.chat_input` trả về câu đó. Script thêm câu vào lịch sử, vẽ nó ra, rồi mở khối `st.chat_message("assistant")` và gọi API. `st.write_stream` hiện chữ dần và trả về cả câu trả lời; dòng cuối lưu nó vào lịch sử.
+- **Bạn gửi câu thứ hai**, script lại chạy từ đầu. Lần này vòng `for` vẽ lại hai tin của lượt trước, rồi khối `if` xử lý câu mới với cả lịch sử.
+
+Tin `system` không nằm trong `st.session_state.messages`, mà được ghép vào lúc gọi API. Nhờ vậy vòng `for` không vẽ lời dặn đó thành một bong bóng chat.
+
+Gửi hai câu, bạn sẽ thấy câu trả lời hiện dần, và ở lượt thứ hai mô hình trả lời có tính tới lượt đầu.
+
+## Lỗi hay gặp
+
+:::caution[Lưu lịch sử Streamlit vào biến thường, hoặc khởi tạo lại mỗi lần]
+Cả `history = []` lẫn `st.session_state.messages = []` đặt ở đầu file mà không có điều kiện đều chạy lại sau mỗi tin nhắn, nên lịch sử bị xóa sạch: màn hình chỉ còn lượt mới nhất, và mô hình không thấy gì của các lượt trước. Luôn khởi tạo trong `if "messages" not in st.session_state:`, như code của bài.
+:::
+
+:::caution[Quên lưu câu trả lời, hoặc gửi lịch sử sai dạng]
+Ở Streamlit, nếu bỏ dòng cuối (lưu `reply`), câu trả lời vẫn hiện trên màn hình ở lượt đó, nhưng lượt sau nó biến mất khỏi màn hình, và danh sách gửi lên API có hai tin `user` liền nhau, không có câu trả lời ở giữa. Hỏi "câu bạn vừa trả lời là gì?" thì mô hình không có cách nào biết. Ở Gradio, lịch sử do khung chat giữ, nhưng nếu bạn `yield piece` thay vì `yield reply`, cái được lưu chỉ là mảnh cuối.
+
+Ở Gradio còn một bẫy nữa ở tầng gửi lên API: `history` của Gradio 6 có `content` là danh sách mảnh và thêm khóa `metadata`, `options`. Gửi nguyên như vậy thì tùy nhà cung cấp, yêu cầu có thể bị từ chối; hãy chuyển về `{"role": ..., "content": "chuỗi"}` như hàm `to_text` của bài. Ví dụ cũ trên mạng (Gradio 4, 5) còn truyền `type="messages"` vào `gr.ChatInterface` hoặc coi `history` là danh sách cặp `(câu hỏi, câu trả lời)`. Gradio 6 đã bỏ cả hai: truyền `type="messages"` vào Gradio 6.30.0 là gặp ngay `TypeError`.
+:::
+
+:::caution[Mở ứng dụng ra Internet bằng key của bạn]
+`demo.launch(share=True)` của Gradio tạo một đường link công khai, ai có link cũng chat được, và mọi lượt chat tính vào key của bạn: tốn tiền hoặc hết hạn mức. Chỉ chia sẻ khi cần, và đặt mật khẩu bằng tham số `auth` của `launch`. Không bao giờ ghi key vào code hay dán key của bạn vào ô nhập trên trang công khai. Nếu dùng `st.secrets` của Streamlit theo hướng dẫn của họ, đừng đẩy file `.streamlit/secrets.toml` lên Git.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Gradio và Streamlit biến vài chục dòng Python thành ứng dụng web chạy trên máy, không cần HTML hay JavaScript.
+- Gradio: viết hàm `chat(message, history)`, bọc bằng `gr.ChatInterface`. Hàm là generator thì `yield` cả đoạn đã có, vì mỗi lần `yield` thay toàn bộ tin nhắn. Ở Gradio 6, chuyển `history` về dạng `messages` của API trước khi gửi.
+- Streamlit: mỗi lần tương tác, cả script chạy lại. Lịch sử nằm trong `st.session_state` (chỉ khởi tạo khi chưa có), vẽ lại bằng `st.chat_message`, và câu trả lời là giá trị `st.write_stream` trả về.
+- API không giữ trạng thái: lượt thứ $k$ gửi $2k$ tin. Lịch sử càng dài càng tốn token, cho tới khi vượt cửa sổ ngữ cảnh.
+
+**Đọc thêm:**
+
+- Gradio. [*Creating a Chatbot Fast*](https://www.gradio.app/guides/creating-a-chatbot-fast). Hướng dẫn chính thức về `gr.ChatInterface`: hàm chat, streaming bằng `yield`, `examples`, `additional_inputs` (ví dụ thêm ô system prompt hay thanh trượt). Trang tài liệu không có bản theo phiên bản; bài đã đối chiếu với Gradio 6.30.0.
+- Gradio. [*ChatInterface*](https://www.gradio.app/docs/gradio/chatinterface). Trang tham chiếu: đủ tham số của `gr.ChatInterface`.
+- Streamlit. [*Build a basic LLM chat app*](https://docs.streamlit.io/develop/tutorials/chat-and-llm-apps/build-conversational-apps). Hướng dẫn chính thức, cùng khuôn `st.session_state` – `st.chat_message` – `st.write_stream` như bài. Lưu ý: ví dụ ở đó đọc key bằng `st.secrets` và ghi cứng tên mô hình; bài này đọc cả hai từ biến môi trường.
+- Streamlit. [*Session State*](https://docs.streamlit.io/develop/concepts/architecture/session-state) và [*st.write_stream*](https://docs.streamlit.io/develop/api-reference/write-magic/st.write_stream). Cơ chế chạy lại và cách `st.write_stream` đọc luồng của SDK `openai`. Tài liệu ứng với Streamlit 1.66.
+- Abid, A., Abdalla, A., Abid, A., Khan, D., Alfozan, A., Zou, J. (2019). [*Gradio: Hassle-Free Sharing and Testing of ML Models in the Wild*](https://arxiv.org/abs/1906.02569). Bài báo giới thiệu Gradio, kể vì sao cần một cách nhanh để người không lập trình thử được mô hình.
+
+<LessonProgress />

@@ -1,0 +1,379 @@
+---
+title: 'Đánh giá mô hình và PEFT: LoRA, quantization, distillation, pruning'
+description: Fine-tune xong, làm sao biết mô hình tốt hơn, và fine-tune thế nào khi thiếu GPU? Benchmark, giám khảo LLM, rò rỉ đề, LoRA, QLoRA, lượng tử hóa, chắt lọc, tỉa.
+quiz:
+  - question: 'Bạn fine-tune một mô hình trên vài chục nghìn trang hỏi đáp crawl từ web. Điểm trên một benchmark trắc nghiệm công khai tăng từ 45% lên 70%. Trước khi tin con số này, việc nào nên làm trước tiên?'
+    options:
+      - 'Đo perplexity trên tập huấn luyện để chắc mô hình đã học xong'
+      - 'Tăng số ví dụ few-shot trong prompt để điểm ổn định hơn'
+      - 'Tìm các câu hỏi của benchmark có đoạn trùng (ví dụ trùng một đoạn 13 từ liên tiếp) với dữ liệu fine-tune, rồi so điểm trên phần sạch với phần bị trùng'
+      - 'Nhờ một LLM mạnh chấm lại các câu trả lời'
+    answer: 2
+    explanation: 'Benchmark công khai nằm trên web, nên dữ liệu crawl có thể chứa chính đề thi. Nhóm GPT-3 làm đúng việc này: tách phần sạch, không trùng đoạn 13 từ (13-gram), rồi so điểm. Nếu điểm trên phần sạch thấp hơn hẳn, phần tăng có thể chỉ là học thuộc. Perplexity trên tập huấn luyện không nói gì về đề thi, và giám khảo LLM cũng không biết mô hình đã thấy đề hay chưa.'
+  - question: 'Một lớp tuyến tính có $\mathbf{W}_0 \in \mathbb{R}^{2048 \times 8192}$, tức $d_{\text{out}} = 2048$, $d_{\text{in}} = 8192$. Bạn gắn LoRA với $r = 16$. Lớp này có bao nhiêu tham số được huấn luyện?'
+    options:
+      - '$16 \cdot 2048 \cdot 8192$, khoảng 268 triệu'
+      - '$16 \cdot (2048 + 8192) = 163\,840$'
+      - '$2048 \cdot 8192 = 16\,777\,216$'
+      - '$16 \cdot 16 = 256$'
+    answer: 1
+    explanation: '$\mathbf{B}$ có $2048 \times 16$ số, $\mathbf{A}$ có $16 \times 8192$ số, cộng lại $16 \cdot (2048 + 8192) = 163\,840$, chưa tới 1% số tham số của $\mathbf{W}_0$. $16\,777\,216$ là cỡ của chính $\mathbf{W}_0$: nó vẫn còn đó nhưng bị đóng băng. Nhân $r$ với $d_{\text{out}} \cdot d_{\text{in}}$ là nhầm $\mathbf{B}\mathbf{A}$ thành $r$ ma trận đầy đủ.'
+  - question: 'Một ma trận có mọi phần tử nằm trong $[-1, 1]$, trừ một phần tử bằng $50$. Bạn lượng tử hóa absmax 4 bit ($q_{\max} = 7$) với một hệ số co giãn cho cả ma trận. Điều gì xảy ra với các phần tử khác?'
+    options:
+      - 'Phần tử $50$ bị cắt về $7$, các phần tử khác giữ nguyên độ chính xác'
+      - 'Không sao, vì sai số của mỗi phần tử luôn nhỏ hơn $1/14$'
+      - 'Chúng được làm tròn chính xác hơn, vì khoảng giá trị rộng hơn'
+      - 'Gần như tất cả thành $0$, vì mỗi bước lượng tử hóa rộng $50/7 \approx 7.1$'
+    answer: 3
+    explanation: '$s = 7/50 = 0.14$, nên phần tử $w$ thành $\operatorname{round}(0.14\,w)$. Với $|w| \le 1$ thì $|0.14\,w| < 0.5$, nên mọi phần tử đó được làm tròn về $0$. Absmax không cắt phần tử nào: phần tử lớn nhất rơi đúng vào $q_{\max}$. Cận sai số là $1/(2s) = 50/14 \approx 3.6$, không phải $1/14$, vì cận tỉ lệ với giá trị lớn nhất.'
+  - question: 'Sau khi fine-tune bằng LoRA, bạn gộp $\mathbf{W} = \mathbf{W}_0 + \frac{\alpha}{r}\mathbf{B}\mathbf{A}$ ở mọi lớp rồi xuất mô hình. So với mô hình gốc, mô hình đã gộp thế nào?'
+    options:
+      - 'Cùng số tham số, cùng tốc độ suy luận; chỉ giá trị trọng số khác'
+      - 'Nhỏ hơn nhiều, vì mỗi lớp chỉ còn $r(d_{\text{in}} + d_{\text{out}})$ tham số'
+      - 'Chậm hơn, vì mỗi lớp phải tính thêm nhánh $\mathbf{B}\mathbf{A}\mathbf{x}$'
+      - 'Phải giữ $\mathbf{A}$ và $\mathbf{B}$ bên cạnh mô hình thì mới suy luận đúng'
+    answer: 0
+    explanation: '$\mathbf{W}_0 + \frac{\alpha}{r}\mathbf{B}\mathbf{A}$ có đúng cỡ $d_{\text{out}} \times d_{\text{in}}$ như $\mathbf{W}_0$, nên mô hình gộp chạy y như một mô hình thường. LoRA làm nhỏ phần được huấn luyện và file lưu bản tinh chỉnh, không làm nhỏ mô hình; muốn mô hình nhỏ hơn thì cần lượng tử hóa, chắt lọc hay tỉa. Nhánh $\mathbf{B}\mathbf{A}\mathbf{x}$ chỉ tốn thêm khi chưa gộp, và sau khi gộp thì $\mathbf{A}$, $\mathbf{B}$ đã nằm sẵn trong $\mathbf{W}$.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LoraFigure from '@components/figures/LoraFigure.astro';
+import loraQuantCode from '@code/llm/evaluation-peft/lora-quant.vi.py?raw';
+import loraLayerCode from '@code/llm/evaluation-peft/lora-layer.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Phân biệt được đo mô hình đoán văn bản giỏi tới đâu (loss, perplexity) với đo mô hình làm việc tốt tới đâu (**benchmark**, **LLM làm giám khảo**, LLM-as-a-judge). Nhận ra khi nào điểm số đáng ngờ, nhất là khi có **rò rỉ dữ liệu test** (test-set contamination).
+- Hiểu **PEFT** (parameter-efficient fine-tuning, tinh chỉnh tiết kiệm tham số) và tự dẫn được **LoRA** (low-rank adaptation, thích nghi hạng thấp): công thức $\mathbf{W}_0 + \frac{\alpha}{r}\mathbf{B}\mathbf{A}$, số tham số, cách khởi tạo, cách gộp.
+- Tính được sai số của **lượng tử hóa** (quantization) absmax 8 bit và 4 bit, giải thích vì sao một giá trị ngoại lai làm hỏng cả ma trận, và biết QLoRA ghép lượng tử hóa với LoRA thế nào.
+- Nắm ý chính của **chắt lọc tri thức** (knowledge distillation) và **tỉa tham số** (pruning): mỗi kỹ thuật tiết kiệm được gì, mất gì.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/) huấn luyện mô hình bằng cross-entropy $\mathcal{L} = -\frac{1}{m}\sum_{t=1}^{m} \ln p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$ và đọc nó thành perplexity $\mathrm{PPL} = \exp(\mathcal{L})$. Bài [Họ GPT và fine-tune đa nhiệm](/vi/llm/gpt-family-finetuning/) dùng chính loss đó để **fine-tune** mô hình trên cặp prompt và câu trả lời, cập nhật toàn bộ tham số.
+:::
+
+## Trực giác
+
+### Hai câu hỏi sau khi fine-tune
+
+Giả sử bạn muốn có một trợ lý trả lời câu hỏi về sản phẩm của công ty. Bạn chọn một mô hình mở 7 tỷ tham số, gom vài nghìn cặp câu hỏi và câu trả lời mẫu, và định fine-tune như bài trước. Ngay lập tức có hai câu hỏi.
+
+**Làm sao biết bản fine-tune tốt hơn bản gốc?** Loss huấn luyện giảm chưa nói lên gì, vì mô hình có thể chỉ học thuộc. Cho nó làm một bộ đề trắc nghiệm có sẵn trên mạng thì sao, nếu đề đó đã lọt vào dữ liệu bạn crawl về? Còn câu trả lời tự do kiểu "giải thích chính sách đổi trả" thì chấm bằng gì?
+
+**Lấy đâu ra bộ nhớ?** Trọng số 7 tỷ tham số ở 16 bit (2 byte mỗi số) đã chiếm khoảng 14 GB. Fine-tune đầy đủ còn giữ gradient của từng tham số, và Adam giữ thêm hai số cho mỗi tham số. Ước lượng thô: nếu mọi thứ đều 16 bit thì đó là 4 bản cỡ mô hình, khoảng 56 GB, chưa kể các giá trị trung gian; thực tế còn hơn, vì trạng thái Adam thường giữ ở 32 bit. Card đồ họa phổ thông không chứa nổi, và mỗi việc mới lại thêm một bản 14 GB.
+
+Hãy hình dung mô hình là một cuốn sách dày đã in xong. Fine-tune đầy đủ giống in lại cả cuốn để sửa vài chương. Có những cách rẻ hơn: **kẹp thêm một tờ ghi chú** và đọc cả hai (LoRA); **in bằng chữ nhỏ hơn**, chấp nhận mờ đi một chút (lượng tử hóa); **viết một cuốn mỏng hơn** (chắt lọc) hoặc **gạch bớt những dòng không quan trọng** (tỉa).
+
+Bài toán của bài này là: **làm sao đo được một mô hình có thật sự tốt hơn, mà không tự lừa mình bằng điểm số? Và làm sao fine-tune, lưu, chạy một mô hình lớn với ít bộ nhớ hơn nhiều mà vẫn giữ chất lượng?**
+
+## Lý thuyết
+
+### Đánh giá bằng loss và perplexity
+
+Cách đo trực tiếp nhất là dùng lại chính mục tiêu huấn luyện, trên văn bản mô hình **chưa thấy**:
+
+$$
+\mathrm{PPL} = \exp\!\left(-\frac{1}{m}\sum_{t=1}^{m} \ln p_{\boldsymbol{\theta}}(x_t \mid x_{<t})\right)
+$$
+
+Trong ngoặc là cross-entropy trung bình trên $m$ vị trí của tập kiểm tra; lấy $\exp$ thì được số lựa chọn đều nhau tương đương mà mô hình đang phân vân. Bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/) đã dẫn công thức này; nhớ chỉ so perplexity khi **cùng bộ tách từ, cùng tập kiểm tra**.
+
+Perplexity rẻ, tự động và nhạy. Nhưng nó đo **đoán văn bản giỏi tới đâu**, không đo **làm việc tốt tới đâu**. Ví dụ ở bài [Họ GPT và fine-tune đa nhiệm](/vi/llm/gpt-family-finetuning/): khi huấn luyện InstructGPT, loss kiểm định tăng sau epoch đầu mà điểm đánh giá của người vẫn tốt lên.
+
+### Benchmark: đề thi chuẩn hóa
+
+**Benchmark** là một bộ câu hỏi chuẩn có đáp án. Mọi mô hình làm cùng một đề, chấm cùng một cách, nên so được với nhau. Ví dụ hay được nhắc là **MMLU** (Hendrycks và cộng sự, 2021): câu hỏi trắc nghiệm bốn lựa chọn thuộc 57 tác vụ, từ toán sơ cấp, lịch sử Mỹ, khoa học máy tính tới luật. Lúc công bố, mô hình GPT-3 lớn nhất chỉ hơn mức đoán mò gần 20 điểm phần trăm tính trung bình.
+
+Khi đọc một điểm benchmark, hãy hỏi:
+
+1. **Mốc đoán mò là bao nhiêu?** Đề bốn lựa chọn thì đoán mò được khoảng 25%, nên 40% chỉ hơn đoán mò 15 điểm.
+2. **Đo với prompt nào, bao nhiêu ví dụ?** Zero-shot và 5-shot (năm ví dụ trong prompt) cho điểm khác nhau. Chỉ so hai con số đo cùng cách, và ghi kèm paper, năm.
+3. **Mô hình đã thấy đề chưa?** Xem mục rò rỉ bên dưới.
+
+Benchmark trắc nghiệm còn một giới hạn: nó chỉ chấm được câu có một đáp án đúng. "Viết email xin lỗi khách hàng" thì không có đáp án để so.
+
+### LLM làm giám khảo
+
+Để người chấm câu trả lời mở là tốt nhất, nhưng chậm và đắt. **LLM làm giám khảo** là đưa câu hỏi và câu trả lời cho một LLM mạnh, nhờ nó chấm điểm hoặc chọn câu tốt hơn trong hai câu. Zheng và cộng sự (2023) dựng hai bộ đo: **MT-bench**, câu hỏi mở có nhiều lượt hội thoại, và **Chatbot Arena**, nơi người dùng hỏi hai mô hình ẩn danh rồi bỏ phiếu. Theo tóm tắt của các tác giả, giám khảo mạnh như GPT-4 đồng ý với lựa chọn của người hơn 80% số lần, ngang mức hai người đồng ý với nhau.
+
+Nhưng chính paper liệt kê các **thiên lệch** (bias) của giám khảo LLM: **vị trí** (ưu ái câu đứng ở một chỗ, ví dụ câu đứng trước), **độ dài** (ưu ái câu dài hơn, dù không tốt hơn), **tự ưu ái** (chấm cao câu do chính nó viết), và **khả năng suy luận có hạn** khi chấm bài toán, bài suy luận. Một cách giảm thiên lệch vị trí, cũng được bàn trong paper, là chấm hai lần với hai thứ tự. Kết quả đổi theo thứ tự thì đừng coi là thắng.
+
+### Rò rỉ dữ liệu test
+
+Dữ liệu pre-train lấy từ web, mà đề và đáp án của benchmark cũng nằm trên web. Mô hình có thể đã **thấy đề thi** khi huấn luyện, và điểm cao khi đó chỉ chứng tỏ trí nhớ. Đó là **rò rỉ dữ liệu test**.
+
+Nhóm GPT-3 (Brown và cộng sự, 2020, mục 4) đã tìm và xóa các đoạn trùng với tập dev và test của mọi benchmark trong paper, nhưng **một lỗi trong bước lọc** khiến việc xóa chỉ xong một phần. Huấn luyện lại quá tốn kém, nên họ đo tác động của phần còn lại.
+
+Họ đánh dấu mọi câu của benchmark có một đoạn 13 từ liên tiếp (**13-gram**, đại khái; phụ lục C dùng từ 8 đến 13 từ tùy bộ đề) trùng với dữ liệu huấn luyện; câu ngắn hơn 13 từ thì xét trùng cả câu. Bỏ các câu bị đánh dấu (cố ý đánh dấu rộng tay) được một **phiên bản sạch**, rồi so điểm trên phiên bản đó với điểm trên cả bộ: điểm sạch thấp hơn hẳn thì rò rỉ có thể đang thổi phồng kết quả.
+
+Theo các tác giả, phần lớn benchmark có điểm gần như không đổi; họ thấy dấu hiệu rò rỉ ở hai bộ PIQA và Winograd (họ đánh dấu sao các kết quả này). Điều đáng học là **cách kiểm**, không phải kết luận "rò rỉ thì không sao", vì kết luận gắn với dữ liệu của họ năm 2020.
+
+Với bạn: giữ một **tập kiểm tra riêng**, chưa từng dùng để huấn luyện hay chọn siêu tham số, như bài [Overfitting và Underfitting](/vi/ml/overfitting-underfitting/), và kiểm đoạn trùng giữa dữ liệu fine-tune và đề trước khi tin điểm benchmark.
+
+### PEFT: chỉ huấn luyện một phần nhỏ
+
+**PEFT** là tên chung của các phương pháp chỉ huấn luyện một phần rất nhỏ tham số, thêm vào hoặc chọn ra từ mô hình, phần còn lại **đóng băng** (frozen, không cập nhật). Không phải giữ gradient và trạng thái tối ưu cho tham số đóng băng, và mỗi việc chỉ cần lưu phần nhỏ đã học.
+
+### LoRA: cập nhật hạng thấp
+
+**Bước 1: fine-tune đầy đủ học gì.** Xét một lớp tuyến tính, ví dụ ma trận tạo truy vấn trong attention:
+
+$$
+\mathbf{h} = \mathbf{W}_0 \mathbf{x}, \qquad \mathbf{W}_0 \in \mathbb{R}^{d_{\text{out}} \times d_{\text{in}}}
+$$
+
+$\mathbf{W}_0$ là trọng số đã pre-train, $d_{\text{in}}$ và $d_{\text{out}}$ là số chiều đầu vào và đầu ra. (Paper viết $d \times k$; bài dùng $d_{\text{out}} \times d_{\text{in}}$ cho khớp `nn.Linear` của PyTorch.) Fine-tune đầy đủ thay $\mathbf{W}_0$ bằng $\mathbf{W}_0 + \Delta\mathbf{W}$, với $\Delta\mathbf{W}$ cùng cỡ: $d_{\text{out}} \cdot d_{\text{in}}$ số phải học.
+
+**Bước 2: ép phần cập nhật có hạng thấp.** LoRA viết phần cập nhật thành tích của hai ma trận hẹp:
+
+$$
+\Delta\mathbf{W} = \mathbf{B}\mathbf{A}, \qquad \mathbf{B} \in \mathbb{R}^{d_{\text{out}} \times r}, \quad \mathbf{A} \in \mathbb{R}^{r \times d_{\text{in}}}
+$$
+
+Số $r$ là **hạng** (rank) của LoRA, chọn rất nhỏ so với $d_{\text{in}}$ và $d_{\text{out}}$. Vì sao $\mathbf{B}\mathbf{A}$ có hạng không quá $r$? Viết $\mathbf{B}\mathbf{A}\mathbf{x} = \mathbf{B}(\mathbf{A}\mathbf{x})$: $\mathbf{A}\mathbf{x}$ chỉ là $r$ con số, và $\mathbf{B}$ dùng chúng làm hệ số để cộng $r$ cột của nó. Dù $\mathbf{x}$ là gì, kết quả luôn là tổ hợp của $r$ cột đó: phần cập nhật chỉ đẩy đầu ra theo $r$ hướng.
+
+Vì sao hy vọng $r$ nhỏ là đủ? Hu và cộng sự đặt **giả thuyết** rằng khi thích nghi với một việc cụ thể, phần thay đổi của trọng số có "hạng nội tại" thấp. Đây là giả thuyết kiểm bằng thực nghiệm, không phải định lý.
+
+**Bước 3: lan truyền xuôi.**
+
+$$
+\mathbf{h} = \mathbf{W}_0 \mathbf{x} + \frac{\alpha}{r}\,\mathbf{B}\mathbf{A}\mathbf{x}
+$$
+
+Hai nhánh cùng nhận $\mathbf{x}$ rồi cộng lại. Ta tính $\mathbf{A}\mathbf{x}$ trước ($r$ số) rồi mới nhân $\mathbf{B}$, nên khi huấn luyện không phải dựng ma trận $\mathbf{B}\mathbf{A}$ cỡ $d_{\text{out}} \times d_{\text{in}}$. Hệ số $\frac{\alpha}{r}$ co giãn phần cập nhật, với $\alpha$ là hằng số chọn trước. Theo paper, với Adam, chỉnh $\alpha$ gần như tương đương chỉnh tốc độ học, nên họ đặt $\alpha$ bằng giá trị $r$ đầu tiên thử rồi giữ nguyên; chia cho $r$ giúp bớt chỉnh lại siêu tham số khi đổi $r$.
+
+{/* FIG: LoRA giữ nguyên ma trận gốc, chỉ học hai ma trận hẹp; tích của chúng là một nhánh cộng vào đầu ra. */}
+<LoraFigure />
+
+**Bước 4: đếm tham số.** $\mathbf{B}$ có $d_{\text{out}} \cdot r$ số, $\mathbf{A}$ có $r \cdot d_{\text{in}}$ số. Cộng lại rồi đặt $r$ ra ngoài:
+
+$$
+\underbrace{d_{\text{out}}\, r}_{\mathbf{B}} + \underbrace{r\, d_{\text{in}}}_{\mathbf{A}} = r\,(d_{\text{in}} + d_{\text{out}})
+$$
+
+So với $d_{\text{in}} d_{\text{out}}$ của fine-tune đầy đủ, tỉ lệ là $\frac{r(d_{\text{in}} + d_{\text{out}})}{d_{\text{in}} d_{\text{out}}}$. Với ma trận vuông $D \times D$, tỉ lệ rút gọn thành $\frac{2rD}{D^2} = \frac{2r}{D}$. Ma trận $4096 \times 4096$ có 16 777 216 số; LoRA với $r = 8$ chỉ học $8 \cdot 8192 = 65\,536$ số, tức $\frac{16}{4096} \approx 0.39\%$.
+
+Với GPT-3 175 tỷ tham số: theo Brown và cộng sự (2020, bảng 2.1), mô hình có 96 lớp và $D = 12288$. Trong phần lớn thí nghiệm, Hu và cộng sự chỉ gắn LoRA vào ma trận truy vấn $\mathbf{W}_q$ và ma trận giá trị $\mathbf{W}_v$ của attention ở mỗi lớp, đều cỡ $D \times D$, với $r = 4$:
+
+$$
+96 \cdot 2 \cdot 4 \cdot (12288 + 12288) = 18\,874\,368
+$$
+
+Khớp với ngân sách "18M" tham số huấn luyện mà paper nêu. Lưu chừng ấy số ở 16 bit tốn khoảng 38 MB; paper ghi file một bản tinh chỉnh khoảng 35 MB.
+
+**Bước 5: khởi tạo, và vì sao gradient vẫn chảy.** Paper khởi tạo $\mathbf{A}$ ngẫu nhiên theo phân phối Gauss và $\mathbf{B} = \mathbf{0}$. Khi đó $\mathbf{B}\mathbf{A} = \mathbf{0}$: lúc bắt đầu, lớp LoRA cho **đúng** đầu ra của mô hình gốc, và fine-tune xuất phát từ chỗ mô hình gốc đang đứng.
+
+Nhưng $\mathbf{B} = \mathbf{0}$ có làm gradient bằng 0 không? Đặt $\mathbf{u} = \mathbf{A}\mathbf{x}$ (vectơ $r$ chiều ở chỗ thắt), và $\mathbf{g} = \frac{\partial \mathcal{L}}{\partial \mathbf{h}}$ là gradient đi ngược về từ các lớp sau. Ta dùng quy tắc của lớp tuyến tính $\mathbf{h} = \mathbf{M}\mathbf{u}$: phần tử $M_{ij}$ chỉ có mặt trong $h_i = \sum_j M_{ij} u_j$, với hệ số $u_j$, nên $\frac{\partial \mathcal{L}}{\partial M_{ij}} = g_i u_j$, viết gọn là $\mathbf{g}\mathbf{u}^\top$.
+
+- **Theo $\mathbf{B}$:** nhánh LoRA là $\frac{\alpha}{r}\mathbf{B}\mathbf{u}$, một lớp tuyến tính với ma trận $\frac{\alpha}{r}\mathbf{B}$ và đầu vào $\mathbf{u}$, nên $\frac{\partial \mathcal{L}}{\partial \mathbf{B}} = \frac{\alpha}{r}\mathbf{g}\mathbf{u}^\top$ (thừa số $\frac{\alpha}{r}$ vì mỗi $B_{ij}$ xuất hiện dưới dạng $\frac{\alpha}{r} B_{ij}$). $\mathbf{A}$ ngẫu nhiên nên $\mathbf{u} \ne \mathbf{0}$, và gradient này khác 0.
+- **Theo $\mathbf{A}$:** đi ngược qua $\mathbf{B}$ trước, gradient theo $\mathbf{u}$ là $\frac{\alpha}{r}\mathbf{B}^\top\mathbf{g}$; áp quy tắc cho $\mathbf{u} = \mathbf{A}\mathbf{x}$ được $\frac{\partial \mathcal{L}}{\partial \mathbf{A}} = \frac{\alpha}{r}\mathbf{B}^\top\mathbf{g}\,\mathbf{x}^\top$. Lúc đầu $\mathbf{B} = \mathbf{0}$ nên gradient này **bằng 0**.
+
+Vậy bước đầu chỉ $\mathbf{B}$ được cập nhật; sau đó $\mathbf{B} \ne \mathbf{0}$ và $\mathbf{A}$ mới nhận gradient. Cũng vì thế mà không thể khởi tạo cả hai bằng 0: cả hai gradient sẽ bằng 0 mãi. Ô PyTorch ở mục Ví dụ code kiểm tra đúng điều này.
+
+**Bước 6: gộp khi suy luận.** Huấn luyện xong, tính một lần
+
+$$
+\mathbf{W} = \mathbf{W}_0 + \frac{\alpha}{r}\,\mathbf{B}\mathbf{A}
+$$
+
+$\mathbf{W}$ cùng cỡ với $\mathbf{W}_0$, nên mô hình gộp chạy y như mô hình gốc, **không thêm độ trễ**. Paper tính: 100 bản tinh chỉnh GPT-3 chỉ tốn 350 GB của mô hình gốc cộng 100 lần 35 MB, khoảng 354 GB, thay vì khoảng 35 TB. Nhưng mô hình gốc 350 GB **vẫn phải có** khi chạy: LoRA không làm mô hình nhỏ đi.
+
+**Gắn LoRA vào đâu?** Hu và cộng sự chỉ xét các ma trận của attention, và với cùng ngân sách 18 triệu tham số trên GPT-3, gắn vào cả $\mathbf{W}_q$ và $\mathbf{W}_v$ với $r = 4$ tốt hơn dồn hết vào $\mathbf{W}_q$ hoặc $\mathbf{W}_k$ với $r = 8$. Nhưng Dettmers và cộng sự (2023, paper QLoRA) thấy cách "chỉ truy vấn và giá trị" **không** theo kịp fine-tune đầy đủ trên mô hình nền lớn; phải gắn LoRA vào **mọi lớp tuyến tính** của khối Transformer, còn $r$ gần như không ảnh hưởng trong thí nghiệm của họ. Hai thiết lập khác nhau, nên đừng coi bên nào là luật.
+
+:::note[Ghi nhớ]
+LoRA đóng băng $\mathbf{W}_0$ và học phần cập nhật hạng thấp: $\mathbf{h} = \mathbf{W}_0\mathbf{x} + \frac{\alpha}{r}\mathbf{B}\mathbf{A}\mathbf{x}$. Mỗi ma trận chỉ học $r(d_{\text{in}} + d_{\text{out}})$ số thay vì $d_{\text{in}} d_{\text{out}}$. $\mathbf{B} = \mathbf{0}$ lúc đầu nên mô hình xuất phát đúng từ mô hình gốc. Gộp $\mathbf{W}_0 + \frac{\alpha}{r}\mathbf{B}\mathbf{A}$ thì suy luận không chậm hơn, nhưng mô hình cũng không nhỏ hơn.
+:::
+
+### Lượng tử hóa
+
+Lượng tử hóa là lưu mỗi số bằng ít bit hơn, ví dụ từ số thực 16 bit xuống số nguyên 8 bit (int8) hay 4 bit (int4). Chỉ tính trọng số, mô hình 7 tỷ tham số cần khoảng 14 GB ở 16 bit, 7 GB ở 8 bit, 3.5 GB ở 4 bit (số tham số nhân số byte, chưa kể phần khác khi chạy). Cái giá là **sai số làm tròn**.
+
+Cách đơn giản nhất là **absmax** (Dettmers và cộng sự, 2022, mục 2.1, viết cho 8 bit; ở đây viết cho $b$ bit). Số nguyên $b$ bit dùng khoảng đối xứng $[-q_{\max}, q_{\max}]$ với $q_{\max} = 2^{b-1} - 1$: 127 với 8 bit, 7 với 4 bit. Ta co giãn để phần tử có trị tuyệt đối lớn nhất rơi đúng vào $q_{\max}$:
+
+$$
+s = \frac{q_{\max}}{\max_{i,j} |W_{ij}|}
+$$
+
+$$
+\mathbf{W}_{\text{int}} = \operatorname{round}(s\,\mathbf{W}), \qquad \hat{\mathbf{W}} = \frac{\mathbf{W}_{\text{int}}}{s}
+$$
+
+$s$ là **hệ số co giãn** (scale). Ta lưu ma trận số nguyên $\mathbf{W}_{\text{int}}$ cùng một số $s$; khi tính thì **giải lượng tử** (dequantize) thành $\hat{\mathbf{W}}$.
+
+**Sai số lớn tới đâu?** Phép $\operatorname{round}$ đổi một số đi nhiều nhất $\frac{1}{2}$. Vì $\hat{W}_{ij} - W_{ij} = \frac{\operatorname{round}(s W_{ij}) - s W_{ij}}{s}$:
+
+$$
+\lvert \hat{W}_{ij} - W_{ij} \rvert \le \frac{1}{2s} = \frac{\max_{i,j} |W_{ij}|}{2\, q_{\max}}
+$$
+
+Dấu $\le$ đến từ cận $\frac{1}{2}$ của phép làm tròn; dấu $=$ là thay $s$ bằng định nghĩa của nó. Không phần tử nào bị cắt, vì $|s W_{ij}| \le q_{\max}$. Công thức nói hai điều. Một, từ 8 bit xuống 4 bit, $q_{\max}$ giảm từ 127 xuống 7, khoảng 18 lần, nên cận sai số tăng khoảng 18 lần. Hai, cận sai số **tỉ lệ với phần tử lớn nhất**.
+
+**Giá trị ngoại lai.** Absmax dùng một $s$ cho cả ma trận. Một **giá trị ngoại lai** (outlier) rất lớn làm $s$ rất nhỏ, mỗi bước làm tròn rất rộng, và mọi phần tử bình thường bị làm tròn thô, nhiều phần tử thành 0. Như một cây thước chia vạch để đo được vật dài 40 mét: vật dài vài xăng-ti-mét đo bằng nó đều thành "0 vạch". Ô NumPy ở mục Ví dụ code cho thấy điều này bằng số.
+
+Đây không phải chuyện lý thuyết. Dettmers và cộng sự (2022) thấy từ cỡ khoảng 6.7 tỷ tham số, mọi lớp Transformer có một số ít đặc trưng biên độ rất lớn. Các đặc trưng này nằm ở đầu vào của phép nhân (giá trị kích hoạt), không ở trọng số; phương pháp **LLM.int8()** của họ lượng tử hóa cả hai thứ, nên ngoại lai ở đầu vào cũng phá hỏng phép nhân 8 bit. Vì vậy LLM.int8() dùng hệ số co giãn riêng cho từng hàng, từng cột, và tách các chiều ngoại lai ra nhân ở 16 bit (hơn 99.9% giá trị vẫn nhân ở 8 bit); theo tóm tắt, cách này chạy mô hình tới 175 tỷ tham số mà không giảm chất lượng. **GPTQ** (Frantar và cộng sự, 2022) đi hướng khác, lượng tử hóa một lần sau huấn luyện xuống 3 hoặc 4 bit mỗi trọng số.
+
+### QLoRA: lượng tử hóa cộng LoRA
+
+LoRA giảm phần phải huấn luyện, nhưng mô hình gốc vẫn nằm trong bộ nhớ ở 16 bit. **QLoRA** (Dettmers và cộng sự, 2023) lượng tử hóa luôn phần đó: mô hình nền lưu ở 4 bit và đóng băng, gradient đi xuyên qua nó tới các **adapter** LoRA (cặp $\mathbf{A}$, $\mathbf{B}$ gắn thêm vào mỗi lớp) giữ ở 16 bit. Phần mở đầu của paper cho biết fine-tune 16 bit thông thường một mô hình 65 tỷ tham số cần hơn 780 GB bộ nhớ GPU; theo tóm tắt, QLoRA fine-tune được mô hình cỡ đó trên một GPU 48 GB mà vẫn giữ chất lượng của fine-tune 16 bit trong thí nghiệm của họ. Ba điểm kỹ thuật:
+
+- **NormalFloat 4 bit (NF4):** đặt 16 mức theo phân vị của phân phối chuẩn thay vì cách đều như int4, vì trọng số thường có dạng gần chuẩn quanh 0.
+- **Lượng tử hóa kép** (double quantization): chia trọng số thành khối 64 số, mỗi khối một hệ số co giãn, là cách có từ trước; theo công thức absmax, một ngoại lai khi đó chỉ ảnh hưởng tới khối của nó. Điểm mới của QLoRA là lượng tử hóa thêm chính các hệ số đó, giảm phần tốn cho hệ số từ 0.5 xuống khoảng 0.127 bit mỗi tham số.
+- **Paged optimizers:** quản lý các lúc bộ nhớ tăng vọt khi huấn luyện.
+
+Để ý: **lưu ở 4 bit không có nghĩa là tính ở 4 bit.** Trước mỗi phép nhân, trọng số NF4 được giải lượng tử về BFloat16, một kiểu số thực 16 bit. Lượng tử hóa ở đây tiết kiệm chỗ **lưu**.
+
+### Chắt lọc tri thức
+
+Muốn mô hình khi chạy thật sự nhỏ, có thể huấn luyện một mô hình nhỏ bắt chước mô hình lớn: **chắt lọc tri thức**, theo Hinton, Vinyals và Dean (2015), trên bài toán phân loại.
+
+Mô hình lớn, gọi là **thầy** (teacher), cho cả một phân phối xác suất. Ví dụ của paper, kể lại: một chữ số 2 có thể được gán xác suất nhỏ cho số 3 và nhỏ hơn nhiều cho số 7, tức chữ 2 này "hơi giống 3", điều nhãn cứng không nói. Mô hình nhỏ, gọi là **trò** (student), học theo phân phối đó, gọi là **nhãn mềm** (soft targets). Vì các xác suất bé thường gần 0, paper dùng **nhiệt độ** $T$:
+
+$$
+\mathrm{softmax}_T(\mathbf{z})_i = \frac{\exp(z_i / T)}{\sum_j \exp(z_j / T)}
+$$
+
+$T$ lớn làm phân phối phẳng hơn, lộ rõ các xác suất nhỏ. Đây là cùng công thức nhiệt độ ở bài [Sử dụng API văn bản](/vi/llm/text-api/), nhưng khác mục đích: ở đó $T$ dùng lúc sinh văn bản, ở đây dùng lúc huấn luyện trò.
+
+Gọi $\mathbf{z}$, $\hat{\mathbf{z}}$ là logit của thầy và trò, $\mathbf{p}_T = \mathrm{softmax}_T(\mathbf{z})$, $\hat{\mathbf{p}}_T = \mathrm{softmax}_T(\hat{\mathbf{z}})$. Paper mô tả bằng lời một trung bình có trọng số của hai cross-entropy; viết thành công thức (trọng số $\lambda$ là cách viết của bài):
+
+$$
+\mathcal{L} = \lambda\, T^2\, \mathrm{CE}(\mathbf{p}_T, \hat{\mathbf{p}}_T) + (1 - \lambda)\, \mathrm{CE}(\mathbf{y}, \hat{\mathbf{p}}_1)
+$$
+
+Số hạng đầu bắt trò khớp nhãn mềm của thầy ở cùng nhiệt độ cao, với $\mathrm{CE}(\mathbf{p}, \hat{\mathbf{p}}) = -\sum_i p_i \ln \hat{p}_i$ như ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/), chỉ khác là $\mathbf{p}$ giờ là phân phối mềm thay vì one-hot. Số hạng sau là cross-entropy thường với nhãn đúng $\mathbf{y}$, ở $T = 1$. Thừa số $T^2$: paper chỉ ra độ lớn gradient của số hạng mềm co lại theo $1/T^2$, nên nhân $T^2$ để tỉ lệ đóng góp của hai số hạng không đổi khi đổi $T$.
+
+Huấn luyện xong, trò dùng $T = 1$. Trên MNIST, paper báo: mạng lớn có 67 lỗi trên tập test; một mạng nhỏ hơn huấn luyện thường có 146 lỗi; cùng mạng nhỏ đó học thêm nhãn mềm ở $T = 20$ còn 74 lỗi. Đó là mạng phân loại chữ số năm 2015; bài không đi vào chắt lọc ở quy mô LLM.
+
+### Tỉa tham số
+
+Cách thứ ba là bỏ bớt trọng số. Han và cộng sự (2015) làm ba bước: **huấn luyện** mạng để biết kết nối nào quan trọng; **tỉa** mọi kết nối có trọng số nhỏ hơn một ngưỡng (gán bằng 0 mãi mãi), biến ma trận dày thành ma trận **thưa** (sparse); rồi **huấn luyện lại** các trọng số còn lại. Paper nhấn mạnh bước cuối: dùng ngay mạng đã tỉa thì độ chính xác giảm đáng kể. Theo tóm tắt, AlexNet giảm 9 lần tham số và VGG-16 giảm 13 lần mà không giảm độ chính xác trên ImageNet, với mạng thị giác năm 2015.
+
+Với LLM, huấn luyện lại rất đắt. **SparseGPT** (Frantar và Alistarh, 2023) tỉa một lần, **không huấn luyện lại**, các mô hình lớn như OPT-175B và BLOOM-176B xuống ít nhất 50% **độ thưa** (sparsity, tỉ lệ trọng số bằng 0) với mất mát chính xác nhỏ, theo tóm tắt của paper; nó hỗ trợ cả kiểu thưa 2:4, tức trong mỗi nhóm 4 trọng số liền nhau có 2 số bằng 0. Ma trận bị tỉa lỗ chỗ vẫn được nhân như ma trận dày nếu phần cứng và thư viện không tận dụng được các số 0; kiểu thưa có quy luật như 2:4 dễ được tăng tốc hơn.
+
+### Giới hạn
+
+- **Mọi cách đo đều có điểm mù.** Dùng nhiều cách đo, cộng một tập kiểm tra riêng (hộp thứ hai ở mục Lỗi hay gặp).
+- **LoRA giả định phần cập nhật có hạng thấp,** và chọn gắn vào lớp nào vẫn là chuyện thử nghiệm.
+- **Nén mô hình đổi chất lượng lấy kích thước.** Hãy đo lại trên việc của bạn sau mỗi bước nén. Triển khai mô hình đã nén thuộc bài [Deploy LLM: nhiều GPU, phân tán](/vi/llm/llm-deployment/).
+
+## Minh họa
+
+Bảng dưới đặt bốn kỹ thuật cạnh nhau. Hãy nhìn cột thứ tư: chỉ lượng tử hóa và chắt lọc chắc chắn làm mô hình khi chạy nhỏ đi; tỉa chỉ nhỏ đi khi lưu và nhân ở dạng thưa; LoRA tiết kiệm ở lúc huấn luyện và ở chỗ lưu các bản tinh chỉnh.
+
+| Kỹ thuật | Làm gì | Có huấn luyện? | Mô hình khi chạy nhỏ hơn? | Cái giá |
+|---|---|---|---|---|
+| LoRA | Đóng băng $\mathbf{W}_0$, học thêm $\mathbf{B}$, $\mathbf{A}$ hạng $r$ | Có, chỉ $\mathbf{A}$ và $\mathbf{B}$ | Không. Gộp xong vẫn đúng cỡ cũ | Cập nhật bị giới hạn ở hạng $r$; vẫn cần mô hình gốc |
+| Lượng tử hóa | Lưu trọng số bằng ít bit hơn | Không bắt buộc: absmax, GPTQ làm sau huấn luyện | Có: 7 tỷ tham số từ 14 GB (16 bit) xuống 3.5 GB (4 bit) | Sai số làm tròn, nhạy với giá trị ngoại lai |
+| Chắt lọc | Mô hình nhỏ học nhãn mềm của mô hình lớn | Có, huấn luyện cả mô hình trò | Có, đó là một mô hình khác, nhỏ hơn | Cần mô hình thầy, dữ liệu và một lần huấn luyện đầy đủ |
+| Tỉa | Gán bằng 0 các trọng số ít quan trọng | Han 2015: có (huấn luyện lại); SparseGPT: không | Chỉ khi lưu dạng thưa | Chỉ nhanh hơn khi phần cứng, thư viện tận dụng được độ thưa |
+
+QLoRA ghép dòng một với dòng hai: mô hình nền 4 bit để vừa bộ nhớ, adapter LoRA 16 bit để học.
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026: ô NumPy với Python 3.14 và NumPy 2.4 (bản có trong Pyodide), ô PyTorch với Python 3.14 và PyTorch 2.14 trên CPU. Ô đầu chạy ngay trên trang; ô thứ hai cần PyTorch nên chạy trên máy bạn.
+
+### Đếm tham số LoRA và đo sai số absmax
+
+Ô dưới đây làm lại hai phép tính của mục Lý thuyết. Phần đầu đếm tham số LoRA của ma trận $4096 \times 4096$ với $r = 1, 8, 64$, rồi của GPT-3. Phần sau lượng tử hóa absmax 8 bit và 4 bit một ma trận $256 \times 256$ có phân phối chuẩn, in **RMSE** (root mean squared error, căn của trung bình bình phương sai số), sai số lớn nhất, cận $\frac{1}{2s}$ và tỉ lệ phần tử thành 0. Cuối cùng, ô đặt một phần tử bằng 40 rồi đo lại trên các phần tử còn lại.
+
+<PythonRunner code={loraQuantCode} title="Tham số LoRA và sai số lượng tử hóa absmax" />
+
+Đọc kết quả:
+
+- **Ba dòng đầu:** 8 192, 65 536 và 524 288 tham số, tức 0.05%, 0.39% và 3.12% của 16 777 216, cho **một** ma trận. Dòng `GPT-3, r = 4: 18874368` khớp phép tính ở Bước 4.
+- **int8:** với `max |W| = 4.732`, RMSE là 0.0108 và sai số lớn nhất 0.0186, bằng cận $\frac{4.732}{2 \cdot 127}$ tới 4 chữ số. Sai số chạm cận vì 65 536 phần tử đủ nhiều để có phần tử rơi sát giữa hai mức.
+- **int4:** RMSE 0.1951, khoảng 18 lần int8, như tỉ lệ $\frac{127}{7}$ dự đoán. 26.3% phần tử thành 0.
+- **Có ngoại lai bằng 40:** cận tăng lên 0.1575 (int8) và 2.8571 (int4), tức $\frac{40}{254}$ và $\frac{40}{14}$. RMSE trên phần tử bình thường tăng khoảng 8 lần với int8 (0.0908), và lên 0.9920 với int4: 99.6% phần tử thành 0, vì mọi phần tử có trị tuyệt đối dưới 2.857 đều bị làm tròn về 0. Sai số xấp xỉ cả độ lệch chuẩn 1 của dữ liệu: ma trận gần như bị xóa sạch.
+
+Đây là ma trận ngẫu nhiên, không phải trọng số thật; con số chỉ cho thấy xu hướng. Thử đổi `40.0` thành `10.0` để thấy tác hại nhỏ đi.
+
+### Một lớp LoRA tự viết bằng PyTorch
+
+File dưới đây viết lớp `LoRALinear` đúng như mục Lý thuyết: bọc một `nn.Linear`, đóng băng trọng số của nó, thêm $\mathbf{A}$ ngẫu nhiên nhân 0.01 và $\mathbf{B} = \mathbf{0}$, với $r = 4$, $\alpha = 8$. Lớp gốc cỡ $64 \times 64$; đích là $\mathbf{W}_0$ cộng một ma trận hạng 2. Chỉ $\mathbf{A}$ và $\mathbf{B}$ được huấn luyện bằng Adam trong 300 bước, trên **10 mẫu**, rồi kiểm tra trên 200 mẫu khác.
+
+<LocalCode
+  code={loraLayerCode}
+  title="Lớp LoRALinear: đóng băng W_0, học A và B"
+  packages={['torch']}
+  hardware="CPU là đủ, chạy trong vài giây"
+  sampleVaries={false}
+>
+
+```text
+same at start: True
+test loss before: 1.14020
+grad A zero: True | grad B zero: False
+step 0: train loss 2.39636
+step 100: train loss 0.00005
+step 200: train loss 0.00000
+step 299: train loss 0.00000
+trainable 512 of 4608
+test loss after: 0.87876
+merge ok: True
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **`same at start: True`**: vì $\mathbf{B} = \mathbf{0}$, lớp LoRA cho đúng đầu ra của lớp gốc trước khi huấn luyện.
+- **`grad A zero: True | grad B zero: False`**: ở bước đầu chỉ $\mathbf{B}$ có gradient, đúng như Bước 5.
+- **`trainable 512 of 4608`**: chỉ $4 \cdot (64 + 64) = 512$ số được huấn luyện; 4 096 số còn lại là $\mathbf{W}_0$.
+- **`merge ok: True`**: gộp $\mathbf{W}_0 + \frac{\alpha}{r}\mathbf{B}\mathbf{A}$ rồi nhân như lớp thường cho cùng kết quả với chạy hai nhánh (lệch cỡ $10^{-6}$).
+- **Loss huấn luyện về 0, nhưng loss kiểm tra chỉ giảm từ 1.14020 xuống 0.87876.** (Loss ở bước 0 khác loss kiểm tra ban đầu chỉ vì nó lấy trung bình trên 10 mẫu khác.) Bài toán dễ (đích hạng 2, $r = 4$), nhưng 10 mẫu chỉ xác định phần cập nhật trên 10 trong 64 hướng của đầu vào, nên trên dữ liệu mới mô hình chỉ đúng một phần. Ví dụ này chứng minh **cơ chế** chạy đúng, không chứng minh LoRA học tốt. Đổi `torch.randn(10, 64)` thành `torch.randn(100, 64)` thì lần chạy thử của bài cho loss kiểm tra sau huấn luyện 0.00001.
+
+Khi làm thật, bạn không cần tự viết lớp này. Thư viện `peft` của Hugging Face (bản 0.21.2 tại thời điểm viết, 10/2026) cài LoRA và nhiều phương pháp PEFT khác; thư viện `bitsandbytes` (0.50.2) lo phần lượng tử hóa 8 bit và 4 bit; Unsloth là một bộ công cụ mã nguồn mở khác có hỗ trợ LoRA và QLoRA. Bài chưa chạy thử code của các thư viện này nên chỉ nhắc tên; hãy đọc tài liệu của đúng phiên bản bạn cài.
+
+## Lỗi hay gặp
+
+:::caution[Nghĩ rằng LoRA làm mô hình nhỏ đi]
+Mô hình gốc vẫn phải nằm trong bộ nhớ khi chạy; muốn mô hình nhỏ hơn, bạn cần lượng tử hóa, chắt lọc hoặc tỉa. Hiểu nhầm họ hàng: "4 bit nghĩa là tính bằng 4 bit". QLoRA lưu ở 4 bit nhưng giải lượng tử về 16 bit trước mỗi phép nhân.
+:::
+
+:::caution[Tin điểm số mà không kiểm cách đo]
+Loss huấn luyện về 0 (như ô PyTorch ở trên), điểm benchmark cao hay giám khảo LLM chọn bản mới đều có thể đánh lừa bạn. Trước khi báo "bản mới tốt hơn": kiểm trên tập kiểm tra riêng, kiểm đoạn trùng với đề, và chấm hai lần với hai thứ tự nếu dùng giám khảo LLM.
+:::
+
+:::caution[Lượng tử hóa cả tensor bằng một hệ số]
+Một hệ số cho cả ma trận để một giá trị ngoại lai quyết định độ thô cho mọi phần tử: trong ô NumPy, một phần tử bằng 40 làm 99.6% phần tử thành 0 ở 4 bit. Các phương pháp thực tế dùng hệ số riêng cho từng hàng, từng cột (LLM.int8()) hay từng khối nhỏ (QLoRA), hoặc tách riêng phần ngoại lai. Cũng đừng suy từ "8 bit ổn" ra "4 bit cũng ổn", hay từ "tỉa 50% trọng số" ra "nhanh gấp đôi": hãy đo lại trên mô hình và phần cứng của bạn.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Perplexity $\mathrm{PPL} = \exp(\mathcal{L})$ trên văn bản chưa thấy đo mô hình đoán văn bản giỏi tới đâu. Benchmark như MMLU và giám khảo LLM đo mô hình làm việc tốt tới đâu; giám khảo LLM thiên lệch vị trí, độ dài, tự ưu ái.
+- Rò rỉ dữ liệu test làm điểm benchmark cao giả. Nhóm GPT-3 kiểm bằng cách bỏ các câu trùng một đoạn 13 từ (13-gram) rồi so điểm. Luôn giữ một tập kiểm tra riêng.
+- LoRA học $\mathbf{h} = \mathbf{W}_0\mathbf{x} + \frac{\alpha}{r}\mathbf{B}\mathbf{A}\mathbf{x}$ với $\mathbf{W}_0$ đóng băng: mỗi ma trận chỉ $r(d_{\text{in}} + d_{\text{out}})$ số, $\mathbf{B} = \mathbf{0}$ lúc đầu, gộp được khi suy luận. QLoRA giữ mô hình nền ở 4 bit và học adapter 16 bit.
+- Absmax có sai số mỗi phần tử tối đa $\frac{\max|W|}{2q_{\max}}$, nên nhạy với ngoại lai. Chắt lọc dạy mô hình nhỏ bằng nhãn mềm ở nhiệt độ $T$. Tỉa bỏ trọng số nhỏ, nhưng ít tham số hơn chưa chắc chạy nhanh hơn.
+
+**Đọc thêm:**
+
+- Hu, E. J., Shen, Y., Wallis, P., và cộng sự (2021). [*LoRA: Low-Rank Adaptation of Large Language Models*](https://arxiv.org/abs/2106.09685), arXiv:2106.09685, mục 4 và 7. Công thức, khởi tạo, số liệu GPT-3, chọn ma trận để gắn LoRA.
+- Dettmers, T., Pagnoni, A., Holtzman, A., Zettlemoyer, L. (2023). [*QLoRA: Efficient Finetuning of Quantized LLMs*](https://arxiv.org/abs/2305.14314), arXiv:2305.14314, mục 2–4. NF4, lượng tử hóa kép, gắn LoRA vào mọi lớp tuyến tính.
+- Dettmers, T., Lewis, M., Belkada, Y., Zettlemoyer, L. (2022). [*LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale*](https://arxiv.org/abs/2208.07339), arXiv:2208.07339, NeurIPS 2022, mục 2–4. Absmax và đặc trưng ngoại lai.
+- Hinton, G., Vinyals, O., Dean, J. (2015). [*Distilling the Knowledge in a Neural Network*](https://arxiv.org/abs/1503.02531), arXiv:1503.02531, mục 1–3. Nhãn mềm và nhiệt độ.
+- Brown, T. B., Mann, B., Ryder, N., và cộng sự (2020). [*Language Models are Few-Shot Learners*](https://arxiv.org/abs/2005.14165), arXiv:2005.14165, mục 4. Đo rò rỉ dữ liệu test bằng 13-gram.
+- Zheng, L., Chiang, W.-L., Sheng, Y., và cộng sự (2023). [*Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena*](https://arxiv.org/abs/2306.05685), arXiv:2306.05685. Giám khảo LLM và các thiên lệch.
+- Các nguồn khác trong bài: [MMLU](https://arxiv.org/abs/2009.03300) (Hendrycks và cộng sự, 2021), [tỉa trọng số](https://arxiv.org/abs/1506.02626) (Han và cộng sự, 2015), [GPTQ](https://arxiv.org/abs/2210.17323) (Frantar và cộng sự, 2022), [SparseGPT](https://arxiv.org/abs/2301.00774) (Frantar và Alistarh, 2023), tài liệu [PEFT](https://huggingface.co/docs/peft/index) của Hugging Face.
+
+<LessonProgress />

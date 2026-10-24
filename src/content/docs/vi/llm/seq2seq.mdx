@@ -1,0 +1,378 @@
+---
+title: Mô hình chuỗi sang chuỗi (Seq2Seq)
+description: Dịch một câu sang một câu có độ dài và trật tự khác. Encoder–decoder, attention, cross-attention, teacher forcing, beam search và T5.
+quiz:
+  - question: 'Câu nguồn có 12 token, decoder đã có 5 token. Trong một lớp cross-attention (xét một đầu), ma trận điểm $\mathbf{Q}\mathbf{K}^\top$ có kích thước bao nhiêu, và có cần mặt nạ nhân quả không?'
+    options:
+      - '$5 \times 12$, không cần mặt nạ nhân quả'
+      - '$12 \times 5$, cần mặt nạ nhân quả'
+      - '$5 \times 5$, cần mặt nạ nhân quả'
+      - '$12 \times 12$, không cần mặt nạ nhân quả'
+    answer: 0
+    explanation: 'Truy vấn lấy từ decoder (5 hàng), khóa lấy từ encoder (12 hàng), nên $\mathbf{Q}\mathbf{K}^\top$ có 5 hàng, 12 cột: mỗi vị trí đích chấm điểm mọi vị trí nguồn. Câu nguồn đã có đủ từ đầu, không có gì là "tương lai", nên không cần mặt nạ nhân quả. $5 \times 5$ là ma trận của self-attention trong decoder, chỗ duy nhất cần mặt nạ.'
+  - question: 'Bạn huấn luyện một Transformer encoder–decoder và quên truyền mặt nạ cho self-attention của decoder. Loss huấn luyện về $0.001$. Cách đo nào phát hiện được lỗi này?'
+    options:
+      - 'Xem loss huấn luyện có tiếp tục giảm không'
+      - 'Đo tỉ lệ khớp hoàn toàn bằng teacher forcing trên dữ liệu mới'
+      - 'Cho mô hình tự sinh (greedy) trên dữ liệu mới rồi so với đáp án'
+      - 'Tăng số bước huấn luyện rồi xem loss có về 0 không'
+    answer: 2
+    explanation: 'Không có mặt nạ, khi được đưa chuỗi đích thật, vị trí $i$ nhìn thấy token $y_i$ ở vị trí sau nó và chỉ cần chép lại. Vì vậy cả loss lẫn phép đo teacher forcing (cũng đưa chuỗi đích thật vào) đều đẹp. Chỉ khi mô hình phải tự sinh, không có đáp án để chép, lỗi mới lộ ra: ở ô PyTorch của bài, teacher forcing khớp $1.000$ còn sinh tham lam chỉ khoảng $0.02$.'
+  - question: 'Beam search kết thúc với hai giả thuyết. A có 3 token (tính cả `<EOS>`), tổng log-xác suất $-1.8$. B có 7 token, tổng log-xác suất $-2.4$. Dùng $\mathrm{lp}(\mathbf{y}) = ((5 + |\mathbf{y}|)/6)^{\alpha}$. Câu nào được chọn khi $\alpha = 0$ và khi $\alpha = 1$?'
+    options:
+      - 'A ở cả hai trường hợp'
+      - 'A khi $\alpha = 0$, B khi $\alpha = 1$'
+      - 'B ở cả hai trường hợp'
+      - 'B khi $\alpha = 0$, A khi $\alpha = 1$'
+    answer: 1
+    explanation: 'Với $\alpha = 0$, $\mathrm{lp} = 1$ nên so thẳng log-xác suất: $-1.8 > -2.4$, A thắng. Với $\alpha = 1$, $\mathrm{lp}(A) = 8/6$ và $\mathrm{lp}(B) = 12/6 = 2$, nên điểm là $-1.8 \cdot 6/8 = -1.35$ và $-2.4/2 = -1.2$: B thắng. Phạt độ dài bù cho việc câu dài phải cộng nhiều số âm hơn.'
+  - question: 'Một mô hình tóm tắt đạt độ chính xác từng token rất cao khi đo bằng teacher forcing trên tập kiểm định. Nhưng khi tự sinh, bản tóm tắt thường đúng ở đầu rồi lạc đề dần từ giữa đoạn. Giải thích nào hợp nhất?'
+    options:
+      - 'Beam quá hẹp, nên tăng $B$ là hết lạc đề'
+      - 'Cross-attention có mặt nạ nhân quả nên decoder không thấy cuối văn bản nguồn'
+      - 'Overfitting: mô hình học thuộc tập huấn luyện'
+      - 'Exposure bias: lúc học luôn có tiền tố đúng, lúc sinh phải dùng token tự sinh'
+    answer: 3
+    explanation: 'Teacher forcing luôn đưa tiền tố đúng cho decoder, nên nó chưa từng tập tiếp tục từ một tiền tố có lỗi. Khi tự sinh, một token lệch làm tiền tố khác mọi thứ nó từng thấy, và lỗi chồng lên nhau. Beam rộng hơn chỉ tìm kỹ hơn trên cùng mô hình. Cross-attention không có mặt nạ nhân quả. Overfitting không khớp với triệu chứng: độ chính xác teacher forcing trên tập kiểm định vẫn cao, nên mô hình không chỉ học thuộc tập huấn luyện; chỗ hỏng nằm ở chế độ tự sinh.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import EncoderDecoderFigure from '@components/figures/EncoderDecoderFigure.astro';
+import beamCode from '@code/llm/seq2seq/beam.vi.py?raw';
+import tinyTransformerCode from '@code/llm/seq2seq/tiny-transformer.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu bài toán chuỗi sang chuỗi (sequence-to-sequence, Seq2Seq), khung encoder–decoder, và vì sao nén cả câu nguồn vào một vectơ cố định là một nút thắt.
+- Giải thích được attention của Bahdanau và cross-attention trong Transformer: truy vấn từ decoder, khóa và giá trị từ encoder.
+- Phân biệt teacher forcing khi huấn luyện với sinh tự do khi dùng, và nhận ra exposure bias.
+- Cài đặt được beam search có phạt độ dài (length penalty) bằng NumPy, và đọc hiểu một Transformer encoder–decoder nhỏ viết bằng PyTorch.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+**Mạng hồi tiếp** (RNN) đọc chuỗi từng token một và cập nhật một **trạng thái ẩn** (hidden state), một vectơ tóm tắt mọi token đã đọc. **LSTM** là RNN có thêm các cổng để nhớ được xa hơn, còn RNN **hai chiều** (bidirectional) chạy cả xuôi lẫn ngược rồi ghép hai trạng thái. **Self-attention** cho mỗi vị trí lấy trung bình có trọng số của các vị trí trong cùng chuỗi, với trọng số tính từ **truy vấn** (query) $\mathbf{Q}$, **khóa** (key) $\mathbf{K}$ và **giá trị** (value) $\mathbf{V}$.
+:::
+
+## Trực giác
+
+### Câu ra không thẳng hàng với câu vào
+
+Hãy dịch hai câu tiếng Anh sang tiếng Việt:
+
+| Câu nguồn | Câu đích | Số từ |
+|---|---|---|
+| Good morning | Chào buổi sáng | 2 → 3 |
+| the black cat | con mèo đen | 3 → 3, nhưng "black cat" thành "mèo đen" |
+
+Hai điều làm việc này khác hẳn phân loại. **Độ dài khác nhau**: câu ra có thể dài hơn hay ngắn hơn câu vào, và ta không biết trước nó dài bao nhiêu. **Trật tự khác nhau**: từ thứ hai của câu ra không nhất thiết ứng với từ thứ hai của câu vào. Vì vậy không thể gắn cho mỗi từ nguồn một nhãn đích, như khi gán nhãn từ loại.
+
+Dịch máy chỉ là một ví dụ. Tóm tắt (văn bản dài vào, đoạn ngắn ra), hỏi đáp có sinh câu trả lời, hay sửa lỗi chính tả đều có cùng dạng: **một chuỗi vào, một chuỗi ra**, độ dài và trật tự của hai bên tự do.
+
+### Người phiên dịch và mẩu giấy ghi chú
+
+Cách làm đầu tiên giống một người phiên dịch nghe hết câu, ghi ý vào **một mẩu giấy nhỏ**, rồi úp bản gốc xuống và dịch chỉ dựa vào mẩu giấy. Phần nghe là **encoder** (bộ mã hóa), phần nói là **decoder** (bộ giải mã). Câu ngắn thì ổn. Câu năm mươi từ thì mẩu giấy vẫn chỉ to chừng ấy, nên chi tiết rơi rớt.
+
+Cách tốt hơn: để bản gốc nằm trên bàn. Mỗi khi viết một từ, người phiên dịch **liếc lại đúng chỗ** cần nhìn trong câu gốc. Viết "mèo" thì nhìn "cat", viết "đen" thì nhìn "black". Đó là ý tưởng của attention, và cũng là việc của cross-attention trong Transformer.
+
+Còn một chuyện nữa: mỗi bước, mô hình có nhiều từ có thể viết tiếp. Chọn từ "tốt nhất" ở từng bước chưa chắc ra câu tốt nhất, vì một lựa chọn ban đầu hơi kém có khi mở ra phần sau rất tốt.
+
+Bài toán của bài này là: **từ các cặp câu nguồn và câu đích, học cách sinh câu đích từng token một, mỗi bước nhìn lại câu nguồn; rồi khi chỉ có câu nguồn, tìm một câu đích có xác suất cao.**
+
+## Lý thuyết
+
+### Phát biểu bài toán
+
+Gọi chuỗi nguồn là $\mathbf{x} = (x_1, \dots, x_{L_x})$ và chuỗi đích là $\mathbf{y} = (y_1, \dots, y_{L_y})$, với $L_x$, $L_y$ là độ dài của hai chuỗi. Token cuối $y_{L_y}$ luôn là `<EOS>` (end of sequence): mô hình tự quyết định khi nào dừng bằng cách sinh ra token này, nên $L_y$ tính cả `<EOS>`.
+
+Như bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/), ta tách xác suất của cả chuỗi bằng quy tắc nhân. Khác biệt duy nhất là mọi thừa số đều có thêm điều kiện $\mathbf{x}$:
+
+$$
+p(\mathbf{y} \mid \mathbf{x}) = \prod_{i=1}^{L_y} p(y_i \mid y_{<i}, \mathbf{x})
+$$
+
+Ở đây $y_{<i}$ là các token đích đứng trước vị trí $i$. Vậy mô hình seq2seq là một **mô hình ngôn ngữ có điều kiện**: nó đoán token kế tiếp của câu đích, khi biết các token đích đã có **và** cả câu nguồn.
+
+### Encoder–decoder bằng mạng hồi tiếp
+
+Sutskever, Vinyals và Le (2014) và Cho cùng cộng sự (2014) đưa ra khung **encoder–decoder** bằng hai mạng hồi tiếp:
+
+1. **Encoder** đọc $x_1, \dots, x_{L_x}$. Trạng thái ẩn cuối cùng là một vectơ $\mathbf{c}$ có số chiều cố định, đại diện cho cả câu nguồn.
+2. **Decoder** sinh $y_1, y_2, \dots$ dựa trên $\mathbf{c}$, từng token một, mỗi bước nhận token vừa sinh làm đầu vào, cho tới khi sinh `<EOS>`.
+
+Hai mạng được huấn luyện cùng nhau để làm lớn $\ln p(\mathbf{y} \mid \mathbf{x})$ trên các cặp câu. Mô hình của Sutskever và cộng sự dùng LSTM 4 lớp, mỗi lớp 1000 ô. Trên tập dịch Anh–Pháp WMT'14, tổ hợp 5 mô hình (ensemble) của họ đạt điểm **BLEU** 34.8, so với 33.3 của một hệ thống dịch dựa trên cụm từ. BLEU đo mức trùng các cụm từ ngắn (n-gram) giữa bản dịch máy và bản dịch tham chiếu của người; cao hơn là tốt hơn. Họ còn gặp một mẹo lạ: **đảo ngược trật tự câu nguồn** làm BLEU tăng từ 25.9 lên 30.6. Họ thừa nhận chưa giải thích được đầy đủ, và cho rằng khi đảo, nhiều cặp từ tương ứng giữa hai câu nằm gần nhau hơn, nên bài toán tối ưu dễ hơn.
+
+Mẹo đó là một dấu hiệu: mọi thông tin của câu nguồn phải đi qua đúng một vectơ $\mathbf{c}$. Câu 5 từ hay 50 từ đều được nén vào cùng một số chiều. Bahdanau, Cho và Bengio (2015) đặt giả thuyết rằng chính vectơ cố định này là **nút thắt** (bottleneck), và đo được bằng chứng: mô hình encoder–decoder cơ bản tụt điểm mạnh khi câu dài ra, còn bản tốt nhất có attention của họ không tụt, kể cả với câu từ 50 từ trở lên.
+
+### Attention: mỗi bước nhìn lại câu nguồn
+
+Bahdanau và cộng sự bỏ yêu cầu "một vectơ cho cả câu". Encoder là một RNN hai chiều, cho **mỗi** từ nguồn $j$ một vectơ $\mathbf{h}_j$ mang thông tin của từ đó và các từ xung quanh. Gọi $\mathbf{s}_{i-1}$ là trạng thái của decoder ngay trước khi sinh $y_i$. Ở mỗi bước $i$, decoder làm ba việc:
+
+$$
+e_{ij} = a(\mathbf{s}_{i-1}, \mathbf{h}_j), \qquad
+\alpha_{ij} = \frac{\exp(e_{ij})}{\sum_{k=1}^{L_x} \exp(e_{ik})}, \qquad
+\mathbf{c}_i = \sum_{j=1}^{L_x} \alpha_{ij} \mathbf{h}_j
+$$
+
+- **Chấm điểm.** $e_{ij}$ đo "để sinh từ đích thứ $i$, nên nhìn từ nguồn thứ $j$ bao nhiêu". Hàm $a$ là một mạng nhỏ, học cùng cả mô hình.
+- **Chuẩn hóa.** Softmax trên $j$ biến các điểm thành trọng số $\alpha_{ij}$ dương, cộng lại bằng 1 trên mọi từ nguồn.
+- **Trộn.** $\mathbf{c}_i$ là trung bình có trọng số của các $\mathbf{h}_j$. Đây là bản tóm tắt câu nguồn **riêng cho bước $i$**, thay cho vectơ $\mathbf{c}$ chung.
+
+Encoder vẫn tạo vectơ cho câu nguồn; điều thay đổi là decoder không còn bị buộc chỉ dùng một vectơ. Bảng trọng số $\alpha$ còn đọc được bằng mắt. Với "the black cat" sang "con mèo đen", một mô hình học tốt có thể cho bảng như dưới (số tự đặt để minh họa, không phải số của mô hình thật):
+
+| Từ đích | nhìn "the" | nhìn "black" | nhìn "cat" |
+|---|---:|---:|---:|
+| con | 0.80 | 0.05 | 0.15 |
+| mèo | 0.05 | 0.10 | 0.85 |
+| đen | 0.02 | 0.90 | 0.08 |
+
+Mỗi hàng cộng lại bằng 1. Hai hàng cuối đổi chỗ so với đường chéo, đúng chỗ tiếng Việt đặt tính từ sau danh từ. Bahdanau và cộng sự cho thấy các bản đồ như vậy từ mô hình thật trên câu Anh–Pháp: gần như theo đường chéo, lệch ra ở chỗ hai ngôn ngữ đổi trật tự.
+
+### Transformer encoder–decoder và cross-attention
+
+Transformer (Vaswani và cộng sự, 2017) giữ khung encoder–decoder nhưng bỏ RNN, chỉ dùng attention. Bản gốc có 6 lớp encoder và 6 lớp decoder:
+
+- **Một lớp encoder** gồm self-attention rồi mạng truyền thẳng, mỗi phần có kết nối tắt và chuẩn hóa lớp. Self-attention ở đây **không có mặt nạ**: mỗi từ nguồn nhìn được mọi từ nguồn, cả trước lẫn sau.
+- **Một lớp decoder** có ba phần: self-attention **có mặt nạ nhân quả** trên các token đích, rồi **cross-attention** nhìn sang encoder, rồi mạng truyền thẳng.
+
+Cross-attention dùng đúng công thức attention mà bạn đã gặp. Khác biệt nằm ở **nguồn** của ba ma trận. Gọi $\mathbf{H}_{\text{enc}} \in \mathbb{R}^{L_x \times D}$ là đầu ra của lớp encoder cuối, mỗi hàng một vị trí nguồn, và $\mathbf{S} \in \mathbb{R}^{L_y \times D}$ là trạng thái của decoder (đầu ra của phần self-attention ngay trước), mỗi hàng một vị trí đích. Với các ma trận chiếu học được $\mathbf{W}^Q$, $\mathbf{W}^K$, $\mathbf{W}^V$:
+
+$$
+\mathbf{Q} = \mathbf{S}\mathbf{W}^Q, \quad
+\mathbf{K} = \mathbf{H}_{\text{enc}}\mathbf{W}^K, \quad
+\mathbf{V} = \mathbf{H}_{\text{enc}}\mathbf{W}^V, \qquad
+\mathrm{Attn} = \mathrm{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d}}\right)\mathbf{V}
+$$
+
+- **Truy vấn từ decoder, khóa và giá trị từ encoder.** Mỗi vị trí đích "hỏi", các vị trí nguồn "trả lời".
+- **Ma trận điểm $\mathbf{Q}\mathbf{K}^\top$ có kích thước $L_y \times L_x$.** Hàng $i$ là các điểm của vị trí đích $i$ trên mọi vị trí nguồn; softmax theo hàng cho đúng vai trò của $\alpha_{ij}$ ở trên.
+- **Không có mặt nạ nhân quả.** Câu nguồn đã có đủ từ đầu, không có vị trí nào là "tương lai". Chỉ self-attention của decoder mới cần mặt nạ.
+- **Mọi lớp decoder dùng cùng $\mathbf{H}_{\text{enc}}$**, nhưng mỗi lớp có ma trận chiếu riêng. Công thức trên là một đầu; Transformer dùng nhiều đầu song song. Với $H$ đầu, mỗi đầu chiếu xuống $d = D/H$ chiều và chia cho $\sqrt{d}$.
+
+Vaswani và cộng sự viết rằng cross-attention bắt chước cơ chế attention encoder–decoder của các mô hình seq2seq trước đó. Hai khác biệt chính: điểm là tích vô hướng thay cho mạng nhỏ $a$, và mọi vị trí được tính song song thay vì từng bước như RNN. Bản lớn của họ đạt BLEU 28.4 trên tập dịch Anh–Đức WMT 2014.
+
+### Huấn luyện bằng teacher forcing
+
+Khi huấn luyện, ta đã có câu đích thật. Vậy đầu vào của decoder là **chính câu đích, dịch sang phải một vị trí** (shift right), bắt đầu bằng token mở đầu `<BOS>`; còn nhãn là câu đích không dịch:
+
+| Vị trí | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|
+| Đầu vào decoder | `<BOS>` | con | mèo | đen |
+| Nhãn cần đoán | con | mèo | đen | `<EOS>` |
+
+Cách đưa đáp án thật làm đầu vào này gọi là **teacher forcing**. Nhờ mặt nạ nhân quả, vị trí $i$ chỉ thấy `<BOS>` và $y_1, \dots, y_{i-1}$, nên **một** lần chạy cho cả $L_y$ dự đoán, như với GPT. Hàm mất mát là cross-entropy trung bình trên các vị trí:
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = -\frac{1}{L_y} \sum_{i=1}^{L_y} \ln p_{\boldsymbol{\theta}}(y_i \mid y_{<i}, \mathbf{x})
+$$
+
+Trong công thức này, $y_{<i}$ là **token thật**. Khi lô có nhiều cặp câu, ta lấy trung bình thêm trên các cặp.
+
+### Exposure bias: lúc học và lúc dùng không giống nhau
+
+Khi dùng mô hình, không có câu đích thật. Decoder phải ăn lại token **do chính nó sinh ra**: $y_{<i}$ trong công thức giờ là các token mô hình đã chọn. Ranzato và cộng sự (2016) gọi sự lệch này là **exposure bias**: lúc huấn luyện, mô hình chỉ được thấy tiền tố đúng, chưa từng tập tiếp tục từ một tiền tố có lỗi. Một token sai sớm làm tiền tố khác mọi thứ nó đã thấy, và lỗi có thể dồn lên nhau.
+
+Teacher forcing không phải lỗi: nó nhanh, song song và ổn định. Vấn đề là khoảng cách giữa hai chế độ. Một hướng xử lý là **scheduled sampling** (Bengio và cộng sự, 2015): trong lúc huấn luyện, thỉnh thoảng thay token thật bằng token mô hình tự sinh, tỉ lệ thay tăng dần. Mức nặng nhẹ của exposure bias tùy bài toán: ở ô PyTorch bên dưới, tác vụ quá dễ nên không thấy nó.
+
+### Giải mã: tham lam và beam search
+
+Khi đã có mô hình, ta muốn câu $\mathbf{y}$ có $p(\mathbf{y} \mid \mathbf{x})$ lớn nhất. Thử hết thì không thể: với từ vựng 32 000 token và câu 20 token, có $32\,000^{20} \approx 10^{90}$ chuỗi (tự tính).
+
+**Giải mã tham lam** (greedy decoding) chọn token xác suất cao nhất ở mỗi bước. Nhanh, nhưng một lựa chọn sớm không bao giờ được xem lại.
+
+**Beam search** giữ $B$ giả thuyết dở dang tốt nhất (gọi là chùm, beam), $B$ là **độ rộng chùm** (beam width). Điểm của một giả thuyết là tổng log-xác suất của các token của nó:
+
+$$
+\mathrm{score}(\mathbf{y}) = \sum_{i=1}^{L_y} \ln p(y_i \mid y_{<i}, \mathbf{x}) = \ln p(\mathbf{y} \mid \mathbf{x})
+$$
+
+Đẳng thức thứ hai có được vì logarit của tích bằng tổng các logarit. Mỗi bước:
+
+1. Nối mỗi giả thuyết trong chùm với mọi token có thể, cộng thêm log-xác suất của token đó.
+2. Trong mọi ứng viên, giữ $B$ ứng viên điểm cao nhất.
+3. Ứng viên nào vừa sinh `<EOS>` thì tách ra danh sách "đã xong". Dừng khi chùm rỗng, hoặc khi đủ độ dài tối đa.
+
+$B = 1$ chính là giải mã tham lam. Sutskever và cộng sự thấy $B = 1$ đã khá tốt và $B = 2$ lấy được phần lớn lợi ích của beam search; Vaswani và cộng sự dùng $B = 4$. Beam search vẫn chỉ là xấp xỉ: không đảm bảo tìm ra câu có xác suất cao nhất.
+
+**Phạt độ dài.** Mỗi token cộng thêm một số $\ln p \le 0$ vào điểm, nên câu càng dài điểm càng âm. Beam search thô vì vậy thiên về câu ngắn, kể cả câu cắt cụt. Wu và cộng sự (2016) chia điểm cho một hàm tăng theo độ dài:
+
+$$
+s(\mathbf{y}) = \frac{\ln p(\mathbf{y} \mid \mathbf{x})}{\mathrm{lp}(\mathbf{y})}, \qquad
+\mathrm{lp}(\mathbf{y}) = \left(\frac{5 + |\mathbf{y}|}{5 + 1}\right)^{\alpha}
+$$
+
+- $|\mathbf{y}|$ là số token của câu đích. Bài này tính cả `<EOS>`; bài báo không nói rõ điểm này, và các thư viện có thể đếm khác nhau.
+- $\alpha = 0$ cho $\mathrm{lp} = 1$: quay về beam search thô. $\alpha$ càng lớn, câu dài càng được bù nhiều.
+- Không có $\alpha$ "đúng" chung. Nó được chỉnh trên tập kiểm định (validation set): Wu và cộng sự dùng $\alpha = 0.2$ cùng một khoản phạt khác tên là coverage penalty, Vaswani và cộng sự dùng $\alpha = 0.6$.
+
+:::note[Ghi nhớ]
+Seq2seq học $p(\mathbf{y} \mid \mathbf{x}) = \prod_i p(y_i \mid y_{<i}, \mathbf{x})$. Encoder đọc câu nguồn; decoder sinh từng token và nhìn lại câu nguồn qua attention, trong Transformer là cross-attention với $\mathbf{Q}$ từ decoder, $\mathbf{K}$ và $\mathbf{V}$ từ encoder, không có mặt nạ nhân quả. Huấn luyện bằng teacher forcing (đầu vào là đáp án dịch phải), dùng bằng sinh tự do; khoảng cách giữa hai chế độ là exposure bias. Beam search giữ $B$ giả thuyết theo tổng log-xác suất, chia cho $\mathrm{lp}$ để không thiên vị câu ngắn.
+:::
+
+### T5: mọi việc là văn bản sang văn bản
+
+Raffel và cộng sự (2020) đẩy ý seq2seq tới cùng với **T5**: mọi tác vụ đều viết thành "văn bản vào, văn bản ra". Chỉ cần thêm một **tiền tố tác vụ** (task prefix) vào đầu câu vào. Các ví dụ trong bài báo:
+
+| Đầu vào | Đầu ra |
+|---|---|
+| translate English to German: That is good. | Das ist gut. |
+| cola sentence: The course is jumping well. | not acceptable |
+| stsb sentence1: The rhino grazed on the grass. sentence2: A rhino is grazing in a field. | 3.8 |
+
+Phân loại (câu có đúng ngữ pháp không) cho ra chữ "not acceptable"; chấm độ giống nhau của hai câu cho ra chuỗi "3.8". Cùng một mô hình, cùng hàm mất mát, cùng cách giải mã cho mọi việc. Ý "nói việc cần làm bằng chữ ở đầu đầu vào" là họ hàng gần của prompt chỉ dẫn ở bài [Prompt Engineering](/vi/llm/prompt-engineering/).
+
+T5 dùng Transformer encoder–decoder chuẩn, huấn luyện bằng teacher forcing. Bản cơ sở có 12 khối ở mỗi bên, khoảng 220 triệu tham số. Trong thí nghiệm so kiến trúc của họ, với mục tiêu khử nhiễu (denoising) mà T5 chọn, bản encoder–decoder cho điểm cao nhất trên mọi tác vụ, hơn các biến thể decoder-only (chỉ có decoder) cùng chi phí tính toán (dù bản encoder–decoder có gấp đôi số tham số).
+
+### So với decoder-only
+
+GPT và các họ mô hình như LLaMA là **decoder-only**: không có encoder, không có cross-attention. Câu vào và câu ra nằm nối nhau trong **một** chuỗi, và mọi vị trí đều dùng mặt nạ nhân quả. Giữa hai kiểu có **prefix LM**: vẫn một chồng khối, nhưng phần câu vào nhìn đầy đủ hai chiều, chỉ phần câu ra là nhân quả.
+
+| Tiêu chí | Encoder–decoder (T5) | Prefix LM | Decoder-only (GPT) |
+|---|---|---|---|
+| Câu vào nhìn | Cả hai chiều, trong encoder | Cả hai chiều | Chỉ về trước (nhân quả) |
+| Câu ra nhìn | Nhân quả, cộng cross-attention sang câu vào | Nhân quả, cả câu vào | Nhân quả, cả câu vào |
+| Số chồng khối | Hai | Một | Một |
+
+Decoder-only làm được việc seq2seq bằng cách đặt câu vào làm phần đầu của chuỗi, như khi bạn gửi prompt cho một LLM. Encoder–decoder vẫn là lựa chọn tự nhiên cho dịch và tóm tắt, nơi câu vào và câu ra tách bạch.
+
+### Giới hạn
+
+- **Beam search tìm câu xác suất cao, không phải câu hay.** Với sinh văn bản mở, Holtzman và cộng sự (2020) cho rằng giải mã theo xác suất cao nhất làm văn nhạt và lặp lạ thường; họ đề xuất top-p (bài [Sử dụng API văn bản](/vi/llm/text-api/)).
+- **Văn bản nguồn rất dài vẫn đắt.** Self-attention của encoder tốn $L_x \times L_x$ điểm, cross-attention tốn $L_y \times L_x$, cho mỗi đầu ở mỗi lớp.
+
+## Minh họa
+
+Hình dưới đặt encoder và decoder cạnh nhau. Hãy nhìn các mũi tên đi vào khối cross-attention: truy vấn đến từ phía decoder, còn khóa và giá trị đến từ đầu ra của encoder.
+
+{/* FIG: decoder nhìn lại encoder qua cross-attention, Q từ decoder, K và V từ encoder. */}
+<EncoderDecoderFigure />
+
+Bảng dưới tóm lại ba kiểu attention trong một Transformer encoder–decoder. Hàng cuối là chỗ hai nửa gặp nhau.
+
+| Kiểu attention | Ở đâu | $\mathbf{Q}$ từ | $\mathbf{K}$, $\mathbf{V}$ từ | Mặt nạ nhân quả | Kích thước ma trận điểm |
+|---|---|---|---|---|---|
+| Self-attention | Encoder | Câu nguồn | Câu nguồn | Không | $L_x \times L_x$ |
+| Self-attention có mặt nạ | Decoder | Câu đích | Câu đích | Có | $L_y \times L_y$ |
+| Cross-attention | Decoder | Câu đích | Đầu ra encoder | Không | $L_y \times L_x$ |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026: ô beam search với Python 3.14 và NumPy 2.4 (bản có trong Pyodide), ô Transformer với Python 3.14 và PyTorch 2.14 trên CPU. Ô beam search chạy ngay trên trang. Ô Transformer cần PyTorch nên chạy trên máy bạn.
+
+### Tham lam và beam search bằng NumPy
+
+Để thấy cơ chế mà không cần huấn luyện gì, ô dưới dùng một "decoder giả" với bảng xác suất tự đặt. Hãy coi như decoder đã đọc xong câu nguồn. Để code ngắn, xác suất token kế chỉ phụ thuộc token ngay trước; decoder thật dùng cả câu nguồn và mọi token đã sinh.
+
+| Token trước | Token kế và xác suất |
+|---|---|
+| `<s>` (bắt đầu) | con 0.5, đàn 0.4, `<eos>` 0.1 |
+| con | mèo 0.34, chó 0.33, chim 0.33 |
+| đàn | chim 0.9, mèo 0.1 |
+| mèo, chó, bay | `<eos>` 1.0 |
+| chim | `<eos>` 0.52, bay 0.48 |
+
+Trước khi chạy, hãy tự tính: câu "con mèo" có xác suất $0.5 \times 0.34 \times 1.0$, còn câu "đàn chim" có $0.4 \times 0.9 \times 0.52$. Câu nào lớn hơn, và giải mã tham lam sẽ chọn câu nào?
+
+Ô chạy ba cấu hình: tham lam ($B = 1$), beam search $B = 2$ không phạt độ dài, và $B = 2$ với $\alpha = 0.6$. Mỗi dòng in câu được chọn, xác suất của cả câu `p`, và điểm `s` đã chia cho $\mathrm{lp}$.
+
+<PythonRunner code={beamCode} title="Tham lam và beam search trên bảng xác suất giả lập" />
+
+Đọc kết quả:
+
+- **Tham lam ra "con mèo", $p = 0.170$.** Bước đầu nó chọn "con" (0.5 > 0.4), rồi gặp một nhánh phẳng: "mèo", "chó", "chim" gần như ngang nhau, nên tích chỉ còn $0.5 \times 0.34 = 0.170$.
+- **Beam $B = 2$ ra "đàn chim", $p = 0.187$.** Nó giữ cả "đàn" ở bước đầu, và nhánh đó có "chim" chắc tới 0.9. Đây là câu có xác suất cao hơn, mà tham lam bỏ lỡ chỉ vì một lựa chọn sớm.
+- **Thêm $\alpha = 0.6$, beam đổi sang "đàn chim bay", $p = 0.173$**, dù xác suất thô **thấp hơn** "đàn chim" (0.187). Tính tay với độ dài tính cả `<eos>`: "đàn chim" có $p = 0.1872$, $\ln p = -1.676$, chia $\mathrm{lp} = (8/6)^{0.6} \approx 1.188$ được $-1.410$; "đàn chim bay" có $p = 0.1728$, $\ln p = -1.756$, chia $(9/6)^{0.6} \approx 1.275$ được $-1.376$, cao hơn.
+
+Bảng này tự đặt để thấy cơ chế, không nói gì về việc phạt độ dài tốt hay xấu cho một bài dịch thật. Một chi tiết nữa của code: việc cắt chùm dùng log-xác suất thô, chỉ bước chọn cuối mới chia cho $\mathrm{lp}$. Như vậy beam search không đảm bảo tìm ra câu có điểm $s$ cao nhất.
+
+### Transformer encoder–decoder nhỏ bằng PyTorch
+
+File dưới đây huấn luyện một Transformer encoder–decoder để **đảo ngược dãy 6 chữ số**: nguồn `9 7 9 6 0 9`, đích `9 0 6 9 7 9`. Tác vụ đồ chơi này có đủ mọi phần của seq2seq, và câu đích phụ thuộc vào cả câu nguồn: token đích đầu tiên là token nguồn cuối cùng, nên decoder buộc phải nhìn sang encoder.
+
+- **Mô hình:** `nn.Transformer` có 2 lớp encoder, 2 lớp decoder, $D = 64$, 4 đầu, mạng truyền thẳng 128 chiều, cộng một lớp nhúng token và một lớp nhúng vị trí học được. Từ vựng có 12 token: `<BOS>`, `<EOS>` và 10 chữ số.
+- **Mặt nạ:** `generate_square_subsequent_mask` trả về ma trận số thực, $-\infty$ ở các ô phía trên đường chéo, được cộng thẳng vào điểm của self-attention trong decoder. Encoder và cross-attention không nhận mặt nạ nào.
+- **Teacher forcing:** hàm `batch` tạo đầu vào decoder là `<BOS>` cộng đáp án, nhãn là đáp án cộng `<EOS>`, đúng như bảng ở mục Lý thuyết. Mỗi bước sinh 64 dãy ngẫu nhiên mới; vòng lặp chạy 301 bước bằng AdamW.
+- **Đánh giá trên 500 dãy mới**, theo hai cách: tỉ lệ khớp hoàn toàn cả 7 token khi được đưa đáp án (teacher forcing), và khi tự sinh tham lam từ `<BOS>`, mỗi bước nối token vừa chọn vào.
+
+Cách cài PyTorch bản chỉ chạy CPU có ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+<LocalCode
+  code={tinyTransformerCode}
+  title="Transformer encoder–decoder đảo ngược dãy số"
+  packages={['torch']}
+  hardware="CPU là đủ, không cần GPU. Khoảng 20 tới 40 giây trên máy phát triển, có thể vài phút trên máy chậm hoặc đang bận"
+  sampleVaries={false}
+>
+
+```text
+step   0  loss 2.608
+step 100  loss 0.003
+step 200  loss 0.001
+step 300  loss 0.001
+exact match, teacher forcing: 1.000  greedy: 1.000
+src: 9 7 9 6 0 9
+out: 9 0 6 9 7 9 <EOS>
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Bước 0:** loss 2.608, gần $\ln 12 \approx 2.485$, mức của mô hình đoán đều trên 12 token.
+- **Bước 100:** loss đã xuống 0.003. Đảo dãy là việc rất hợp với cross-attention: vị trí đích $i$ chỉ cần nhìn đúng vị trí nguồn $L_x + 1 - i$.
+- **Cả hai cách đo đều khớp hoàn toàn 1.000** trên 500 dãy chưa thấy, và dãy mẫu được đảo đúng, kết thúc bằng `<EOS>`. Ở đây sinh tự do tốt ngang teacher forcing, nên không thấy exposure bias: tác vụ quá dễ để mô hình mắc lỗi đầu tiên. Đừng lấy kết quả này để kết luận exposure bias không có thật.
+
+Seed cố định nên mỗi lần chạy trên cùng máy cho cùng kết quả; trên máy khác hoặc bản PyTorch khác, số có thể lệch đôi chút. Ở dòng 9, `CAUSAL = True` bật mặt nạ của decoder. Hộp đầu tiên ở mục dưới cho thấy chuyện gì xảy ra khi đổi nó thành `False`.
+
+## Lỗi hay gặp
+
+:::caution[Bỏ mặt nạ của decoder rồi tin loss huấn luyện]
+Đổi `CAUSAL = False` trong ô PyTorch rồi chạy lại. Ở các lần chạy thử của bài, loss vẫn về 0.001 ở bước 300, và khớp hoàn toàn bằng teacher forcing vẫn là 1.000. Nhưng khi tự sinh, tỉ lệ khớp chỉ còn khoảng **0.02** (0.020 và 0.022 ở hai lần chạy; số lệch đôi chút theo số luồng CPU mà PyTorch dùng), và ở lần đầu, dãy mẫu ra `<EOS> 0 6 9 7 9 <EOS>`: sai ngay token đầu. Không có mặt nạ, khi được đưa đáp án, vị trí $i$ thấy luôn token đúng $y_i$ nằm ở vị trí $i + 1$ của đầu vào, nên chỉ cần chép. Lúc tự sinh, vị trí cuối không có gì phía sau để chép. Luôn đo mô hình bằng cách cho nó **tự sinh**, không chỉ bằng loss hay phép đo teacher forcing.
+:::
+
+:::caution[Thêm mặt nạ nhân quả cho cross-attention]
+Cross-attention nhìn câu nguồn, mà câu nguồn đã có đủ từ đầu. Che bớt câu nguồn chỉ làm decoder mù một phần: ở tác vụ đảo dãy, token đích đầu tiên cần đúng token nguồn **cuối cùng**. Trong `nn.Transformer`, mặt nạ nhân quả truyền vào `tgt_mask`; `memory_mask` (mặt nạ của cross-attention) để trống. Cũng đừng nhầm nguồn của ba ma trận: self-attention lấy cả $\mathbf{Q}$, $\mathbf{K}$, $\mathbf{V}$ từ một chuỗi, cross-attention lấy $\mathbf{Q}$ từ decoder, $\mathbf{K}$ và $\mathbf{V}$ từ encoder.
+:::
+
+:::caution[Quên dịch câu đích sang phải]
+Nếu đầu vào decoder và nhãn là cùng một dãy, có mặt nạ thì vị trí $i$ vẫn thấy chính token $y_i$ mà nó phải đoán, và học cách chép. Đầu vào phải bắt đầu bằng `<BOS>`, nhãn phải kết thúc bằng `<EOS>`, như hai dòng `dec_in` và `dec_out` trong ô PyTorch.
+:::
+
+:::caution[Tin rằng beam rộng hơn luôn tốt hơn]
+Beam search chỉ xấp xỉ, và điểm thô của nó thiên về câu ngắn: ở ô NumPy, không có phạt độ dài thì câu hai từ thắng câu ba từ. Chùm rộng hơn tìm kỹ hơn theo **điểm**, nên có thể càng dễ chọn câu ngắn nếu không chuẩn hóa độ dài. $\alpha$ của $\mathrm{lp}$ cũng không có giá trị chuẩn: 0.6 là lựa chọn của Vaswani và cộng sự cho bài dịch của họ, hãy chỉnh trên tập kiểm định của bạn.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Seq2seq học $p(\mathbf{y} \mid \mathbf{x}) = \prod_i p(y_i \mid y_{<i}, \mathbf{x})$: một mô hình ngôn ngữ có điều kiện theo câu nguồn, cho câu ra có độ dài và trật tự tự do, dừng khi sinh `<EOS>`.
+- Encoder–decoder RNN nén câu nguồn vào một vectơ cố định, và tụt điểm với câu dài. Attention cho mỗi bước một trung bình có trọng số riêng của câu nguồn. Trong Transformer, đó là cross-attention: $\mathbf{Q}$ từ decoder, $\mathbf{K}$ và $\mathbf{V}$ từ encoder, ma trận điểm $L_y \times L_x$, không có mặt nạ nhân quả.
+- Huấn luyện bằng teacher forcing (đầu vào là đáp án dịch phải, một lần chạy cho mọi vị trí), dùng bằng sinh tự do. Khoảng cách giữa hai chế độ là exposure bias; luôn đánh giá bằng cách cho mô hình tự sinh.
+- Beam search giữ $B$ giả thuyết theo tổng log-xác suất, tốt hơn tham lam nhưng vẫn là xấp xỉ, và cần chia cho $\mathrm{lp}(\mathbf{y}) = ((5 + |\mathbf{y}|)/6)^{\alpha}$ để không thiên vị câu ngắn. T5 biến mọi tác vụ thành văn bản sang văn bản bằng tiền tố tác vụ.
+
+**Đọc thêm:**
+
+- Sutskever, I., Vinyals, O., Le, Q. V. (2014). [*Sequence to Sequence Learning with Neural Networks*](https://arxiv.org/abs/1409.3215), arXiv:1409.3215, mục 2 và 3. Bài gốc của khung seq2seq bằng LSTM, có mẹo đảo câu nguồn và thí nghiệm về độ rộng chùm.
+- Bahdanau, D., Cho, K., Bengio, Y. (2015). [*Neural Machine Translation by Jointly Learning to Align and Translate*](https://arxiv.org/abs/1409.0473), ICLR 2015, mục 3 và 5. Attention đầu tiên cho dịch máy, có đồ thị điểm theo độ dài câu và các bản đồ căn chỉnh. Bài báo dùng $T_x$ cho độ dài câu nguồn, chỗ bài này viết $L_x$.
+- Vaswani, A. và cộng sự (2017). [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762), NIPS 2017, mục 3.1 và 3.2.3. Transformer encoder–decoder và ba cách dùng attention. Bài báo dùng $d_k$ cho số chiều của khóa, chỗ bài này viết $d$.
+- Raffel, C. và cộng sự (2020). [*Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer*](https://jmlr.org/papers/v21/20-074.html), *JMLR* 21(140), mục 2.4 và 3.2. T5, tiền tố tác vụ, và phép so encoder–decoder với decoder-only và prefix LM.
+- Wu, Y. và cộng sự (2016). [*Google's Neural Machine Translation System: Bridging the Gap between Human and Machine Translation*](https://arxiv.org/abs/1609.08144), arXiv:1609.08144, mục 7. Beam search có phạt độ dài và coverage penalty, cùng các mẹo cắt tỉa chùm trong một hệ thống dịch thật.
+
+<LessonProgress />

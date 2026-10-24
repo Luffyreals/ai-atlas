@@ -1,0 +1,326 @@
+---
+title: Chuẩn bị dữ liệu pre-train
+description: Một câu lặp 60 000 lần trong dữ liệu web. Nguồn dữ liệu, lọc chất lượng, khử trùng lặp bằng hash và MinHash, lọc PII, trộn nguồn, đóng gói chuỗi.
+quiz:
+  - question: 'Bạn dùng chữ ký MinHash $K = 100$ số. Cách A chia $b = 20$ băng, mỗi băng $r = 5$ hàng. Cách B chia $b = 5$ băng, mỗi băng $r = 20$ hàng. Với một cặp tài liệu có $J = 0.7$, điều gì xảy ra?'
+    options:
+      - 'Hai cách như nhau, vì cùng dùng 100 số'
+      - 'Cách A gần như chắc chắn đưa cặp này ra so (khoảng 0.97), cách B gần như bỏ qua nó (dưới 0.01)'
+      - 'Cách B bắt cặp này dễ hơn, vì mỗi băng dài hơn nên chứa nhiều thông tin hơn'
+      - 'Cả hai đều bắt cặp này với xác suất đúng bằng $0.7$'
+    answer: 1
+    explanation: 'Xác suất thành cặp ứng viên là $1 - (1 - s^r)^b$. Cách A: $0.7^5 \approx 0.168$, nên $1 - 0.832^{20} \approx 0.97$. Cách B: $0.7^{20} \approx 0.0008$, nên $1 - (1 - 0.0008)^5 \approx 0.004$. Băng dài đòi trùng cùng lúc nhiều số, nên chặt hơn hẳn. Con số $0.7$ chỉ là xác suất trùng ở một vị trí của chữ ký, không phải xác suất thành ứng viên.'
+  - question: 'Bạn băm SHA-256 thẳng trên văn bản thô của hai nguồn tin tức và thấy 0 bản trùng, dù xem bằng mắt thì có hàng trăm bài giống hệt nhau. Nguyên nhân nào hợp lý nhất?'
+    options:
+      - 'SHA-256 hay cho hai văn bản giống nhau hai hash khác nhau'
+      - 'Phải dùng `hash()` của Python thì mới so được giữa hai nguồn'
+      - 'Phải dùng MinHash vì SHA-256 không so được văn bản dài'
+      - 'Hai nguồn khác nhau ở chữ hoa, khoảng trắng hay cách mã hóa dấu (NFC và NFD), nên byte khác nhau dù chữ trông giống nhau'
+    answer: 3
+    explanation: 'Hàm băm nhìn byte, không nhìn chữ. Cùng chữ "à" có thể là một ký tự (NFC) hoặc chữ "a" cộng dấu huyền rời (NFD), và chỉ khác một dấu cách là hash đổi hẳn. Phải chuẩn hóa trước khi băm. SHA-256 cho cùng một chuỗi byte luôn ra cùng hash, dù văn bản dài bao nhiêu; MinHash dành cho bản gần trùng, còn ở đây các bài giống hệt. Còn `hash()` của Python cho chuỗi bị "muối" ngẫu nhiên theo từng lần chạy, nên càng không so được giữa các lần.'
+  - question: 'Một nhóm khử trùng lặp trên toàn bộ các đợt crawl và loại được rất nhiều tài liệu. Mô hình train trên phần còn lại không tốt hơn mô hình train trên dữ liệu chưa khử. Bài học rút ra là gì?'
+    options:
+      - 'Khử trùng lặp luôn vô ích, nên bỏ hẳn bước này'
+      - 'Họ chưa khử đủ mạnh, nên hạ ngưỡng giống nhau xuống để bỏ thêm'
+      - 'Lượng dữ liệu bị bỏ không nói lên chất lượng của phần còn lại; mỗi lựa chọn phải được đo bằng cách huấn luyện và đánh giá mô hình'
+      - 'Kết quả này chắc chắn do lỗi code'
+    answer: 2
+    explanation: 'FineWeb (2024) gặp đúng chuyện này: khử trùng lặp toàn cục bỏ tới 90% một đợt crawl cũ, nhưng 10% còn lại lại tệ hơn 90% bị bỏ. Khử riêng từng đợt crawl thì cho kết quả ngang RefinedWeb. Khử trùng lặp vẫn có ích (Lee và cộng sự, 2022), nên bỏ hẳn là sai. Hạ ngưỡng chỉ làm đúng điều chưa được kiểm chứng: bỏ nhiều hơn.'
+  - question: 'Một chuỗi $L = 8$ token gồm 3 token cuối của tài liệu A (kể cả EOS) rồi 5 token đầu của tài liệu B. Dùng mặt nạ chéo tài liệu, có bao nhiêu ô $(i, j)$ được phép nhìn?'
+    options: ['$21$', '$36$', '$15$', '$64$']
+    answer: 0
+    explanation: 'Mỗi tài liệu tạo một khối tam giác riêng: $\tfrac{3 \cdot 4}{2} = 6$ ô cho A, $\tfrac{5 \cdot 6}{2} = 15$ ô cho B, tổng $21$. $36 = \tfrac{8 \cdot 9}{2}$ là mặt nạ nhân quả thường, cho B nhìn cả A. $15$ chỉ đếm khối của B. $64$ là không có mặt nạ nào.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import dedupCode from '@code/llm/pretraining-data/dedup.vi.py?raw';
+import packingCode from '@code/llm/pretraining-data/packing.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu các bước biến dữ liệu web thô thành dữ liệu pre-train: trích chữ, lọc chất lượng, khử trùng lặp (deduplication), lọc dữ liệu cá nhân, trộn nguồn, đóng gói chuỗi.
+- Tự dẫn được vì sao MinHash ước lượng được độ giống Jaccard, và xác suất một cặp tài liệu bị LSH đưa ra so, $1 - (1 - s^r)^b$.
+- Cài đặt được khử trùng lặp exact bằng hash, MinHash cùng LSH, và đóng gói chuỗi (sequence packing) có mặt nạ chéo tài liệu, trên vài câu bằng NumPy.
+- Nhận ra các đánh đổi: luật lọc bỏ nhầm văn bản tốt, khử trùng lặp nhiều hơn chưa chắc tốt hơn, và tỉ lệ trộn nguồn không có đáp án chung.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/) huấn luyện mô hình bằng **cross-entropy** trên các đoạn dài $L$ token, với **mặt nạ nhân quả** (causal mask) để vị trí $t$ chỉ nhìn các vị trí trước nó. Bài đó cũng cho thấy mô hình học thuộc khi dữ liệu ít, và chuẩn hóa Unicode về dạng **NFC** trước khi đếm ký tự.
+:::
+
+## Trực giác
+
+### Nhiều chưa phải là đủ
+
+Bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/) kết luận rằng LLM cần rất nhiều văn bản. Nguồn văn bản lớn nhất là web. Theo nhóm tạo bộ dữ liệu C4 (Raffel và cộng sự, 2020), Common Crawl, một kho lưu trữ web công khai, cho ra khoảng 20 TB chữ mỗi tháng. Nhưng chính nhóm này nhận xét rằng phần lớn số chữ đó không phải ngôn ngữ tự nhiên: menu, thông báo lỗi, chữ lặp đi lặp lại.
+
+Một ví dụ cụ thể: Lee và cộng sự (2022) tìm thấy trong C4 một câu tiếng Anh dài 61 từ, lặp lại hơn 60 000 lần. Mô hình đọc nó 60 000 lần mà không học thêm được gì, chỉ tốn công học thuộc.
+
+Vậy phần lớn việc chuẩn bị dữ liệu là **bỏ bớt**, không phải gom thêm. Trong một đợt crawl, bạn sẽ gặp:
+
+- trang chỉ có menu, chân trang, thông báo cookie;
+- cùng một bài báo đăng lại ở chục trang, chỉ khác dòng ngày đăng;
+- trang quảng cáo, trang spam;
+- địa chỉ email, số điện thoại của người thật.
+
+**Bài toán của bài này: từ một đống văn bản thô rất lớn, chọn ra phần đáng học, bỏ các bản lặp và bản gần lặp mà không phải so từng cặp, rồi xếp văn bản thành các chuỗi $L$ token để huấn luyện.**
+
+## Lý thuyết
+
+### Nguồn dữ liệu
+
+Bộ dữ liệu pre-train thường ghép nhiều nguồn, mỗi nguồn dạy một thứ:
+
+| Nguồn | Mạnh ở | Ví dụ |
+|---|---|---|
+| Web (Common Crawl) | Khối lượng, đủ mọi chủ đề | C4, RefinedWeb, FineWeb |
+| Sách | Văn dài, mạch lạc | Sách hết bản quyền của Project Gutenberg |
+| Bài báo khoa học | Tri thức chuyên sâu, toán | arXiv, PubMed Central |
+| Mã nguồn | Cấu trúc, logic | Kho code công khai trên GitHub |
+| Wikipedia | Tri thức cô đọng, đã được biên tập | Wikipedia các ngôn ngữ |
+
+The Pile (Gao và cộng sự, 2020) ghép 22 nguồn như vậy. Dolma (Soldaini và cộng sự, 2024) có khoảng 3 nghìn tỉ token, cũng từ nhiều nguồn. Nguồn nào cũng có điều kiện sử dụng và bản quyền riêng, kể cả trang web công khai. Bài [Crawl dữ liệu và MongoDB](/vi/llm/web-crawling-mongodb/) đã nói về các lớp quy tắc đó.
+
+Với web, bước đầu tiên là **trích chữ từ HTML**. Nhóm FineWeb (Penedo và cộng sự, 2024) thấy tự trích từ HTML gốc bằng thư viện `trafilatura` cho dữ liệu tốt hơn dùng bản chữ trích sẵn của Common Crawl, dù tốn công hơn.
+
+### Lọc chất lượng
+
+**Lọc bằng luật** (heuristic filtering). C4 dùng các luật đơn giản, ví dụ:
+
+- chỉ giữ dòng kết thúc bằng dấu câu và có ít nhất 5 từ; bỏ trang dưới 3 câu;
+- bỏ dòng nhắc tới "Javascript" hay chính sách cookie; bỏ trang có "lorem ipsum" hoặc dấu `{`;
+- bỏ trang có từ trong một danh sách từ xấu; chỉ giữ trang được `langdetect` nhận là tiếng Anh với xác suất ít nhất 0.99.
+
+Luật dễ hiểu, chạy nhanh, nhưng có tác dụng phụ. Luật dấu `{` nhắm vào code lẫn trong trang, nên bỏ luôn cả bài hướng dẫn lập trình. Nhóm FineWeb thử từng luật của C4: luật "dòng phải kết thúc bằng dấu câu" cải thiện mô hình nhiều nhất, nhưng bỏ khoảng 30% số token. Họ không dùng luật đó: dùng mọi luật còn lại của C4 cho kết quả còn tốt hơn mà chỉ bỏ khoảng 7% token. Luật viết cho văn xuôi tiếng Anh cũng phải được kiểm lại trước khi dùng cho ngôn ngữ khác.
+
+**Lọc bằng bộ phân loại** (quality classifier). Ta huấn luyện một mô hình nhỏ chấm điểm "văn bản này có đáng học không". FineWeb nhờ Llama-3-70B-Instruct chấm giá trị giáo dục của 460 000 trang, dùng điểm đó huấn luyện một bộ phân loại, rồi giữ phần điểm cao: được FineWeb-Edu, 1.3 nghìn tỉ token trong 15 nghìn tỉ token của FineWeb. Mô hình học trên FineWeb-Edu tăng điểm MMLU từ 33% lên 37% so với học trên FineWeb. Cái giá: bộ phân loại học theo mẫu "tốt" mà người làm chọn, nên mang luôn thiên kiến của mẫu đó, và có thể bỏ cả văn bản tốt chỉ vì nó trông khác mẫu.
+
+### Khử trùng lặp exact
+
+Cách đơn giản nhất: chuẩn hóa văn bản (NFC, chữ thường, gộp khoảng trắng), băm nó bằng một hàm như SHA-256, rồi giữ một tài liệu cho mỗi giá trị hash. Hai văn bản giống nhau từng byte thì cùng hash. Cách này nhanh và chỉ cần lưu một hash cho mỗi tài liệu.
+
+Điểm yếu: đổi một dấu phẩy là hash đổi hẳn. Bài báo đăng lại với dòng ngày đăng khác vẫn lọt. Lee và cộng sự còn khử ở mức đoạn con: dùng **mảng hậu tố** (suffix array) để tìm và bỏ mọi đoạn từ 50 token trở lên xuất hiện nhiều lần.
+
+### Khử trùng lặp gần: shingle và độ giống Jaccard
+
+Để bắt bản **gần trùng** (near-duplicate), ta cần một con số đo độ giống. Biến mỗi tài liệu thành tập các **shingle**: các cụm vài từ liền nhau. Với shingle 2 từ, câu "hà nội là thủ đô" có tập 4 shingle: "hà nội", "nội là", "là thủ", "thủ đô". Gọi tập shingle của hai tài liệu là $A$ và $B$. **Độ giống Jaccard** (Jaccard similarity) là:
+
+$$
+J(A, B) = \frac{|A \cap B|}{|A \cup B|}
+$$
+
+Tử số đếm shingle chung, mẫu số đếm mọi shingle của cả hai. $J = 1$ khi hai tập bằng nhau, $J = 0$ khi không có shingle chung. Ở ô code bên dưới, câu "...một thành phố hơn nghìn năm tuổi" có 14 shingle, câu thêm chữ "cổ" có 15. Chúng chung 13 shingle, hợp lại có 16, nên $J = 13/16 \approx 0.81$.
+
+Tính $J$ cho mọi cặp thì không được. Với $m$ tài liệu có $m(m-1)/2$ cặp; một tỉ tài liệu là khoảng $5 \times 10^{17}$ cặp, mỗi cặp lại phải so cả tập shingle. Ta cần hai mẹo: rút mỗi tài liệu thành một **chữ ký** ngắn, và chỉ so các cặp có vẻ giống.
+
+### MinHash: chữ ký ngắn ước lượng được Jaccard
+
+Ý tưởng ước lượng độ giống bằng một chữ ký nhỏ có từ Broder (1997). Lấy một hàm băm $h$ gán cho mỗi shingle một số ngẫu nhiên, coi như không có hai shingle nào trùng số. **MinHash** của tập $A$ là giá trị nhỏ nhất, $\min_{x \in A} h(x)$.
+
+**Vì sao $\Pr[\min h(A) = \min h(B)] = J(A, B)$.** Xét shingle $x^*$ có giá trị băm nhỏ nhất trong cả $A \cup B$.
+
+- Nếu $x^*$ thuộc cả $A$ lẫn $B$, nó là phần tử nhỏ nhất của từng tập, nên hai MinHash bằng nhau.
+- Nếu $x^*$ chỉ thuộc $A$, thì $\min h(A) = h(x^*)$. Mọi phần tử của $B$ đều có giá trị lớn hơn $h(x^*)$, nên hai MinHash khác nhau. Trường hợp $x^*$ chỉ thuộc $B$ cũng vậy.
+
+Vậy hai MinHash bằng nhau khi và chỉ khi $x^*$ nằm trong $A \cap B$. Hàm băm ngẫu nhiên nên mọi phần tử của $A \cup B$ đều có cơ hội như nhau để là $x^*$. Xác suất $x^*$ rơi vào $A \cap B$ là $|A \cap B| / |A \cup B|$, đúng bằng $J$.
+
+Một hàm băm chỉ cho câu trả lời có hoặc không. Dùng $K$ hàm băm độc lập $h_1, \dots, h_K$, ta có **chữ ký MinHash** (MinHash signature) gồm $K$ số, dù tài liệu dài bao nhiêu. Ta ước lượng $J$ bằng tỉ lệ vị trí trùng nhau:
+
+$$
+\hat{J} = \frac{1}{K} \sum_{k=1}^{K} \mathbb{1}\big[\min h_k(A) = \min h_k(B)\big]
+$$
+
+$\mathbb{1}[\cdot]$ bằng 1 khi điều trong ngoặc đúng, bằng 0 khi sai. Mỗi số hạng bằng 1 với xác suất $J$, nên $\hat{J}$ là tỉ lệ thành công của $K$ lần tung đồng xu độc lập có xác suất $J$. Trung bình của nó là $J$, độ lệch chuẩn là $\sqrt{J(1-J)/K}$. Với $J = 0.81$ và $K = 64$, độ lệch chuẩn khoảng 0.05. Muốn sai số giảm một nửa thì cần $K$ gấp bốn.
+
+### LSH: chỉ so các cặp có vẻ giống
+
+Chữ ký ngắn rồi, nhưng số cặp vẫn là $m(m-1)/2$. **LSH** (locality-sensitive hashing, băm nhạy với độ giống) theo kiểu chia băng tránh việc này. Chia chữ ký $K$ số thành $b$ **băng** (band), mỗi băng $r$ số liền nhau, $K = b \cdot r$. (Ở bài này $b$ là số băng, không phải hệ số tự do.) Hai tài liệu thành **cặp ứng viên** (candidate pair) nếu trùng **trọn** ít nhất một băng. Trong thực tế, mỗi băng được băm vào một bảng, và chỉ các tài liệu rơi cùng ô mới được so kỹ.
+
+Gọi $s$ là xác suất hai chữ ký trùng ở một vị trí, tức $s = J$. Gọi $P(s)$ là xác suất thành cặp ứng viên. Ta tính nó qua bốn bước:
+
+1. Trùng trọn một băng là trùng cả $r$ vị trí độc lập: xác suất $s^r$.
+2. Không trùng trọn băng đó: $1 - s^r$.
+3. Không trùng trọn băng nào trong $b$ băng độc lập: $(1 - s^r)^b$.
+4. Trùng trọn ít nhất một băng là phần bù của bước 3:
+
+$$
+P(s) = 1 - (1 - s^r)^b
+$$
+
+Thử với $b = 16$, $r = 4$ như ô code:
+
+| Độ giống $s$ | 0.1 | 0.3 | 0.5 | 0.7 | 0.81 |
+|---|---:|---:|---:|---:|---:|
+| $P(s)$ | 0.0016 | 0.12 | 0.64 | 0.99 | 0.9999 |
+
+Đường cong có dạng chữ S: cặp ít giống gần như không được so, cặp rất giống gần như luôn được so. Ngưỡng, nơi đường cong dốc nhất, xấp xỉ $(1/b)^{1/r}$, ở đây $(1/16)^{1/4} = 0.5$. Hai tham số kéo ngược nhau: $r$ lớn là đòi trùng nhiều vị trí cùng lúc, nên chặt hơn; $b$ lớn là thêm cơ hội thử, nên lỏng hơn. LSH là cái sàng: vẫn có cặp giống bị sót và cặp ứng viên không thật sự giống, nên cặp ứng viên thường được kiểm lại.
+
+Các cấu hình đã công bố:
+
+| Bộ dữ liệu | Shingle | $K$ | $b \times r$ | Xác suất bắt cặp đã công bố |
+|---|---|---:|---:|---|
+| FineWeb (2024) | 5 từ | 112 | 14 × 8 | $s = 0.75$: 77%; $s = 0.85$: 98.8% |
+| Lee và cộng sự (2022) | 5 từ (tách theo khoảng trắng) | 9 000 | 450 × 20 | như dòng dưới (cùng cấu hình) |
+| RefinedWeb (2023) | 5 token GPT-2 (sau khi chuẩn hóa NFD, bỏ dấu) | 9 000 | 450 × 20 | $s = 0.75$: 76%; $s = 0.8$: 99.4% (phụ lục G) |
+
+Hai bài báo của Lee và RefinedWeb đặt tên chữ ngược với bài này: chữ $b = 20$ của họ là số hàng mỗi băng, chữ $r = 450$ là số băng. Phần chính của RefinedWeb (mục 3.3) lại ghi "20 buckets of 450 hashes", mâu thuẫn với phụ lục G của chính bài. Số 76% và 99.4% chỉ khớp cách chia 450 băng × 20 hàng. Lee và cộng sự còn lọc mỗi cặp ứng viên thêm hai lần: Jaccard thật phải lớn hơn 0.8, rồi độ giống theo khoảng cách chỉnh sửa (edit similarity) cũng phải lớn hơn 0.8.
+
+### Vì sao khử trùng lặp, và khử bao nhiêu là đủ
+
+Lee và cộng sự (2022) thấy khử trùng lặp làm mô hình chép nguyên văn dữ liệu ít đi khoảng 10 lần: từ hơn 1% văn bản sinh ra xuống khoảng 0.1%. Họ cũng thấy hơn 4% mẫu trong tập kiểm định của các bộ dữ liệu chuẩn có bản trùng trong tập huấn luyện. Đây là **rò rỉ dữ liệu kiểm tra** (test-set contamination): mô hình được chấm trên câu nó đã thấy, nên điểm đẹp hơn thực tế. Vì vậy phải khử trùng lặp cả giữa tập huấn luyện và tập kiểm tra.
+
+Nhưng nhiều hơn chưa chắc tốt hơn. Nhóm FineWeb khử trùng lặp MinHash trên cả 96 đợt crawl gộp chung, còn 4 nghìn tỉ token, nhưng mô hình học trên đó gần như không hơn khi học trên dữ liệu chưa khử. Ở một đợt crawl cũ, quá trình này bỏ tới 90% dữ liệu, và 10% còn lại lại **tệ hơn** 90% bị bỏ: nhiều quảng cáo, danh sách từ khóa rời rạc, chữ định dạng hỏng. Khi khử riêng từng đợt crawl, họ còn 20 nghìn tỉ token, và mô hình ngang RefinedWeb. Bài học: số lượng dữ liệu bị bỏ không nói lên chất lượng phần còn lại. Mỗi lựa chọn phải được đo bằng cách huấn luyện và đánh giá mô hình.
+
+### Dữ liệu cá nhân và nội dung độc hại
+
+**PII** (personally identifiable information, dữ liệu định danh cá nhân) như email, số điện thoại có thể bị mô hình học thuộc rồi nhả ra. FineWeb ẩn danh địa chỉ email và địa chỉ IP công khai trong bản phát hành. Dolma lọc PII, và dùng bộ phân loại huấn luyện trên dữ liệu Jigsaw Toxic Comments để lọc nội dung độc hại. C4 dùng danh sách từ xấu. Cách nào cũng là đánh đổi: lọc mạnh thì mất cả nội dung vô hại, nhất là của những cộng đồng ít người viết; lọc nhẹ thì lọt dữ liệu nhạy cảm.
+
+### Trộn nguồn
+
+Mỗi nguồn được gán một **trọng số**: phần của nó trong dữ liệu mô hình sẽ đọc. Nguồn nhỏ mà chất lượng cao có thể được đọc nhiều lần (nhiều epoch). Vài dòng trong bảng thành phần của The Pile (825 GiB dữ liệu gốc, khoảng 1 254 GiB hiệu dụng sau khi lặp mỗi nguồn theo số epoch):
+
+| Nguồn | Trọng số | Số epoch |
+|---|---:|---:|
+| Pile-CC (web) | 18.11% | 1.0 |
+| PubMed Central | 14.40% | 2.0 |
+| ArXiv | 8.96% | 2.0 |
+| GitHub | 7.59% | 1.0 |
+| Wikipedia (en) | 1.53% | 3.0 |
+
+Trọng số là tỉ lệ byte sau khi đã lặp mỗi nguồn theo số epoch của nó: Wikipedia chỉ 6.38 GiB nhưng được đọc 3 lần. Đây là lựa chọn của nhóm làm The Pile cho mục tiêu của họ, không phải tỉ lệ đúng chung.
+
+### Đóng gói chuỗi và mặt nạ chéo tài liệu
+
+Mô hình nhận các chuỗi dài đúng $L$ token, còn tài liệu thì dài ngắn đủ kiểu. Cách thứ nhất là **đệm** (padding): mỗi tài liệu cắt riêng thành các khúc $L$ token, khúc cuối đệm thêm token rỗng, vẫn tốn tính toán mà không dạy gì. Cách thứ hai là **đóng gói chuỗi** (sequence packing): tách token mọi tài liệu, nối thành một dòng dài, chèn **token kết thúc** (end-of-sequence, EOS) sau mỗi tài liệu, rồi cắt dòng đó thành các khúc $L$ token. Không còn token đệm, nhưng một chuỗi giờ có thể chứa đuôi tài liệu này và đầu tài liệu khác.
+
+Có hai cách xử lý ranh giới. Cách đơn giản: để nguyên mặt nạ nhân quả và để mô hình tự học rằng sau EOS là chuyện khác. Cách chặt hơn: dùng **mặt nạ chéo tài liệu** (cross-document attention mask, Llama 3 gọi là document mask), cấm token nhìn sang tài liệu khác. Gọi $\mathrm{doc}(i)$ là số thứ tự tài liệu của vị trí $i$ trong chuỗi; $\mathrm{doc}$ tăng thêm 1 ngay sau mỗi EOS, còn EOS thuộc tài liệu mà nó kết thúc. Mặt nạ $\mathbf{M}$ vẫn được cộng vào điểm attention như ở bài trước, nhưng giờ $M_{ij} = 0$ khi thỏa **cả hai** điều kiện
+
+$$
+j \le i, \qquad \mathrm{doc}(i) = \mathrm{doc}(j),
+$$
+
+và $M_{ij} = -\infty$ ở mọi ô khác. Điều kiện đầu là mặt nạ nhân quả, điều kiện sau là phần thêm vào. Kết quả là các khối tam giác nằm dọc đường chéo, mỗi khối một tài liệu. Với chuỗi 12 token gồm 4 token của tài liệu thứ nhất và 8 token của tài liệu thứ hai, số ô được nhìn là $\tfrac{4 \cdot 5}{2} + \tfrac{8 \cdot 9}{2} = 10 + 36 = 46$, so với $\tfrac{12 \cdot 13}{2} = 78$ của mặt nạ nhân quả thường.
+
+[Llama 3](https://arxiv.org/abs/2407.21783) (Llama Team, 2024) dùng mặt nạ này và ghi rằng nó ít ảnh hưởng khi pre-train thông thường, nhưng quan trọng khi tiếp tục pre-train trên chuỗi rất dài.
+
+:::note[Ghi nhớ]
+MinHash ước lượng được Jaccard vì $\Pr[\min h(A) = \min h(B)] = J(A, B)$. LSH chia chữ ký thành $b$ băng $r$ hàng, bắt cặp với xác suất $1 - (1 - s^r)^b$. Mặt nạ chéo tài liệu là mặt nạ nhân quả thêm điều kiện $\mathrm{doc}(i) = \mathrm{doc}(j)$.
+:::
+
+### Giới hạn
+
+- **Số token phụ thuộc bộ tách từ.** 15 nghìn tỉ token của FineWeb (đếm bằng bộ tách từ của GPT-2) và 3 nghìn tỉ của Dolma (bộ tách từ của Llama) không cùng thước đo.
+- **Quy mô thật cần công cụ riêng.** Ô code của bài chạy trên 5 câu. Với hàng tỉ trang, người ta dùng thư viện như [datatrove](https://github.com/huggingface/datatrove) của Hugging Face, có sẵn các bước lọc, MinHash và tách token chạy song song.
+- **Dữ liệu chỉ là nguyên liệu.** Mô hình pre-train chỉ biết viết tiếp văn bản. Dạy nó làm theo yêu cầu là việc của bài [Họ GPT và fine-tune đa nhiệm](/vi/llm/gpt-family-finetuning/).
+
+## Minh họa
+
+Bảng dưới theo vài trang web giả định qua các bước của mục Lý thuyết. Hãy nhìn cột cuối: không phải trang nào bị bỏ cũng là trang xấu.
+
+| Trang (ví dụ tự đặt) | Bước xử lý nó | Kết quả |
+|---|---|---|
+| "Trang chủ \| Tin tức \| Liên hệ \| Đăng nhập" | Luật: dòng ngắn, không có dấu câu cuối | Bỏ, đúng ý |
+| "Vui lòng bật JavaScript để xem trang này" | Luật nhắc "Javascript" của C4 | Bỏ, đúng ý |
+| Bài hướng dẫn Python có khối code `{ ... }` | Luật dấu `{` của C4 | Bỏ, **bỏ nhầm** |
+| Bài thơ không có dấu chấm cuối dòng | Luật dấu câu cuối dòng | Mất gần hết các dòng, **bỏ nhầm** |
+| Cùng một bài báo ở 10 trang, chỉ khác ngày đăng | Khử trùng lặp gần (MinHash) | Giữ 1 bản |
+| Trang có email cá nhân trong phần bình luận | Lọc PII | Giữ trang, email bị ẩn danh |
+
+Bảng thứ hai so padding và packing trên ba câu của ô code thứ hai. Ba tài liệu dài 16, 10 và 13 token (kể cả EOS), với $L = 12$:
+
+| Cách | Số chuỗi | Token đệm | Token còn thừa |
+|---|---:|---:|---:|
+| Padding: mỗi tài liệu cắt riêng | 5 | 21 trên 60 chỗ (35%) | 0 |
+| Packing: nối rồi cắt | 3 | 0 | 3 |
+
+Ba token thừa của packing không mất đi: ở dữ liệu thật, chúng nằm ở đầu chuỗi kế tiếp, nối với tài liệu sau.
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026, với Python 3.14 và NumPy 2.4 (bản có trong Pyodide). Cả hai ô chạy ngay trên trang và chạy độc lập: ô nào cũng tự import và tự tạo dữ liệu.
+
+### Khử trùng lặp exact và MinHash
+
+Ô này có 5 câu tự viết. Câu 1 là bản sao câu 0 nhưng viết hoa, thừa dấu cách và mã hóa dấu kiểu NFD (chữ cái và dấu tách rời). Câu 2 là câu 0 thêm chữ "cổ". Câu 3 nói về phở, câu 4 là spam. Ô khử trùng lặp exact bằng SHA-256, rồi tính MinHash với $K = 64$ (shingle là cặp từ liền nhau) và LSH với $r = 4$, tức $b = 16$ băng.
+
+<PythonRunner code={dedupCode} title="Khử trùng lặp exact, MinHash và LSH" />
+
+Đọc kết quả:
+
+- **`raw equal: False`, nhưng `after exact: [0, 2, 3, 4]`.** Hai chuỗi thô khác nhau, nhưng sau khi chuẩn hóa thì cùng hash, nên câu 1 bị bỏ.
+- **Cặp 0-2:** $J = 0.81$ đúng như tính tay ở mục Lý thuyết, MinHash ước lượng 0.84. Lệch 0.03, nhỏ hơn độ lệch chuẩn khoảng 0.05. Cặp này là ứng viên, khớp bảng xác suất: ở $s = 0.81$, $P \approx 0.9999$.
+- **Cặp 0-3 và 2-3:** $J = 0.10$ (chung đúng "của việt" và "việt nam"), ước lượng 0.11 và 0.09, không là ứng viên. Các cặp có câu spam đều có $J = 0$ và ước lượng 0.
+
+Hàm `h` lấy 60 bit đầu của SHA-1 thay cho `hash()` của Python (xem mục Lỗi hay gặp). 60 bit vừa kiểu `int64` của NumPy, nên chữ ký không bị tràn số.
+
+Bạn có thể tự thử hai thay đổi ở dòng `K, r = 64, 4`:
+
+- **`K, r = 256, 4`:** ước lượng của cặp 0-2 thành 0.82, gần $J = 0.81$ hơn, vì độ lệch chuẩn giảm còn khoảng 0.024.
+- **`K, r = 64, 16`:** chỉ còn 4 băng, mỗi băng 16 số. Cặp 0-2 không còn là ứng viên, dù ước lượng vẫn là 0.84. Theo công thức, $1 - (1 - 0.81^{16})^{4} \approx 0.13$: băng quá dài làm LSH sót cặp gần trùng.
+
+### Đóng gói chuỗi và mặt nạ chéo tài liệu
+
+Ô này lấy ba câu còn lại sau khi khử trùng lặp: câu 0, câu về phở và câu spam. Câu 2 bị bỏ vì gần trùng câu 0. Câu spam được giữ chỉ để có thêm dữ liệu, còn ở quy trình thật bộ lọc chất lượng lẽ ra đã loại nó. Mỗi từ là một token, thêm `<eos>` sau mỗi câu. Ô đếm token đệm nếu dùng padding, rồi đóng gói thành chuỗi $L = 12$, in chuỗi thứ hai cùng số thứ tự tài liệu, và đếm số ô được nhìn của hai loại mặt nạ.
+
+<PythonRunner code={packingCode} title="Packing có EOS và mặt nạ chéo tài liệu" />
+
+Đọc kết quả:
+
+- **Padding:** 5 chuỗi, 21 token đệm. **Packing:** 3 chuỗi, thừa 3 token. Đây là các số ở bảng mục Minh họa.
+- **Chuỗi thứ hai** bắt đầu bằng "nghìn năm tuổi `<eos>`", đuôi câu Hà Nội, rồi tới 8 token đầu của câu về phở. Dòng `doc` là $\mathrm{doc}(i)$: bốn số 0 (kể cả EOS), rồi tám số 1.
+- **Số ô được nhìn:** 78 với mặt nạ nhân quả, 46 với mặt nạ chéo tài liệu, như tính ở mục Lý thuyết.
+- **Hàng 4** là hàng của "phở", token đầu của tài liệu mới. Nó chỉ có một số 1, ở chính nó, nên "phở" không nhìn được "nghìn năm tuổi". Mặt nạ nhân quả thường cho hàng này năm số 1.
+
+## Lỗi hay gặp
+
+:::caution[Dùng `hash()` của Python để băm shingle]
+Từ Python 3.3, `hash()` của chuỗi được "muối" (salt) bằng một số ngẫu nhiên mỗi lần chạy chương trình. Cùng một shingle cho hash khác nhau giữa hai lần chạy, nên chữ ký MinHash không lặp lại được, và không so được chữ ký tính trên hai máy. Dùng `hashlib` (SHA-1, SHA-256) hay `zlib.crc32`, như hàm `h` của ô thứ nhất.
+:::
+
+:::caution[Băm trước khi chuẩn hóa Unicode]
+Cùng chữ "à" có thể là một ký tự (NFC) hoặc chữ "a" cộng dấu huyền rời (NFD). Hàm băm nhìn byte, nên hai cách mã hóa cho hai hash khác nhau. Ở ô thứ nhất, nếu bỏ `unicodedata.normalize("NFC", ...)` khỏi dòng `words`, câu 1 không bị khử nữa, và Jaccard của nó với câu 0 còn bằng 0.00: biểu thức `\w+` không coi dấu tách rời là chữ, nên làm rơi dấu và cắt nhiều từ thành mảnh ("nội" thành "no" và "i"). Chuẩn hóa NFC, chữ thường và khoảng trắng trước mọi phép so.
+:::
+
+:::caution[Coi khử trùng lặp là làm sạch, và nghĩ khử càng nhiều càng tốt]
+Khử trùng lặp chỉ bỏ bản lặp: một trang độc hại giữ lại một bản thì vẫn độc hại, nên vẫn cần lọc riêng. Và bỏ nhiều hơn chưa chắc tốt hơn, như thí nghiệm khử trùng lặp toàn cục của FineWeb. Đo bằng mô hình, đừng đo bằng số tài liệu đã bỏ.
+:::
+
+:::caution[Quên khử trùng lặp giữa tập huấn luyện và tập kiểm tra]
+Nếu câu hỏi của bộ đánh giá nằm sẵn trong dữ liệu pre-train, điểm cao có thể chỉ là mô hình nhớ đáp án. Chạy cùng quy trình khử trùng lặp (exact và gần trùng) giữa dữ liệu huấn luyện và mọi tập dùng để đánh giá, như bài [Tổng quan về Học máy](/vi/ml/ml-overview/) cảnh báo về rò rỉ dữ liệu.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Dữ liệu web nhiều nhưng phần lớn là rác và bản lặp. Chuẩn bị dữ liệu pre-train chủ yếu là bỏ bớt: trích chữ, lọc bằng luật và bộ phân loại, khử trùng lặp, lọc PII và nội dung độc hại, rồi trộn nguồn theo trọng số.
+- Khử trùng lặp exact băm văn bản đã chuẩn hóa. Khử trùng lặp gần dùng shingle và độ giống Jaccard $J = |A \cap B| / |A \cup B|$; MinHash ước lượng $J$ vì xác suất hai MinHash trùng nhau đúng bằng $J$; LSH chia chữ ký thành $b$ băng $r$ hàng, bắt cặp với xác suất $1 - (1 - s^r)^b$.
+- Khử trùng lặp giảm học thuộc và rò rỉ dữ liệu kiểm tra, nhưng khử nhiều hơn chưa chắc tốt hơn. Mỗi bước lọc phải được đo bằng mô hình.
+- Packing nối tài liệu bằng EOS và cắt thành chuỗi $L$ token, không phí token đệm. Mặt nạ chéo tài liệu cấm token nhìn sang tài liệu khác trong cùng chuỗi.
+
+**Đọc thêm:**
+
+- Lee, K., Ippolito, D., Nystrom, A., Zhang, C., Eck, D., Callison-Burch, C., Carlini, N. (2022). [*Deduplicating Training Data Makes Language Models Better*](https://arxiv.org/abs/2107.06499). ACL 2022, mục 4. MinHash, mảng hậu tố, và số đo về học thuộc, rò rỉ dữ liệu kiểm tra. Bài báo đặt tên chữ $b$, $r$ ngược với bài này.
+- Penedo, G., Kydlíček, H., Ben Allal, L., Lozhkov, A., Mitchell, M., Raffel, C., Von Werra, L., Wolf, T. (2024). [*The FineWeb Datasets: Decanting the Web for the Finest Text Data at Scale*](https://arxiv.org/abs/2406.17557). arXiv:2406.17557, mục 3 và 4. Ghi lại từng thí nghiệm: trích chữ, luật lọc, khử trùng lặp toàn cục và từng đợt crawl, FineWeb-Edu.
+- Penedo, G. và cộng sự (2023). [*The RefinedWeb Dataset for Falcon LLM: Outperforming Curated Corpora with Web Data, and Web Data Only*](https://arxiv.org/abs/2306.01116). arXiv:2306.01116, mục 3 và phụ lục G. Một quy trình chỉ dùng dữ liệu web. Phụ lục G giải thích cấu hình MinHash (450 băng × 20 hàng), khác với cách ghi ở mục 3.3.
+- Raffel, C. và cộng sự (2020). [*Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer*](https://arxiv.org/abs/1910.10683). *JMLR* 21(140), mục 2.2. Danh sách luật lọc của C4.
+- Gao, L. và cộng sự (2020). [*The Pile: An 800GB Dataset of Diverse Text for Language Modeling*](https://arxiv.org/abs/2101.00027). arXiv:2101.00027, bảng 1. Thành phần, trọng số và số epoch của 22 nguồn.
+- Soldaini, L. và cộng sự (2024). [*Dolma: an Open Corpus of Three Trillion Tokens for Language Model Pretraining Research*](https://arxiv.org/abs/2402.00159). ACL 2024, arXiv:2402.00159. Bộ dữ liệu mở cùng công cụ làm dữ liệu, có phần lọc PII và nội dung độc hại.
+
+<LessonProgress />

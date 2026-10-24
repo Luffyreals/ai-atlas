@@ -1,0 +1,355 @@
+---
+title: Graph RAG
+description: Câu hỏi cần nối nhiều sự kiện thì RAG vector dễ hụt. Dựng đồ thị tri thức bằng LLM, lưu vào Neo4j, hỏi nhiều bước bằng Cypher, và ý tưởng GraphRAG.
+quiz:
+  - question: 'Kho tin âm nhạc có hai đoạn: "Ca sĩ Hà ký hợp đồng với hãng đĩa Sóng Âm" và "Sóng Âm vừa phát hành album đầu tay của ban nhạc Gió Lộng". Người dùng hỏi: "Ai cùng hãng đĩa với ca sĩ Hà?". Vì sao RAG vector với top-$k$ nhỏ dễ trả lời thiếu?'
+    options:
+      - 'Vì embedding không biểu diễn được tên riêng tiếng Việt'
+      - 'Vì đoạn thứ hai không nhắc tới Hà, nên có thể không đủ giống câu hỏi để lọt vào top-$k$; câu trả lời cần nối hai đoạn qua nút chung Sóng Âm'
+      - 'Vì độ tương tự cosine chỉ so được hai đoạn có cùng độ dài'
+    answer: 1
+    explanation: 'RAG vector chấm từng đoạn riêng lẻ theo độ giống với câu hỏi. Đoạn có câu trả lời (Gió Lộng) không chứa chữ nào về Hà, nên dễ bị xếp thấp. Trong đồ thị, hai bộ ba (Hà, SIGNED_WITH, Sóng Âm) và (Sóng Âm, RELEASED, Gió Lộng) chung nút Sóng Âm, nên đi hai bước là tới. Cosine không phụ thuộc độ dài vectơ, còn embedding vẫn xử lý được tên riêng; vấn đề nằm ở chỗ thông tin bị chia ra hai đoạn.'
+  - question: 'LLM trích được hai bộ ba từ hai đoạn khác nhau: (Lan, FOUNDED, Mây Xanh) và (Cty Mây Xanh, BASED_IN, Đà Nẵng). Truy vấn "người sáng lập công ty có trụ sở ở Đà Nẵng" không trả về ai. Nguyên nhân khả dĩ nhất?'
+    options:
+      - 'Cypher không đi được hai bước trong một truy vấn'
+      - 'Phải đổi hướng cả hai cạnh thì truy vấn mới chạy'
+      - 'Mây Xanh và Cty Mây Xanh thành hai nút khác nhau, nên đồ thị bị đứt ở giữa; cần gộp thực thể trước khi lưu'
+      - 'Thiếu một mạng GCN để học embedding cho các nút'
+    answer: 2
+    explanation: 'Đồ thị chỉ nối hai sự kiện khi chúng dùng chung đúng một nút. Hai cách viết tên tạo ra hai nút, nên không có đường đi từ Lan tới Đà Nẵng. Cypher đi nhiều bước được (ví dụ mẫu hai bước hoặc `{1,3}`). Hướng của hai cạnh ở đây đã đúng. Graph RAG không cần huấn luyện mạng nào; việc cần làm là gộp thực thể (entity resolution).'
+  - question: 'Đồ thị có cạnh (An)-[:WORKS_AT]->(Công ty Bình Minh). Truy vấn `MATCH (c {name: ''Công ty Bình Minh''})-[:WORKS_AT]->(p) RETURN p.name` trả về rỗng. Sửa thế nào?'
+    options:
+      - 'Đổi mũi tên thành `(c)<-[:WORKS_AT]-(p)`, hoặc bỏ mũi tên `(c)-[:WORKS_AT]-(p)` để không xét hướng'
+      - 'Thay `MATCH` bằng `MERGE`'
+      - 'Thêm `{1,1}` sau `-[:WORKS_AT]->`'
+      - 'Đặt tên công ty trong tham số `$name` thay vì viết thẳng'
+    answer: 0
+    explanation: 'Cạnh đi từ An tới công ty, còn mẫu đòi một cạnh đi ra từ công ty. Mẫu phải khớp hướng, hoặc bỏ mũi tên để chấp nhận cả hai chiều. `MERGE` không khớp được cả mẫu thì tạo cả mẫu: thêm một nút ''Công ty Bình Minh'' trùng tên, một nút rỗng và một cạnh giữa chúng, thay vì tìm. `{1,1}` chỉ là một bước, không đổi hướng. Tham số `$name` là thói quen tốt, nhưng không làm truy vấn này có kết quả.'
+  - question: 'Bạn có 2 000 biên bản họp và hỏi: "Ba vấn đề được bàn nhiều nhất trong cả năm là gì?". Vì sao global search của GraphRAG (Microsoft) hợp với câu này hơn RAG vector top-$k$?'
+    options:
+      - 'Vì GraphRAG không gọi LLM lúc lập chỉ mục, nên rẻ hơn'
+      - 'Vì GraphRAG tìm thực thể có trong câu hỏi rồi đi quanh nó vài bước'
+      - 'Vì GraphRAG dùng $k$ lớn hơn nên đọc được nhiều đoạn hơn'
+      - 'Vì không đoạn nào chứa sẵn câu trả lời; GraphRAG đã tóm tắt sẵn từng cộng đồng thực thể của cả kho, rồi gộp các câu trả lời từng phần'
+    answer: 3
+    explanation: 'Câu hỏi toàn cục cần nhìn cả kho, trong khi top-$k$ chỉ thấy vài đoạn giống câu hỏi nhất. GraphRAG trả giá lúc lập chỉ mục (nhiều lần gọi LLM để trích thực thể và viết tóm tắt) để lúc hỏi có sẵn bản tóm tắt phủ khắp kho. Đi quanh một thực thể là local search, hợp với câu hỏi về một thực thể cụ thể; câu này không nêu thực thể nào.'
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import RagPipelineFigure from '@components/figures/RagPipelineFigure.astro';
+import multiHopCode from '@code/llm/graph-rag/multi-hop.vi.py?raw';
+import extractCode from '@code/llm/graph-rag/extract-triples.vi.py?raw';
+import neo4jCode from '@code/llm/graph-rag/neo4j-graph.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu vì sao câu hỏi cần nối nhiều sự kiện làm khó RAG vector, và **đồ thị tri thức** (knowledge graph) giúp ở chỗ nào.
+- Biểu diễn được tri thức bằng **bộ ba** (triple) chủ thể – quan hệ – đối tượng, và viết được prompt nhờ LLM trích bộ ba ra JSON có kiểm tra.
+- Lưu được bộ ba vào Neo4j và viết được truy vấn Cypher một bước, hai bước, và độ dài thay đổi `{1,3}`.
+- Nhận ra ý tưởng của GraphRAG (Microsoft): tóm tắt theo cộng đồng cho câu hỏi về cả kho, và biết khi nào RAG vector vẫn là lựa chọn tốt hơn.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+RAG chia tài liệu thành **chunk**, embed từng chunk, rồi với mỗi câu hỏi lấy **top-$k$** chunk có độ tương tự cosine cao nhất và ghép vào prompt. Bài này giữ nguyên khung đó, chỉ thay bước truy xuất.
+:::
+
+## Trực giác
+
+Bạn làm chatbot cho một trang tin khởi nghiệp. Kho có vài nghìn bài báo ngắn. Ba đoạn trong đó:
+
+- "Chị Lan, cựu sinh viên ĐH Bách khoa, sáng lập Mây Xanh năm 2021."
+- "Quỹ Sao Mai vừa rót vốn vào Mây Xanh, công ty có trụ sở tại Đà Nẵng."
+- "Lúa Vàng ở Cần Thơ, do anh Minh sáng lập, công bố nhận vốn từ Quỹ Sao Mai."
+
+Câu hỏi "Ai sáng lập Mây Xanh?" thì dễ. Đoạn thứ nhất giống câu hỏi, RAG vector lấy nó ở top-1, xong.
+
+Còn câu "Những công ty nào có chung nhà đầu tư với Mây Xanh?" thì khác. Câu trả lời là Lúa Vàng, nằm ở đoạn thứ ba. Nhưng đoạn thứ ba không nhắc tới Mây Xanh chữ nào. Muốn trả lời, phải đi hai bước: từ Mây Xanh tới Quỹ Sao Mai (đoạn hai), rồi từ Quỹ Sao Mai tới Lúa Vàng (đoạn ba). RAG vector chấm từng đoạn riêng lẻ theo độ giống câu hỏi, nên đoạn ba dễ bị xếp thấp, và mô hình chỉ thấy một nửa câu chuyện.
+
+Hãy nghĩ tới bảng điều tra trong phim trinh thám. Thám tử ghim ảnh người, công ty, địa điểm lên bảng, rồi căng dây đỏ giữa chúng, mỗi sợi có một nhãn: "sáng lập", "rót vốn", "trụ sở ở". Câu hỏi khó lúc này thành việc **lần theo dây**: từ ảnh Mây Xanh, theo dây "rót vốn" ngược về Quỹ Sao Mai, rồi theo một sợi "rót vốn" khác sang Lúa Vàng. Không cần đoạn văn nào nhắc cả hai công ty cùng lúc.
+
+Graph RAG dựng chính tấm bảng đó từ văn bản, với LLM làm người đọc hồ sơ và căng dây giúp bạn. **Bài toán của bài: biến kho văn bản thành một đồ thị gồm thực thể và quan hệ, rồi trả lời câu hỏi bằng cách đi theo các cạnh của đồ thị, nhiều bước khi cần, thay vì chỉ tìm đoạn văn giống câu hỏi.**
+
+## Lý thuyết
+
+### Đồ thị tri thức: thực thể, quan hệ, bộ ba
+
+Chữ "đồ thị" ở đây là **graph**: một mạng gồm **nút** (node) và **cạnh** (edge), không phải biểu đồ (chart) vẽ số liệu.
+
+- Mỗi nút là một **thực thể** (entity): người, công ty, quỹ, thành phố.
+- Mỗi cạnh là một **quan hệ** (relation) giữa hai thực thể. Cạnh **có hướng** và **có nhãn**: "Lan sáng lập Mây Xanh" khác "Mây Xanh sáng lập Lan".
+
+Một sự kiện được ghi thành một **bộ ba** $(s, r, o)$: $s$ là **chủ thể** (subject), $r$ là **quan hệ** (predicate), $o$ là **đối tượng** (object). Ví dụ (Lan, FOUNDED, Mây Xanh) đọc là "Lan sáng lập Mây Xanh", cạnh đi từ Lan tới Mây Xanh. Cả đồ thị tri thức chỉ là một tập bộ ba. Từ ba đoạn văn ở phần Trực giác, cộng thêm vài câu về anh Minh, ta được 8 bộ ba dùng suốt bài:
+
+| Chủ thể $s$ | Quan hệ $r$ | Đối tượng $o$ | Đọc là |
+|---|---|---|---|
+| Lan | `FOUNDED` | Mây Xanh | Lan sáng lập Mây Xanh |
+| Minh | `FOUNDED` | Lúa Vàng | Minh sáng lập Lúa Vàng |
+| Quỹ Sao Mai | `INVESTED_IN` | Mây Xanh | Quỹ Sao Mai đầu tư vào Mây Xanh |
+| Quỹ Sao Mai | `INVESTED_IN` | Lúa Vàng | Quỹ Sao Mai đầu tư vào Lúa Vàng |
+| Lan | `STUDIED_AT` | ĐH Bách khoa | Lan học ở ĐH Bách khoa |
+| Minh | `STUDIED_AT` | ĐH Bách khoa | Minh học ở ĐH Bách khoa |
+| Mây Xanh | `BASED_IN` | Đà Nẵng | Mây Xanh có trụ sở ở Đà Nẵng |
+| Lúa Vàng | `BASED_IN` | Cần Thơ | Lúa Vàng có trụ sở ở Cần Thơ |
+
+Điều quan trọng nhất: **hai bộ ba chung một thực thể thì tự nối với nhau.** Bộ ba thứ ba và thứ tư lấy từ hai bài báo khác nhau, nhưng cùng có nút Quỹ Sao Mai, nên trong đồ thị chúng thành một con đường Mây Xanh – Quỹ Sao Mai – Lúa Vàng. Tri thức rải rác ở nhiều đoạn được ghép lại qua nút chung.
+
+Tên thực thể giữ tiếng Việt. Tên quan hệ viết tiếng Anh, chữ hoa, nối bằng gạch dưới, theo thói quen của Cypher (ngôn ngữ truy vấn ở phần sau). Tên chỉ gồm chữ, số và gạch dưới (không có khoảng trắng) thì không phải bọc trong dấu nháy ngược; bài dùng tiếng Anh chữ hoa vì đó là quy ước quen thuộc của Cypher. Danh sách các loại quan hệ (và loại thực thể) được phép gọi là **lược đồ** (schema). Có lược đồ thì cùng một ý luôn được ghi bằng cùng một nhãn, thay vì lúc `FOUNDED`, lúc `CO_FOUNDER_OF`.
+
+### Từ văn bản tới bộ ba: nhờ LLM trích
+
+Ai viết ra 8 bộ ba kia? Với vài nghìn bài báo, ta nhờ LLM. Quy trình giống bước lập chỉ mục của RAG: chia văn bản thành chunk, rồi với **mỗi** chunk gọi mô hình chat một lần. Prompt dùng lại ba ý của bài [Prompt Engineering](/vi/llm/prompt-engineering/):
+
+1. **Chỉ dẫn rõ, kèm lược đồ:** chỉ được dùng các quan hệ `FOUNDED`, `INVESTED_IN`, `STUDIED_AT`, `BASED_IN`; chỉ ghi điều văn bản nói rõ, không suy đoán.
+2. **Một ví dụ mẫu** (few-shot): một câu ngắn và đúng JSON mong muốn cho câu đó.
+3. **Định dạng đầu ra:** chỉ một đối tượng JSON, có thể bật thêm JSON mode như bài [Sử dụng API văn bản](/vi/llm/text-api/).
+
+Với đoạn "Quỹ Sao Mai vừa rót vốn vào Mây Xanh, công ty có trụ sở tại Đà Nẵng.", đầu ra mong muốn là:
+
+```json
+{
+  "triples": [
+    {"subject": "Quỹ Sao Mai", "relation": "INVESTED_IN", "object": "Mây Xanh"},
+    {"subject": "Mây Xanh", "relation": "BASED_IN", "object": "Đà Nẵng"}
+  ]
+}
+```
+
+Đầu ra của mô hình vẫn chỉ là chữ, nên chương trình phải kiểm trước khi lưu: JSON có đọc được không, quan hệ có nằm trong lược đồ không, tên có rỗng không. Bộ ba sai lược đồ thì bỏ, hoặc gửi lại kèm lời nhắc. Nên lưu kèm mỗi bộ ba **mã chunk nguồn** của nó: khi nghi ngờ, bạn mở lại đoạn gốc, và chatbot trích được nguồn như ở bài RAG.
+
+**Gộp thực thể** (entity resolution) là bước khó nhất khi làm thật. "Mây Xanh", "công ty Mây Xanh", "Cty Mây Xanh" là một công ty, nhưng nếu lưu thành ba nút thì đồ thị đứt: đi từ Lan không bao giờ tới Đà Nẵng. Cách làm thường gặp, từ rẻ tới đắt: chuẩn hóa chuỗi (bỏ khoảng trắng thừa, bỏ chức danh như "chị", "ông"), một bảng tên gọi khác do người viết, nhờ LLM hay embedding gợi ý các cặp tên có thể trùng rồi người duyệt lại.
+
+Cái giá của bước này: RAG vector lập chỉ mục chỉ bằng các lần gọi embedding, còn Graph RAG gọi mô hình chat **cho từng chunk**. Kho lớn thì lập chỉ mục chậm và tốn hơn hẳn, và tài liệu đổi thì phải trích lại phần đổi.
+
+### Lưu và truy vấn bằng Neo4j
+
+Bạn lưu bộ ba vào đâu cũng được: một dict Python, một bảng SQL. Nhưng khi đồ thị lớn và cần hỏi nhiều kiểu, người ta dùng **cơ sở dữ liệu đồ thị** (graph database). Neo4j là một hệ phổ biến, có bản Community miễn phí chạy được trong Docker. Ngôn ngữ truy vấn của nó là **Cypher**, viết mẫu cần tìm như vẽ bằng ký tự:
+
+- Nút: `(c:Entity {name: 'Mây Xanh'})`. `c` là tên biến, `Entity` là nhãn của nút, phần trong ngoặc nhọn là thuộc tính.
+- Cạnh: `-[:FOUNDED]->`, mũi tên chỉ hướng. Bỏ mũi tên (`-[:FOUNDED]-`) là chấp nhận cả hai chiều.
+
+**Tạo bộ ba** bằng `MERGE`: tìm mẫu, chưa có thì tạo. Chú ý: `MERGE` xét **cả mẫu** một lượt, không khớp cả mẫu thì tạo cả mẫu, kể cả những nút đã có, vì thế ô code `MERGE` từng nút trước rồi mới `MERGE` cạnh. `CREATE` thì luôn tạo mới, chạy hai lần là có hai nút "Lan".
+
+```cypher
+MERGE (lan:Entity {name: 'Lan'})
+MERGE (mx:Entity {name: 'Mây Xanh'})
+MERGE (lan)-[:FOUNDED]->(mx)
+```
+
+**Một bước:** ai sáng lập Mây Xanh? Mẫu đi từ một nút bất kỳ `p` theo cạnh `FOUNDED` tới Mây Xanh.
+
+```cypher
+MATCH (p)-[:FOUNDED]->(c:Entity {name: 'Mây Xanh'})
+RETURN p.name
+```
+
+Kết quả: `"Lan"`.
+
+**Hai bước:** công ty nào có chung nhà đầu tư với Mây Xanh? Mẫu vẽ đúng con đường ở phần Trực giác: từ Mây Xanh, theo cạnh `INVESTED_IN` **ngược** về quỹ `f`, rồi theo một cạnh `INVESTED_IN` khác đi **xuôi** tới công ty `other`.
+
+```cypher
+MATCH (c:Entity {name: 'Mây Xanh'})<-[:INVESTED_IN]-(f)-[:INVESTED_IN]->(other)
+RETURN f.name AS quy, other.name AS cong_ty
+```
+
+Kết quả: `"Quỹ Sao Mai", "Lúa Vàng"`. Mây Xanh không tự xuất hiện ở cột `cong_ty`, vì trong một mẫu, Cypher không cho đi lại cùng một cạnh hai lần.
+
+**Độ dài thay đổi:** mọi thực thể cách Mây Xanh từ 1 tới 3 bước, theo cạnh loại nào và chiều nào cũng được.
+
+```cypher
+MATCH (c:Entity {name: 'Mây Xanh'})-[]-{1,3}(n)
+RETURN DISTINCT n.name AS ten
+```
+
+`{1,3}` đặt sau một cạnh nghĩa là "lặp cạnh này từ 1 tới 3 lần". Đây là cú pháp mới, theo chuẩn GQL. Tài liệu và ví dụ cũ trên mạng viết `-[*1..3]-`. Neo4j Community 2026.10 vẫn chạy cả hai và cho cùng kết quả (7 thực thể), nhưng phiên bản Neo4j cũ hơn có thể không hiểu `{1,3}`: ví dụ nào báo lỗi cú pháp thì kiểm phiên bản trước.
+
+**Giá trị từ người dùng đi qua tham số.** Trong code, viết `{name: $name}` và truyền `name="Mây Xanh"` riêng, đừng nối chuỗi. Nối chuỗi thì một cái tên chứa dấu nháy và vài lệnh Cypher có thể biến thành lệnh xóa dữ liệu, giống prompt injection nhưng ở tầng cơ sở dữ liệu. Có một chỗ không viết `$r` được như tên: **kiểu quan hệ** trong mẫu `-[:FOUNDED]->`. Ô code Neo4j của bài ghép kiểu quan hệ vào chuỗi, nhưng chỉ sau khi kiểm nó nằm trong lược đồ. (Neo4j bản mới còn có cú pháp kiểu động `$(...)` cho chỗ này, được giới thiệu chính để giảm rủi ro tiêm Cypher, nhưng tài liệu Neo4j lưu ý truy vấn dùng giá trị động có thể chạy chậm hơn truy vấn tĩnh.)
+
+### Truy vấn nhiều bước là duyệt đồ thị
+
+Bên dưới `{1,3}` là một phép duyệt đồ thị. Cách tự nhiên nhất là **BFS** (breadth-first search, tìm kiếm theo chiều rộng): đi từ nút xuất phát ra mọi láng giềng (bước 1), từ các nút đó ra láng giềng chưa gặp (bước 2), cứ thế từng lớp một, và dừng ở $h$ bước. Vì đi theo lớp, lần đầu gặp một nút cũng là lúc có đường đi ngắn nhất tới nó. Ô code chạy trên trang cài đúng thuật toán này bằng một dict và một hàng đợi.
+
+Số nút tìm được tăng rất nhanh theo $h$. Giả sử mỗi nút có khoảng $d$ láng giềng. Bước 1 gặp tối đa $d$ nút; mỗi nút đó lại mở ra $d$ nút nữa, nên bước 2 gặp tối đa $d^2$; cứ thế, sau $h$ bước có tối đa
+
+$$
+d + d^2 + \cdots + d^h
+$$
+
+nút. Với $d = 10$ và $h = 3$, đó là $10 + 100 + 1000 = 1110$ nút: dán hết vào prompt thì không vừa, và phần lớn chẳng liên quan. Vì vậy Graph RAG nên **giới hạn số bước** (thường 1–2), giới hạn số bộ ba đưa vào prompt, và **lọc theo loại quan hệ** như truy vấn hai bước ở trên, thay vì đi theo mọi cạnh.
+
+### Graph RAG từ đầu tới cuối
+
+Ghép lại, một hệ Graph RAG ở cấp ứng dụng thường chạy như sau:
+
+1. **Lập chỉ mục** (một lần): chia chunk, nhờ LLM trích bộ ba, kiểm, gộp thực thể, lưu vào đồ thị kèm chunk nguồn.
+2. **Nhận ra thực thể trong câu hỏi**: nhờ LLM liệt kê tên riêng trong câu hỏi, rồi khớp với tên nút (so chuỗi, hoặc embedding tên nút).
+3. **Duyệt đồ thị** quanh các thực thể đó, 1–2 bước, lọc theo loại quan hệ khi biết.
+4. **Biến bộ ba thành chữ**: mỗi bộ ba một dòng, ví dụ `Quỹ Sao Mai INVESTED_IN Lúa Vàng`, kèm chunk nguồn nếu cần.
+5. **Ghép vào prompt và gọi mô hình chat**, đúng như RAG thường: chỉ dẫn, ngữ cảnh đánh số, câu hỏi.
+
+So với pipeline ở bài [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/), chỉ bước truy xuất đổi: thay "tìm top-$k$ theo cosine" bằng "duyệt đồ thị". Hai cách không loại trừ nhau. Nhiều hệ dùng cả hai: vector tìm đoạn văn liên quan, đồ thị bổ sung các mối nối mà đoạn văn không nói cùng một chỗ.
+
+Hình dưới nhắc lại pipeline RAG vector của bài trước. Ở Graph RAG, hãy đọc khối "Kho vectơ" thành đồ thị, và khối "Tìm top-k (cosine)" thành bước duyệt đồ thị quanh các thực thể của câu hỏi; phần ghép prompt và gọi mô hình chat giữ nguyên.
+
+{/* FIG: dùng lại hình của bài rag-chatbot; chỉ bước truy xuất đổi, như câu dẫn ở trên. */}
+<RagPipelineFigure />
+
+Có một cách khác cho bước 3: nhờ LLM **viết luôn truy vấn Cypher** từ câu hỏi. Cách này linh hoạt, nhưng chạy thẳng một truy vấn do mô hình viết là mạo hiểm. Nếu làm, hãy chạy truy vấn ở chế độ chỉ đọc (driver Python: `routing_=RoutingControl.READ`, máy chủ sẽ từ chối lệnh ghi), đặt giới hạn thời gian chạy, và trên Neo4j Enterprise thì dùng tài khoản chỉ có quyền đọc.
+
+### GraphRAG của Microsoft: câu hỏi về cả kho
+
+Có một loại câu hỏi mà cả RAG vector lẫn duyệt quanh một thực thể đều bó tay: "**Các chủ đề chính** trong kho tài liệu này là gì?". Không đoạn nào chứa sẵn câu trả lời, và câu hỏi chẳng nêu thực thể nào để bắt đầu. Lấy top-$k$ đoạn thì giống hỏi ý kiến cả lớp mà chỉ nghe ba bạn bàn đầu.
+
+[Edge và cộng sự (2024)](https://arxiv.org/abs/2404.16130) đề xuất GraphRAG cho loại câu hỏi **toàn cục** (global) này. Tên giống "Graph RAG", nhưng đây là tên một cách làm cụ thể và một dự án mã nguồn mở của Microsoft. Ý chính:
+
+- **Lúc lập chỉ mục:** LLM trích thực thể và quan hệ từ văn bản, dựng đồ thị. Đồ thị được chia thành các **cộng đồng** (community): những cụm thực thể nối với nhau chặt hơn với phần còn lại. Tài liệu của dự án ghi là dùng thuật toán Leiden, chia theo nhiều cấp. LLM viết **tóm tắt cho từng cộng đồng**, làm sẵn một lần.
+- **Lúc hỏi:** mỗi bản tóm tắt cộng đồng cho ra một câu trả lời từng phần, rồi các câu trả lời từng phần được gộp thành câu trả lời cuối. Trở lại ví dụ lớp học: mỗi nhóm thảo luận riêng rồi cử người phát biểu, sau đó mới tổng hợp.
+
+Paper báo cáo GraphRAG trả lời **đầy đủ hơn** và **đa dạng hơn** so với một RAG vector nền, trên các câu hỏi toàn cục với kho cỡ một triệu token. Đó là kết quả cho đúng loại câu hỏi ấy, không phải "GraphRAG tốt hơn RAG mọi lúc". Tài liệu của dự án tách các chế độ hỏi: **global search** dùng tóm tắt cộng đồng cho câu hỏi về cả kho; **local search** đi từ một thực thể ra láng giềng của nó, gần với cách làm ở mục trước; ngoài ra còn DRIFT search (local search kèm thông tin cộng đồng) và chế độ tìm vector cơ bản cho câu hỏi một chỗ.
+
+### Giới hạn
+
+- **Chất lượng đồ thị bằng chất lượng bước trích.** LLM có thể bịa quan hệ, đặt ngược hướng, hoặc tách một thực thể thành nhiều nút. Hộp thứ hai ở mục Lỗi hay gặp nói cách kiểm.
+- **Lập chỉ mục tốn kém**, như đã nói: mỗi chunk một lần gọi mô hình chat, và với GraphRAG còn thêm các lần viết tóm tắt cộng đồng.
+- **Lược đồ phải bảo trì.** Thêm loại câu hỏi mới có thể cần loại quan hệ mới, tức là trích lại.
+- **Học trên đồ thị là một hướng khác.** Mạng tích chập đồ thị (Graph Convolutional Network, GCN) của [Kipf và Welling (2017)](https://arxiv.org/abs/1609.02907) cập nhật vectơ của mỗi nút từ vectơ của các láng giềng, tạo embedding cho nút. GCN cần huấn luyện; Graph RAG trong bài thì không. Bài chỉ nhắc tên để bạn khỏi nhầm hai thứ.
+
+## Minh họa
+
+Bảng dưới đặt bốn câu hỏi cạnh con đường trả lời chúng trong đồ thị 8 bộ ba. Hãy nhìn cột "Số bước": càng nhiều bước, các bộ ba trên đường đi càng dễ nằm rải ở nhiều đoạn văn (hàng 3 cần hai bài báo khác nhau), và tìm đoạn theo độ giống câu hỏi càng dễ hụt.
+
+| Câu hỏi | Đường đi trong đồ thị | Số bước |
+|---|---|---:|
+| Ai sáng lập Mây Xanh? | Mây Xanh `<-[FOUNDED]-` **Lan** | 1 |
+| Người sáng lập Mây Xanh học trường nào? | Mây Xanh `<-[FOUNDED]-` Lan `-[STUDIED_AT]->` **ĐH Bách khoa** | 2 |
+| Công ty nào có chung nhà đầu tư với Mây Xanh? | Mây Xanh `<-[INVESTED_IN]-` Quỹ Sao Mai `-[INVESTED_IN]->` **Lúa Vàng** | 2 |
+| Ai học cùng trường với người sáng lập Mây Xanh? | Mây Xanh `<-[FOUNDED]-` Lan `-[STUDIED_AT]->` ĐH Bách khoa `<-[STUDIED_AT]-` **Minh** | 3 |
+
+Bảng thứ hai so sánh ba cách làm. Đọc theo hàng "Mạnh ở" trước: mỗi cách hợp với một loại câu hỏi.
+
+| Tiêu chí | RAG vector | Graph RAG (duyệt đồ thị) | GraphRAG (tóm tắt cộng đồng) |
+|---|---|---|---|
+| Lập chỉ mục | Chia chunk, gọi embedding | Thêm: LLM trích bộ ba cho từng chunk, gộp thực thể | Thêm nữa: chia cộng đồng, LLM viết tóm tắt cho từng cộng đồng |
+| Truy xuất | Top-$k$ chunk theo cosine | Duyệt 1–2 bước quanh thực thể trong câu hỏi | Mỗi tóm tắt cho câu trả lời từng phần, rồi gộp |
+| Mạnh ở | Câu hỏi một chỗ: "X quy định gì?" | Quan hệ, nhiều bước: "Ai có chung nhà đầu tư với X?" | Câu hỏi về cả kho: "Chủ đề chính là gì?" |
+| Yếu ở | Câu trả lời rải ở nhiều đoạn | Phụ thuộc bước trích và lược đồ | Lập chỉ mục tốn nhiều lần gọi LLM nhất |
+| Khi tài liệu đổi | Embed lại chunk đổi | Trích lại, gộp lại thực thể | Trích lại, có thể phải tóm tắt lại cộng đồng |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026, với Python 3.14, `openai` 3.37 và driver `neo4j` 6.4 trên Neo4j Community 2026.10.1; ô chạy trên trang chỉ dùng Python thuần. Ô thứ nhất chạy ngay trên trang. Ô thứ hai gọi API, ô thứ ba cần Neo4j, nên hai ô này chạy trên máy bạn.
+
+### Duyệt nhiều bước bằng BFS
+
+Ô này dựng đồ thị từ 8 bộ ba của bài, không cần thư viện nào. Mỗi bộ ba được ghi vào danh sách kề ở **cả hai đầu**: ở chủ thể là cạnh đi ra `-[R]->`, ở đối tượng là cạnh đi vào `<-[R]-`. Nhờ vậy BFS đi được cả hai chiều, mà vẫn nhớ chiều thật của từng cạnh. Hàm `bfs` trả về đường đi ngắn nhất tới mọi thực thể trong tối đa `max_hops` bước.
+
+<PythonRunner code={multiHopCode} title="Duyệt đồ thị tri thức nhiều bước bằng dict và BFS" />
+
+- **Ba dòng đầu** đếm số thực thể tới được từ Mây Xanh: 3 thực thể trong 1 bước, 5 trong 2 bước, 7 trong 3 bước. Đồ thị chỉ có 8 nút, nên 3 bước đã chạm mọi nút khác. Ô Neo4j ở dưới cũng đếm được 7 với `-[]-{1,3}`.
+- **Ba đường đi một bước** (Lan, Quỹ Sao Mai, Đà Nẵng) trả lời được câu hỏi một bước như "Ai sáng lập Mây Xanh?".
+- **Hai đường đi hai bước** chính là hàng 2 và hàng 3 của bảng ở mục Minh họa: Lan `-[STUDIED_AT]->` ĐH Bách khoa, và Quỹ Sao Mai `-[INVESTED_IN]->` Lúa Vàng.
+
+Thử đổi `bfs("Mây Xanh", 2)` ở vòng `for` cuối thành `bfs("Mây Xanh", 3)`: hai đường mới tới Minh và Cần Thơ hiện ra. Đường tới Minh là hàng cuối của bảng Minh họa, vì BFS gặp ĐH Bách khoa trước Lúa Vàng.
+
+### Trích bộ ba bằng LLM
+
+Ô này gửi cho mô hình prompt ở mục Lý thuyết: chỉ dẫn kèm lược đồ, một ví dụ mẫu (lượt `user` và `assistant` viết sẵn), rồi đoạn văn cần trích. Nó cần ba biến môi trường như ở bài [Sử dụng API văn bản](/vi/llm/text-api/#chuẩn-bị-nhà-cung-cấp-và-biến-môi-trường). Nhà cung cấp báo lỗi 400 với `response_format` thì xóa dòng đó: prompt vẫn đòi JSON, và `json.loads` vẫn kiểm.
+
+<LocalCode code={extractCode} title="Trích bộ ba từ một đoạn văn, có kiểm lược đồ" packages={['openai']} />
+
+Chương trình in mỗi bộ ba hợp lệ thành một tuple, in "Bỏ qua (sai lược đồ)" cho bộ ba có quan hệ ngoài danh sách, và "Bỏ qua (tên rỗng)" cho bộ ba thiếu chủ thể hoặc đối tượng. Nếu mô hình không trả JSON, hoặc `triples` không phải một danh sách, nó in "Không đọc được JSON" kèm chuỗi nhận được. Đoạn văn được chọn để có hai chỗ đáng xem:
+
+- "tốt nghiệp ĐH Bách khoa" không có chữ "học", nên mô hình phải tự ánh xạ sang `STUDIED_AT`, hoặc bỏ qua. Cả hai đều có thể xảy ra.
+- "nhận vốn từ Quỹ Sao Mai" viết theo góc nhìn của Mây Xanh. Bộ ba đúng hướng là (Quỹ Sao Mai, `INVESTED_IN`, Mây Xanh). Nếu bạn thấy (Mây Xanh, `INVESTED_IN`, Quỹ Sao Mai), mô hình đã đặt ngược hướng, và bước kiểm lược đồ **không** bắt được lỗi này.
+
+### Lưu vào Neo4j và hỏi bằng Cypher
+
+Chạy Neo4j Community trong Docker (xem bài [Docker và Cloud](/vi/llm/docker-cloud/) nếu bạn mới dùng Docker). Mật khẩu đặt bằng biến môi trường, dùng chung cho lệnh `docker run` và cho code Python; Neo4j đòi mật khẩu ít nhất 8 ký tự. `127.0.0.1:` trước mỗi cổng giữ Neo4j chỉ mở cho máy bạn.
+
+<Tabs syncKey="os">
+<TabItem label="macOS, Linux (bash)">
+
+```sh
+export NEO4J_PASSWORD='<mật khẩu, ít nhất 8 ký tự>'
+docker run --rm --name neo4j-atlas \
+  -p 127.0.0.1:7474:7474 -p 127.0.0.1:7687:7687 \
+  -e NEO4J_AUTH="neo4j/$NEO4J_PASSWORD" \
+  neo4j:community
+```
+
+</TabItem>
+<TabItem label="Windows (PowerShell)">
+
+```powershell
+$env:NEO4J_PASSWORD = '<mật khẩu, ít nhất 8 ký tự>'
+docker run --rm --name neo4j-atlas `
+  -p 127.0.0.1:7474:7474 -p 127.0.0.1:7687:7687 `
+  -e NEO4J_AUTH="neo4j/$env:NEO4J_PASSWORD" `
+  neo4j:community
+```
+
+</TabItem>
+</Tabs>
+
+Khi log hiện dòng `Started.`, mở cửa sổ dòng lệnh thứ hai, đặt lại `NEO4J_PASSWORD` ở đó, rồi chạy ô dưới. Cổng 7687 dành cho driver; cổng 7474 mở Neo4j Browser tại `http://localhost:7474`, nơi bạn dán được các khối Cypher ở mục Lý thuyết và xem đồ thị dưới dạng hình. Có `--rm` và không gắn ổ đĩa (volume), nên dừng container là mất dữ liệu: đủ cho việc học, không dùng cho dữ liệu thật.
+
+<LocalCode code={neo4jCode} title="Ghi 8 bộ ba vào Neo4j, hỏi hai bước và nhiều bước" packages={['neo4j']} sampleVaries={false}>
+
+```text
+{'fund': 'Quỹ Sao Mai', 'company': 'Lúa Vàng'}
+{'n': 7}
+```
+
+</LocalCode>
+
+Ô này xóa **mọi** nút `Entity` trong cơ sở dữ liệu, ghi lại 8 bộ ba bằng `MERGE`, rồi chạy hai truy vấn với tham số `name="Mây Xanh"`. Dòng thứ nhất là truy vấn hai bước "chung nhà đầu tư": đúng hàng 3 của bảng Minh họa. Dòng thứ hai đếm thực thể cách Mây Xanh 1 tới 3 bước, được 7, khớp với ô BFS ở trên: trên đồ thị này, `{1,3}` của Cypher và BFS của bạn tìm ra cùng một tập thực thể. (Hai bên không làm y hệt nhau: Cypher liệt kê mọi đường đi không lặp cạnh, còn BFS chỉ giữ đường ngắn nhất tới mỗi nút.) Kết quả giống nhau mọi lần chạy, vì không có mô hình nào trong ô này. Biến `NEO4J_URI` là tùy chọn, chỉ cần khi Neo4j không nằm ở `127.0.0.1:7687`; đừng trỏ nó vào cơ sở dữ liệu đang có dữ liệu thật.
+
+## Lỗi hay gặp
+
+:::caution[Graph RAG luôn tốt hơn RAG vector]
+Không. Câu hỏi một chỗ ("Mây Xanh có trụ sở ở đâu?") thì RAG vector đủ, dựng nhanh, rẻ, và không phụ thuộc bước trích bộ ba. Kết quả của Edge và cộng sự (2024) là cho câu hỏi toàn cục, trong điều kiện thử nghiệm của họ. Hãy bắt đầu bằng RAG vector, đo trên câu hỏi thật, và chỉ thêm đồ thị khi thấy nhiều câu cần nối nhiều sự kiện.
+:::
+
+:::caution[Tin bộ ba do LLM trích, và quên gộp tên]
+LLM có thể bịa một quan hệ văn bản không nói, đặt ngược hướng như ví dụ "nhận vốn từ", hay ghi một công ty bằng ba tên. Kiểm lược đồ bằng code chỉ bắt được lỗi định dạng, không bắt được lỗi nghĩa. Để giảm lỗi ngược hướng, hãy mô tả hướng của từng quan hệ ngay trong lược đồ của prompt, ví dụ "`INVESTED_IN`: bên rót vốn → công ty nhận vốn". Hãy lưu chunk nguồn cạnh mỗi bộ ba, đọc lại một mẫu ngẫu nhiên vài chục bộ ba, và gộp thực thể trước khi lưu. Một truy vấn nhiều bước trả về rỗng thường là dấu hiệu đồ thị bị đứt vì hai cách viết một tên.
+:::
+
+:::caution[Nối chuỗi vào Cypher, ghi cứng mật khẩu]
+`f"MATCH (c {{name: '{ten}'}})"` mở đường cho tiêm Cypher, nhất là khi `ten` lấy từ người dùng hay từ đầu ra của LLM. Truyền giá trị qua tham số `$name`; thứ duy nhất được ghép vào chuỗi là kiểu quan hệ, và chỉ sau khi kiểm nó nằm trong lược đồ. Mật khẩu Neo4j cũng như API key: đọc từ biến môi trường, không viết vào code hay đẩy lên Git. Đừng mở cổng Neo4j ra mạng ngoài bằng `-p 7687:7687` khi chưa cần.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Đồ thị tri thức là một tập bộ ba $(s, r, o)$: thực thể là nút, quan hệ là cạnh có hướng, có nhãn. Hai bộ ba chung một thực thể thì tự nối, nên tri thức rải ở nhiều đoạn được ghép lại.
+- LLM trích bộ ba từ từng chunk theo một lược đồ, trả JSON. Chương trình phải kiểm JSON và lược đồ, lưu chunk nguồn, và gộp thực thể; bước trích là chỗ tốn kém và dễ sai nhất.
+- Neo4j lưu đồ thị; Cypher vẽ mẫu bằng ký tự, như `(c)<-[:INVESTED_IN]-(f)-[:INVESTED_IN]->(o)`, và `-[]-{1,3}` cho 1 tới 3 bước (cú pháp cũ `*1..3`). Bên dưới là phép duyệt kiểu BFS; số nút tăng cỡ $d^h$ theo số bước, nên phải giới hạn bước và lọc loại quan hệ.
+- Graph RAG chỉ thay bước truy xuất của RAG bằng duyệt đồ thị. GraphRAG của Microsoft thêm tóm tắt theo cộng đồng cho câu hỏi về cả kho. RAG vector vẫn là lựa chọn rẻ và đủ cho câu hỏi một chỗ.
+
+**Đọc thêm:**
+
+- Edge, D., Trinh, H., Cheng, N. và cộng sự (2024). [*From Local to Global: A Graph RAG Approach to Query-Focused Summarization*](https://arxiv.org/abs/2404.16130). arXiv:2404.16130. Paper GraphRAG: dựng đồ thị bằng LLM, tóm tắt cộng đồng, gộp câu trả lời từng phần cho câu hỏi toàn cục.
+- Microsoft. [*GraphRAG*](https://microsoft.github.io/graphrag/), tài liệu dự án (truy cập 10/2026). Quy trình lập chỉ mục và các chế độ global search, local search; mã nguồn ở [microsoft/graphrag](https://github.com/microsoft/graphrag).
+- Neo4j. [*Cypher Manual: Variable-length patterns*](https://neo4j.com/docs/cypher-manual/current/patterns/variable-length-patterns/) (truy cập 10/2026). Cú pháp `{1,3}` theo GQL, so với cú pháp cũ `*1..3`.
+- Neo4j. [*Python Driver Manual*](https://neo4j.com/docs/python-manual/current/), bản 6 (truy cập 10/2026). `GraphDatabase.driver`, `execute_query`, và cách truyền tham số.
+- Kipf, T. N., Welling, M. (2017). [*Semi-Supervised Classification with Graph Convolutional Networks*](https://arxiv.org/abs/1609.02907). ICLR 2017. Cho ai muốn biết GCN, hướng học embedding cho nút mà bài chỉ nhắc tên.
+
+<LessonProgress />

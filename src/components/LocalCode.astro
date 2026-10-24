@@ -1,0 +1,116 @@
+---
+// Code that runs on the reader's machine, not on the page: API calls, PyTorch, apps
+// (docs/architecture/llm-lessons.md, sections 2.2 and 4.1). No island, no script: the block is highlighted at
+// build time by Starlight's <Code>, which also gives the copy button.
+// The environment variables are read from the code itself, so the requirement list cannot drift from it.
+// The default slot, when given, is the sample output (usually one ```text fence).
+// Styles: src/styles/local-code.css, loaded on every page through Starlight's customCss (astro.config.ts).
+import { Code } from '@astrojs/starlight/components';
+import { getStrings } from '@i18n/ui';
+import { pipCommand, readEnvVars } from '@lib/local-code';
+import { getContentLang, getPageLocale } from '@lib/page-locale';
+
+interface Props {
+  /** Program text, imported with ?raw from src/code/<part>/<lesson>/<name>.<locale>.py. Must not be empty. */
+  code: string;
+  /** Caption above the block (content, per locale), like PythonRunner. */
+  title?: string;
+  /** File name in the frame tab, e.g. 'app.py'. */
+  file?: string;
+  /** Only 'python' for now; non-Python code goes in an MDX fence. */
+  lang?: 'python';
+  /** pip names, shown as one "pip install …" line. May carry a version spec ('gradio>=6'), quoted for the shell. */
+  packages?: string[];
+  /** Command to run the file when it is not plain "python <file>", e.g. 'streamlit run app.py'. */
+  command?: string;
+  /** Content, per locale: hardware the code needs, e.g. 'GPU NVIDIA, 16 GB VRAM'. */
+  hardware?: string;
+  /** false when the sample output is the same on every run (parsed HTML, a parameter count…): the note under
+   * "Sample output" then drops "a model gives a different answer each time". */
+  sampleVaries?: boolean;
+}
+
+const { code, title, file, lang = 'python', packages = [], command, hardware, sampleVaries = true } = Astro.props;
+const route = Astro.locals.starlightRoute;
+const where = `<LocalCode /> on "${route.id}"`;
+if (!code?.trim()) {
+  throw new Error(`${where}: the \`code\` prop is empty. Import a file with ?raw.`);
+}
+for (const [prop, value] of [['command', command], ['hardware', hardware]] as const) {
+  if (value !== undefined && !value.trim()) {
+    throw new Error(`${where}: the \`${prop}\` prop is empty. Leave it out instead.`);
+  }
+}
+if (lang !== 'python') {
+  throw new Error(`${where}: \`lang\` must be 'python'. Write non-Python code in an MDX code fence.`);
+}
+
+/** Runs one requirement reader; its error names the page and the prop. */
+function read<T>(prop: 'code' | 'packages', reader: () => T): T {
+  try {
+    return reader();
+  } catch (error) {
+    throw new Error(`${where}: the \`${prop}\` prop is invalid: ${(error as Error).message}`);
+  }
+}
+
+const install = read('packages', () => pipCommand(packages));
+const envVars = read('code', () => readEnvVars(code));
+const locale = getPageLocale(route);
+const t = getStrings(Astro.locals.t, 'localCode');
+// The labels follow the page's language (lang on the root). On Starlight's fallback page the title, the code,
+// the hardware line and the sample output come from the vi file, so they keep that language.
+const contentLang = getContentLang(route);
+const hasRequirements = install !== '' || envVars.length > 0 || command !== undefined || hardware !== undefined;
+const hasOutput = Astro.slots.has('default');
+---
+
+<div class="atlas-local not-content" lang={locale} data-local-code>
+  <div class="atlas-local-head">
+    <p class="atlas-local-badge" data-pagefind-ignore><span class="atlas-local-icon" aria-hidden="true"></span>{t.badge}</p>
+    {title && <p class="atlas-local-title" lang={contentLang}>{title}</p>}
+  </div>
+  {
+    hasRequirements && (
+      <dl class="atlas-local-reqs">
+        {install && (
+          <div>
+            <dt>{t.install}</dt>
+            <dd><code>{install}</code></dd>
+          </div>
+        )}
+        {envVars.length > 0 && (
+          <div>
+            <dt>{t.env}</dt>
+            <dd>{envVars.map((v, i) => <Fragment>{i > 0 && ', '}<code>{v.name}</code>{v.optional && ` (${t.optional})`}</Fragment>)}</dd>
+          </div>
+        )}
+        {command && (
+          <div>
+            <dt>{t.command}</dt>
+            <dd><code>{command}</code></dd>
+          </div>
+        )}
+        {hardware && (
+          <div>
+            <dt>{t.hardware}</dt>
+            <dd lang={contentLang}>{hardware}</dd>
+          </div>
+        )}
+      </dl>
+    )
+  }
+  <div class="atlas-local-code" lang={contentLang}>
+    {/* title is never undefined: otherwise Expressive Code moves a "# app.py" comment out of the code (2.2). */}
+    <Code code={code} lang={lang} title={file ?? ''} />
+  </div>
+  {
+    hasOutput && (
+      <div class="atlas-local-output">
+        <p class="atlas-local-output-label">{t.sampleOutput}</p>
+        <p class="atlas-local-output-note">{sampleVaries ? t.sampleNote : t.sampleNoteFixed}</p>
+        <div lang={contentLang}><slot /></div>
+      </div>
+    )
+  }
+</div>

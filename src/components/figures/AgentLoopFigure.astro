@@ -1,0 +1,64 @@
+---
+// llm/agents, "Minh họa": an agent is a loop. The model picks a tool, the program runs it, the result goes back
+// to the model, until there is an answer or the step limit is hit. The loop is a square read clockwise from
+// the model (accent): model → "call a tool?" → (yes) program runs the tool → result → (steps left) model.
+// The two ways out sit outside the square: "no" down to the answer, "step limit" up to stop. Asking the user
+// before a dangerous tool is a second-group box (dashed) tied to the program by a dashed link.
+// Narrow layout only: the square is already compact. Words: src/data/figures/agent-loop.ts.
+import { AGENT_LOOP } from '@data/figures/agent-loop';
+import { anchor, mainAndSmall, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = AGENT_LOOP[getPageLocale(Astro.locals.starlightRoute)];
+
+// Columns: left x 8–144, a 72-unit gap for the arrow labels, right x 216–352. Rows 32 apart, for labels too.
+const L = { x: 8, width: 136 } as const;
+const R = { x: 216, width: 136 } as const;
+const box = (col: { x: number; width: number }, y: number, height: number): Box => ({ ...col, y, height });
+
+const stop = box(L, 8, 56);
+const question = box(R, 8, 56);
+const result = box(L, 104, 56);
+const model = box(R, 104, 56);
+const run = box(L, 184, 56);
+const decide = box(R, 184, 56);
+const confirm = box(L, 272, 72);
+const answer = box(R, 272, 40);
+const height = confirm.y + confirm.height + 8;
+
+const gapMid = (L.x + L.width + R.x) / 2;
+const lMid = L.x + L.width / 2;
+const rMid = R.x + R.width / 2;
+---
+
+<FigureFrame id="agent-loop" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigNode {...question} lines={t.labels.question} />
+    <FigArrow from={anchor(question, 'bottom')} to={anchor(model, 'top')} />
+    <FigNode {...model} {...mainAndSmall(t.labels.model)} tone="accent" />
+    <FigArrow from={anchor(model, 'bottom')} to={anchor(decide, 'top')} />
+    <FigNode {...decide} lines={t.labels.decide} />
+
+    <FigArrow from={anchor(decide, 'left')} to={anchor(run, 'right')} />
+    <FigText x={gapMid} y={anchor(run, 'right')[1] - 12} lines={t.labels.yes} size="small" />
+    <FigNode {...run} lines={t.labels.run} />
+    <FigArrow from={anchor(run, 'bottom')} to={anchor(confirm, 'top')} tone="alt" head={false} />
+    <FigNode {...confirm} {...mainAndSmall(t.labels.confirm)} tone="alt" />
+    <FigArrow from={anchor(run, 'top')} to={anchor(result, 'bottom')} />
+    <FigNode {...result} {...mainAndSmall(t.labels.result)} />
+
+    <FigArrow from={anchor(result, 'right')} to={anchor(model, 'left')} />
+    <FigText x={gapMid} y={anchor(model, 'left')[1] - 12} lines={t.labels.again} size="small" />
+    <FigArrow from={anchor(result, 'top')} to={anchor(stop, 'bottom')} />
+    <FigText x={lMid + 8} y={(stop.y + stop.height + result.y) / 2} lines={t.labels.limit} size="small" anchor="start" />
+    <FigNode {...stop} {...mainAndSmall(t.labels.stop)} />
+
+    <FigArrow from={anchor(decide, 'bottom')} to={anchor(answer, 'top')} />
+    <FigText x={rMid + 8} y={(decide.y + decide.height + answer.y) / 2} lines={t.labels.no} size="small" anchor="start" />
+    <FigNode {...answer} lines={t.labels.answer} />
+  </Fragment>
+</FigureFrame>

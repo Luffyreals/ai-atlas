@@ -1,0 +1,301 @@
+---
+title: Crawl dữ liệu và MongoDB
+description: Gom trang web cho chatbot. robots.txt và các lớp quy tắc, tải trang lịch sự bằng requests, bóc chữ bằng BeautifulSoup, lưu vào MongoDB không trùng url.
+quiz:
+  - question: 'robots.txt của một site có nhóm `User-agent: *` với đúng một dòng `Disallow: /tin`. Crawler của bạn muốn tải `/tin-tuc/ai` và `/Tin/ai`. Theo RFC 9309, kết quả là gì?'
+    options:
+      - 'Được tải cả hai, vì `/tin` không phải là một thư mục'
+      - 'Cấm `/tin-tuc/ai`, được tải `/Tin/ai`'
+      - 'Cấm cả hai, vì so khớp đường dẫn không phân biệt hoa thường'
+      - 'Được tải `/tin-tuc/ai`, cấm `/Tin/ai`'
+    answer: 1
+    explanation: 'Quy tắc khớp theo tiền tố: `/tin-tuc/ai` bắt đầu bằng `/tin` nên bị cấm, dù chủ site có thể chỉ định chặn trang `/tin`. So khớp đường dẫn lại phân biệt hoa thường, nên `/Tin/ai` không khớp và được tải. Chỉ tên trong dòng `User-agent` mới không phân biệt hoa thường. Muốn chặn đúng một thư mục thì viết `Disallow: /tin/`.'
+  - question: 'Crawler tải `/robots.txt` của một site và nhận mã 503 vì server đang quá tải. Theo RFC 9309, crawler nên làm gì?'
+    options:
+      - 'Coi như site không có robots.txt và tải mọi trang'
+      - 'Tải các trang như thường, chỉ giãn cách 1 giây'
+      - 'Coi như bị cấm toàn bộ site, cho tới khi đọc được robots.txt'
+      - 'Tải lại robots.txt liên tục cho tới khi được'
+    answer: 2
+    explanation: 'Mã 5xx nghĩa là robots.txt "không với tới được", và RFC 9309 bắt crawler coi như cấm hết. Phương án đầu là cách xử lý mã 4xx: khi đó site không có tệp, crawler được truy cập tự do. Nhầm hai nhóm mã này là lỗi hay gặp, mà gửi dồn yêu cầu vào một server đang quá tải là điều tệ nhất có thể làm.'
+  - question: 'robots.txt của một diễn đàn cho phép mọi đường dẫn. Trang hồ sơ thành viên công khai có tên, số điện thoại và ảnh. Bạn định crawl các trang này làm dữ liệu cho chatbot RAG. Nhận định nào đúng?'
+    options:
+      - 'robots.txt chỉ là một lớp. Điều khoản dịch vụ, bản quyền và luật về dữ liệu cá nhân vẫn áp dụng, nên trước hết hãy bỏ dữ liệu cá nhân ra'
+      - 'robots.txt cho phép và trang công khai, nên lấy gì cũng được'
+      - 'Chỉ cần đặt `User-Agent` giống trình duyệt để site không nhận ra bot'
+      - 'Năm 2022, tòa án Mỹ đã xác nhận rằng crawl dữ liệu công khai luôn hợp pháp'
+    answer: 0
+    explanation: 'robots.txt là quy ước về chỗ crawler được đi. Nó cho phép cũng không làm việc lấy dữ liệu trở nên được phép. Tên, số điện thoại, ảnh là dữ liệu cá nhân, và ở Việt Nam việc xử lý chúng chịu Luật Bảo vệ dữ liệu cá nhân. Vụ hiQ kiện LinkedIn chỉ nói về một đạo luật của Mỹ (CFAA), không nói crawl luôn hợp pháp. Giả làm trình duyệt thì không trung thực, và cũng không đổi được gì về mặt pháp lý.'
+  - question: 'Crawler chạy mỗi ngày. Collection có chỉ mục duy nhất trên `url`, và code lưu từng trang bằng `pages.insert_one(page)`. Ngày thứ hai, một trang đã lưu có nội dung mới. Chuyện gì xảy ra?'
+    options:
+      - 'MongoDB tự thay document cũ bằng nội dung mới'
+      - 'Có thêm một document thứ hai cùng `url`, vì `_id` tự sinh khác nhau'
+      - '`insert_one` ném `DuplicateKeyError` và nội dung mới không được lưu. Nên dùng `update_one` lọc theo `url`, với `upsert=True`'
+    answer: 2
+    explanation: 'Chỉ mục duy nhất chặn document thứ hai cùng `url`, dù `_id` khác nhau, nên phương án hai không xảy ra. Nhưng chỉ mục cũng không tự cập nhật gì: `insert_one` chỉ thêm, gặp trùng thì báo lỗi, và chương trình dừng nếu không bắt lỗi. Upsert lọc theo `url`: có rồi thì `$set` nội dung mới, chưa có thì thêm, nên chạy lại bao nhiêu lần cũng chỉ có một document cho mỗi trang.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import robotsCode from '@code/llm/web-crawling-mongodb/robots.vi.py?raw';
+import parseHtmlCode from '@code/llm/web-crawling-mongodb/parse-html.vi.py?raw';
+import crawlCode from '@code/llm/web-crawling-mongodb/crawl.vi.py?raw';
+import saveCode from '@code/llm/web-crawling-mongodb/save.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Phân biệt được các lớp quy tắc khi lấy dữ liệu từ web: robots.txt, điều khoản dịch vụ (Terms of Service), bản quyền và dữ liệu cá nhân, và hiểu vì sao robots.txt cho phép vẫn chưa đủ.
+- Đọc được robots.txt theo RFC 9309 bằng `urllib.robotparser`, kể cả cách xử lý khi tệp không có hoặc server lỗi.
+- Viết được một crawler nhỏ, lịch sự bằng `requests` (có `timeout`, `User-Agent` trung thực, giãn cách giữa các yêu cầu) và bóc phần chữ có ích bằng BeautifulSoup.
+- Lưu trang vào MongoDB dưới dạng document, dùng chỉ mục duy nhất (unique index) trên `url` và upsert để chạy lại không sinh bản trùng.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài này dùng ba thứ của Python cơ bản. **Chuỗi** (string): `text.splitlines()` tách một chuỗi nhiều dòng thành danh sách dòng, f-string `f"{x}"` chèn giá trị vào chuỗi. **Từ điển** (dict) `{"url": ..., "title": ...}` ghép tên trường với giá trị; một document của MongoDB trong Python chính là một dict. **Hàm** (function) gom vài dòng lặp lại thành một tên, như `load_robots()` trong ô crawler của bài.
+:::
+
+## Trực giác
+
+Bạn muốn làm một chatbot trả lời câu hỏi về tài liệu hướng dẫn của một thư viện mã nguồn mở. Tài liệu có vài trăm trang trên web. Chép tay từng trang thì mất cả tuần, nên bạn viết một chương trình tự tải trang, bóc phần chữ, rồi cất lại. Việc tự động đi qua các trang web và tải về gọi là **crawl** (web crawling). Việc lấy dữ liệu ra khỏi một trang đã tải gọi là **bóc tách** (web scraping). Hai từ hay dùng lẫn, nhưng crawl nhấn vào việc đi từ trang này sang trang khác, còn scrape nhấn vào việc lấy dữ liệu.
+
+Chương trình của bạn giống một vị khách vào cửa hàng. Ở cửa có tấm biển "Khu vực dành cho nhân viên": đó là **robots.txt**. Biển không khóa được ai, nhưng khách lịch sự đọc biển và làm theo. Và biển không cấm khu nào cũng không có nghĩa bạn được chụp ảnh hết hàng hóa mang về bán. Khách lịch sự còn không chen vào cùng lúc với cả trăm người: một chương trình gửi hàng trăm yêu cầu mỗi giây có thể làm sập một site nhỏ.
+
+Tải xong rồi cất ở đâu? Vài trăm trang, mỗi trang có địa chỉ, tiêu đề, nội dung, giờ lấy; có trang thêm tác giả, có trang không. Tuần sau chạy lại, bạn muốn cập nhật trang đã đổi chứ không muốn mỗi trang có hai bản. Một **cơ sở dữ liệu tài liệu** (document database) như MongoDB hợp với việc này: mỗi trang là một tờ phiếu, phiếu này có thêm ô "tác giả" cũng không sao.
+
+Bài toán của bài này là: **tải và bóc chữ từ các trang web một cách hợp lệ, lịch sự, rồi lưu chúng vào MongoDB sao cho mỗi trang đúng một bản, có đủ thông tin để sau này chatbot dẫn được nguồn.**
+
+## Lý thuyết
+
+### Trước dòng code đầu tiên: bạn có được lấy không?
+
+Hỏi câu này trước, vì một crawler viết đúng kỹ thuật vẫn có thể làm điều sai. Có nhiều lớp quy tắc, mỗi lớp trả lời một câu hỏi khác nhau:
+
+| Lớp | Trả lời câu hỏi | Cách kiểm |
+|---|---|---|
+| robots.txt | Crawler được đi vào đường dẫn nào? | Đọc `/robots.txt` của site (mục dưới) |
+| Điều khoản dịch vụ | Site có cho phép thu thập tự động không? | Đọc trang điều khoản. Nhiều site cấm crawl |
+| Bản quyền | Bạn được dùng nội dung vào việc gì? | Xem giấy phép của nội dung. Đọc được không có nghĩa là được sao chép |
+| Dữ liệu cá nhân | Có tên, email, số điện thoại, ảnh của người thật không? | Tránh thu thập ngay từ đầu |
+| Gánh nặng cho server | Crawler có làm site chậm đi không? | Giãn cách yêu cầu, tải ít, dừng khi site báo quá tải |
+
+Pháp luật mỗi nước một khác, và bài này không phải lời khuyên pháp lý. Hai ví dụ để thấy chuyện này có thật:
+
+- Ở Mỹ, trong vụ *hiQ Labs kiện LinkedIn*, năm 2022 tòa phúc thẩm khu vực 9 cho rằng việc tự động lấy trang công khai, không cần đăng nhập, không vi phạm đạo luật chống xâm nhập máy tính CFAA. Phán quyết đó chỉ nói về CFAA. Cũng trong năm 2022, tòa sơ thẩm cho rằng điều khoản cấm scraping trong thỏa thuận người dùng của LinkedIn có hiệu lực, và vụ kiện khép lại bằng một phán quyết đồng thuận buộc hiQ ngừng scraping LinkedIn. Vụ này **không** có nghĩa crawl luôn hợp pháp.
+- Ở Việt Nam, Luật Bảo vệ dữ liệu cá nhân (Luật số 91/2025/QH15) có hiệu lực từ 01/01/2026. Muốn biết chi tiết, hãy đọc văn bản gốc, và hỏi chuyên gia khi dùng dữ liệu vào việc thương mại.
+
+Cách an toàn nhất là chọn nguồn **cho phép rõ ràng**: API chính thức, dữ liệu mở có giấy phép, tài liệu có giấy phép tự do. Bỏ dữ liệu cá nhân ra khỏi những gì bạn lưu.
+
+### robots.txt theo RFC 9309
+
+robots.txt là một tệp văn bản ở gốc site, ví dụ `https://example.com/robots.txt`. Quy ước này có từ năm 1994 và được chuẩn hóa thành **giao thức loại trừ robot** (Robots Exclusion Protocol) trong RFC 9309 (Koster và cộng sự, 2022). Một tệp gồm các **nhóm** (group):
+
+```text
+User-agent: *
+Disallow: /admin/
+Disallow: /search
+
+User-agent: BadBot
+Disallow: /
+```
+
+- Mỗi nhóm bắt đầu bằng một hay vài dòng `User-agent`, rồi tới các dòng `Allow` và `Disallow`. Crawler tìm nhóm có tên khớp với tên của nó (không phân biệt hoa thường). Không có thì dùng nhóm `*`. Không có cả hai thì không có quy tắc nào. Ở ví dụ trên, `BadBot` bị cấm cả site, mọi crawler khác chỉ bị cấm `/admin/` và `/search`.
+- Quy tắc khớp theo **tiền tố** (prefix) của đường dẫn, và **phân biệt hoa thường**. `Disallow: /search` cấm cả `/search?q=ai` lẫn `/searching-tips`, nhưng không cấm `/Search`.
+- Khi nhiều quy tắc cùng khớp, quy tắc **dài nhất** (cụ thể nhất) thắng. Một `Allow` và một `Disallow` dài bằng nhau thì `Allow` thắng. Không quy tắc nào khớp thì được phép. RFC 9309 còn có ký tự đại diện `*` và `$`; bài này không dùng tới.
+
+Tải robots.txt không phải lúc nào cũng được. RFC 9309 nói rõ phải làm gì:
+
+| Khi tải `/robots.txt` | Nghĩa | Crawler làm gì |
+|---|---|---|
+| Thành công (2xx) | Có quy tắc | Làm theo quy tắc |
+| Mã 4xx (404, 403…) | Không lấy được tệp | Được truy cập tự do |
+| Mã 5xx, hoặc không kết nối được | Không với tới được | **Coi như cấm hết** |
+
+Riêng mã 429 (gửi quá nhiều yêu cầu) thì khác: RFC xếp nó vào nhóm 4xx, nhưng site đang bảo bạn chậm lại. Ô crawler của bài xử lý nó như 5xx: tạm coi như cấm hết. Crawler được giữ lại bản đã tải để khỏi tải lại mỗi lần, nhưng không nên dùng nó quá 24 giờ.
+
+Python có sẵn `urllib.robotparser`: `parse(lines)` đọc các dòng có sẵn, `can_fetch(agent, url)` trả `True` hay `False`. Hàm `crawl_delay(agent)` đọc dòng `Crawl-delay` mà nhiều site vẫn ghi, dù RFC 9309 không định nghĩa dòng này. Hàm `read()` tự tải tệp, nhưng nó gửi `User-Agent` mặc định của Python chứ không phải tên crawler của bạn, và coi mã 401, 403 là cấm hết, khác với RFC. Vì vậy ô crawler của bài tự tải robots.txt bằng `requests`.
+
+Từ các bản vá năm 2026 (đã thử 3.13.14 và 3.14.5), `robotparser` chọn quy tắc dài nhất như RFC và hiểu `*`, `$`. Các bản trước đó (đã thử 3.12.10 và 3.14.2, cũng là bản Python của ô chạy trên trang) xét quy tắc theo thứ tự trong tệp, quy tắc khớp đầu tiên thắng. Ô robots.txt ở mục Ví dụ code không có quy tắc chồng nhau, nên bản nào cũng cho cùng kết quả.
+
+:::note[Ghi nhớ]
+robots.txt **không phải** cơ chế bảo mật hay cấp quyền. RFC 9309 nói rõ các quy tắc không phải là một hình thức cho phép truy cập, và ai cũng đọc được tệp. Crawler tử tế làm theo, crawler xấu thì bỏ qua. Làm theo robots.txt là cần, nhưng chưa đủ.
+:::
+
+### Tải trang lịch sự với `requests`
+
+Thư viện `requests` tải một trang bằng `requests.get(url, headers=..., timeout=...)`, trả về một đối tượng có `status_code` (mã trạng thái HTTP), `content` (nội dung trang dạng byte) và `text` (nội dung đã giải mã thành chuỗi). Bốn thói quen nên có từ dòng đầu tiên, và ô crawler ở mục Ví dụ code làm đủ cả bốn:
+
+- **Luôn đặt `timeout`.** Không đặt thì `requests` chờ mãi, và chương trình có thể treo vô hạn khi server không trả lời. `timeout=10` là số giây tối đa chờ kết nối, hay chờ giữa hai lần nhận dữ liệu; nó không phải giới hạn tổng thời gian tải. Quá hạn thì `requests` ném `requests.Timeout`. Khi crawl thật, hãy bắt lỗi này (hay `requests.RequestException` nói chung) để một trang chậm không làm dừng cả chương trình.
+- **Khai báo `User-Agent` trung thực.** Header này cho site biết ai đang gọi. Hãy ghi tên dự án và cách liên hệ, như `atlas-tutorial-bot/0.1 (+https://...)`, đừng giả làm trình duyệt. Chủ site thấy bot của bạn gây phiền thì còn biết liên hệ ai, thay vì chặn hẳn.
+- **Kiểm tra mã trạng thái.** Trang 404 hay trang "bạn bị chặn" vẫn có HTML. Chỉ lưu khi mã là 200, hoặc gọi `r.raise_for_status()` để ném lỗi với mã 4xx, 5xx. Mã 429 (gửi quá nhiều yêu cầu) và 503 (server quá tải) nghĩa là site đang bảo bạn chậm lại: hãy dừng.
+- **Giãn cách giữa các yêu cầu** bằng `time.sleep`. Không có con số chuẩn chung. Bài này **gợi ý** 1 giây giữa hai yêu cầu, và chờ lâu hơn nếu robots.txt có `Crawl-delay` lớn hơn. Đừng chạy nhiều luồng cùng lúc vào một site nhỏ.
+
+### Bóc chữ bằng BeautifulSoup
+
+HTML là cây các thẻ (tag): `<title>`, `<p>`, `<a href="...">`. BeautifulSoup đọc HTML thành cây đó để bạn tìm thẻ. Gói cài tên là `beautifulsoup4`, nhưng khi import thì viết `bs4`.
+
+- `BeautifulSoup(html, "html.parser")` dùng parser có sẵn trong Python. Đưa vào `r.content` (byte) thì BeautifulSoup tự đọc mã hóa từ thẻ `<meta charset>` của trang.
+- **Tìm thẻ.** `soup.find("title")` trả **thẻ đầu tiên** khớp, hoặc `None` nếu không có. `soup.find_all("a")` và `soup.select("article p")` (bộ chọn CSS, CSS selector) trả danh sách mọi thẻ khớp.
+- **Lấy dữ liệu.** `tag.get_text(strip=True)` lấy chữ bên trong thẻ, bỏ khoảng trắng thừa ở hai đầu. Thẻ có thẻ con thì dùng `get_text(" ", strip=True)` để giữ dấu cách giữa các mảnh. `tag.get("href")` lấy một thuộc tính, và `urljoin(url_của_trang, href)` ghép đường dẫn tương đối như `embedding` thành địa chỉ đầy đủ.
+
+Một trang thật có menu, chân trang, quảng cáo, script. Chọn đúng vùng nội dung (thường là `<article>` hay `<main>`) thì dữ liệu sạch hơn nhiều so với lấy chữ của cả trang.
+
+### Lưu vào MongoDB
+
+MongoDB lưu dữ liệu thành các **document**: các cặp tên trường và giá trị, có thể lồng document con và mảng. Đây là "document" theo nghĩa cơ sở dữ liệu, không phải văn bản Word. Các document nhóm lại thành **collection**, các collection nằm trong một database. Từ Python, bạn dùng thư viện `pymongo`, và một document chỉ là một dict.
+
+- **Schema linh hoạt.** Các document trong cùng collection không cần cùng tập trường. Trang có tác giả thì thêm trường `author`, trang không có thì thôi. Khác với bảng SQL, nơi mọi dòng phải có cùng các cột. Linh hoạt không có nghĩa là tùy tiện: hãy thống nhất tên trường, như `url`, `title`, `text`, `fetched_at`, để còn truy vấn được.
+- **`_id`.** Mỗi document có một trường `_id` duy nhất. Bạn không đặt thì driver tự sinh một `ObjectId`.
+- **Ghi và đọc.** `insert_one(doc)` thêm một document, `insert_many([doc1, doc2])` thêm nhiều. `find(bộ_lọc)` trả một **con trỏ** (cursor) để duyệt dần các document khớp, `find_one(bộ_lọc)` trả document đầu tiên hoặc `None`. Bộ lọc cũng là dict: `{"url": "https://example.com/a"}`.
+
+Chạy crawler lần hai thì sao? Có hai cách giữ mỗi `url` đúng một document:
+
+- **Chỉ mục duy nhất.** `pages.create_index("url", unique=True)` làm cho hai document không thể có cùng `url`. Ghi trùng thì server từ chối: `insert_one` ném `DuplicateKeyError`, `insert_many` ném `BulkWriteError`. Đây là lưới an toàn: kể cả code có lỗi, dữ liệu vẫn không trùng.
+- **Upsert** (ghép của update và insert). `update_one({"url": url}, {"$set": page}, upsert=True)` tìm document có `url` đó: có rồi thì cập nhật các trường trong `$set`, chưa có thì thêm mới. Không báo lỗi, chạy lại bao nhiêu lần cũng được. Kết quả có `matched_count` (số document khớp bộ lọc) và `upserted_id` (khác `None` khi vừa thêm mới).
+
+Dùng cả hai: upsert để ghi, chỉ mục duy nhất để chặn khi lỡ tay dùng `insert_one`. Bộ lọc của upsert phải là trường có chỉ mục duy nhất. Lọc sai trường thì mỗi lần chạy lại sinh một document mới.
+
+**Chuỗi kết nối** (connection string) cho `pymongo` biết server ở đâu, như `mongodb://localhost:27017`. Với dịch vụ MongoDB trên cloud, chuỗi này chứa cả tên người dùng và mật khẩu, nên code của bài đọc nó từ biến môi trường **`MONGODB_URI`**. Cách đặt biến môi trường giống cách đặt API key ở bài [Sử dụng API văn bản](/vi/llm/text-api/).
+
+Dữ liệu crawl là nguyên liệu cho bài [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/), nên ngay từ lúc crawl hãy lưu `url` (để chatbot dẫn nguồn), `fetched_at` (để biết trang nào cần crawl lại) và `text` đã bỏ menu, script, vì chữ rác lọt vào kho thì cũng lọt vào câu trả lời. Cắt văn bản thành đoạn và tạo embedding nằm ở bài RAG, còn làm sạch và khử trùng lặp dữ liệu quy mô lớn nằm ở bài [Chuẩn bị dữ liệu pre-train](/vi/llm/pretraining-data/).
+
+### Giới hạn
+
+- **Trang dựng bằng JavaScript.** `requests` chỉ tải HTML server gửi về, không chạy JavaScript. Trang hiện nội dung bằng JavaScript sẽ trả về HTML gần như rỗng. Khi đó, hãy tìm API của site trước khi nghĩ tới công cụ điều khiển trình duyệt.
+- **Crawler của bài không tự đi theo liên kết.** Nó tải một danh sách đường dẫn cho sẵn. Crawler thật cần hàng đợi các liên kết, nhớ trang đã thăm, giới hạn số trang và độ sâu.
+- **Dữ liệu chưa sạch.** Trùng nội dung giữa các trang, lỗi mã hóa chữ, trang lỗi lọt vào: xem mục Lỗi hay gặp và bài Chuẩn bị dữ liệu pre-train.
+
+## Minh họa
+
+Ô dưới đây đưa một trang HTML nhỏ, viết sẵn trong code, qua BeautifulSoup. Hãy nhìn HTML ở đầu ô rồi so với kết quả mẫu: cái gì còn lại, cái gì biến mất.
+
+<LocalCode code={parseHtmlCode} title="Bóc chữ từ một trang HTML cho sẵn" packages={['beautifulsoup4']} sampleVaries={false}>
+
+```text
+Tiêu đề: RAG là gì? | Blog
+Thẻ h2: None
+Nội dung: RAG tìm đoạn văn liên quan rồi ghép vào prompt. Nhờ vậy mô hình trả lời dựa trên nguồn có thật.
+Liên kết: https://example.com/
+Liên kết: https://example.com/blog/
+Liên kết: https://example.com/blog/embedding
+```
+
+</LocalCode>
+
+- **Thẻ h2: None.** Trang không có thẻ `<h2>`, nên `find` trả `None`. Nếu viết thẳng `soup.find("h2").get_text()`, chương trình dừng với `AttributeError`. Vì vậy dòng tiêu đề kiểm tra `if title` trước.
+- **Nội dung** chỉ còn hai đoạn văn trong `<article>`. Menu, chân trang, script và dòng ngày đăng (lớp `meta`, bị loại bằng bộ chọn `p:not(.meta)`) đều không lọt vào.
+- **Liên kết** `embedding` là đường dẫn tương đối. Ghép với địa chỉ trang `https://example.com/blog/rag`, `urljoin` thay phần cuối `rag` và cho `https://example.com/blog/embedding`.
+
+Kết quả này, cộng `url` và thời điểm lấy, thành một document như sau khi lưu vào MongoDB. MongoDB tự thêm `_id`, và `fetched_at` được lưu dưới dạng kiểu ngày giờ của MongoDB, không phải chuỗi.
+
+```json
+{
+  "url": "https://example.com/blog/rag",
+  "title": "RAG là gì? | Blog",
+  "text": "RAG tìm đoạn văn liên quan rồi ghép vào prompt. Nhờ vậy mô hình trả lời dựa trên nguồn có thật.",
+  "fetched_at": "2026-10-24T08:00:00Z"
+}
+```
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026, với Python 3.14, `requests` 2.34, `beautifulsoup4` 4.15 và `pymongo` 4.19. Phần MongoDB chạy thử với MongoDB 8.3 (image `mongo:8`).
+
+Ô đầu tiên chạy ngay trên trang, vì `urllib.robotparser` có sẵn trong Python và ô không cần mạng. Hai ô sau chạy trên máy bạn: một ô cần mạng, một ô cần server MongoDB.
+
+### Đọc robots.txt không cần mạng
+
+Ô này đưa một robots.txt viết sẵn cho `RobotFileParser.parse`, rồi hỏi `can_fetch` với sáu đường dẫn.
+
+<PythonRunner code={robotsCode} title="Đọc robots.txt bằng urllib.robotparser" />
+
+- `/` và `/blog/rag` là `True` vì không quy tắc nào khớp. `/admin/users` là `False` nhưng `/Admin/users` là `True`: so khớp đường dẫn phân biệt hoa thường.
+- `/search?q=ai` và `/searching-tips` đều `False`: `Disallow: /search` khớp theo tiền tố, nên chặn cả trang mẹo tìm kiếm mà có lẽ chủ site không định chặn.
+- `crawl delay: 2` lâu hơn mức 1 giây bài gợi ý, nên crawler nên chờ 2 giây. `BadBot` có nhóm riêng `Disallow: /`, nên bị cấm cả `/blog/rag`.
+
+### Một crawler nhỏ và lịch sự
+
+Ô này ghép mọi thứ ở mục Lý thuyết. Hàm `load_robots` tải robots.txt bằng `requests` (để gửi đúng `User-Agent` của bạn) và xử lý mã trạng thái theo bảng của RFC 9309: 2xx thì đọc quy tắc (giải mã UTF-8 như RFC yêu cầu), 4xx thì cho phép hết, 5xx, 429 hay lỗi mạng thì cấm hết. Sau đó, với mỗi đường dẫn: hỏi robots.txt, tải với `timeout`, dừng nếu gặp 429 hay 503, chỉ giữ trang có mã 200, rồi chờ.
+
+<LocalCode code={crawlCode} title="Crawler lịch sự: robots.txt, User-Agent, giãn cách" packages={['requests', 'beautifulsoup4']} />
+
+`SITE` để là `example.com`, một tên miền dành riêng cho ví dụ trong tài liệu. Đổi nó thành site bạn đã kiểm tra điều khoản và được phép crawl. Mỗi đường dẫn in một dòng gồm mã trạng thái và địa chỉ. Với một site có trang `/` nhưng không có `/trang-khong-co/`, bạn sẽ thấy một dòng 200, một dòng 404, và số trang lấy được là 1: trang 404 không được lưu. Giữa hai yêu cầu, chương trình chờ ít nhất 1 giây.
+
+Ô này lấy chữ của cả trang bằng `soup.get_text(" ", strip=True)` cho gọn, nên tiêu đề, menu và chân trang cũng lọt vào `text`. Với site thật, hãy chọn vùng nội dung như ở mục Minh họa.
+
+### Lưu vào MongoDB, không trùng url
+
+Ô cuối đọc `MONGODB_URI` từ biến môi trường, tạo chỉ mục duy nhất trên `url`, rồi thử cả hai cách ghi. `serverSelectionTimeoutMS=5000` làm chương trình báo lỗi sau 5 giây nếu không tìm thấy server, thay vì chờ 30 giây theo mặc định. Dòng `pages.drop()` xóa collection `pages` của database `atlas_demo` mỗi lần chạy, để kết quả lần nào cũng như nhau. Đừng trỏ `MONGODB_URI` vào database có dữ liệu thật của bạn mà không đọc kỹ dòng này.
+
+Để thử trên máy, cách nhanh nhất là chạy MongoDB bằng Docker (bài [Docker và Cloud](/vi/llm/docker-cloud/) giải thích Docker; ở đây chỉ cần một dòng lệnh), rồi đặt `MONGODB_URI` thành `mongodb://localhost:27017`:
+
+```sh
+docker run -d --name atlas-mongo -p 127.0.0.1:27017:27017 mongo:8
+```
+
+<LocalCode code={saveCode} title="Lưu trang vào MongoDB: chỉ mục duy nhất và upsert" packages={['pymongo']} sampleVaries={false}>
+
+```text
+Trùng url, không chèn thêm.
+https://example.com/a khớp: 1 thêm mới: False
+https://example.com/c khớp: 0 thêm mới: True
+Số document: 3
+{'url': 'https://example.com/a', 'text': 'Nội dung A, bản mới.'}
+{'url': 'https://example.com/b', 'text': 'Nội dung B.'}
+{'url': 'https://example.com/c', 'text': 'Nội dung C.'}
+{'title': 'Trang B'}
+```
+
+</LocalCode>
+
+Trang B có thêm trường `lang` mà trang A không có, và MongoDB vẫn nhận. Lần `insert_one` chèn lại trang A bị chỉ mục chặn, còn upsert cập nhật A (khớp 1, không thêm mới) và thêm C (khớp 0), nên collection còn đúng 3 document, mỗi `url` một bản. Tham số thứ hai của `find` và `find_one` chọn trường cần lấy, nên các dòng cuối chỉ có `url`, `text` hay `title`.
+
+Trong một chương trình thật, bạn ghép hai ô: crawler tạo danh sách `pages`, rồi gọi upsert cho từng trang.
+
+## Lỗi hay gặp
+
+:::caution[Công khai, robots.txt cho phép, nên được lấy]
+Nhìn thấy được không có nghĩa là được dùng. robots.txt chỉ nói crawler được đi đâu. Điều khoản dịch vụ có thể cấm thu thập tự động, nội dung có thể có bản quyền, và trang có thể chứa dữ liệu cá nhân. Đọc điều khoản trước khi chạy, ưu tiên API và dữ liệu có giấy phép, và đừng lưu email, số điện thoại hay ảnh của người thật "cho tiện": dữ liệu đó sẽ đi thẳng vào câu trả lời của chatbot.
+:::
+
+:::caution[Crawler vội vàng]
+Quên `timeout` thì chương trình treo, bỏ `time.sleep` thì site chậm đi và IP của bạn bị chặn, không kiểm tra mã trạng thái thì trang "bạn bị chặn" được lưu như dữ liệu thật. Tệ nhất là bị chặn rồi giả `User-Agent` thành trình duyệt để lách: vừa không trung thực, vừa dễ vi phạm điều khoản. Bị chặn thì dừng hẳn, hỏi chủ site hoặc tìm API. Một lỗi nhỏ hay gặp với trang tiếng Việt: chữ vỡ dấu khi server không khai mã hóa và `requests` đoán sai. Hãy đưa `r.content` (byte) cho BeautifulSoup như ô crawler, để nó tự đọc mã hóa từ `<meta charset>`. Chỉ khi dùng `r.text` mới cần kiểm `r.encoding`, và gán `r.encoding = "utf-8"` nếu trang dùng UTF-8.
+:::
+
+:::caution[Ghi cứng chuỗi kết nối, hoặc mở MongoDB ra Internet]
+Chuỗi kết nối của dịch vụ cloud chứa mật khẩu. Ghi nó vào code rồi đẩy lên GitHub là lộ cả database, giống lộ API key. Đọc nó từ `MONGODB_URI` như ô code của bài. Ở máy cục bộ, image `mongo` mặc định **không bật xác thực**: ai kết nối được tới cổng 27017 là đọc, ghi được hết. Vì vậy dòng `docker run` của bài chỉ mở cổng cho chính máy bạn (`127.0.0.1:27017`), không mở cho cả mạng.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Trước khi crawl, hỏi qua mọi lớp quy tắc: robots.txt, điều khoản dịch vụ, bản quyền, dữ liệu cá nhân, gánh nặng cho server. robots.txt cho phép là cần nhưng chưa đủ, và nó không phải cơ chế bảo mật.
+- robots.txt (RFC 9309) chọn nhóm theo tên crawler hoặc `*`, khớp theo tiền tố, phân biệt hoa thường, quy tắc dài nhất thắng. Tải tệp gặp 4xx thì được truy cập tự do, 5xx thì coi như cấm hết.
+- Crawler lịch sự đặt `timeout`, khai `User-Agent` trung thực, chỉ lưu trang có mã 200, giãn cách và dừng khi gặp 429 hay 503. Với BeautifulSoup, nhớ rằng `find` có thể trả `None`, và hãy chọn đúng vùng nội dung.
+- MongoDB lưu mỗi trang thành một document: chỉ mục duy nhất trên `url` chặn bản trùng, upsert cập nhật hoặc thêm mới. Lưu `url` và `fetched_at` để chatbot dẫn được nguồn, và đọc chuỗi kết nối từ `MONGODB_URI`.
+
+**Đọc thêm:**
+
+- Koster, M., Illyes, G., Zeller, H., Sassman, L. (2022). [*RFC 9309: Robots Exclusion Protocol*](https://www.rfc-editor.org/rfc/rfc9309.html). IETF. Mục 2 (cách so khớp quy tắc, cách xử lý mã trạng thái) ngắn và dễ đọc.
+- Python Software Foundation (2026). [*urllib.robotparser: Parser for robots.txt*](https://docs.python.org/3.14/library/urllib.robotparser.html). Tài liệu Python 3.14 của `RobotFileParser`, `can_fetch`, `crawl_delay`.
+- Reitz, K. và cộng sự (2026). [*Requests: Quickstart*](https://requests.readthedocs.io/en/latest/user/quickstart/), các mục Custom Headers, Response Status Codes và Timeouts. Và Richardson, L. (2026). [*Beautiful Soup Documentation*](https://www.crummy.com/software/BeautifulSoup/bs4/doc/), các mục về parser, `find`, `find_all`, `select` và `get_text`.
+- MongoDB (2026). [*PyMongo: Insert Documents*](https://www.mongodb.com/docs/languages/python/pymongo-driver/current/crud/insert/), [*Find Documents*](https://www.mongodb.com/docs/languages/python/pymongo-driver/current/crud/query/find/), [*Update Documents*](https://www.mongodb.com/docs/languages/python/pymongo-driver/current/crud/update/) và [*Indexes*](https://www.mongodb.com/docs/languages/python/pymongo-driver/current/indexes/). Tài liệu chính thức của các hàm trong ô code cuối, kể cả upsert và chỉ mục duy nhất.
+- Newby, T. G., Feder, D., Yoo-Scott, J. (21/04/2022). [*hiQ Labs Scrapes By Again: The Ninth Circuit Reaffirms that Data-Scraping Does Not Violate the CFAA*](https://www.fenwick.com/insights/publications/hiq-labs-scrapes-by-again-the-ninth-circuit-reaffirms-that-data-scraping-does-not-violate-the-cfaa-1). Fenwick & West. Bài bình luận của một hãng luật về phán quyết năm 2022, kể cả những rủi ro mà phán quyết không xóa đi (bản quyền, điều khoản dịch vụ). Về kết cục của vụ kiện cuối năm 2022: Dull, K. R., Jacobson, J. B. (19/12/2022). [*LinkedIn’s Data Scraping Battle with hiQ Labs Ends with Proposed Judgment*](https://www.natlawreview.com/article/linkedin-s-data-scraping-battle-hiq-labs-ends-proposed-judgment). The National Law Review.
+
+<LessonProgress />

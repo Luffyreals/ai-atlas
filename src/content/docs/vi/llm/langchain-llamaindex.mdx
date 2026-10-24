@@ -1,0 +1,310 @@
+---
+title: LangChain và LlamaIndex
+description: Viết lại pipeline RAG bằng hai framework. Khi nào cần framework, retriever, chain và LCEL, index và query engine, bảng đối chiếu, những API đã đổi.
+quiz:
+  - question: 'Trường hợp nào chuyển từ code tự viết (SDK `openai` và NumPy) sang một framework như LangChain hay LlamaIndex mang lại ít lợi ích nhất?'
+    options:
+      - 'Kho tài liệu gồm PDF, trang web và thư mục Word, cần đọc hết rồi cắt chunk'
+      - 'Muốn thử ba kho vectơ khác nhau mà ít phải sửa code'
+      - 'Một chatbot hỏi đáp trên 20 đoạn văn bản thuần, một nhà cung cấp, quy trình không đổi'
+      - 'Muốn xem lại từng bước (truy xuất gì, prompt ra sao) của mỗi lần hỏi'
+    answer: 2
+    explanation: 'Quy trình cố định, ít bước, một nhà cung cấp, dữ liệu là văn bản thuần: 40 dòng tự viết đã đủ, và framework chỉ thêm một tầng trừu tượng cùng hàng chục gói phụ thuộc có API đổi nhanh. Ba trường hợp còn lại đều là chỗ framework có sẵn đồ dùng: bộ đọc nhiều định dạng, giao diện chung cho nhiều kho vectơ, công cụ theo dõi từng bước.'
+  - question: 'Bạn chạy code LlamaIndex của bài nhưng xóa dòng `Settings.embed_model = ...`. Biến môi trường trỏ tới Gemini: `OPENAI_BASE_URL` là địa chỉ của Gemini, `OPENAI_API_KEY` là key Gemini. Điều gì xảy ra?'
+    options:
+      - 'LlamaIndex dùng embedding mặc định của OpenAI, gửi key Gemini tới máy chủ OpenAI và nhận lỗi 401'
+      - 'LlamaIndex tự dùng `OPENAI_BASE_URL`, nên embedding vẫn gọi tới Gemini'
+      - 'LlamaIndex bỏ qua bước embedding và tìm chunk theo từ khóa'
+    answer: 0
+    explanation: 'Thiếu cấu hình thì `Settings` lấy mặc định là mô hình embedding của OpenAI, với địa chỉ mặc định của OpenAI; biến `OPENAI_BASE_URL` không được đọc ở đây. Key Gemini gửi tới OpenAI nên bị từ chối với mã 401. Phương án thứ hai dễ chọn vì SDK `openai` tự đọc biến đó, nhưng LlamaIndex truyền địa chỉ của riêng nó vào SDK.'
+  - question: 'Trong chain `{"context": retriever | format_docs, "question": RunnablePassthrough()} | prompt | llm | StrOutputParser()`, bạn gọi `chain.invoke("Câu lạc bộ họp lúc mấy giờ?")`. Khâu `prompt` nhận được gì?'
+    options:
+      - 'Chỉ chuỗi câu hỏi, vì `prompt` đứng sau dấu `|` đầu tiên'
+      - 'Một dict: `context` là chữ của các chunk tìm được, nối lại thành một chuỗi; `question` là nguyên câu hỏi'
+      - 'Một dict: `context` là danh sách đối tượng `Document`; `question` là nguyên câu hỏi'
+      - 'Danh sách `Document` do retriever trả về, không có câu hỏi'
+    answer: 1
+    explanation: 'Dict ở đầu chain chạy cả hai nhánh với cùng một đầu vào là câu hỏi. Nhánh `context` cho câu hỏi qua retriever (ra danh sách `Document`), rồi qua `format_docs` (ra một chuỗi). Nhánh `question` giữ nguyên câu hỏi. `prompt` nhận dict đó và điền vào hai chỗ trống `{context}`, `{question}`. Phương án thứ ba là khi quên `format_docs`.'
+  - question: 'Bạn chép code từ LangChain sang LlamaIndex và giữ `chunk_size=80` cho cả hai. Văn bản tiếng Việt. Chunk của hai bên so với nhau thế nào?'
+    options:
+      - 'Bằng nhau, vì cùng `chunk_size`'
+      - 'Chunk của LlamaIndex ngắn hơn, vì LlamaIndex đếm theo từ'
+      - 'Chunk của LlamaIndex dài hơn nhiều: LangChain đếm 80 ký tự, LlamaIndex đếm 80 token (kể cả metadata), mà một token tiếng Việt thường dài hơn một ký tự'
+    answer: 2
+    explanation: '`RecursiveCharacterTextSplitter` đo độ dài bằng số ký tự. `SentenceSplitter` của LlamaIndex đo bằng số token của bộ tách từ, và trừ đi số token của metadata đi kèm chunk. Với câu tiếng Việt trong bài, 60 ký tự là khoảng 33 token, nên 80 token, dù đã trừ phần metadata, vẫn chứa nhiều chữ hơn hẳn: mỗi chunk dài khoảng 130 ký tự, gấp đôi chunk 60–67 ký tự của LangChain. Cùng tên tham số không có nghĩa là cùng đơn vị.'
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Prerequisites from '@components/Prerequisites.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import RagPipelineFigure from '@components/figures/RagPipelineFigure.astro';
+import langchainCode from '@code/llm/langchain-llamaindex/rag-langchain.vi.py?raw';
+import llamaindexCode from '@code/llm/langchain-llamaindex/rag-llamaindex.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Quyết định được khi nào một **framework** như LangChain hay LlamaIndex đáng dùng, và khi nào vài chục dòng tự viết là đủ.
+- Hiểu các khái niệm chung của hai thư viện: bộ tải tài liệu (document loader), bộ cắt văn bản (text splitter), chỉ mục (index), **retriever**, **chain** và **query engine**.
+- Viết lại được pipeline RAG tối thiểu bằng LangChain với LCEL, rồi bằng LlamaIndex với `as_query_engine`, cả hai nối với API kiểu OpenAI (OpenAI-compatible).
+- Nhận ra các bẫy thật khi dùng hai thư viện: tên tham số khác nhau, cấu hình mặc định trỏ về OpenAI, import cũ đã bị gỡ, phụ thuộc xung đột.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Ở bài [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/), bạn tự dựng một pipeline RAG: **lập chỉ mục** (indexing) gồm cắt tài liệu thành **chunk**, tính **embedding** cho từng chunk và cất vào **kho vectơ** (vector store); rồi với mỗi câu hỏi, embed câu hỏi, lấy **top-$k$** chunk gần nhất theo cosine, ghép vào prompt và gọi mô hình chat. Bài này làm lại đúng các bước đó, chỉ khác là nhờ thư viện làm hộ.
+:::
+
+## Trực giác
+
+Chatbot RAG của bạn chạy tốt: khoảng 40 dòng Python, SDK `openai`, một mảng NumPy làm kho vectơ. Rồi yêu cầu mới đến dồn dập. Tài liệu giờ là 200 file PDF, vài trang web và một thư mục Word. Kho vectơ trong RAM không đủ, cần một cơ sở dữ liệu vectơ thật. Nhóm muốn thử nhà cung cấp khác mà không viết lại code. Và khi chatbot trả lời sai, bạn muốn xem lại nó đã tìm được chunk nào, prompt gửi đi trông ra sao.
+
+Mỗi yêu cầu đều tự làm được. Nhưng làm hết thì bạn đang viết lại một thư viện: bộ đọc PDF, bộ cắt chunk theo câu, lớp bọc cho từng loại kho vectơ, công cụ ghi lại từng bước. **LangChain** và **LlamaIndex** là hai thư viện Python làm sẵn những thứ đó. Chúng không làm RAG theo cách khác: vẫn là cắt, embed, tìm, ghép prompt, gọi mô hình. Chúng chỉ đặt tên cho từng khâu và cho bạn các khối lắp sẵn.
+
+Giống chuyện tự đóng một cái bàn. Với bộ đồ nghề, bạn hiểu từng con ốc nhưng mất công. Với bộ bàn đóng gói sẵn, lắp nhanh hơn nhiều; nhưng đến khi nhà sản xuất đổi mẫu ốc, tờ hướng dẫn cũ trên mạng không còn khớp, và bạn phải tìm xem con ốc mới nằm ở túi nào.
+
+Để biết nên chọn cách nào, hãy tự hỏi ba câu:
+
+1. Quy trình của bạn có cố định và ít bước không?
+2. Bạn có cần nhiều loại nguồn dữ liệu, nhiều kho vectơ hay nhiều nhà cung cấp không?
+3. Bạn có chịu được việc sửa code mỗi khi thư viện đổi API không?
+
+Trả lời "có, không, không" thì tự viết là hợp lý. Càng lệch khỏi ba câu trả lời đó, framework càng đáng xét.
+
+**Bài toán: viết lại pipeline RAG tối thiểu bằng LangChain và bằng LlamaIndex, hiểu mỗi khâu ứng với khái niệm nào của từng thư viện, và biết cái giá phải trả khi dùng chúng.**
+
+## Lý thuyết
+
+Bài này không có công thức mới. Phần lý thuyết là cách hai thư viện cắt pipeline RAG thành các khái niệm, và cách mỗi thư viện nối các khái niệm đó lại.
+
+### Năm khâu, hai bộ tên
+
+Pipeline RAG có năm khâu. Hai thư viện đặt tên khác nhau cho cùng một việc:
+
+1. **Tải tài liệu.** Bộ tải tài liệu đọc file hay trang web, trả về các đối tượng `Document`, mỗi đối tượng gồm chữ và **metadata** (siêu dữ liệu, ví dụ tên file nguồn). LangChain để phần lớn loader ở gói `langchain-community`. LlamaIndex gọi chúng là reader, ví dụ `SimpleDirectoryReader` đọc cả một thư mục.
+2. **Cắt chunk.** Bộ cắt văn bản chia mỗi `Document` thành các chunk, giữ metadata cho từng chunk. LangChain có `RecursiveCharacterTextSplitter`: thử cắt ở chỗ xuống dòng đôi trước, rồi xuống dòng, rồi dấu cách, sao cho mỗi chunk không quá `chunk_size` **ký tự**. LlamaIndex gọi khâu này là node parser, và chunk là **node**; `SentenceSplitter` cố giữ nguyên câu, đo `chunk_size` bằng **token**.
+3. **Embedding và lưu.** Tính vectơ cho từng chunk rồi cất vào kho vectơ. Ở LangChain đó là `OpenAIEmbeddings` cộng một kho như `InMemoryVectorStore`. Ở LlamaIndex, `VectorStoreIndex` gói cả hai: tạo **chỉ mục** (index) là cắt, embed và lưu trong một lời gọi.
+4. **Truy xuất.** **Retriever** là một đối tượng nhận câu hỏi và trả về các chunk liên quan nhất. Nó che giấu chuyện tìm thế nào: cosine trên kho vectơ, tìm theo từ khóa hay kết hợp cả hai, người gọi đều chỉ thấy "câu hỏi vào, chunk ra".
+5. **Ghép prompt và gọi mô hình.** Ở LangChain, bạn tự nối retriever, prompt, mô hình và bộ đọc kết quả thành một **chain**. Ở LlamaIndex, **query engine** gói sẵn cả truy xuất, prompt và lời gọi mô hình sau một hàm `query`.
+
+Hình dưới, dùng lại từ bài [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/), vẽ lại pipeline đó. Mỗi khối của hình ứng với một khái niệm trong bảng đối chiếu ở mục Minh họa.
+
+{/* FIG: dùng lại hình của bài rag-chatbot: câu hỏi được dùng để truy xuất chunk, rồi chunk được ghép vào prompt. */}
+<RagPipelineFigure />
+
+### LangChain: lắp từng khối bằng LCEL
+
+Mọi khối của LangChain (prompt, mô hình chat, retriever, bộ đọc kết quả) đều là một **Runnable**: đối tượng có phương thức `invoke`, nhận một đầu vào và trả một đầu ra. Toán tử `|` nối hai Runnable thành một: đầu ra của khối trái thành đầu vào của khối phải, giống ống dẫn trong dòng lệnh. Cách viết này gọi là **LCEL** (LangChain Expression Language). Đây là chain trong code của bài:
+
+```python
+chain = (
+    {"context": retriever | format_docs, "question": RunnablePassthrough()}
+    | prompt | llm | StrOutputParser()
+)
+```
+
+Đọc từ trái sang phải, với đầu vào là câu hỏi:
+
+- **Dict ở đầu** chạy hai nhánh với cùng một câu hỏi. Nhánh `context`: retriever trả về danh sách `Document`, rồi hàm `format_docs` nối chữ của chúng thành một chuỗi. LangChain tự biến hàm Python thường thành Runnable khi nó đứng cạnh dấu `|`. Nhánh `question`: `RunnablePassthrough()` cho câu hỏi đi qua nguyên vẹn. Kết quả là dict `{"context": ..., "question": ...}`.
+- **`prompt`** là một `ChatPromptTemplate` có hai chỗ trống `{context}` và `{question}`. Nó điền dict vào và tạo danh sách message `system`, `human`.
+- **`llm`** (`ChatOpenAI`) gửi các message tới API và trả về một message của mô hình.
+- **`StrOutputParser()`** lấy phần chữ của message đó.
+
+Ưu điểm của cách này là đường ống nằm lộ ra: muốn thêm một bước, ví dụ viết lại câu hỏi trước khi tìm, bạn chèn một khối vào đúng chỗ. Nhược điểm là bạn phải tự lắp, và phải hiểu dữ liệu ở mỗi khâu có dạng gì.
+
+### LlamaIndex: chỉ mục và query engine
+
+LlamaIndex đi theo hướng ngược lại: gói sẵn nhiều hơn. Bạn đặt cấu hình chung một lần trong **`Settings`** (mô hình chat, mô hình embedding, bộ cắt chunk), rồi hai dòng làm hết phần còn lại:
+
+```python
+index = VectorStoreIndex.from_documents([doc])
+query_engine = index.as_query_engine(similarity_top_k=2)
+```
+
+`from_documents` cắt tài liệu thành node bằng `Settings.node_parser`, embed từng node bằng `Settings.embed_model` và lưu vào một kho vectơ trong bộ nhớ. `as_query_engine` trả về một query engine; gọi `query_engine.query(câu_hỏi)` thì nó tìm `similarity_top_k` node gần nhất (mặc định là 2), ghép prompt, gọi `Settings.llm`, và trả về một đối tượng `Response`. In `Response` ra là câu trả lời; còn `response.source_nodes` cho biết những node nào đã được dùng. Đường ống bị giấu đi, nên đó là chỗ dễ nhất để bạn kiểm tra mô hình đã dựa vào đâu.
+
+Hai điều cần biết về những gì được gói sẵn:
+
+- **Thiếu cấu hình thì mặc định là OpenAI.** Nếu không đặt `Settings.llm` hay `Settings.embed_model`, LlamaIndex dùng mô hình của OpenAI với địa chỉ của OpenAI, và **không đọc** `OPENAI_BASE_URL`. Người dùng Gemini hay Ollama quên một dòng là chương trình gửi key của họ tới máy chủ OpenAI.
+- **Prompt nội bộ là tiếng Anh.** Lời dặn hệ thống mở bằng "You are an expert Q&A system…", và phần ngữ cảnh mở bằng "Context information is below." (xem mục Minh họa). Khi câu hỏi là tiếng Việt, mô hình có thể vẫn trả lời bằng tiếng Việt, nhưng muốn kiểm soát giọng văn hay quy tắc thì bạn đưa prompt của mình qua tham số `text_qa_template`. Prompt này thay **cả** lời dặn hệ thống lẫn khung ngữ cảnh mặc định, nên hãy tự ghi đủ quy tắc vào:
+
+```python
+from llama_index.core import PromptTemplate
+
+qa_prompt = PromptTemplate(
+    "Ngữ cảnh:\n{context_str}\n\n"
+    "Chỉ dựa vào ngữ cảnh, trả lời bằng tiếng Việt.\n"
+    "Câu hỏi: {query_str}"
+)
+query_engine = index.as_query_engine(text_qa_template=qa_prompt)
+```
+
+### Nối với API kiểu OpenAI
+
+Cả hai thư viện có lớp riêng cho API kiểu OpenAI, nhưng tên tham số không giống nhau. Đây là chỗ dễ sai nhất khi chuyển code từ thư viện này sang thư viện kia:
+
+| Việc | LangChain | LlamaIndex |
+|---|---|---|
+| Lớp mô hình chat | `ChatOpenAI` (gói `langchain-openai`) | `OpenAILike` (gói `llama-index-llms-openai-like`) |
+| Địa chỉ API | `base_url=` | `api_base=` |
+| Tên mô hình embedding | `model=` | `model_name=` |
+| Điều cần đặt thêm | `check_embedding_ctx_length=False` ở `OpenAIEmbeddings` | `is_chat_model=True` ở `OpenAILike` |
+
+Vì sao cần ba điểm ở hai dòng cuối:
+
+- **`model_name=`, không phải `model=`.** `OpenAIEmbedding` của LlamaIndex kiểm tham số `model` với danh sách tên mô hình của OpenAI. Truyền một tên khác, ví dụ tên một mô hình embedding của Ollama, là gặp ngay `ValueError: '...' is not a valid OpenAIEmbeddingModelType`. Tham số `model_name` bỏ qua bước kiểm đó.
+- **`check_embedding_ctx_length=False`.** Mặc định, `OpenAIEmbeddings` tách chữ thành token bằng `tiktoken` rồi gửi **dãy mã token** thay vì chữ. API của OpenAI nhận được kiểu này, nhưng tài liệu của `langchain-openai` ghi rằng nhiều nhà cung cấp khác thì không, và khuyên đặt `False` để gửi chữ. Chạy thử với một server giả, bài thấy đúng như vậy: để mặc định thì server nhận các danh sách số, đặt `False` thì nhận chuỗi chữ.
+- **`is_chat_model=True`.** `OpenAILike` mặc định coi mô hình là loại completion cũ: nó gửi một chuỗi tới endpoint `/completions` thay vì danh sách message tới `/chat/completions`. Nhiều nhà cung cấp chỉ có endpoint chat; server giả của bài cũng vậy, và trả lỗi 404 khi thiếu dòng này.
+
+Phần embedding của cả hai ô code đọc biến môi trường giống bài [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/): `EMBEDDING_MODEL` là bắt buộc; `EMBEDDING_BASE_URL` và `EMBEDDING_API_KEY` là tùy chọn, để trống thì dùng địa chỉ và key của phần chat. Vì vậy, nếu embedding ở chính OpenAI mà phần chat ở nơi khác, `EMBEDDING_BASE_URL` phải ghi rõ `https://api.openai.com/v1`: để trống thì yêu cầu embedding đi tới địa chỉ của phần chat.
+
+### Những gì đã đổi (đã thử 10/2026)
+
+Hai thư viện đổi API nhanh, nên phần lớn ví dụ trên mạng viết cho bản cũ. Bài đã thử những điều dưới đây với `langchain` 1.4.7, `langchain-classic` 1.0.8, `llama-index-core` 0.14.25 vào tháng 10/2026; bản sau có thể khác.
+
+- **LangChain 1.x tách và gỡ nhiều thứ.** `from langchain.chains import RetrievalQA` và `from langchain.text_splitter import ...` báo `ModuleNotFoundError`. Các chain cũ như `RetrievalQA` nay nằm ở gói riêng `langchain-classic` (import từ `langchain_classic.chains`) và đã bị đánh dấu deprecated. Bộ cắt văn bản ở gói `langchain-text-splitters`; `Document`, prompt, kho vectơ trong bộ nhớ ở `langchain-core`.
+- **Agent của LangChain đổi tên hàm.** `create_react_agent` của LangGraph đã chuyển thành `create_agent` trong `langchain.agents`. Trang hướng dẫn RAG chính thức của LangChain giờ dựng bằng Deep Agents (gói `deepagents`, hàm `create_deep_agent`): agent tự quyết khi nào gọi công cụ tìm kiếm. Trang khái niệm Retrieval vẫn giữ "RAG hai bước" (luôn tìm rồi mới gọi mô hình), đúng kiểu chain của bài, và ghi rằng cách này hợp với bot hỏi đáp và bot tài liệu. Chain LCEL như trong bài vẫn chạy và hợp để học từng khâu; agent là chuyện của bài [Agents](/vi/llm/agents/).
+- **LlamaIndex cài chọn lọc.** Gói gộp `llama-index` 0.14.25 đòi `llama-index-llms-openai` dưới 0.8, còn `llama-index-llms-openai-like` 0.8.1 đòi từ 0.8 trở lên, nên pip báo không cài được. Cài `llama-index-core` cùng từng gói tích hợp cần dùng thì được, đúng như trang cài đặt của LlamaIndex gợi ý.
+- **LlamaIndex chưa nhận `openai` 3.** `llama-index-llms-openai` đòi `openai` dưới 3, trong khi các bài khác của phần này dùng `openai` 3.37. `langchain-openai` 1.7.2 nhận cả hai.
+
+### Giới hạn
+
+- **Kho vectơ của cả hai ô code nằm trong bộ nhớ.** Thoát chương trình là mất, lần chạy sau phải embed lại từ đầu, tức gọi API lại. Ứng dụng thật lưu chỉ mục xuống đĩa hoặc dùng một cơ sở dữ liệu vectơ.
+- **Framework không làm RAG tốt hơn.** Chất lượng vẫn do cách cắt chunk, mô hình embedding, $k$ và prompt quyết định. Cách đánh giá ở bài [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/) vẫn cần như cũ.
+- **Bài chỉ chạm phần RAG.** Cả hai thư viện đều có agent (LangChain dựng agent trên LangGraph, LlamaIndex có `FunctionAgent`), là nội dung của bài [Agents](/vi/llm/agents/).
+
+## Minh họa
+
+Bảng dưới đối chiếu từng khâu của pipeline ở ba cách làm: tự viết như bài [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/), LangChain và LlamaIndex. Hãy đọc theo hàng: cùng một việc, ba cái tên.
+
+| Khâu | Tự viết (`openai` + NumPy) | LangChain | LlamaIndex |
+|---|---|---|---|
+| Tài liệu | chuỗi hoặc danh sách chuỗi | `Document(page_content, metadata)` | `Document(text, metadata)`, `SimpleDirectoryReader` |
+| Cắt chunk | tự cắt, hoặc viết sẵn từng chunk | `RecursiveCharacterTextSplitter` (ký tự) | `SentenceSplitter` (token) |
+| Embedding | `client.embeddings.create` | `OpenAIEmbeddings` | `OpenAIEmbedding` |
+| Kho vectơ | mảng NumPy đã chuẩn hóa | `InMemoryVectorStore` | `VectorStoreIndex` (gồm cả cắt và embed) |
+| Truy xuất | `index @ q`, rồi `argsort` | `store.as_retriever(search_kwargs={"k": 2})` | `similarity_top_k=2` |
+| Prompt | f-string | `ChatPromptTemplate` | prompt có sẵn, hoặc `text_qa_template` |
+| Gọi mô hình chat | `client.chat.completions.create` | `ChatOpenAI` | `OpenAILike` |
+| Nối các khâu | vài dòng Python | chain LCEL: `\|` | `query_engine.query(...)` |
+| Xem chunk đã dùng | có sẵn trong biến `top` | gọi `retriever.invoke(...)` | `response.source_nodes` |
+
+Để thấy "prompt có sẵn" của LlamaIndex cụ thể ra sao, đây là các message mà ô LlamaIndex của bài gửi tới API với câu hỏi "Câu lạc bộ họp lúc mấy giờ?". Bài bắt chúng bằng một server giả đứng ở vị trí API, nên đây là prompt thật của `llama-index-core` 0.14.25, không phải câu trả lời của một mô hình. Hai chunk trong ngữ cảnh do mô hình embedding chọn; bảng thay chúng bằng chỗ giữ chỗ.
+
+| Vai trò | Nội dung |
+|---|---|
+| `system` | You are an expert Q&A system that is trusted around the world.<br/>Always answer the query using the provided context information, and not prior knowledge.<br/>Some rules to follow:<br/>1. Never directly reference the given context in your answer.<br/>2. Avoid statements like 'Based on the context, ...' or 'The context information ...' or anything along those lines. |
+| `user` | Context information is below.<br/>---------------------<br/>source: noi-quy.txt<br/><br/>(chunk thứ nhất)<br/><br/>source: noi-quy.txt<br/><br/>(chunk thứ hai)<br/>---------------------<br/>Given the context information and not prior knowledge, answer the query.<br/>Query: Câu lạc bộ họp lúc mấy giờ?<br/>Answer: |
+
+Để ý dòng `source: noi-quy.txt`: metadata của tài liệu được chép vào trước mỗi chunk. Vì vậy `SentenceSplitter` trừ số token của metadata khỏi `chunk_size`. Ô LangChain thì gửi đúng hai message bạn viết trong `ChatPromptTemplate`, không thêm gì.
+
+## Ví dụ code
+
+Code trong bài kiểm tra lần cuối tháng 10/2026, với Python 3.14. Ô LangChain dùng `langchain` 1.4.7, `langchain-openai` 1.7.2 và `openai` 3.37. Ô LlamaIndex dùng `llama-index-core` 0.14.25 và `openai` 2.54, trong một môi trường ảo riêng. Cả hai ô gọi API nên chạy trên máy bạn, không chạy trên trang.
+
+Hai ô làm cùng một việc trên cùng dữ liệu: nội quy bốn đoạn của một câu lạc bộ tưởng tượng, rồi một câu hỏi mà mô hình không thể biết nếu không đọc nội quy. Hãy đặt hai ô cạnh nhau và đối chiếu từng dòng với bảng ở mục Minh họa.
+
+### Chuẩn bị
+
+Đặt ba biến môi trường như ở bài [Sử dụng API văn bản](/vi/llm/text-api/#chuẩn-bị-nhà-cung-cấp-và-biến-môi-trường), cộng thêm tên một mô hình embedding. Nếu nhà cung cấp chat của bạn không có embeddings (bảng ở bài Sử dụng API văn bản ghi rõ nơi nào có), đặt thêm địa chỉ và key của một nhà cung cấp có:
+
+<Tabs syncKey="os">
+<TabItem label="macOS, Linux (bash)">
+
+```sh
+export EMBEDDING_MODEL="<tên mô hình embedding>"
+# Chỉ khi nhà cung cấp chat không có embeddings:
+export EMBEDDING_BASE_URL="<địa chỉ API có embeddings>"
+export EMBEDDING_API_KEY="<key của nhà cung cấp đó>"
+```
+
+</TabItem>
+<TabItem label="Windows (PowerShell)">
+
+```powershell
+$env:EMBEDDING_MODEL = "<tên mô hình embedding>"
+# Chỉ khi nhà cung cấp chat không có embeddings:
+$env:EMBEDDING_BASE_URL = "<địa chỉ API có embeddings>"
+$env:EMBEDDING_API_KEY = "<key của nhà cung cấp đó>"
+```
+
+</TabItem>
+</Tabs>
+
+Cài mỗi ô vào **một môi trường ảo riêng**. Lý do ở mục "Những gì đã đổi": bộ LlamaIndex kéo `openai` xuống bản 2, có thể làm hỏng code của các bài khác nếu cài chung. Phiên bản được ghim đúng bản bài đã thử, vì hai thư viện đổi API thường xuyên.
+
+### RAG bằng LangChain
+
+<LocalCode
+  code={langchainCode}
+  title="RAG tối thiểu bằng LangChain: retriever và chain LCEL"
+  packages={['langchain==1.4.7', 'langchain-openai==1.7.2', 'langchain-text-splitters==1.1.3', 'numpy']}
+/>
+
+Đọc code theo bốn khối đánh số:
+
+1. `RecursiveCharacterTextSplitter` với `chunk_size=80` cắt nội quy ở các chỗ xuống dòng đôi. Mỗi đoạn dài 60 tới 67 ký tự, còn hai đoạn liền nhau đã quá 80, nên dòng đầu tiên in ra là `Số chunk: 4`. Phép cắt không gọi API, nên con số này giống nhau ở mọi máy.
+2. `InMemoryVectorStore` gọi API embedding một lần cho cả bốn chunk, rồi `as_retriever` tạo retriever trả về 2 chunk gần nhất. Kho này tính cosine bằng NumPy, nên NumPy có trong dòng cài đặt dù code không import nó: thiếu NumPy thì dòng tìm kiếm báo `ImportError`.
+3. `ChatPromptTemplate` có lời dặn hệ thống và hai chỗ trống.
+4. Chain LCEL nối tất cả. Hai dòng bắt đầu bằng `-` là hai chunk retriever tìm được; chunk về giờ họp nên đứng đầu. Dòng cuối là câu trả lời, nên nhắc tới tối thứ Năm, 19 giờ.
+
+Retriever được gọi hai lần: một lần để in, một lần bên trong chain. Mỗi lần gọi embed câu hỏi một lần, nên chương trình gọi API embedding ba lần tất cả.
+
+### RAG bằng LlamaIndex
+
+<LocalCode
+  code={llamaindexCode}
+  title="RAG tối thiểu bằng LlamaIndex: chỉ mục và query engine"
+  packages={['llama-index-core==0.14.25', 'llama-index-llms-openai-like==0.8.1', 'llama-index-embeddings-openai==0.7.0']}
+/>
+
+Phần đầu là cấu hình `Settings`; phần còn lại ngắn hơn hẳn ô LangChain vì `from_documents` và `as_query_engine` làm hộ việc cắt, embed, tìm và ghép prompt. Ở đây `chunk_size=64` đếm bằng token và đã tính cả metadata: mỗi đoạn nội quy khoảng 30 token, hai đoạn liền nhau vượt chỗ còn lại sau khi trừ metadata, nên LlamaIndex cũng cắt ra `Số chunk: 4`. Hai dòng `-` lấy từ `response.source_nodes`, rồi tới câu trả lời.
+
+Lần đầu chạy, LlamaIndex không cần tải gì thêm: bộ tách token mà `SentenceSplitter` dùng đã có sẵn trong gói `llama-index-core`. Nhưng nếu địa chỉ API sai, hãy kiên nhẫn: `OpenAIEmbedding` mặc định thử lại tới 10 lần, nên khi bài thử với một cổng đóng, lỗi `APIConnectionError` mất hơn một phút mới hiện ra.
+
+## Lỗi hay gặp
+
+:::caution[Chép code từ bài viết cũ, hoặc cài cả hai thư viện chung một chỗ]
+Ví dụ trên mạng hay mở đầu bằng `from langchain.chains import RetrievalQA` hoặc `from langchain.text_splitter import ...`. Với `langchain` 1.x, cả hai báo `ModuleNotFoundError`. Đừng vội cài thêm gói cho tới khi hết lỗi: hãy xem bài viết dùng bản nào, đọc tài liệu đúng bản bạn cài, và ghim phiên bản trong `requirements.txt`. Tương tự, cài gói gộp `llama-index` chung với `llama-index-llms-openai-like` bản mới thì pip báo xung đột, còn cài bộ LlamaIndex vào môi trường đang có `openai` 3 thì pip lặng lẽ hạ `openai` xuống. Mỗi dự án một môi trường ảo.
+:::
+
+:::caution[Nhầm tên tham số, hoặc quên cấu hình của LlamaIndex]
+`base_url` là của LangChain; LlamaIndex gọi là `api_base`. Embedding của LlamaIndex nhận tên mô hình qua `model_name`; viết `model=` với tên không phải của OpenAI là gặp `ValueError`. Quên `is_chat_model=True` thì `OpenAILike` gọi endpoint `/completions` cũ, và nơi chỉ có endpoint chat trả lỗi 404. Nặng nhất là quên `Settings.llm` hay `Settings.embed_model`: LlamaIndex lặng lẽ dùng OpenAI, gửi key của nhà cung cấp khác tới máy chủ OpenAI và nhận `AuthenticationError` mã 401. Gặp lỗi 401 khi bạn không hề dùng OpenAI, hãy kiểm tra dòng `Settings` trước tiên.
+:::
+
+:::caution[Tưởng dùng framework thì RAG tốt hơn, hay tiết kiệm hơn]
+Framework chỉ gói lại các khâu; chunk cắt dở, mô hình embedding kém hay prompt mơ hồ thì kết quả vẫn dở như tự viết. Nó cũng không làm giảm số lần gọi API: cả hai ô code embed lại toàn bộ tài liệu ở mỗi lần chạy, vì kho vectơ nằm trong bộ nhớ. Với tài liệu lớn, mỗi lần chạy thử là một lần trả tiền embedding, nên hãy lưu chỉ mục lại. Và như mọi bài dùng API: key nằm trong biến môi trường, không nằm trong code, kể cả khi framework cho phép truyền thẳng `api_key="..."`.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- LangChain và LlamaIndex không làm RAG theo cách khác: vẫn là tải tài liệu, cắt chunk, embed và lưu, truy xuất, ghép prompt và gọi mô hình. Chúng đặt tên và làm sẵn từng khâu. Quy trình cố định, ít bước, một nhà cung cấp thì tự viết thường đủ.
+- LangChain lắp từng khối Runnable bằng LCEL: `{"context": retriever | format_docs, "question": RunnablePassthrough()} | prompt | llm | StrOutputParser()`. Đường ống lộ ra, dễ chèn thêm bước.
+- LlamaIndex gói sẵn: `Settings` cấu hình một lần, `VectorStoreIndex.from_documents` lập chỉ mục, `as_query_engine` trả lời; `response.source_nodes` cho biết chunk nào được dùng. Prompt mặc định là tiếng Anh, thay được bằng `text_qa_template`.
+- Hai thư viện đổi nhanh: tên tham số khác nhau (`base_url` và `api_base`, `model` và `model_name`), cấu hình thiếu thì LlamaIndex về OpenAI, import cũ của LangChain đã bị gỡ. Ghim phiên bản và dùng môi trường ảo riêng.
+
+**Đọc thêm:**
+
+- LangChain (2026). [*LangChain overview*](https://docs.langchain.com/oss/python/langchain/overview). Trang tổng quan chính thức của LangChain 1.x: các khối chính, và vì sao agent được dựng trên LangGraph. Tài liệu không chia theo phiên bản; bài đã đối chiếu với `langchain` 1.4.7.
+- LangChain (2026). [*Migrate to LangChain v1*](https://docs.langchain.com/oss/python/migrate/langchain-v1). Danh sách những gì đã chuyển sang `langchain-classic`, đổi tên hay bị gỡ. Nên đọc trước khi dùng một ví dụ cũ.
+- LangChain (2026). [*Retrieval Augmented Generation (RAG) with Deep Agents*](https://docs.langchain.com/oss/python/deepagents/rag). Hướng dẫn RAG chính thức hiện hành, dựng bằng Deep Agents: agent tự quyết khi nào tìm kiếm.
+- LangChain (2026). [*Retrieval*](https://docs.langchain.com/oss/python/deepagents/retrieval). Trang khái niệm: so sánh RAG hai bước (như chain của bài) với RAG dạng agent, và khi nào dùng cách nào.
+- LlamaIndex (2026). [*Starter example*](https://developers.llamaindex.ai/python/framework/getting_started/starter_example/) và [*Installation*](https://developers.llamaindex.ai/python/framework/getting_started/installation/). Ví dụ chính thức với `SimpleDirectoryReader`, `VectorStoreIndex`, `Settings`, và cách cài chọn lọc bằng `llama-index-core` cùng từng gói tích hợp.
+- PyPI. [*llama-index-llms-openai-like 0.8.1*](https://pypi.org/project/llama-index-llms-openai-like/0.8.1/). Trang của gói `OpenAILike` đúng bản bài đã thử, kèm danh sách phụ thuộc.
+
+<LessonProgress />

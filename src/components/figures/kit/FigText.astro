@@ -2,33 +2,38 @@
 // Free text of a static figure, outside boxes (docs/architecture/viz.md, section 8.4): lines as <tspan>,
 // centred as a block on y, anchored at x by start, middle or end. "label" is 15 units and bold, "small" is
 // 13 units and muted; the size is an attribute, colours are in figures.css.
+// `xs` (llm-lessons.md 2.9.3): the lines stand side by side on y instead, line i at xs[i], in one <text>: the
+// names over a row of columns. Positions: textLinePositions in src/lib/figures/geometry.ts.
+// Middle anchor and the central baseline come from figures.css (2.9.3), so only start and end are written.
 import type { Lines } from '@data/figures/types';
-import { FIG_FONT, MAX_NODE_LINES, lineOffsets, round1, toLines } from '@lib/figures/geometry';
+import { FIG_FONT, textLinePositions, toLines, type Pt } from '@lib/figures/geometry';
 
 interface Props {
-  x: number;
+  x?: number;
   /** Vertical centre of the lines. */
   y: number;
   lines: Lines;
+  /** One x per line: the lines side by side on y (a row of column names); `x` is then unused. */
+  xs?: readonly number[];
   size?: 'label' | 'small';
   anchor?: 'start' | 'middle' | 'end';
 }
 
-const { x, y, size = 'label', anchor = 'middle' } = Astro.props;
+const { x = 0, y, xs, size = 'label', anchor = 'middle' } = Astro.props;
 const lines = toLines(Astro.props.lines);
 const where = `<FigText> "${lines.join(' / ')}" on "${Astro.locals.starlightRoute.id}"`;
-if (lines.length === 0 || lines.length > MAX_NODE_LINES) throw new Error(`${where}: needs 1–${MAX_NODE_LINES} lines.`);
 if (lines.some((line) => !line.trim())) throw new Error(`${where}: has an empty line.`);
+if (Astro.props.x === undefined && xs === undefined) throw new Error(`${where}: needs x, or xs for a row.`);
 
 const fontSize = FIG_FONT[size];
-const offsets = lineOffsets(lines.length, fontSize);
+let positions: Pt[];
+try {
+  positions = textLinePositions(x, y, lines.length, fontSize, xs);
+} catch (error) {
+  throw new Error(`${where}: ${error instanceof Error ? error.message : String(error)}`);
+}
 ---
 
-<text
-  class={size === 'label' ? 'atlas-fig-text' : 'atlas-fig-text-sm'}
-  font-size={fontSize}
-  text-anchor={anchor}
-  dominant-baseline="central"
->
-  {lines.map((line, i) => <tspan x={x} y={round1(y + (offsets[i] ?? 0))}>{line}</tspan>)}
+<text class={size === 'label' ? 'atlas-fig-text' : 'atlas-fig-text-sm'} font-size={fontSize} text-anchor={anchor === 'middle' ? undefined : anchor}>
+  {lines.map((line, i) => <tspan x={positions[i]?.[0]} y={positions[i]?.[1]}>{line}</tspan>)}
 </text>

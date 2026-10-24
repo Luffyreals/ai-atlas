@@ -4,52 +4,67 @@
 // fill) for the focus; alt (dashed blue border) for a second group. Colours and strokes: figures.css, by
 // data-tone. Font sizes are attributes, so the line positions here and the e2e size check use the real ones.
 // The build fails when the box holds more than 3 lines, an empty line, or is too short for its lines.
+// Added for the LLM figures (docs/architecture/llm-lessons.md, section 2.9.2): `math`, a FigMath row (15
+// units) above the main lines, e.g. the matrix W0 named inside its box; with it, `lines` may be left out. Tone
+// "off": dotted muted border on the page colour, muted words, for a part that does not run (an expert the
+// router did not pick).
+// `bare` (llm-lessons.md 2.9.3): a box with no words, a layer bar or a cell, named by text around it; the
+// rules of what a box holds are nodeContentError in src/lib/figures/geometry.ts. A plain box writes no
+// data-tone, and its lines no anchor or baseline: figures.css has them (2.9.3), for a smaller figure.
 import type { Lines } from '@data/figures/types';
-import { FIG_FONT, MAX_NODE_LINES, NODE_PADDING, LINE_HEIGHT, round1, stackOffsets, toLines } from '@lib/figures/geometry';
+import { FIG_FONT, nodeContentError, round1, nodeRows, toLines, type MathLabel } from '@lib/figures/geometry';
+import FigMath from './FigMath.astro';
 
 interface Props {
   x: number;
   y: number;
   width: number;
   height: number;
-  /** Main lines, bold. */
-  lines: Lines;
+  /** Main lines, bold. Optional only when `math` is given. */
+  lines?: Lines;
   /** Smaller lines under the main ones. */
   small?: Lines;
-  tone?: 'plain' | 'accent' | 'alt';
+  /** A math row above the main lines. */
+  math?: MathLabel;
+  tone?: 'plain' | 'accent' | 'alt' | 'off';
+  /** No words at all: a layer bar or a cell, named by text around it. */
+  bare?: boolean;
 }
 
-const { x, y, width, height, tone = 'plain' } = Astro.props;
-const main = toLines(Astro.props.lines);
+const { x, y, width, height, math, tone = 'plain', bare = false } = Astro.props;
+const main = Astro.props.lines === undefined ? [] : toLines(Astro.props.lines);
 const small = Astro.props.small === undefined ? [] : toLines(Astro.props.small);
 const all = [...main, ...small];
-const where = `<FigNode> "${all.join(' / ')}" on "${Astro.locals.starlightRoute.id}"`;
+const where = `<FigNode> "${[math?.symbol ?? '', ...all].filter(Boolean).join(' / ')}" at ${x},${y} on "${Astro.locals.starlightRoute.id}"`;
 
-if (main.length === 0) throw new Error(`${where}: needs at least one main line.`);
-if (all.length > MAX_NODE_LINES) throw new Error(`${where}: at most ${MAX_NODE_LINES} lines, got ${all.length}.`);
-if (all.some((line) => !line.trim())) throw new Error(`${where}: has an empty line.`);
+const fault = nodeContentError(main, small, math !== undefined, bare);
+if (fault) throw new Error(`${where}: ${fault}`);
+if (!(width > 0 && height > 0)) throw new Error(`${where}: width and height must be positive.`);
 
-const sizes = [...main.map(() => FIG_FONT.label), ...small.map(() => FIG_FONT.small)];
-const textHeight = sizes.reduce((sum, size) => sum + size * LINE_HEIGHT, 0);
-if (height < textHeight + 2 * NODE_PADDING) {
-  throw new Error(`${where}: height ${height} is under ${round1(textHeight + 2 * NODE_PADDING)} (lines + ${NODE_PADDING} each side).`);
-}
+const sizes = [...(math ? [FIG_FONT.label] : []), ...main.map(() => FIG_FONT.label), ...small.map(() => FIG_FONT.small)];
+const { centres, minHeight } = bare ? { centres: [], minHeight: 0 } : nodeRows(y, height, sizes);
+if (height < minHeight) throw new Error(`${where}: height ${height} is under ${minHeight} (lines + padding each side).`);
 
 const cx = round1(x + width / 2);
-const cy = y + height / 2;
-const offsets = stackOffsets(sizes);
-const mainLines = main.map((line, i) => ({ line, y: round1(cy + (offsets[i] ?? 0)) }));
-const smallLines = small.map((line, i) => ({ line, y: round1(cy + (offsets[main.length + i] ?? 0)) }));
+const first = math ? 1 : 0;
+const mathY = math ? (centres[0] ?? 0) : 0;
+const mainLines = main.map((line, i) => ({ line, y: centres[first + i] ?? 0 }));
+const smallLines = small.map((line, i) => ({ line, y: centres[first + main.length + i] ?? 0 }));
 ---
 
-<g class="atlas-fig-node" data-tone={tone}>
+<g class="atlas-fig-node" data-tone={tone === 'plain' ? undefined : tone}>
   <rect x={x} y={y} width={width} height={height}></rect>
-  <text class="atlas-fig-text" font-size={FIG_FONT.label} text-anchor="middle" dominant-baseline="central">
-    {mainLines.map((item) => <tspan x={cx} y={item.y}>{item.line}</tspan>)}
-  </text>
+  {math && <FigMath {...math} x={cx} y={mathY} />}
+  {
+    mainLines.length > 0 && (
+      <text class="atlas-fig-text" font-size={FIG_FONT.label}>
+        {mainLines.map((item) => <tspan x={cx} y={item.y}>{item.line}</tspan>)}
+      </text>
+    )
+  }
   {
     smallLines.length > 0 && (
-      <text class="atlas-fig-text-sm" font-size={FIG_FONT.small} text-anchor="middle" dominant-baseline="central">
+      <text class="atlas-fig-text-sm" font-size={FIG_FONT.small}>
         {smallLines.map((item) => <tspan x={cx} y={item.y}>{item.line}</tspan>)}
       </text>
     )

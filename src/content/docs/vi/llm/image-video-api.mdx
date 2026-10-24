@@ -1,0 +1,290 @@
+---
+title: API cho hình ảnh và video
+description: Hỏi mô hình về một tấm ảnh, sinh ảnh từ prompt, và vì sao video là job phải chờ. Data URL base64, images.generate, polling, kiểm duyệt, nguồn gốc ảnh.
+quiz:
+  - question: 'Bạn chạy Ollama trên máy và đặt `"url": "https://example.com/meo.jpg"` trong phần `image_url`. Yêu cầu bị lỗi. Sửa thế nào để cùng đoạn code chạy được ở nhiều nhà cung cấp nhất?'
+    options:
+      - 'Đổi `"type": "image_url"` thành `"type": "image"`'
+      - 'Tải ảnh về, mã hóa base64, rồi gửi `data:image/jpeg;base64,...` trong chính trường `url` đó'
+      - 'Dán chuỗi base64 của ảnh vào phần `text` của tin nhắn'
+      - 'Gửi ảnh qua `client.images.generate` thay vì `chat.completions`'
+    answer: 1
+    explanation: 'Theo tài liệu của Ollama, phần `image_url` chỉ nhận ảnh dạng base64, không nhận link web. `image_url` chỉ là tên trường: `url` nhận được cả data URL, và đây là dạng mà OpenAI, Gemini, Groq, Ollama đều nhận. Dán base64 vào phần `text` thì mô hình chỉ thấy một chuỗi ký tự dài, không thấy ảnh. Còn `images.generate` là để tạo ảnh mới, không phải để hỏi về ảnh có sẵn.'
+  - question: 'Qua lớp tương thích OpenAI của Gemini, bạn gọi `images.generate` lần lượt với `quality="high"` và `quality="low"`. Không có lỗi nào, nhưng hai ảnh chi tiết như nhau. Giải thích hợp lý nhất là gì?'
+    options:
+      - 'Gemini luôn sinh ảnh ở chất lượng cao nhất'
+      - '`quality` phải đặt trong `messages`, không đặt trong `images.generate`'
+      - 'Lớp tương thích chỉ nhận `prompt`, `model`, `n`, `size`, `response_format`, và bỏ qua im lặng mọi tham số khác'
+      - 'Key miễn phí không được dùng tham số `quality`'
+    answer: 2
+    explanation: 'Trang tương thích OpenAI của Gemini ghi rõ tham số ngoài danh sách bị bỏ qua mà không báo lỗi; tham số riêng của Gemini phải đi qua `extra_body`. Bài học chung: không có lỗi chưa chắc tham số đã có tác dụng. Đổi nhà cung cấp thì đọc lại danh sách tham số họ hỗ trợ.'
+  - question: 'Bạn viết dịch vụ tạo video: gửi yêu cầu, nhận `id`, hỏi trạng thái tới khi `completed`, rồi lưu link tải vào cơ sở dữ liệu để người dùng bấm xem vào tuần sau. Thiết kế này hỏng ở đâu?'
+    options:
+      - 'Link tải thường chỉ sống ngắn hạn (API video cũ của OpenAI: tối đa một giờ), nên phải tải file về kho của bạn ngay khi job xong'
+      - 'Không hỏng gì: link do nhà cung cấp cấp thì dùng được mãi'
+      - 'Phải gửi lại yêu cầu tạo video mỗi lần người dùng muốn xem'
+      - 'Sai từ đầu: video phải được trả về ngay trong lần gọi đầu tiên'
+    answer: 0
+    explanation: 'Kết quả của job bất đồng bộ thường nằm ở một link tạm. Tài liệu API video của OpenAI (đã ngừng ngày 24/9/2026) ghi link tải chỉ sống tối đa một giờ. Lưu link thì tuần sau link đã chết; phải chép file về kho lưu trữ của bạn. Gửi lại yêu cầu mỗi lần xem thì tốn tiền, chờ vài phút, và ra một video khác.'
+  - question: 'Một bức ảnh lan truyền trên mạng xã hội. Bạn kiểm tra và không thấy metadata C2PA nào. Kết luận nào đúng?'
+    options:
+      - 'Ảnh chắc chắn do người chụp, không phải do AI tạo'
+      - 'Ảnh chắc chắn do AI tạo rồi bị xóa dấu'
+      - 'Ảnh chắc chắn đã bị chỉnh sửa'
+      - 'Chưa kết luận được gì: metadata dễ mất khi chụp màn hình hay đăng lại, và không phải công cụ nào cũng gắn nó'
+    answer: 3
+    explanation: 'C2PA là thông tin đính kèm tệp, nên rất dễ rơi mất trên đường đi. Thiếu nó không chứng minh ảnh là thật hay giả. Ngược lại, có C2PA chỉ cho biết ảnh được tạo và sửa bằng công cụ nào, không bảo đảm nội dung đúng sự thật.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import dataUrlCode from '@code/llm/image-video-api/data-url.vi.py?raw';
+import describeImageCode from '@code/llm/image-video-api/describe-image.vi.py?raw';
+import generateImageCode from '@code/llm/image-video-api/generate-image.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Gửi được một tấm ảnh cho mô hình nhìn được ảnh (vision): đặt ảnh vào `messages` dưới dạng **data URL** base64, cạnh câu hỏi bằng chữ.
+- Sinh được ảnh từ prompt bằng `images.generate`, đọc kết quả `b64_json` và lưu ra tệp.
+- Giải thích được vì sao video là một **tác vụ bất đồng bộ** (asynchronous job): gửi yêu cầu, giữ `id`, hỏi lại trạng thái bằng **polling**, tải kết quả về kịp lúc.
+- Nhận ra các giới hạn quanh ảnh và video do AI tạo: **kiểm duyệt nội dung** (content moderation), bản quyền, và vì sao dấu nguồn gốc như C2PA không phải bằng chứng ảnh thật hay giả.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Ở bài [Sử dụng API văn bản](/vi/llm/text-api/), bạn gọi mô hình chat bằng `client.chat.completions.create`, với `messages` là danh sách các lượt `{"role": ..., "content": ...}` và `content` là **một chuỗi**. Địa chỉ API, key và tên mô hình đọc từ ba biến môi trường `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `LLM_MODEL`, nên cùng một đoạn code chạy được với nhiều nhà cung cấp. SDK `openai` tự thử lại vài lần với lỗi tạm thời như 429 hay 5xx.
+:::
+
+## Trực giác
+
+Bạn đã biết gửi chữ cho mô hình và nhận chữ về. Giờ có ba yêu cầu mới:
+
+1. Chụp một tờ hóa đơn, hỏi mô hình "tổng tiền là bao nhiêu?".
+2. Nhờ mô hình vẽ một bức tranh màu nước cho bài blog.
+3. Nhờ mô hình làm một đoạn video tám giây.
+
+Nghe thì giống nhau: gửi yêu cầu, nhận kết quả. Nhưng ở tầng API, đó là ba con đường khác nhau.
+
+**Hỏi về ảnh** vẫn là một cuộc chat. Bạn vẫn gọi `chat.completions`, chỉ khác là tin nhắn của bạn giờ gồm hai phần: một câu hỏi và một tấm ảnh. Mô hình trả lời bằng chữ, như mọi lần.
+
+**Sinh ảnh** đi qua một cánh cửa khác: `images.generate`. Vào là prompt, ra là byte của một tấm ảnh. Không có `messages`, không có lượt hội thoại. Nhiều người tưởng chỉ một API làm được cả hai việc, rồi bối rối khi mô hình chat trả về một đoạn mô tả thay vì một bức tranh.
+
+**Video** thì lâu: một lần dựng có thể mất vài phút. Không ai giữ kết nối mở chừng ấy thời gian. Nó giống gửi bưu kiện: bạn gửi đơn, nhận **mã vận đơn**, thỉnh thoảng tra xem hàng tới đâu. Hàng tới kho thì phải lấy ngay, vì kho chỉ giữ một thời gian ngắn.
+
+Bài toán của bài này là: **với SDK `openai` quen thuộc, gửi được ảnh cho mô hình đọc, xin được ảnh mới từ prompt, và hiểu cách chờ một kết quả dài như video, kèm các giới hạn về an toàn và nguồn gốc của nội dung do AI tạo.**
+
+## Lý thuyết
+
+### Đưa ảnh vào `messages`
+
+Ở bài trước, `content` của một lượt là một chuỗi. Muốn gửi ảnh, `content` của lượt `user` trở thành **danh sách các phần** (content parts). Mỗi phần có `type`:
+
+```json
+{
+  "role": "user",
+  "content": [
+    { "type": "text", "text": "Ảnh có những hình gì, màu gì, nằm ở đâu?" },
+    { "type": "image_url", "image_url": { "url": "data:image/png;base64,iVBORw0KGgo..." } }
+  ]
+}
+```
+
+Một lượt có thể trộn nhiều phần chữ và nhiều ảnh. Mô hình đọc chúng theo thứ tự rồi trả lời bằng **chữ**: lượt `assistant` vẫn có `content` là chuỗi như bài trước.
+
+**Trường `url` nhận hai kiểu giá trị.** Tên trường là `image_url`, nhưng `url` không bắt buộc là link web:
+
+- **Link web** (`https://...`): máy chủ của nhà cung cấp tự tải ảnh về. Ảnh phải công khai.
+- **Data URL**: một "địa chỉ" chứa luôn dữ liệu của ảnh, dạng `data:<kiểu MIME>;base64,<dữ liệu>`. Ví dụ `data:image/png;base64,iVBORw0KGgo...`. Kiểu MIME (`image/png`, `image/jpeg`…) phải khớp định dạng thật của tệp.
+
+Theo tài liệu của OpenAI, Gemini, Groq và Ollama (kiểm tra 10/2026), cả bốn nơi đều nhận data URL base64, còn Ollama **không** nhận link web. Vì vậy code của bài dùng data URL: đó là cách chạy được ở nhiều nơi nhất.
+
+**Base64 làm chuỗi dài thêm khoảng một phần ba.** Base64 là cách viết dữ liệu nhị phân bằng 64 ký tự an toàn cho văn bản (`A`–`Z`, `a`–`z`, `0`–`9`, `+`, `/`). Mỗi ký tự mang 6 bit. Ba byte là 24 bit, vừa đúng bốn ký tự. Nhóm cuối thiếu byte thì được đệm bằng dấu `=` cho đủ bốn ký tự. Nên một tệp $s$ byte thành chuỗi dài:
+
+$$
+4\left\lceil \frac{s}{3} \right\rceil
+$$
+
+ký tự, trong đó $\lceil\cdot\rceil$ là làm tròn lên. Khi $s$ lớn, tỉ lệ này gần $4/3 \approx 1.33$: một ảnh 3 MB thành chuỗi khoảng 4 MB trong yêu cầu gửi đi. Ảnh lớn nên thu nhỏ trước khi gửi. Mỗi nhà cung cấp còn giới hạn kích thước và số ảnh trong một yêu cầu, mỗi nơi một khác, nên hãy xem tài liệu của nơi bạn dùng.
+
+**Ảnh cũng tốn token.** Mô hình không đọc chuỗi base64 như đọc chữ. Nhà cung cấp giải mã ảnh, rồi biến nó thành một chuỗi token ảnh cho mô hình. Ảnh càng lớn, càng chi tiết thì càng nhiều token, và bạn trả tiền cho số token đó. Riêng OpenAI có thêm trường tùy chọn `detail` trong `image_url` (`"low"`, `"high"`, `"auto"`…; giá trị được phép tùy mô hình): `"low"` rẻ hơn, đủ khi chỉ cần ý chung của ảnh. Vì sao mô hình "nhìn" được ảnh là chuyện của bài [Multimodal](/vi/llm/multimodal/).
+
+**Mô hình phải nhìn được ảnh.** Không phải mô hình chat nào cũng nhận ảnh. Gửi ảnh cho mô hình chỉ đọc chữ thì bạn nhận lỗi 400, hoặc tệ hơn, một câu trả lời bịa. Biến `LLM_MODEL` của bài này phải là một mô hình có hỗ trợ ảnh (vision) ở nhà cung cấp bạn dùng.
+
+### Sinh ảnh với `images.generate`
+
+Sinh ảnh dùng một endpoint riêng, không qua chat:
+
+```python
+response = client.images.generate(
+    model=IMAGE_MODEL,
+    prompt=prompt,
+    size="1024x1024",
+    n=1,
+)
+```
+
+- `model`: mô hình sinh ảnh. Nó khác mô hình chat, nên code đọc tên từ một biến riêng là `IMAGE_MODEL`, theo quy ước `<KHẢ_NĂNG>_MODEL` của phần này.
+- `prompt`: mô tả bức ảnh bạn muốn. Cách viết prompt tốt là chủ đề của bài [Prompt Engineering](/vi/llm/prompt-engineering/).
+- `size`: kích thước, ví dụ `"1024x1024"`. `n`: số ảnh muốn nhận.
+
+Kết quả nằm trong `response.data`, mỗi phần tử là một ảnh. Ảnh thường về dưới dạng `b64_json`: chuỗi base64, giải mã bằng `base64.b64decode` là ra byte của tệp ảnh. Có nơi trả `url` thay vào đó: một link tạm, sẽ hết hạn, nên phải tải về sớm. Code an toàn nhất là **xem cả hai trường**, vì trường không dùng sẽ là `None`.
+
+**Không phải nhà cung cấp nào cũng sinh ảnh.** Theo tài liệu kiểm tra 10/2026:
+
+- **OpenAI** có `images.generate`, với nhiều tham số riêng như `quality`, `output_format`, `background`. Với các mô hình ảnh GPT, ảnh trả về dạng base64.
+- **Gemini** (qua lớp tương thích OpenAI) có `images.generate`, nhưng chỉ nhận `prompt`, `model`, `n`, `size`, `response_format`. Tham số khác bị **bỏ qua im lặng**, không báo lỗi. Tham số riêng của Gemini, như tỉ lệ khung hình, đi qua `extra_body`.
+- **Groq** và **Ollama**: trang tương thích OpenAI của hai nơi này không có endpoint sinh ảnh (10/2026), nên ô sinh ảnh chưa chạy được qua đó. (Ollama có sinh ảnh thử nghiệm qua dòng lệnh, ngoài lớp tương thích OpenAI; xem [bài viết của Ollama](https://ollama.com/blog/image-generation).)
+
+Bảng nhà cung cấp và `OPENAI_BASE_URL` của từng nơi nằm ở bài [Sử dụng API văn bản](/vi/llm/text-api/). Có thể bạn phải dùng một nhà cung cấp cho phần đọc ảnh và một nhà khác cho phần sinh ảnh.
+
+### Video: một tác vụ bất đồng bộ
+
+Dựng một đoạn video có thể mất vài phút. Vì vậy API video không trả video ngay trong lần gọi. Nó theo khuôn **tác vụ bất đồng bộ**: gửi rồi chờ kết quả sau.
+
+1. **Tạo job.** Bạn gửi prompt. API trả về ngay một `id` và trạng thái, thường là `queued` (đang xếp hàng).
+2. **Chờ.** Trạng thái chuyển qua `in_progress` rồi tới `completed` hoặc `failed`. Bạn biết điều đó bằng một trong hai cách:
+   - **Polling**: hỏi lại trạng thái theo chu kỳ.
+   - **Webhook**: bạn đăng ký một địa chỉ web, nhà cung cấp tự gọi tới đó khi job xong. Bạn không phải hỏi, nhưng cần một máy chủ nhận được lời gọi từ bên ngoài.
+3. **Lấy kết quả.** Job xong thì tải file về và chép vào kho lưu trữ của bạn ngay, vì link tải thường chỉ sống ngắn hạn.
+
+Polling viết bằng giả mã (không gắn với nhà cung cấp nào) trông như sau:
+
+```text
+job = tạo_job(prompt)              # trả về ngay: job.id, job.status = "queued"
+chờ = 10 giây
+lặp khi job.status chưa là "completed" hay "failed":
+    nếu đã quá thời hạn tối đa: báo hết giờ, dừng
+    ngủ(chờ)
+    job = hỏi_trạng_thái(job.id)
+    chờ = min(chờ × 2, 60 giây)    # backoff: hỏi thưa dần
+nếu job.status = "failed": báo lỗi, dừng
+tải_về(job.id) rồi lưu vào kho của bạn ngay
+```
+
+Ba chi tiết đáng nhớ. Chờ **thưa dần** (backoff), giống cách retry ở bài trước, vì hỏi dồn dập chỉ tốn lượt gọi và dễ gặp lỗi 429. Luôn có **thời hạn tối đa**, để chương trình không chờ mãi một job bị kẹt. Và **tải kết quả về ngay**. Lấy ví dụ, tài liệu của API video OpenAI (API nay đã ngừng) gợi ý hỏi mỗi 10–20 giây, có backoff, hoặc dùng webhook; link tải chỉ sống tối đa một giờ.
+
+:::caution[Vì sao bài không có code video chạy được]
+API video thay đổi rất nhanh. Tại thời điểm viết (10/2026): OpenAI ngừng Videos API ngày 24/9/2026, không có bản thay thế tương đương. Google đóng các mô hình Veo 3.1 bản xem trước ngày 22/10/2026, và mô hình video mới của Gemini không chạy qua endpoint `/v1/videos` kiểu OpenAI, mà qua SDK riêng của Google. Vì vậy không có code video nào chạy được qua SDK `openai` để đưa vào bài. Khuôn "tạo job, giữ `id`, chờ, lấy kết quả" thì vẫn đúng ở mọi nơi. Khi dùng một API video cụ thể, hãy đọc tài liệu mới nhất của nó, và đừng viết cứng code vào một nhà cung cấp.
+:::
+
+### Kiểm duyệt, bản quyền và nguồn gốc ảnh
+
+**Kiểm duyệt nội dung.** Các nhà cung cấp lọc cả prompt lẫn ảnh sinh ra. Ở OpenAI, yêu cầu bị chặn trả lỗi 400 với mã `moderation_blocked`, và tài liệu khuyên không thử lại khi chưa sửa prompt: gửi lại y nguyên thì kết quả vẫn vậy. SDK cũng không tự thử lại lỗi 400, nên code của bài bắt `openai.BadRequestError` và in mã lỗi. Bạn cũng có thể phải xác minh tổ chức trước khi dùng các mô hình GPT Image của OpenAI.
+
+**Bản quyền và quyền hình ảnh.** Ai sở hữu ảnh do AI tạo, và dùng nó vào việc gì thì được, phụ thuộc điều khoản dịch vụ của từng nhà cung cấp và luật của từng nước. Bài này không phải lời khuyên pháp lý. Vài thói quen an toàn:
+
+- Đọc điều khoản dịch vụ của nhà cung cấp trước khi dùng ảnh vào việc thương mại, và hỏi người có chuyên môn khi cần.
+- Không đưa vào prompt hay ảnh đầu vào những thứ bạn không có quyền dùng: ảnh có bản quyền, mặt người thật chưa xin phép, nhãn hiệu.
+- Khi công bố, ghi rõ ảnh hay video do AI tạo.
+
+**Nguồn gốc nội dung** (content provenance) trả lời câu hỏi "tấm ảnh này từ đâu ra?". Có hai cách đánh dấu chính:
+
+- **C2PA** (Coalition for Content Provenance and Authenticity) là một chuẩn mở, gọi là **Content Credentials**: gắn vào tệp một tờ khai lịch sử, ghi ảnh được tạo và sửa bằng công cụ nào. Tờ khai nằm trong metadata (thông tin kèm theo tệp), nên dễ rơi mất khi chụp màn hình, cắt ghép, hay đăng lên mạng xã hội.
+- **Watermark vô hình**: một dấu in chìm ngay trong điểm ảnh. Nó khó xóa hơn metadata nhưng không tuyệt đối: chỉnh sửa mạnh vẫn có thể phá được. Ví dụ, Google ghi rằng mọi ảnh sinh ra bằng Gemini đều mang watermark **SynthID**.
+
+Hai điều suy ra: **không thấy dấu không chứng minh ảnh là thật**, và **có dấu chỉ nói ảnh được làm bằng công cụ nào**, không bảo đảm nội dung đúng sự thật.
+
+### Giới hạn
+
+- **Tham số và định dạng khác nhau giữa các nhà cung cấp.** Phần chung là `messages` có ảnh, và `images.generate` với vài tham số cơ bản. Mọi thứ khác phải đọc tài liệu từng nơi (hộp thứ ba ở mục Lỗi hay gặp).
+- **Mô hình đọc ảnh vẫn có thể sai**: đọc nhầm số trên hóa đơn, đếm sai đồ vật. Việc quan trọng thì kiểm lại kết quả.
+
+## Minh họa
+
+Bảng đầu là hội thoại mà ô code "Hỏi mô hình về một tấm ảnh" gửi đi. Hãy nhìn vào lượt `user`: `content` của nó là một danh sách hai phần, không còn là một chuỗi như ở bài trước.
+
+| Vai trò | Nội dung |
+|---|---|
+| `system` | Chuỗi: "Bạn trả lời ngắn gọn bằng tiếng Việt." |
+| `user` | Danh sách hai phần. Phần 1, `text`: "Ảnh có những hình gì, màu gì, nằm ở đâu?". Phần 2, `image_url`: `data:image/png;base64,iVBORw0KGgo…`, dài 22 ký tự tiền tố cộng 160 ký tự base64 của ảnh thử 118 byte |
+| `assistant` | Một chuỗi chữ: câu trả lời của mô hình. Mô hình đọc ảnh nhưng chỉ trả lời bằng chữ |
+
+Bảng thứ hai đặt ba luồng của bài cạnh nhau. Nhìn vào hai hàng "Gọi gì" và "Thời gian": đó là chỗ ba luồng khác nhau nhiều nhất.
+
+| Tiêu chí | Hiểu ảnh | Sinh ảnh | Video |
+|---|---|---|---|
+| Gọi gì | `chat.completions.create` | `images.generate` | API video riêng của từng nhà (không có qua SDK `openai`, 10/2026) |
+| Gửi đi | `messages`, ảnh là một phần của `content` | `prompt`, `size`, `n` | prompt, có khi kèm ảnh đầu vào |
+| Nhận về | Chữ | Ảnh (`b64_json` hoặc `url`) | Một `id` và trạng thái; file video tải sau |
+| Thời gian | Như một lần chat | Thường lâu hơn chat, tùy mô hình và chất lượng | Vài phút; phải polling hoặc chờ webhook |
+| Mô hình | `LLM_MODEL` (phải nhìn được ảnh) | `IMAGE_MODEL` | Mô hình video |
+
+## Ví dụ code
+
+Code trong bài viết và kiểm tra lần cuối tháng 10/2026, với Python 3.14 và `openai` 3.37. Ô thứ nhất chạy ngay trên trang, vì nó chỉ dùng thư viện chuẩn của Python. Hai ô sau gọi API, nên bạn chạy trên máy mình. Cách đặt biến môi trường cho bash và PowerShell có ở mục [Chuẩn bị: nhà cung cấp và biến môi trường](/vi/llm/text-api/#chuẩn-bị-nhà-cung-cấp-và-biến-môi-trường) của bài Sử dụng API văn bản; ô sinh ảnh cần thêm biến `IMAGE_MODEL`, đặt giống hệt `LLM_MODEL`.
+
+### Từ byte ảnh tới data URL
+
+Ô này tự vẽ một ảnh PNG nhỏ 48 × 48 điểm (nền trắng, hình vuông đỏ ở giữa) bằng thư viện chuẩn, rồi mã hóa base64 và ghép thành data URL, đúng như khi gửi ảnh cho API.
+
+<PythonRunner code={dataUrlCode} title="Từ byte ảnh tới data URL" />
+
+Ảnh thử nặng 118 byte, chuỗi base64 dài 160 ký tự, đúng công thức $4\lceil 118/3\rceil = 4 \cdot 40 = 160$. Tỉ lệ 1.356 hơi lớn hơn $4/3$ vì 118 không chia hết cho 3: $118 = 3 \cdot 39 + 1$, nên nhóm cuối chỉ có 1 byte và được đệm thêm hai dấu `=` cho đủ bốn ký tự. Data URL mở đầu bằng `data:image/png;base64,` rồi tới `iVBORw0KGgo`: chuỗi này mã hóa 8 byte chữ ký mà tệp PNG nào cũng mở đầu bằng. Dòng cuối kiểm tra giải mã ngược ra đúng byte ban đầu.
+
+Nếu chạy ô này bằng Python trên máy, số byte có thể lệch vài byte, vì bản thư viện nén `zlib` mỗi nơi một khác; công thức thì vẫn đúng.
+
+### Hỏi mô hình về một tấm ảnh
+
+Ô này dùng lại ảnh thử ở trên (tạo tệp `anh-thu.png` nếu chưa có), ghép data URL với kiểu MIME đoán từ đuôi tệp, rồi hỏi mô hình. Đổi `IMAGE_PATH` thành đường dẫn tới ảnh của bạn để hỏi về ảnh thật; `mimetypes.guess_type` sẽ đổi tiền tố thành `image/jpeg` khi tệp là `.jpg`. Với đuôi tệp lạ, hàm này trả `None`, và tiền tố thành `data:None;base64,`: khi đó hãy ghi kiểu MIME bằng tay.
+
+<LocalCode code={describeImageCode} title="Hỏi mô hình về một tấm ảnh" packages={['openai']} />
+
+Phần gọi API giống hệt bài trước, trừ `content` của lượt `user` là danh sách hai phần. Bạn nhận về một đoạn chữ mô tả ảnh; mỗi lần chạy, câu chữ một khác. Nếu nhận lỗi 400 nói mô hình không hỗ trợ ảnh, hãy đổi `LLM_MODEL` sang một mô hình vision của nhà cung cấp bạn dùng.
+
+### Sinh ảnh từ prompt
+
+Ô này xin một bức tranh màu nước từ prompt, rồi lưu ra tệp `anh-sinh-ra.png`.
+
+<LocalCode code={generateImageCode} title="Sinh ảnh từ prompt" packages={['openai']} />
+
+Khi thành công, ô in tên tệp đã lưu. Nếu nhà cung cấp trả `url` thay cho `b64_json`, ô in link để bạn tải về ngay. Nếu yêu cầu bị từ chối, ô in mã lỗi (ví dụ `moderation_blocked` ở OpenAI) hoặc thông báo lỗi, rồi dừng. Trường hợp này hãy sửa prompt, đừng chạy lại y nguyên. Theo tài liệu, ô dùng được với OpenAI, và với Gemini qua lớp tương thích (ví dụ trong tài liệu của Gemini truyền thêm `response_format="b64_json"`). Với Groq hay Ollama thì chưa, vì trang tương thích OpenAI của hai nơi này không có endpoint sinh ảnh (10/2026).
+
+## Lỗi hay gặp
+
+:::caution[Tưởng `image_url` chỉ nhận link web]
+`url` nhận cả data URL, và data URL là dạng chạy được ở nhiều nhà cung cấp nhất; Ollama chỉ nhận dạng này. Hai lỗi nhỏ hay đi kèm: quên tiền tố `data:image/...;base64,` (chỉ gửi chuỗi base64 trần), và ghi sai kiểu MIME, như ghi `image/png` cho một tệp JPEG. Hãy để `mimetypes.guess_type` đoán kiểu từ đuôi tệp như ô code thứ hai.
+:::
+
+:::caution[Nhầm cửa: dùng mô hình chat để sinh ảnh, hoặc gửi ảnh cho mô hình không nhìn được]
+Hỏi về ảnh đi qua `chat.completions` với `LLM_MODEL` là một mô hình vision. Sinh ảnh đi qua `images.generate` với `IMAGE_MODEL`. Nhờ một mô hình chat "vẽ" thì bạn chỉ nhận một đoạn mô tả bằng chữ. Gửi ảnh cho mô hình chỉ đọc chữ thì gặp lỗi 400, hoặc nhận một câu trả lời bịa. Và nhớ rằng không phải nơi nào cũng có `images.generate`: theo tài liệu 10/2026, lớp tương thích OpenAI của Groq và Ollama chưa có.
+:::
+
+:::caution[Không báo lỗi thì tưởng đã chạy đúng; báo lỗi thì thử lại mãi]
+Hai thói quen ngược nhau, cùng gây hại. Gemini bỏ qua im lặng mọi tham số `images.generate` ngoài danh sách của nó, nên `output_format="webp"` không báo lỗi nhưng cũng không có tác dụng: đổi nhà cung cấp là phải đọc lại danh sách tham số. Ngược lại, lỗi kiểm duyệt (`moderation_blocked`) không tự hết khi gửi lại: sửa prompt rồi mới gửi. Vòng thử lại chỉ dành cho lỗi tạm thời như 429 hay 5xx, và SDK đã tự làm việc đó. Polling video cũng vậy: hỏi thưa dần và có thời hạn, đừng hỏi dồn dập.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Hỏi về ảnh vẫn là chat: `content` của lượt `user` là danh sách các phần `text` và `image_url`. `url` nhận link web hoặc data URL `data:<MIME>;base64,...`; data URL chạy được ở nhiều nhà cung cấp nhất. Base64 dài khoảng $4/3$ tệp gốc, và ảnh còn tốn token.
+- Sinh ảnh đi qua cửa riêng `images.generate`, mô hình đọc từ `IMAGE_MODEL`. Kết quả ở `response.data[0]`: đọc `b64_json`, giải mã rồi lưu tệp; xem cả `url` phòng khi nhà cung cấp trả link tạm. Không phải nơi nào cũng sinh ảnh, và tham số khác nhau giữa các nơi.
+- Video là tác vụ bất đồng bộ: tạo job, giữ `id`, polling có backoff và thời hạn (hoặc webhook), tải kết quả về ngay. API video đổi rất nhanh (10/2026), nên bài chỉ dạy khuôn này.
+- Lỗi kiểm duyệt không tự hết khi gửi lại. Dùng ảnh AI thì đọc điều khoản dịch vụ và ghi rõ là ảnh AI. C2PA và watermark cho biết nguồn gốc, nhưng thiếu chúng không chứng minh ảnh thật, có chúng không chứng minh nội dung đúng.
+
+**Đọc thêm:**
+
+- OpenAI (2026). [*Images and vision*](https://developers.openai.com/api/docs/guides/images-vision) và [*Image generation*](https://developers.openai.com/api/docs/guides/image-generation). Cách đưa ảnh vào yêu cầu, trường `detail`, giới hạn định dạng; tham số của `images.generate` và các lỗi kiểm duyệt. Ví dụ trên trang dùng Responses API, khác Chat Completions của bài này ở cú pháp.
+- Google (2026). [*OpenAI compatibility*](https://ai.google.dev/gemini-api/docs/openai), các mục về ảnh. Ảnh đi vào, `images.generate` qua lớp tương thích, danh sách tham số được nhận và cách dùng `extra_body`.
+- Google (2026). [*Image generation*](https://ai.google.dev/gemini-api/docs/image-generation). Sinh và sửa ảnh bằng Gemini qua API riêng của Google; trang ghi rằng mọi ảnh sinh ra đều mang watermark SynthID.
+- Groq (2026). [*Images and Vision*](https://console.groq.com/docs/vision). Gửi ảnh cho mô hình vision của Groq bằng link web hoặc data URL base64.
+- Ollama (2026). [*OpenAI compatibility*](https://docs.ollama.com/api/openai-compatibility). Những gì endpoint kiểu OpenAI của Ollama hỗ trợ, gồm ảnh đi vào dạng base64.
+- C2PA (2026). [*Coalition for Content Provenance and Authenticity*](https://c2pa.org/). Trang của chuẩn Content Credentials: chuẩn này dùng để làm gì.
+- OpenAI (2026). [*Video generation with Sora*](https://developers.openai.com/api/docs/guides/video-generation). API đã ngừng ngày 24/9/2026, nhưng trang vẫn là một ví dụ rõ về job bất đồng bộ: các trạng thái, polling, webhook, thời hạn của link tải.
+
+<LessonProgress />

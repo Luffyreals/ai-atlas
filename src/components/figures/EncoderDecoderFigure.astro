@@ -1,0 +1,114 @@
+---
+// llm/seq2seq, "Minh họa": the encoder reads the whole source sentence once; the decoder makes one target token
+// at a time, and each of its layers looks back at the encoder output through cross-attention (Q from the
+// decoder, K and V from the encoder). Two columns read bottom-up, as in Vaswani et al. (2017). Left, the
+// encoder (second group: dashed frame and output): source tokens → self-attention (no mask) → feed-forward,
+// framed with "× N layers", → encoder output. Right, the decoder: input tokens → masked self-attention →
+// cross-attention (accent) → feed-forward, framed, → next token. The encoder output stands level with
+// cross-attention, so K and V go straight across; Q comes up from below. A dashed link (generation only) runs
+// down the right edge from the next token back to the end of the decoder's input row. The frames are FigArrow
+// polylines with no head, so e2e measures them (llm-lessons.md 2.9.1: no loose rect).
+// Narrow layout only. Words: src/data/figures/encoder-decoder.ts; Q, K, V, N with FigMath.
+import { ENCODER_DECODER } from '@data/figures/encoder-decoder';
+import type { Pt } from '@lib/figures/geometry';
+import { anchor, spreadByWeight, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigMath from './kit/FigMath.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = ENCODER_DECODER[getPageLocale(Astro.locals.starlightRoute)];
+
+// Boxes: encoder x 12–152, decoder x 192–332; frames 8 units outside them; the generation link runs down x 350.
+const ENC = { x: 12, width: 140 } as const;
+const DEC = { x: 192, width: 140 } as const;
+const PAD = 8;
+const LANE = 350;
+const box = (col: { x: number; width: number }, y: number, height: number): Box => ({ ...col, y, height });
+const mid = (b: Box) => b.x + b.width / 2;
+
+const next = box(DEC, 28, 36);
+const decTop = 84;
+const decFf = box(DEC, 110, 36);
+const cross = box(DEC, 170, 40);
+const masked = box(DEC, 234, 54);
+const decBottom = masked.y + masked.height + PAD;
+
+const encOut = box(ENC, 172, 36);
+const encTop = 228;
+const encFf = box(ENC, 254, 36);
+const encSelf = box(ENC, 314, 54);
+const encBottom = encSelf.y + encSelf.height + PAD;
+
+const TOKENS = { y: 398, height: 36 } as const;
+// Each token box is as wide as its share; the longest word gets the widest box (vi and en share the tokens).
+// The rows reach half a frame pad past the columns, for room round "<BOS>".
+const row = (col: { x: number; width: number }, words: readonly string[]) => {
+  const reach = PAD / 2;
+  const { starts, sizes } = spreadByWeight(col.x - reach, col.x + col.width + reach, words.map((w) => w.length + 2), 4);
+  return words.map((word, i): { word: string; box: Box } => ({
+    word,
+    box: { x: starts[i] ?? 0, width: sizes[i] ?? 0, ...TOKENS },
+  }));
+};
+const source = row(ENC, t.labels.source as readonly string[]);
+const target = row(DEC, t.labels.target as readonly string[]);
+const height = TOKENS.y + TOKENS.height + 8;
+
+/** A frame round a stack of boxes: a closed polyline with no head. */
+const frame = (col: { x: number; width: number }, top: number, bottom: number) => {
+  const [l, r] = [col.x - PAD, col.x + col.width + PAD];
+  return { from: [l, top] as Pt, via: [[r, top], [r, bottom], [l, bottom]] as Pt[], to: [l, top] as Pt };
+};
+const layersY = (top: number) => top + 14;
+// "× N layers", right-aligned in the frame's top row: the word ends at the box edge, "× N" ends a little past
+// a generous width of the word (6 units a letter at 13 units; Barlow is about 5), so the two never touch.
+const layersEnd = (col: { x: number; width: number }) => col.x + col.width;
+const mathEnd = (col: { x: number; width: number }) => layersEnd(col) - (t.labels.layers.length * 6 + 3);
+const kv = { k: cross.y + 10, v: cross.y + cross.height - 10 };
+const gapX = (ENC.x + ENC.width + DEC.x) / 2;
+const middleWord = (tokens: { box: Box }[]) => tokens[1]!.box;
+const nextY = anchor(next, 'right')[1];
+const rowY = TOKENS.y + TOKENS.height / 2;
+---
+
+<FigureFrame id="encoder-decoder" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigText x={mid(next)} y={14} lines={t.labels.decoder} />
+    <FigNode {...next} lines={t.labels.next} />
+    <FigArrow {...frame(DEC, decTop, decBottom)} head={false} />
+    <FigMath x={mathEnd(DEC)} y={layersY(decTop)} before="×" symbol="N" size="small" anchor="end" />
+    <FigText x={layersEnd(DEC)} y={layersY(decTop)} lines={t.labels.layers} size="small" anchor="end" />
+    <FigArrow from={anchor(decFf, 'top')} to={anchor(next, 'bottom')} />
+    <FigNode {...decFf} lines={t.labels.feedForward} />
+    <FigArrow from={anchor(cross, 'top')} to={anchor(decFf, 'bottom')} />
+    <FigNode {...cross} lines={t.labels.cross} tone="accent" />
+    <FigArrow from={anchor(masked, 'top')} to={anchor(cross, 'bottom')} />
+    <FigMath x={mid(masked) + 8} y={(cross.y + cross.height + masked.y) / 2} symbol="Q" bold anchor="start" />
+    <FigNode {...masked} lines={t.labels.selfAttn} small={t.labels.masked} />
+
+    <FigText x={mid(encOut)} y={encOut.y - 16} lines={t.labels.encoder} />
+    <FigNode {...encOut} lines={t.labels.encoderOut} tone="alt" />
+    <FigArrow from={[ENC.x + ENC.width, kv.k]} to={[DEC.x, kv.k]} />
+    <FigMath x={gapX - 2} y={kv.k - 12} symbol="K" bold />
+    <FigArrow from={[ENC.x + ENC.width, kv.v]} to={[DEC.x, kv.v]} />
+    <FigMath x={gapX - 2} y={kv.v + 12} symbol="V" bold />
+    <FigArrow {...frame(ENC, encTop, encBottom)} head={false} tone="alt" />
+    <FigMath x={mathEnd(ENC)} y={layersY(encTop)} before="×" symbol="N" size="small" anchor="end" />
+    <FigText x={layersEnd(ENC)} y={layersY(encTop)} lines={t.labels.layers} size="small" anchor="end" />
+    <FigArrow from={anchor(encFf, 'top')} to={anchor(encOut, 'bottom')} />
+    <FigNode {...encFf} lines={t.labels.feedForward} />
+    <FigArrow from={anchor(encSelf, 'top')} to={anchor(encFf, 'bottom')} />
+    <FigNode {...encSelf} lines={t.labels.selfAttn} small={t.labels.unmasked} />
+
+    {source.map(({ word, box: b }) => <FigNode {...b} lines={word} />)}
+    <FigArrow from={anchor(middleWord(source), 'top')} to={[mid(middleWord(source)), encSelf.y + encSelf.height]} />
+    {target.map(({ word, box: b }) => <FigNode {...b} lines={word} />)}
+    <FigArrow from={anchor(middleWord(target), 'top')} to={[mid(middleWord(target)), masked.y + masked.height]} />
+
+    <FigArrow from={anchor(next, 'right')} via={[[LANE, nextY], [LANE, rowY]]} to={[DEC.x + DEC.width + PAD / 2, rowY]} tone="alt" />
+    <FigText x={LANE - 6} y={(decBottom + TOKENS.y) / 2} lines={t.labels.append} size="small" anchor="end" />
+  </Fragment>
+</FigureFrame>

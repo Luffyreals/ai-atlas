@@ -1,0 +1,367 @@
+---
+title: DPO
+description: 'RLHF cần mô hình phần thưởng riêng và vòng RL. DPO tối ưu cùng mục tiêu bằng một loss phân loại trên cặp ưa thích: dẫn từ phạt KL, phần thưởng ẩn, vai trò β.'
+quiz:
+  - question: 'Một cặp có $\ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_w) = -30$, $\ln\pi_{\text{ref}}(\mathbf{y}_w) = -31$, $\ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_l) = -42$, $\ln\pi_{\text{ref}}(\mathbf{y}_l) = -39$, và $\beta = 0.5$. Lề và loss DPO của cặp là bao nhiêu?'
+    options:
+      - 'Lề $6$, loss $\approx 0.0025$'
+      - 'Lề $2$, loss $\approx 0.127$'
+      - 'Lề $4$, loss $\approx 0.018$'
+      - 'Chưa tính được, vì thiếu $Z(\mathbf{x})$'
+    answer: 1
+    explanation: 'Câu được chọn tăng 1 so với tham chiếu, câu bị loại giảm 3, nên $d = 1 - (-3) = 4$ và lề là $\beta d = 2$. Loss là $-\ln\sigma(2) \approx 0.127$. Phương án đầu so hai log-prob của chính sách mà quên mô hình tham chiếu: DPO chỉ quan tâm mỗi câu đã dịch chuyển bao nhiêu so với $\pi_{\text{ref}}$. Phương án thứ ba quên nhân $\beta$. Còn $Z(\mathbf{x})$ đã triệt tiêu vì hai câu chung một prompt.'
+  - question: 'Bạn chạy DPO với $\beta = 0.1$. Văn bản sinh ra bắt đầu lệch xa mô hình SFT: giọng lạ, hay lặp. Muốn giữ chính sách gần mô hình SFT hơn, bạn đổi gì trước?'
+    options:
+      - 'Giảm $\beta$ xuống $0.01$, vì $\beta$ đóng vai tốc độ học'
+      - 'Giữ nguyên $\beta$, chạy tiếp tới khi loss thấp hơn'
+      - 'Bỏ $\pi_{\text{ref}}$ ra khỏi loss cho nhẹ bộ nhớ'
+      - 'Tăng $\beta$, vì $\beta$ là hệ số phạt KL'
+    answer: 3
+    explanation: '$\beta$ là sợi dây KL, không phải tốc độ học $\eta$. Trong nghiệm $\pi^* \propto \pi_{\text{ref}}\, e^{r/\beta}$, $\beta$ lớn làm thừa số gần 1. Trong loss, $\beta$ lớn thì chỉ cần dịch chuyển $d$ nhỏ đã đạt lề lớn. Vậy tăng $\beta$ giữ chính sách gần $\pi_{\text{ref}}$ hơn. Giảm $\beta$ làm ngược lại: dây lỏng hơn. Dù vậy, $\beta$ không chặn được mọi thứ: Azar và cộng sự (2023) chỉ ra khi một đáp án luôn thắng, DPO vẫn đẩy xác suất câu thua về 0 bất kể $\beta$.'
+  - question: 'Vì sao DPO không phải tính hằng số chuẩn hóa $Z(\mathbf{x})$, một tổng trên mọi câu trả lời có thể?'
+    options:
+      - 'Vì hai câu chung prompt nên chung $\beta\ln Z(\mathbf{x})$, mất khi lấy hiệu'
+      - 'Vì sau bước SFT thì $Z(\mathbf{x})$ luôn bằng 1 với mọi prompt'
+      - 'Vì DPO ước lượng $Z(\mathbf{x})$ bằng cách lấy mẫu từ $\pi_{\text{ref}}$ khi huấn luyện'
+      - 'Vì khi $\beta$ đủ nhỏ thì $Z(\mathbf{x}) \approx 1$, có thể bỏ qua'
+    answer: 0
+    explanation: 'Điểm viết theo chính sách là $r = \beta\ln(\pi^*/\pi_{\text{ref}}) + \beta\ln Z(\mathbf{x})$. Số hạng thứ hai chỉ phụ thuộc prompt, nên mất đi khi lấy hiệu điểm của hai câu cùng prompt. Vì thế dữ liệu DPO phải là cặp trả lời cho cùng một $\mathbf{x}$. DPO không lấy mẫu gì trong lúc huấn luyện. Còn $Z$ không bằng 1: với ví dụ ba đáp án và $\beta = 1$, $Z \approx 3.42$.'
+  - question: 'Trong log huấn luyện DPO, loss giảm và `rewards/margins` tăng đều, nhưng `logps/chosen` (log-prob của câu được chọn) cũng giảm dần. Nhận xét nào đúng?'
+    options:
+      - 'Code chắc chắn có lỗi, vì loss giảm thì xác suất câu được chọn phải tăng'
+      - 'Mô hình chắc chắn đã tốt lên, vì lề tăng đều qua từng bước'
+      - 'Có thể xảy ra: câu bị loại tụt nhanh hơn thì lề vẫn tăng'
+      - 'Nên đặt $\beta = 0$ để xác suất câu được chọn tăng trở lại'
+    answer: 2
+    explanation: 'Loss một cặp là $-\ln\sigma(\beta d)$, với $d$ là hiệu hai độ dịch chuyển. Cả hai câu cùng tụt mà câu bị loại tụt mạnh hơn thì $d$ vẫn tăng, như cặp 3 trong ô code. Tài liệu TRL ghi rằng trong thực tế DPO thường tăng lề bằng cách hạ câu bị loại hơn là nâng câu được chọn. Không có lỗi nào ở đây, nhưng lề tăng cũng chưa nói được chất lượng thật. Đặt $\beta = 0$ thì lề luôn bằng 0 và loss đứng yên ở $\ln 2$.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import RlhfStagesFigure from '@components/figures/RlhfStagesFigure.astro';
+import dpoLossCode from '@code/llm/dpo/dpo-loss.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu vì sao **tối ưu ưa thích trực tiếp** (Direct Preference Optimization, DPO) tối ưu đúng mục tiêu của bước RL trong RLHF mà không cần mô hình phần thưởng (reward model, RM) riêng, không cần vòng học tăng cường.
+- Tự dẫn được loss DPO qua bốn bước: nghiệm của mục tiêu có phạt KL, đảo ra phần thưởng, thay vào Bradley–Terry để hằng số chuẩn hóa triệt tiêu, rồi cực đại likelihood.
+- Đọc được gradient của DPO: vì sao cặp đang xếp sai được đẩy mạnh nhất, và $\beta$ làm gì.
+- Nhận ra các hiểu nhầm hay gặp: DPO vẫn có phần thưởng (ẩn), vẫn cần mô hình tham chiếu (reference model), và loss thấp chưa chắc là mô hình tốt.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài [RLHF](/vi/llm/rlhf/) cho ba thứ mà bài này dùng lại: **mô hình Bradley–Terry** $P(\mathbf{y}_w \succ \mathbf{y}_l \mid \mathbf{x}) = \sigma(r_w - r_l)$, chỉ phụ thuộc hiệu điểm; **mục tiêu của bước RL** $\mathbb{E}[r] - \beta\, D_{\mathrm{KL}}(\pi_{\boldsymbol{\phi}} \,\|\, \pi_{\text{ref}})$, với $\pi_{\boldsymbol{\phi}}$ là chính sách (policy) đang học và $\pi_{\text{ref}}$ là mô hình SFT đóng băng; và **nghiệm** $\pi^* \propto \pi_{\text{ref}}\, e^{r/\beta}$ của mục tiêu đó. Bài trước hẹn sẽ dẫn nghiệm ấy ở đây.
+:::
+
+## Trực giác
+
+### Một đường vòng khá xa
+
+Bạn có một bộ dữ liệu ưa thích: vài chục nghìn bộ ba gồm prompt, câu trả lời được chọn và câu trả lời bị loại. Theo RLHF, bạn dùng nó qua hai chặng. Chặng một: huấn luyện một RM bắt chước lựa chọn của người. Chặng hai: chạy PPO, tức chính sách sinh câu trả lời, RM chấm, cập nhật, rồi lại sinh. Trong lúc chạy có bốn mô hình cùng nằm trong bộ nhớ: chính sách, mô hình tham chiếu, RM và hàm giá trị (value function). Kèm theo là nhiều siêu tham số nhạy cảm.
+
+Để ý rằng RM chỉ là trạm trung chuyển. Thông tin thật nằm trong các cặp so sánh. RM nén nó thành một hàm điểm, rồi PPO lại bung hàm điểm đó ra thành chính sách. Mỗi chặng thêm một chỗ có thể sai: RM chấm sai ở vùng nó chưa thấy, và PPO tìm ra đúng chỗ sai đó, như phần reward hacking ở bài trước.
+
+### Đáp án nằm sẵn trong một công thức
+
+Bài trước có một công thức đáng chú ý: nếu biết hàm điểm $r$, chính sách tốt nhất là $\pi^* \propto \pi_{\text{ref}}\, e^{r/\beta}$. Công thức đi từ điểm ra chính sách. Rafailov và cộng sự (2023) hỏi: đi ngược lại thì sao? Nếu mỗi chính sách ứng với một hàm điểm, thì thay vì học điểm rồi đi tìm chính sách, ta học thẳng chính sách, và đọc điểm ra từ chính nó.
+
+Quay lại chuyện học nấu ăn ở bài trước. RLHF thuê một giám khảo ảo, rồi nấu đi nấu lại cho giám khảo ảo chấm. DPO bỏ giám khảo. Bạn cầm từng cặp "món A ngon hơn món B" và sửa thẳng công thức nấu: so với cách nấu cũ, nghiêng thêm về A, rời xa B. "Điểm" của một món chính là bạn đã đổi cách nấu món đó bao nhiêu so với cách cũ.
+
+**Bài toán của bài này: từ mục tiêu "điểm cao nhưng đừng đi xa mô hình SFT", làm sao đổi biến để huấn luyện chính sách trực tiếp trên các cặp ưa thích, bằng một loss đơn giản như bài phân loại, không cần RM riêng và không cần vòng RL?**
+
+## Lý thuyết
+
+### Ký hiệu
+
+Giữ như bài RLHF: prompt $\mathbf{x}$, câu trả lời $\mathbf{y}$, câu được chọn $\mathbf{y}_w$, câu bị loại $\mathbf{y}_l$, chính sách $\pi_{\boldsymbol{\phi}}$, mô hình tham chiếu $\pi_{\text{ref}}$, hệ số phạt KL $\beta > 0$. Paper DPO viết chính sách là $\pi_\theta$. Bài này giữ $\boldsymbol{\phi}$ cho khớp bài trước, nơi $\boldsymbol{\theta}$ là tham số của RM. Paper viết $\log$, bài viết $\ln$, cùng một nghĩa.
+
+$\pi(\mathbf{y} \mid \mathbf{x})$ là xác suất của **cả** câu trả lời. Như bài trước, $\ln\pi(\mathbf{y} \mid \mathbf{x})$ là tổng log-prob của từng token, nên với một câu vài chục token, nó là một số âm cỡ vài chục.
+
+Bốn bước dưới đây theo mục 4 và phụ lục A của paper.
+
+### Bước 1: nghiệm của mục tiêu có phạt KL
+
+Cố định một prompt và một hàm điểm $r$ bất kỳ. Để gọn, tạm bỏ $\mathbf{x}$ khỏi ký hiệu. Giả sử $\pi$ được chọn tự do trong mọi phân phối trên tập câu trả lời, không bị giới hạn bởi kiến trúc mạng. Viết kỳ vọng thành tổng, mục tiêu $\mathbb{E}_{\mathbf{y} \sim \pi}[r] - \beta\, D_{\mathrm{KL}}(\pi \,\|\, \pi_{\text{ref}})$ là
+
+$$
+J(\pi) = \sum_{\mathbf{y}} \pi(\mathbf{y}) \Big[ r(\mathbf{y}) - \beta \ln\frac{\pi(\mathbf{y})}{\pi_{\text{ref}}(\mathbf{y})} \Big]
+$$
+
+Tìm $\pi$ làm $J$ lớn nhất cũng là tìm $\pi$ làm $-J/\beta$ nhỏ nhất: chia cho số dương $\beta$ không đổi điểm tối ưu, còn đổi dấu thì lớn nhất thành nhỏ nhất.
+
+$$
+-\frac{J(\pi)}{\beta} = \sum_{\mathbf{y}} \pi(\mathbf{y}) \Big[ \ln\frac{\pi(\mathbf{y})}{\pi_{\text{ref}}(\mathbf{y})} - \frac{r(\mathbf{y})}{\beta} \Big]
+$$
+
+Gộp $r/\beta$ vào log. Vì $r/\beta = \ln e^{r/\beta}$, và hiệu hai log bằng log của thương:
+
+$$
+\ln\frac{\pi(\mathbf{y})}{\pi_{\text{ref}}(\mathbf{y})} - \frac{r(\mathbf{y})}{\beta} = \ln\frac{\pi(\mathbf{y})}{\pi_{\text{ref}}(\mathbf{y})\, e^{r(\mathbf{y})/\beta}}
+$$
+
+Mẫu số trông như một phân phối, nhưng tổng của nó trên mọi $\mathbf{y}$ nói chung không bằng 1. Ta chuẩn hóa nó. Đặt
+
+$$
+\begin{aligned}
+Z &= \sum_{\mathbf{y}} \pi_{\text{ref}}(\mathbf{y})\, e^{r(\mathbf{y})/\beta} \\
+\pi^*(\mathbf{y}) &= \frac{1}{Z}\, \pi_{\text{ref}}(\mathbf{y})\, e^{r(\mathbf{y})/\beta}
+\end{aligned}
+$$
+
+$Z$ là **hằng số chuẩn hóa** (partition function, còn gọi là hàm phân hoạch). $\pi^*$ dương và có tổng bằng 1, nên là một phân phối hợp lệ. Mẫu số ở trên đúng bằng $Z\, \pi^*(\mathbf{y})$, và log của một thương tách được thành hiệu:
+
+$$
+\ln\frac{\pi(\mathbf{y})}{Z\, \pi^*(\mathbf{y})} = \ln\frac{\pi(\mathbf{y})}{\pi^*(\mathbf{y})} - \ln Z
+$$
+
+Thay lại vào tổng. $\ln Z$ không phụ thuộc $\mathbf{y}$ và $\sum_{\mathbf{y}} \pi(\mathbf{y}) = 1$, nên số hạng $-\ln Z$ ra ngoài nguyên vẹn. Phần còn lại đúng là định nghĩa của KL:
+
+$$
+\begin{aligned}
+-\frac{J(\pi)}{\beta} &= \sum_{\mathbf{y}} \pi(\mathbf{y}) \ln\frac{\pi(\mathbf{y})}{\pi^*(\mathbf{y})} - \ln Z \\
+&= D_{\mathrm{KL}}(\pi \,\|\, \pi^*) - \ln Z
+\end{aligned}
+$$
+
+$Z$ không phụ thuộc $\pi$. KL luôn $\ge 0$, và bằng 0 khi và chỉ khi hai phân phối trùng nhau (bất đẳng thức Gibbs, Gibbs' inequality). Vậy $-J/\beta$ nhỏ nhất, tức $J$ lớn nhất, đúng khi $\pi = \pi^*$. Viết lại $\mathbf{x}$:
+
+$$
+\pi^*(\mathbf{y} \mid \mathbf{x}) = \frac{1}{Z(\mathbf{x})}\, \pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})\, e^{r(\mathbf{x}, \mathbf{y})/\beta}
+$$
+
+Đây là công thức bài trước đã dùng. Tiện thể, tại $\pi^*$ thì KL bằng 0, nên giá trị lớn nhất của mục tiêu là $J(\pi^*) = \beta \ln Z(\mathbf{x})$.
+
+Vì sao không dùng thẳng công thức này cho LLM? Vì $Z$ là tổng trên **mọi** câu trả lời có thể. Từ vựng $V$ token và câu dài $L$ token thì có $V^L$ câu. Không ai tính nổi.
+
+### Bước 2: đảo ra phần thưởng
+
+Lấy $\ln$ hai vế của công thức $\pi^*$. Log của một tích là tổng các log:
+
+$$
+\begin{aligned}
+\ln\pi^*(\mathbf{y} \mid \mathbf{x}) &= \ln\pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x}) \\
+&\quad + \frac{r(\mathbf{x}, \mathbf{y})}{\beta} - \ln Z(\mathbf{x})
+\end{aligned}
+$$
+
+Chuyển vế để $r/\beta$ đứng một mình, gộp hai log thành log của thương, rồi nhân hai vế với $\beta$:
+
+$$
+r(\mathbf{x}, \mathbf{y}) = \beta \ln\frac{\pi^*(\mathbf{y} \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})} + \beta \ln Z(\mathbf{x})
+$$
+
+Đọc: điểm của một câu trả lời bằng $\beta$ nhân "chính sách tối ưu thích câu này hơn mô hình tham chiếu bao nhiêu", cộng một số chỉ phụ thuộc prompt. Biết chính sách là biết điểm, sai khác một hằng số theo $\mathbf{x}$. Có điều hằng số đó vẫn chứa $Z$.
+
+### Bước 3: thay vào Bradley–Terry, Z triệt tiêu
+
+Bradley–Terry chỉ dùng **hiệu** điểm của hai câu trả lời cho **cùng** một prompt. Thay biểu thức ở bước 2 vào $r(\mathbf{x}, \mathbf{y}_w) - r(\mathbf{x}, \mathbf{y}_l)$. Hai câu chung $\mathbf{x}$, nên chung số hạng $\beta\ln Z(\mathbf{x})$, và hai số hạng đó trừ nhau bằng 0:
+
+$$
+\begin{aligned}
+P(\mathbf{y}_w \succ \mathbf{y}_l \mid \mathbf{x}) = \sigma\Big( &\beta \ln\frac{\pi^*(\mathbf{y}_w \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y}_w \mid \mathbf{x})} \\
+&- \beta \ln\frac{\pi^*(\mathbf{y}_l \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y}_l \mid \mathbf{x})} \Big)
+\end{aligned}
+$$
+
+Không còn $r$, không còn $Z$. Xác suất người chọn $\mathbf{y}_w$ chỉ còn phụ thuộc $\pi^*$ và $\pi_{\text{ref}}$. Cũng vì thế mà dữ liệu DPO phải là cặp trả lời cho **cùng một** prompt: ghép hai câu của hai prompt khác nhau thì $Z$ không triệt tiêu.
+
+Kiểm bằng số trên ví dụ ba đáp án của bài trước: mô hình SFT viết A, B, C với xác suất $\pi_{\text{ref}} = (0.6, 0.3, 0.1)$, RM chấm $r = (0, 1, 3)$, và $\beta = 1$. Tính $\pi^*$ theo bước 1, rồi so:
+
+| Đại lượng | A | B | C |
+|---|---:|---:|---:|
+| $\pi^*$ | 0.175 | 0.238 | 0.587 |
+| $\beta\ln(\pi^* / \pi_{\text{ref}})$ | $-1.2308$ | $-0.2308$ | $1.7692$ |
+| $r - \beta\ln(\pi^* / \pi_{\text{ref}})$ | 1.2308 | 1.2308 | 1.2308 |
+
+Hàng cuối giống nhau ở cả ba đáp án. Đó chính là $\beta\ln Z$, với $Z \approx 3.424$. Nên hiệu của hàng thứ hai giữa hai đáp án bất kỳ đúng bằng hiệu điểm RM: B so với A là $-0.2308 - (-1.2308) = 1 = r_B - r_A$.
+
+### Bước 4: loss DPO
+
+Ta không biết $\pi^*$. Nhưng ta có chính sách $\pi_{\boldsymbol{\phi}}$ với tham số học được. Ý của DPO: **coi $\pi_{\boldsymbol{\phi}}$ là ứng viên cho $\pi^*$**, đặt nó vào công thức xác suất ở bước 3, rồi chỉnh $\boldsymbol{\phi}$ để công thức đó giải thích tốt nhất lựa chọn thật của người. Làm như với RM ở bài trước: cực đại likelihood, lấy $-\ln$, trung bình trên các cặp:
+
+$$
+\begin{aligned}
+\mathcal{L}_{\text{DPO}}(\boldsymbol{\phi}) &= -\,\mathbb{E}_{(\mathbf{x}, \mathbf{y}_w, \mathbf{y}_l) \sim \mathcal{D}}\big[ \ln\sigma(\Delta) \big] \\
+\Delta &= \beta \ln\frac{\pi_{\boldsymbol{\phi}}(\mathbf{y}_w \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y}_w \mid \mathbf{x})} \\
+&\quad - \beta \ln\frac{\pi_{\boldsymbol{\phi}}(\mathbf{y}_l \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y}_l \mid \mathbf{x})}
+\end{aligned}
+$$
+
+So với loss của RM, $-\ln\sigma\big(r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y}_w) - r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y}_l)\big)$: cùng một dạng. Chỉ khác là điểm $r_{\boldsymbol{\theta}}$, vốn do một mạng riêng cho ra, được thay bằng
+
+$$
+\hat{r}_{\boldsymbol{\phi}}(\mathbf{x}, \mathbf{y}) = \beta \ln\frac{\pi_{\boldsymbol{\phi}}(\mathbf{y} \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})}
+$$
+
+Paper gọi đây là **phần thưởng ẩn** (implicit reward). Mô hình ngôn ngữ vừa là chính sách, vừa là RM. Đó là ý của tên paper: "Your Language Model is Secretly a Reward Model".
+
+**Viết gọn cho một cặp.** Vì $\ln(a/b) = \ln a - \ln b$, mỗi log tỉ số là hiệu hai log-prob. Bỏ $\mathbf{x}$ cho gọn, đặt
+
+$$
+\begin{aligned}
+d &= \big[ \ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_w) - \ln\pi_{\text{ref}}(\mathbf{y}_w) \big] \\
+&\quad - \big[ \ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_l) - \ln\pi_{\text{ref}}(\mathbf{y}_l) \big]
+\end{aligned}
+$$
+
+$d$ cho biết câu thắng được nâng lên so với tham chiếu nhiều hơn câu thua bao nhiêu. Đại lượng $\Delta$ trong loss là **lề** (margin), như bài trước: hiệu hai phần thưởng ẩn, $\Delta = \hat{r}_{\boldsymbol{\phi}}(\mathbf{y}_w) - \hat{r}_{\boldsymbol{\phi}}(\mathbf{y}_l) = \beta d$. Loss của một cặp là $-\ln\sigma(\beta d)$. Khi chính sách còn trùng tham chiếu, $d = 0$ và loss bằng $\ln 2 \approx 0.6931$, đúng như RM chưa học gì.
+
+Mọi thứ trong loss là log-prob: chạy $\pi_{\boldsymbol{\phi}}$ và $\pi_{\text{ref}}$ trên $\mathbf{y}_w$ và $\mathbf{y}_l$, cộng log-prob các token của phần trả lời. Không cần sinh câu mới. $\pi_{\text{ref}}$ không đổi suốt quá trình, nên log-prob của nó tính trước một lần là đủ.
+
+**Đổi biến, không xấp xỉ thêm.** Bước 1 đến 3 là đẳng thức, nên loss DPO là một phép đổi biến: tìm thẳng chính sách thay vì tìm hàm điểm rồi mới tìm chính sách. Với vài giả thiết nhẹ, paper chứng minh (mục 5.1, định lý 1) rằng mỗi lớp hàm điểm hợp với Bradley–Terry (gom các hàm điểm chỉ khác nhau một hàm của $\mathbf{x}$) đều có một đại diện dạng $\beta\ln(\pi / \pi_{\text{ref}})$, nên cách đặt tham số này không bỏ sót lớp nào.
+
+:::note[Ghi nhớ]
+Bốn bước: (1) mục tiêu có phạt KL có nghiệm $\pi^* = \pi_{\text{ref}}\, e^{r/\beta} / Z$. (2) Đảo lại: $r = \beta\ln(\pi^* / \pi_{\text{ref}}) + \beta\ln Z$. (3) Bradley–Terry chỉ dùng hiệu điểm của hai câu cùng prompt, nên $\beta\ln Z$ triệt tiêu. (4) Thay $\pi^*$ bằng $\pi_{\boldsymbol{\phi}}$ rồi cực đại likelihood: loss $-\ln\sigma(\beta d)$. DPO là hồi quy logistic trên lề của phần thưởng ẩn.
+:::
+
+### Gradient: DPO học như thế nào
+
+Bài trước đã tính: đạo hàm của $-\ln\sigma(\Delta)$ theo lề là $-(1 - \sigma(\Delta))$, mà $1 - \sigma(\Delta) = \sigma(-\Delta)$. Ở đây $\Delta = \beta d$. Trong $d$, hai số hạng của $\pi_{\text{ref}}$ là hằng số, nên theo quy tắc chuỗi, gradient của $\Delta$ theo $\boldsymbol{\phi}$ là $\beta\big(\nabla_{\boldsymbol{\phi}}\ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_w) - \nabla_{\boldsymbol{\phi}}\ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_l)\big)$. Ghép lại:
+
+$$
+\begin{aligned}
+&\nabla_{\boldsymbol{\phi}}\big[ -\ln\sigma(\beta d) \big] \\
+&= -\beta\, \sigma(-\beta d) \big( \nabla_{\boldsymbol{\phi}}\ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_w \mid \mathbf{x}) \\
+&\qquad - \nabla_{\boldsymbol{\phi}}\ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_l \mid \mathbf{x}) \big)
+\end{aligned}
+$$
+
+Đọc từng phần, nhớ rằng ta đi **ngược** gradient:
+
+- **Ngoặc cuối:** tăng log-prob của câu thắng, giảm log-prob của câu thua.
+- **Trọng số $\sigma(-\beta d)$**, bằng $\sigma\big(\hat{r}_{\boldsymbol{\phi}}(\mathbf{y}_l) - \hat{r}_{\boldsymbol{\phi}}(\mathbf{y}_w)\big)$: xác suất mà phần thưởng ẩn cho rằng người đã chọn câu kia. Cặp đang xếp sai ($d < 0$) có trọng số trên 0.5, được đẩy mạnh. Cặp đã xếp đúng với lề lớn gần như không được đẩy thêm.
+- **$\beta$ ở đầu:** hệ số chung, làm bước cập nhật lớn hay nhỏ.
+
+Trọng số này quan trọng. Paper có so với một cách làm không có trọng số, gọi là unlikelihood: chỉ tăng log-prob câu được chọn, giảm log-prob câu bị loại, cặp nào cũng cùng một lực. Trên bài tóm tắt TL;DR, cách đó sinh ra những chuỗi vô nghĩa kiểu "when when when when…" (bảng 3 ở phụ lục của paper).
+
+### Vai trò của β
+
+$\beta$ có mặt ở hai chỗ, và cả hai nói cùng một điều.
+
+- **Trong mục tiêu**, $\beta$ là hệ số phạt KL. Nhìn nghiệm $\pi^* \propto \pi_{\text{ref}}\, e^{r/\beta}$: $\beta$ lớn thì thừa số gần 1, chính sách gần như đứng yên. $\beta$ nhỏ thì chính sách được đi xa.
+- **Trong loss**, $\beta$ nhân $d$ thành lề. Muốn một cặp đạt $P = \sigma(2) \approx 0.88$: với $\beta = 0.5$ cần $d = 4$, với $\beta = 0.1$ cần $d = 20$. $\beta$ nhỏ đòi chính sách dịch log-prob xa tham chiếu hơn nhiều. Đó là cách nói khác của "dây lỏng".
+
+$\beta$ khuếch đại cả hai chiều: cặp xếp đúng ($d > 0$) có loss giảm khi $\beta$ tăng, cặp xếp sai ($d < 0$) có loss tăng. Vì thế loss trung bình không nhất thiết đơn điệu theo $\beta$, như ô code sẽ cho thấy. Đừng so loss giữa hai lần chạy có $\beta$ khác nhau.
+
+Paper dùng $\beta = 0.1$ làm mặc định, riêng bài tóm tắt TL;DR dùng $0.5$ (phụ lục B). Đừng nhầm $\beta$ với tốc độ học $\eta$: paper dùng $\eta = 10^{-6}$ với bộ tối ưu RMSprop, một con số hoàn toàn khác.
+
+Sợi dây $\beta$ cũng không chặn được mọi thứ. Azar và cộng sự (2023) chỉ ra: nếu dữ liệu cho thấy một đáp án **luôn** thắng, loss chỉ về 0 khi $d \to \infty$, và DPO đẩy xác suất của câu thua về 0 **bất kể $\beta$**. Đây giống trường hợp dữ liệu tách được với RM ở bài trước.
+
+### DPO so với RLHF
+
+Quy trình DPO theo paper có hai bước. Một: với mỗi prompt, lấy hai câu trả lời từ $\pi_{\text{ref}}$ và nhờ người chọn, hoặc dùng lại một bộ dữ liệu ưa thích công khai. Hai: tối ưu $\mathcal{L}_{\text{DPO}}$ trên bộ dữ liệu cố định đó. Không sinh câu nào trong lúc huấn luyện, nên gọi là **học ngoại tuyến** (offline). $\pi_{\text{ref}}$ là mô hình SFT. Khi không có mô hình SFT, họ fine-tune trên các câu được chọn trước, để $\pi_{\text{ref}}$ gần với phân phối đã sinh ra dữ liệu.
+
+Kết quả của họ nên đọc kèm phạm vi: mô hình tối đa 6 tỉ tham số, năm 2023. Ở bài điều khiển cảm xúc trên IMDb, DPO cho cân bằng giữa phần thưởng và KL tốt hơn PPO, kể cả khi PPO được dùng phần thưởng thật. Ở bài tóm tắt TL;DR, so với bản tóm tắt tham chiếu trong tập test và do GPT-4 chấm, DPO có tỉ lệ thắng (win rate) khoảng 61%, PPO khoảng 57% ở nhiệt độ tốt nhất của nó. Chính tác giả ghi rằng tỉ lệ thắng do GPT-4 tính bị ảnh hưởng bởi prompt chấm, và việc mở rộng lên mô hình lớn hơn nhiều vẫn còn để ngỏ. Câu "DPO ổn định hơn PPO" là lập luận của họ (mục 5.2, về nguồn gốc bất ổn của các thuật toán actor-critic như PPO), không phải một phép đo trực tiếp.
+
+### Họ hàng của DPO
+
+Chỉ nêu ý, để bạn biết tên khi gặp:
+
+- **IPO** (Identity Preference Optimization, Azar và cộng sự, 2023). Nhắm vào chỗ overfit vừa nói. Trong khung lý thuyết của họ, DPO ứng với một hàm biến đổi xác suất ưa thích là hàm logit. IPO thay nó bằng hàm đồng nhất, nên loss thành bình phương, kéo $d$ về một giá trị hữu hạn thay vì vô cùng. Trong TRL là `loss_type="ipo"`, và khi đó tham số `beta` đóng vai hệ số điều chuẩn $\tau$ của paper IPO.
+- **KTO** (Kahneman–Tversky Optimization, Ethayarajh và cộng sự, 2024). Không cần cặp: mỗi câu trả lời chỉ cần nhãn "tốt" hay "xấu". Lấy cảm hứng từ lý thuyết triển vọng (prospect theory) của Kahneman và Tversky.
+- **ORPO** (Odds Ratio Preference Optimization, Hong và cộng sự, 2024). Không cần mô hình tham chiếu, gộp SFT và bước ưa thích thành một giai đoạn: loss SFT cộng một số hạng dựa trên **tỉ số odds** (odds ratio) giữa câu thắng và câu thua.
+
+### Giới hạn
+
+- **Dữ liệu cố định.** Câu trong dữ liệu không do $\pi_{\text{ref}}$ sinh ra thì có lệch phân phối. Mô hình cũng không tự thử câu mới như PPO.
+- **Overfit khi ưa thích gần như tất định**, như kết quả của Azar và cộng sự ở trên.
+- **Tối ưu quá mức chưa biến mất.** Tác giả DPO để ngỏ câu hỏi reward over-optimization biểu hiện thế nào ở DPO (mục 7). Không có RM riêng không có nghĩa là hết vấn đề.
+- **Thiên lệch độ dài.** Log-prob của cả câu là tổng theo token, nên phụ thuộc độ dài câu. TRL có biến thể `loss_type="sigmoid_norm"` (theo paper SimPO của Meng và cộng sự, 2024) chuẩn hóa theo số token.
+
+## Minh họa
+
+RLHF có ba bước: SFT, học RM, tối ưu chính sách bằng RL. Đặt DPO cạnh nó: DPO giữ bước 1 (mô hình SFT làm $\pi_{\text{ref}}$) và giữ dữ liệu ưa thích, chỉ gộp bước 2 và bước 3 thành một bước tối ưu loss.
+
+{/* FIG: dùng lại hình của bài rlhf; phần so sánh với DPO nằm ở bảng dưới. */}
+<RlhfStagesFigure />
+
+| Tiêu chí | RLHF với PPO | DPO |
+|---|---|---|
+| Bước SFT | Có, làm $\pi_{\text{ref}}$ và điểm khởi tạo | Có, làm $\pi_{\text{ref}}$ và điểm khởi tạo |
+| Dữ liệu ưa thích dùng để | Huấn luyện RM | Tính loss trực tiếp |
+| Hàm điểm | Mạng riêng $r_{\boldsymbol{\theta}}$, đóng băng khi chạy RL | Phần thưởng ẩn $\beta\ln(\pi_{\boldsymbol{\phi}} / \pi_{\text{ref}})$ |
+| Sinh câu trả lời khi huấn luyện | Có, mỗi vòng | Không (offline) |
+| Mô hình phải chạy | Chính sách, tham chiếu, RM, hàm giá trị | Chính sách, tham chiếu (tính trước được) |
+| Mục tiêu | $\mathbb{E}[r] - \beta\, D_{\mathrm{KL}}$ | Cùng mục tiêu, qua nghiệm dạng đóng |
+| Cách tối ưu | PPO, có kẹp | $-\ln\sigma(\beta d)$, như bài phân loại |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026, với Python 3.14 và NumPy 2.4 (bản có trong Pyodide). Bài có một ô, chạy ngay trên trang. Không có ô nào cần chạy trên máy bạn.
+
+### Loss DPO trên bốn cặp
+
+Ô dùng log-prob của cả câu, giả lập cho bốn cặp. Thay vì nhìn số tuyệt đối, hãy nhìn mỗi câu đã dịch chuyển bao nhiêu so với tham chiếu:
+
+| Cặp | Câu được chọn | Câu bị loại | $d$ |
+|---:|---:|---:|---:|
+| 1 | $+2$ | $-3$ | 5 |
+| 2 | $-3$ | $-1$ | $-2$ |
+| 3 | $-1$ | $-4$ | 3 |
+| 4 | $+1$ | $-1$ | 2 |
+
+Cặp 1 đã dịch đúng hướng rõ rệt. Cặp 2 dịch sai hướng. Cặp 3 hạ cả hai câu, nhưng câu bị loại hạ nhiều hơn. Ô in phần thưởng ẩn, loss và trọng số gradient ở $\beta = 0.1$, rồi loss trung bình ở bốn giá trị $\beta$, cuối cùng là trường hợp chính sách trùng tham chiếu.
+
+<PythonRunner code={dpoLossCode} title="Loss DPO theo β" />
+
+Đọc kết quả:
+
+- **`d = [ 5. -2.  3.  2.]`**: khớp bảng trên.
+- **`reward chosen` và `reward rejected`**: phần thưởng ẩn ở $\beta = 0.1$, bằng $0.1$ nhân độ dịch chuyển. `accuracy 0.75`: 3 trên 4 cặp có lề dương. TRL ghi đúng chỉ số này với tên `rewards/accuracies`. Để ý cặp 3: phần thưởng của câu được chọn là $-0.1$, tức chính sách đã **hạ** xác suất câu đó, mà cặp vẫn được tính là đúng.
+- **`loss`**: $(0.4741, 0.7981, 0.5544, 0.5981)$. Cặp 2 xếp sai nên loss lớn nhất, trên $\ln 2$.
+- **`weight`**, tức $\sigma(-\beta d)$: $(0.3775, 0.5498, 0.4256, 0.4502)$. Cặp 2 có trọng số lớn nhất, cặp 1 nhỏ nhất, đúng như mục Gradient. Đạo hàm đầy đủ của loss theo $\ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_w)$ còn nhân thêm $-\beta$: với cặp 2 là $-0.1 \cdot 0.5498 \approx -0.055$.
+- **Bảng theo $\beta$**: loss trung bình $0.6833$, $0.6062$, $0.4767$ rồi tăng lại $0.5773$. Nhìn từng cột: khi $\beta$ đi từ $0.01$ tới $1$, loss của cặp 1 giảm từ $0.668$ xuống $0.007$, còn của cặp 2 tăng từ $0.703$ lên $2.127$. Ở $\beta = 1$, riêng cặp 2 đã chiếm khoảng 92% tổng loss. $\beta$ khuếch đại cả cặp đúng lẫn cặp sai.
+- **`policy = ref`**: cả bốn cặp có loss $0.6931 = \ln 2$, vì $d = 0$.
+
+Bạn có thể thử: sửa `logp_w` của cặp 2 để $d > 0$, rồi chạy lại. Khi mọi cặp đều có $d > 0$, loss trung bình giảm đều khi $\beta$ tăng.
+
+Trên mô hình thật, bạn không tự viết vòng lặp này. Thư viện TRL của Hugging Face có `DPOTrainer` (bản 1.16.0). Dữ liệu có ba cột `prompt`, `chosen`, `rejected`. `loss_type` mặc định là `"sigmoid"`, chính là loss ở trên, và `beta` mặc định là 0.1. Bỏ trống `ref_model` thì nó dùng mô hình ở trạng thái trước khi huấn luyện làm tham chiếu. Bài không có ô chạy cho phần này vì cần mô hình thật và GPU.
+
+## Lỗi hay gặp
+
+:::caution[DPO không có phần thưởng, không cần mô hình tham chiếu]
+DPO có phần thưởng, chỉ là ẩn: $\beta\ln(\pi_{\boldsymbol{\phi}} / \pi_{\text{ref}})$. Nó chỉ không huấn luyện một RM riêng. Và vì phần thưởng đó là tỉ số với $\pi_{\text{ref}}$, loss cần log-prob của mô hình tham chiếu ở mọi cặp, nên phải giữ bản đóng băng hoặc tính trước. Khởi tạo $\pi_{\text{ref}}$ từ mô hình SFT, đúng như paper khuyên. Muốn bỏ hẳn mô hình tham chiếu thì phải dùng phương pháp khác, ví dụ ORPO.
+:::
+
+:::caution[Loss giảm là mô hình tốt lên]
+Loss chỉ phụ thuộc hiệu hai độ dịch chuyển. Cả hai câu cùng tụt xác suất mà câu bị loại tụt mạnh hơn thì loss vẫn giảm, như cặp 3 trong ô code. Tài liệu TRL ghi rằng trong thực tế DPO thường tăng lề bằng cách hạ câu bị loại hơn là nâng câu được chọn. Hãy theo dõi cả `logps/chosen` và `rewards/chosen`, sinh thử văn bản, và đánh giá bằng người hoặc bằng mô hình (xem [Đánh giá mô hình và PEFT](/vi/llm/evaluation-peft/)). Cũng như RLHF, DPO dạy hành vi chứ không thêm kiến thức.
+:::
+
+:::caution[Nhầm β với tốc độ học]
+$\beta$ lớn là dây **chặt**: chính sách ở gần $\pi_{\text{ref}}$ hơn, không phải "học mạnh hơn". Tốc độ học là $\eta$, một siêu tham số riêng. Loss ở hai giá trị $\beta$ khác nhau cũng không so được với nhau, vì $\beta$ nằm ngay trong đối số của sigmoid. Một bẫy nữa: trong TRL, khi chọn `loss_type="ipo"`, cùng tham số `beta` lại mang nghĩa $\tau$ của IPO.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Mục tiêu có phạt KL của RLHF có nghiệm dạng đóng $\pi^* = \pi_{\text{ref}}\, e^{r/\beta} / Z$. Đảo lại, mỗi chính sách cho một hàm điểm $r = \beta\ln(\pi^* / \pi_{\text{ref}}) + \beta\ln Z$.
+- Bradley–Terry chỉ dùng hiệu điểm của hai câu cùng prompt, nên $Z$ triệt tiêu. Thay $\pi^*$ bằng $\pi_{\boldsymbol{\phi}}$ được loss DPO $-\ln\sigma(\beta d)$: hồi quy logistic trên lề của phần thưởng ẩn $\beta\ln(\pi_{\boldsymbol{\phi}} / \pi_{\text{ref}})$.
+- Gradient tăng câu thắng, giảm câu thua, với trọng số $\sigma(-\beta d)$ lớn nhất ở cặp đang xếp sai. $\beta$ lớn giữ chính sách gần $\pi_{\text{ref}}$, và khuếch đại cả cặp đúng lẫn cặp sai trong loss.
+- So với RLHF: không RM riêng, không vòng RL, không sinh câu khi huấn luyện. Vẫn cần mô hình tham chiếu, vẫn có thể overfit, và loss thấp chưa phải chất lượng thật.
+
+**Đọc thêm:**
+
+- Rafailov, R., Sharma, A., Mitchell, E., Ermon, S., Manning, C. D., Finn, C. (2023). [*Direct Preference Optimization: Your Language Model is Secretly a Reward Model*](https://arxiv.org/abs/2305.18290), arXiv:2305.18290, mục 4 và phụ lục A.1, A.2. Paper gốc, phần dẫn xuất bài này đi theo. Paper dùng $\pi_\theta$ cho chính sách và $\log$ cho log tự nhiên.
+- Azar, M. G., Rowland, M., Piot, B., Guo, D., Calandriello, D., Valko, M., Munos, R. (2023). [*A General Theoretical Paradigm to Understand Learning from Human Preferences*](https://arxiv.org/abs/2310.12036), arXiv:2310.12036, mục 4 và 5. Vì sao DPO có thể overfit, và IPO.
+- Ethayarajh, K., Xu, W., Muennighoff, N., Jurafsky, D., Kiela, D. (2024). [*KTO: Model Alignment as Prospect Theoretic Optimization*](https://arxiv.org/abs/2402.01306), arXiv:2402.01306, ICML 2024. Học từ nhãn tốt/xấu, không cần cặp.
+- Hong, J., Lee, N., Thorne, J. (2024). [*ORPO: Monolithic Preference Optimization without Reference Model*](https://arxiv.org/abs/2403.07691), arXiv:2403.07691. Gộp SFT và bước ưa thích, không cần mô hình tham chiếu.
+- Meng, Y., Xia, M., Chen, D. (2024). [*SimPO: Simple Preference Optimization with a Reference-Free Reward*](https://arxiv.org/abs/2405.14734), arXiv:2405.14734. Chuẩn hóa log-prob theo độ dài câu, cũng không cần mô hình tham chiếu.
+- Hugging Face. [*DPO Trainer*](https://huggingface.co/docs/trl/v1.16.0/en/dpo_trainer) (TRL 1.16.0), tài liệu chính thức, đọc tháng 10/2026. `DPOTrainer`, danh sách `loss_type`, và các chỉ số `rewards/*` để theo dõi khi huấn luyện.
+
+<LessonProgress />

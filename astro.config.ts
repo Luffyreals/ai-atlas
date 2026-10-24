@@ -67,6 +67,7 @@ export default defineConfig({
         './src/styles/lesson-progress.css',
         './src/components/quiz/quiz.css',
         './src/components/python-runner/python-runner.css',
+        './src/styles/local-code.css',
         // The one CSS file of every static figure (docs/architecture/viz.md, section 8.2 f). Just before viz.css.
         './src/components/figures/figures.css',
         // The one CSS file of every VIZ (docs/architecture/viz.md, section 2.3). Keep it last.

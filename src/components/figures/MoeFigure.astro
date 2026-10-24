@@ -1,0 +1,77 @@
+---
+// llm/deepseek-family, "Minh họa": each token runs the shared expert and only the few routed experts the
+// router picks, so the compute is much smaller than the parameter count. Read top-down: the token feeds the
+// router, the shared expert (straight down, not through the router) and the shortcut (round the right edge).
+// The router scores a row of 8 routed experts and picks 2 (accent, solid arrows, gate weights); the other 6
+// are "off" (dotted, no arrow). Accent means "runs for this token": the picked experts, the shared one and
+// the legend's "picked" box; the router stays plain, so the eye goes to which experts light up. Everything
+// adds up in the weighted sum, then the output. A legend and a second-group note on DeepSeek-V3 close it.
+// Narrow layout only: the row of 8 already fills the width. Words and the picked experts:
+// src/data/figures/moe.ts (token 0 of the lesson's first code cell).
+import { MOE, MOE_PICKED, MOE_ROUTED } from '@data/figures/moe';
+import { anchor, mainAndSmall, spread, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = MOE[getPageLocale(Astro.locals.starlightRoute)];
+
+// The shared expert stands left (x 22–114), the routed row right (x 124–340); the shortcut runs down x 350.
+const LANE = 350;
+const token: Box = { x: 24, y: 8, width: 176, height: 56 };
+const router: Box = { x: 166, y: 92, width: 140, height: 36 };
+const shared: Box = { x: 22, y: 160, width: 92, height: 72 };
+const ROW = { y: 178, height: 36 } as const;
+const row = spread(124, 340, MOE_ROUTED, 3);
+const experts = row.starts.map((x, i) => {
+  const box: Box = { x, y: ROW.y, width: row.size, height: ROW.height };
+  return { i, box, picked: (MOE_PICKED as readonly number[]).includes(i) };
+});
+const add: Box = { x: 150, y: 254, width: 174, height: 36 };
+const output: Box = { x: 177, y: 318, width: 120, height: 56 };
+const KEY = { y: 394, height: 36 } as const;
+const pickedKey: Box = { x: 128, ...KEY, width: 100 };
+const idleKey: Box = { x: 236, ...KEY, width: 116 };
+const v3: Box = { x: 8, y: 446, width: 344, height: 54 };
+const height = v3.y + v3.height + 8;
+
+const gateY = (router.y + router.height + ROW.y) / 2;
+const [low, high] = MOE_PICKED.map((i) => experts[i]!.box);
+const mid = (box: Box) => box.x + box.width / 2;
+const tokenY = anchor(token, 'right', 0.5)[1];
+const addY = anchor(add, 'left')[1];
+---
+
+<FigureFrame id="moe" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigNode {...token} math={{ symbol: 'u', bold: true }} lines={t.labels.token} />
+    <FigArrow from={[router.x + 20, token.y + token.height]} to={[router.x + 20, router.y]} />
+    <FigNode {...router} lines={t.labels.router} />
+
+    <FigArrow from={[mid(shared), token.y + token.height]} to={anchor(shared, 'top')} />
+    <FigNode {...shared} lines={t.labels.shared.slice(0, 2)} small={t.labels.shared.slice(2)} tone="accent" />
+
+    {experts.map(({ i, box, picked }) => <FigNode {...box} lines={String(i)} tone={picked ? 'accent' : 'off'} />)}
+    <FigArrow from={[mid(low!), router.y + router.height]} to={anchor(low!, 'top')} />
+    <FigText x={mid(low!) - 6} y={gateY} lines={t.labels.gateLow} size="small" anchor="end" />
+    <FigArrow from={[mid(high!), router.y + router.height]} to={anchor(high!, 'top')} />
+    <FigText x={mid(high!) + 6} y={gateY} lines={t.labels.gateHigh} size="small" anchor="start" />
+
+    <FigArrow from={anchor(low!, 'bottom')} to={[mid(low!), add.y]} />
+    <FigArrow from={anchor(high!, 'bottom')} to={[mid(high!), add.y]} />
+    <FigArrow from={anchor(shared, 'bottom')} via={[[mid(shared), addY]]} to={anchor(add, 'left')} />
+    <FigArrow from={anchor(token, 'right')} via={[[LANE, tokenY], [LANE, addY]]} to={anchor(add, 'right')} />
+    <FigText x={(token.x + token.width + LANE) / 2} y={tokenY - 12} lines={t.labels.shortcut} size="small" />
+    <FigNode {...add} lines={t.labels.add} />
+
+    <FigArrow from={anchor(add, 'bottom')} to={anchor(output, 'top')} />
+    <FigNode {...output} math={{ symbol: 'h', bold: true }} lines={t.labels.output} />
+
+    <FigText x={pickedKey.x - 8} y={KEY.y + KEY.height / 2} lines={t.labels.routed} size="small" anchor="end" />
+    <FigNode {...pickedKey} lines={t.labels.pickedKey} tone="accent" />
+    <FigNode {...idleKey} lines={t.labels.idleKey} tone="off" />
+    <FigNode {...v3} {...mainAndSmall(t.labels.v3)} tone="alt" />
+  </Fragment>
+</FigureFrame>
