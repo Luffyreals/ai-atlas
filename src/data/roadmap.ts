@@ -217,7 +217,7 @@ export const LESSONS: readonly Lesson[] = [
     id: 'ml/gradient-descent',
     title: { vi: 'Gradient Descent', en: 'Gradient Descent' },
     prerequisites: ['ml/linear-regression', 'math/calculus'],
-    status: { vi: 'planned', en: 'planned' },
+    status: { vi: 'published', en: 'planned' },
   },
   {
     id: 'ml/optimizers',

@@ -14,7 +14,11 @@ export interface PlotFrameProps {
   yTitle: string;
   label: string; // aria-label of the <svg role="img">
   describedBy?: string; // id of an sr-only description
-  shape?: 'default' | 'short'; // 'short': a low plot (data-shape on .atlas-viz-chart, viz.css; section 9.4.7)
+  // data-shape on .atlas-viz-chart (viz.css): 'short' is a low plot (section 9.4.7); 'equal' keeps 4 : 3 at every
+  // width, for two axes in the same unit (section 12.2.5).
+  shape?: 'default' | 'short' | 'equal';
+  // Shown instead of formatNumber(tick), one per y tick, e.g. '0.1' … '1000' on a log axis (section 12.2.6).
+  yTickLabels?: readonly string[];
   children: ReactNode; // SVG marks
 }
 
@@ -33,14 +37,18 @@ export default function PlotFrame({
   label,
   describedBy,
   shape = 'default',
+  yTickLabels,
   children,
 }: PlotFrameProps) {
+  if (yTickLabels && yTickLabels.length !== yTicks.length) {
+    throw new RangeError(`PlotFrame: ${yTickLabels.length} yTickLabels for ${yTicks.length} yTicks`);
+  }
   const xLabels = tickLabels(xTicks);
-  const yLabels = tickLabels(yTicks);
+  const yLabels = yTickLabels ?? tickLabels(yTicks);
   // The y tick column is as wide as its longest label (tabular figures: one ch per character).
   const style = { '--atlas-viz-ytick-ch': Math.max(1, ...yLabels.map((text) => text.length)) } as CSSProperties;
   return (
-    <div className="atlas-viz-chart" style={style} data-shape={shape === 'short' ? 'short' : undefined}>
+    <div className="atlas-viz-chart" style={style} data-shape={shape === 'default' ? undefined : shape}>
       <div className="atlas-viz-axis-title atlas-viz-ytitle" aria-hidden="true">
         {yTitle}
       </div>
