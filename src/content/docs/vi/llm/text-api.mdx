@@ -1,0 +1,371 @@
+---
+title: Sử dụng API văn bản
+description: Gọi LLM từ Python qua API kiểu OpenAI. Vai trò trong messages, token và chi phí, temperature, top-k, top-p, streaming, retry khi lỗi, đầu ra JSON.
+quiz:
+  - question: 'Hai token có logit chênh nhau 1. Ở $T = 1$, xác suất của token lớn gấp $e$ lần token nhỏ. Hạ xuống $T = 0.5$ thì tỉ số này bằng bao nhiêu?'
+    options: ['$e$', '$\sqrt{e}$', '$e^2$', '$e/2$']
+    answer: 2
+    explanation: 'Tỉ số hai xác suất là $\exp((z_i - z_j)/T)$, mẫu số của softmax đã triệt tiêu. Với $z_i - z_j = 1$ và $T = 0.5$, tỉ số là $\exp(2) = e^2 \approx 7.39$: nhiệt độ thấp khuếch đại chênh lệch. $\sqrt{e}$ là kết quả ở $T = 2$, khi phân phối phẳng hơn. Thứ tự hai token không đổi ở mọi $T > 0$.'
+  - question: 'Ở bước A, token đầu có xác suất 0.95. Ở bước B, mô hình phân vân: 30 token đầu, mỗi token 0.031. Với top-p $= 0.9$, mỗi bước giữ bao nhiêu token?'
+    options: ['A giữ 1, B giữ 30', 'A giữ 5, B giữ 5', 'Cả hai giữ 1', 'Cả hai giữ 30']
+    answer: 0
+    explanation: 'Top-p lấy tập nhỏ nhất có tổng xác suất từ $0.9$ trở lên. Ở A, riêng token đầu đã có $0.95$, nên chỉ giữ 1. Ở B, 29 token đầu mới được $29 \times 0.031 = 0.899 < 0.9$, phải lấy token thứ 30 thì tổng mới lên $0.93$. Số token giữ lại co giãn theo độ chắc chắn của mô hình. Giữ cùng một số token ở mọi bước (phương án thứ hai) là cách của top-k.'
+  - question: 'Chatbot có system prompt 30 token. Mỗi câu hỏi 40 token, mỗi câu trả lời 60 token. Chương trình gửi lại cả lịch sử ở mỗi lượt. Lượt thứ 4 gửi bao nhiêu token vào?'
+    options: ['40', '70', '340', '370']
+    answer: 3
+    explanation: 'Lượt 4 gửi system prompt (30), ba lượt cũ, mỗi lượt gồm câu hỏi và câu trả lời ($3 \times 100 = 300$), cùng câu hỏi mới (40): tổng 370. 70 là chỉ gửi system prompt và câu hỏi mới, tức bỏ mất ba lượt cũ, nên mô hình không biết gì về cuộc trò chuyện trước đó. 40 còn bỏ cả system prompt. 340 là quên system prompt, vốn được gửi ở mọi lượt.'
+  - question: 'Chương trình gọi API báo `AuthenticationError` (mã 401). Nên làm gì?'
+    options:
+      - 'Tăng `max_retries` lên 10 để SDK thử lại nhiều hơn'
+      - 'Kiểm tra key và `OPENAI_BASE_URL`, vì thử lại không giúp gì'
+      - 'Chờ một phút rồi chạy lại, vì máy chủ đang quá tải'
+      - 'Hạ `temperature` về 0'
+    answer: 1
+    explanation: 'Mã 401 nghĩa là máy chủ không nhận key: key sai, đã bị thu hồi, hoặc là key của nhà cung cấp khác so với `OPENAI_BASE_URL`. Lỗi này không tự hết, nên SDK không thử lại nó, và thêm lần thử chỉ tốn thời gian. Chờ rồi thử lại là cách cho lỗi tạm thời như 429 hay 503.'
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import SamplingViz from '@components/viz/SamplingViz.astro';
+import samplingCode from '@code/llm/text-api/sampling.vi.py?raw';
+import chatCode from '@code/llm/text-api/chat.vi.py?raw';
+import extractJsonCode from '@code/llm/text-api/extract-json.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Gọi được một mô hình ngôn ngữ lớn (large language model, LLM) từ Python qua API kiểu OpenAI, với danh sách `messages` gồm các vai trò `system`, `user`, `assistant`.
+- Hiểu vì sao API không nhớ cuộc trò chuyện, và vì sao chi phí tính theo token tăng nhanh khi hội thoại dài ra.
+- Tự tính được softmax có nhiệt độ (temperature), top-k và top-p (nucleus sampling), và biết mỗi tham số đổi phân phối của token kế tiếp thế nào.
+- Viết được code dùng thật: để SDK thử lại lỗi tạm thời có backoff, bắt các lỗi còn lại, đọc đầu ra JSON an toàn, và biết streaming hoạt động thế nào.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài này dùng **hàm** (`def`), **danh sách** (list) và **từ điển** (dict) của Python, cùng khối `try`/`except` để bắt lỗi. Mỗi lượt nói trong hội thoại là một dict như `{"role": "user", "content": "..."}`, và cả cuộc trò chuyện là một list các dict như thế. Bạn cũng cần chạy được một file `.py` từ dòng lệnh.
+:::
+
+## Trực giác
+
+Bạn muốn chương trình Python của mình trả lời câu hỏi bằng tiếng Việt, tóm tắt văn bản hay trích thông tin từ đánh giá của khách. Bạn không cần huấn luyện mô hình nào: OpenAI, Google hay Groq chạy sẵn LLM trên máy chủ của họ. Chương trình của bạn gửi văn bản qua mạng tới **API** (application programming interface, giao diện lập trình ứng dụng) của họ, và nhận lại văn bản mô hình viết ra. AI Atlas chia việc dùng LLM thành bốn cấp: dùng mô hình có sẵn qua API, xây prompt/RAG/agent trên mô hình có sẵn, fine-tune, và pre-train từ đầu. Bài này ở cấp đầu tiên.
+
+Gọi thử vài lần, bạn sẽ gặp ba điều lạ:
+
+- **Mô hình quên ngay.** Bạn hỏi "Token là gì?", rồi hỏi tiếp "Cho một ví dụ". Nếu lần sau chỉ gửi câu thứ hai, mô hình không biết "ví dụ" về cái gì. Giống nhắn tin cho một người mất trí nhớ sau mỗi câu trả lời: bạn phải dán lại cả cuộc trò chuyện vào mỗi tin nhắn.
+- **Cùng câu hỏi, mỗi lần một câu trả lời.** Mô hình viết từng mẩu chữ một, và mỗi mẩu được **rút ngẫu nhiên** theo một phân phối xác suất. Có những tham số vặn được độ ngẫu nhiên đó.
+- **Bạn trả tiền theo mẩu chữ.** Các mẩu ấy gọi là **token**. Nhà cung cấp tính tiền và đặt giới hạn theo số token, cả token gửi đi lẫn token mô hình viết ra.
+
+Bài toán của bài này là: **gửi đúng thứ mô hình cần qua API, hiểu mô hình chọn từng token thế nào và vặn việc chọn đó bằng tham số nào, rồi viết code chịu được lỗi mạng, giới hạn số yêu cầu và đầu ra sai định dạng.**
+
+## Lý thuyết
+
+### Một lần gọi API
+
+Bài dùng thư viện `openai` cho Python, một **SDK** (software development kit: bộ thư viện do nhà cung cấp viết sẵn), và endpoint **Chat Completions** (endpoint: một địa chỉ cụ thể của API, mỗi địa chỉ làm một việc). OpenAI khuyên ứng dụng mới dùng Responses API, nhưng vẫn hỗ trợ Chat Completions lâu dài, và Gemini, Groq, Ollama đều cung cấp endpoint này theo đúng kiểu của OpenAI. Chỉ cần đổi địa chỉ (`base_url`), key và tên mô hình, cùng một đoạn code chạy được với nhiều nhà cung cấp.
+
+Một lần gọi gửi đi hai thứ chính: tên mô hình và danh sách `messages`. Mỗi phần tử của `messages` có một **vai trò** (role) và nội dung:
+
+| Vai trò | Ai viết | Dùng để |
+|---|---|---|
+| `system` | Bạn, người viết chương trình | Đặt vai, giọng điệu, quy tắc: "Bạn là trợ giảng, trả lời ngắn gọn". Gọi là **system prompt** |
+| `user` | Người dùng | Câu hỏi, yêu cầu |
+| `assistant` | Mô hình, ở các lượt trước | Lời mô hình đã trả lời, bạn gửi lại để mô hình "nhớ" |
+
+Hội thoại hai lượt ở ô code thứ hai của bài, đến lượt thứ hai, gửi đi danh sách sau:
+
+| Vai trò | Nội dung |
+|---|---|
+| `system` | Bạn là trợ giảng, trả lời ngắn gọn bằng tiếng Việt. |
+| `user` | Token trong mô hình ngôn ngữ là gì? Trả lời trong hai câu. |
+| `assistant` | (câu trả lời của lượt một, chương trình đã lưu lại) |
+| `user` | Cho một ví dụ với câu tiếng Việt. |
+
+Nhờ ba dòng đầu, câu "Cho một ví dụ" mới có nghĩa. API **không giữ trạng thái** (stateless): máy chủ không lưu gì giữa hai lần gọi, nên mọi thứ mô hình cần biết phải nằm trong `messages`.
+
+Với các mô hình mới, OpenAI gọi vai trò `system` là `developer`, nhưng Gemini, Groq, Ollama vẫn dùng `system`, nên code của bài dùng `system`.
+
+Phản hồi trả về có ba chỗ bạn hay đọc: `choices[0].message.content` là chữ mô hình viết; `choices[0].finish_reason` cho biết vì sao mô hình dừng (`"stop"`: tự kết thúc, `"length"`: chạm trần số token); `usage` cho biết số token vào và ra.
+
+### Token và chi phí
+
+**Token** là đơn vị văn bản mô hình đọc và viết. Nó không hẳn là từ, cũng không phải ký tự: một từ thường gặp có thể là một token, một từ hiếm bị cắt thành vài token. Mỗi mô hình có một **cửa sổ ngữ cảnh** (context window): số token tối đa của đầu vào cộng đầu ra trong một lần gọi.
+
+Nhà cung cấp tính tiền theo token, thường tách hai giá: **token vào** (prompt, gồm cả lịch sử hội thoại) và **token ra** (completion). Vì lịch sử được gửi lại mỗi lượt, chi phí của một cuộc trò chuyện dài tăng nhanh hơn bạn nghĩ. Gọi $s$ là số token của system prompt, mỗi câu hỏi $q$ token, mỗi câu trả lời $a$ token. Ở lượt thứ $r$, bạn gửi system prompt, $r - 1$ lượt cũ (mỗi lượt một hỏi một đáp) và câu hỏi mới. Gọi số token vào ở lượt này là $N_r$:
+
+$$
+N_r = s + (r - 1)(q + a) + q
+$$
+
+Cộng từ lượt 1 tới lượt $R$. Hai số hạng $s$ và $q$ lặp lại $R$ lần. Số hạng giữa cần tổng $0 + 1 + \dots + (R - 1) = \frac{R(R - 1)}{2}$:
+
+$$
+\sum_{r=1}^{R} N_r = R(s + q) + (q + a)\,\frac{R(R - 1)}{2}
+$$
+
+Số hạng cuối có $R^2$: tổng token vào tăng theo **bình phương** số lượt. Với $s = 20$, $q = a = 50$: lượt 1 gửi 70 token, lượt 10 gửi 970 token, và 10 lượt cộng lại là $10 \cdot 70 + 100 \cdot 45 = 5200$ token vào. Vì thế chatbot thật thường cắt bớt hoặc tóm tắt lịch sử cũ.
+
+**Tham số `max_tokens`** đặt trần số token mô hình được viết ra trong một lần gọi. Trần này chặn chi phí, nhưng **không** làm mô hình viết gọn lại: chạm trần thì câu bị cắt giữa chừng và `finish_reason` là `"length"`. Muốn câu ngắn, hãy yêu cầu ngay trong prompt. OpenAI đã đổi tên tham số này thành `max_completion_tokens`, tên mới tính cả các token suy luận ẩn của **mô hình reasoning** (reasoning model: mô hình tự suy luận nhiều bước trước khi trả lời). Ollama chỉ liệt kê tên cũ; OpenAI và Groq vẫn nhận tên cũ nhưng đã đánh dấu bỏ dần (riêng mô hình reasoning của OpenAI thì từ chối). Vì thế code của bài không đặt trần này, để nhà cung cấp dùng mặc định.
+
+### Mô hình chọn token kế tiếp thế nào
+
+LLM viết từng token một. Ở mỗi bước, mô hình đọc mọi token đã có rồi cho ra một con số cho **mỗi** token trong từ vựng, gọi là **logit**. Gọi từ vựng là $\mathcal{V}$, có $V$ token, và logit của token thứ $i$ là $z_i$. Logit càng lớn, mô hình càng thấy token đó hợp làm token kế tiếp.
+
+Ví dụ: sau "Hôm nay trời rất", giả sử mô hình chỉ xét 10 ứng viên (cho dễ nhìn, coi mỗi từ là một token):
+
+| Token | đẹp | nóng | lạnh | mát | nắng | oi | trong | xanh | ẩm | tối |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Logit $z_i$ | 3.0 | 2.6 | 2.0 | 1.5 | 1.1 | 0.6 | 0.1 | −0.4 | −1.0 | −1.6 |
+
+**Bước 1: biến logit thành xác suất bằng softmax.** Logit có thể âm và không cộng lại bằng 1, nên chưa phải xác suất. Hàm **softmax** lấy $\exp$ của từng logit (luôn dương), rồi chia cho tổng (để cộng lại bằng 1):
+
+$$
+p_i = \frac{\exp(z_i)}{\sum_{j=1}^{V} \exp(z_j)}
+$$
+
+**Bước 2: chia logit cho nhiệt độ $T$ trước softmax.** Đây là núm vặn `temperature`:
+
+$$
+p_i(T) = \frac{\exp(z_i / T)}{\sum_{j=1}^{V} \exp(z_j / T)}, \qquad T > 0
+$$
+
+$T = 1$ cho lại đúng softmax ở Bước 1. Để thấy $T$ làm gì, so xác suất của hai token $i$ và $j$. Hai phân số có cùng mẫu số nên mẫu số triệt tiêu, rồi dùng $\exp(x) / \exp(y) = \exp(x - y)$:
+
+$$
+\frac{p_i(T)}{p_j(T)} = \frac{\exp(z_i / T)}{\exp(z_j / T)} = \exp\!\left(\frac{z_i - z_j}{T}\right)
+$$
+
+Công thức này cho ba điều:
+
+- **Thứ tự không đổi.** $z_i > z_j$ thì tỉ số lớn hơn 1 ở mọi $T > 0$. Nhiệt độ không bao giờ đưa token kém lên trên token tốt.
+- **$T < 1$ khuếch đại chênh lệch, phân phối nhọn hơn.** "đẹp" và "nóng" chênh 0.4 logit. Ở $T = 1$, "đẹp" có khả năng gấp $e^{0.4} \approx 1.49$ lần "nóng"; ở $T = 0.5$, gấp $e^{0.8} \approx 2.23$ lần. Khi $T \to 0$, token có logit lớn nhất chiếm gần hết xác suất: mô hình gần như luôn chọn nó, gọi là **giải mã tham lam** (greedy decoding).
+- **$T > 1$ thu nhỏ chênh lệch, phân phối phẳng hơn.** Token hiếm có nhiều cơ hội hơn: câu trả lời đa dạng hơn, nhưng cũng dễ lạc đề hơn.
+
+Với 10 logit ở trên (số từ ô code thứ nhất):
+
+| $T$ | đẹp | nóng | lạnh | Top-p 0.9 giữ |
+|---:|---:|---:|---:|---:|
+| 0.5 | 0.599 | 0.269 | 0.081 | 3 token |
+| 1 | 0.382 | 0.256 | 0.140 | 5 token |
+| 1.5 | 0.286 | 0.219 | 0.147 | 7 token |
+
+**Bước 3 (tùy chọn): cắt đuôi bằng top-k.** Từ vựng thật có hàng chục tới hàng trăm nghìn token. Mỗi token trong đuôi có xác suất nhỏ, nhưng cộng cả đuôi thì không nhỏ, nên thỉnh thoảng một token vô nghĩa được rút trúng. **Top-k** chỉ giữ $k$ token có xác suất lớn nhất (tập $\mathcal{V}_k$), cho các token còn lại xác suất 0, rồi **chuẩn hóa lại** để tổng bằng 1:
+
+$$
+p_i^{(k)} =
+\begin{cases}
+\dfrac{p_i}{\sum_{j \in \mathcal{V}_k} p_j}, & i \in \mathcal{V}_k \\[6pt]
+0, & i \notin \mathcal{V}_k
+\end{cases}
+$$
+
+Với $k = 3$ ở $T = 1$: ba token đầu có tổng $0.382 + 0.256 + 0.140 = 0.778$; chia mỗi số cho tổng này được $0.491$, $0.329$, $0.180$.
+
+**Bước 3' (tùy chọn): cắt đuôi bằng top-p.** Holtzman và cộng sự (2020) đề xuất cách này sau khi thấy hai thái cực đều hỏng: luôn chọn token xác suất cao nhất cho văn bản nhạt và lặp lại, còn rút mẫu trên cả từ vựng thì thỉnh thoảng lạc vào đuôi vô nghĩa. Top-k chặn được đuôi, nhưng $k$ cố định: khi mô hình rất chắc chắn, $k = 3$ vẫn giữ hai token gần như vô lý; khi mô hình phân vân giữa hàng chục lựa chọn hợp lý, $k = 3$ lại bỏ đi gần hết. **Top-p**, còn gọi là **nucleus sampling**, xếp token theo xác suất giảm dần rồi lấy **tập nhỏ nhất** $\mathcal{V}_p$ có tổng xác suất từ ngưỡng $p$ trở lên:
+
+$$
+\sum_{i \in \mathcal{V}_p} p_i \ \ge\ p
+$$
+
+rồi chuẩn hóa lại như top-k (ngưỡng $p$ không có chỉ số, khác xác suất $p_i$ của từng token). Ở $T = 1$, tổng cộng dồn là $0.382$; $0.638$; $0.778$; $0.864$; $0.921$. Bốn token đầu mới được $0.864 < 0.9$, nên phải lấy cả token thứ năm: top-p $0.9$ giữ 5 token. Bảng trên cho thấy cùng ngưỡng $0.9$ giữ 3, 5 hay 7 token tùy độ nhọn của phân phối. Tập giữ lại **co giãn**: ít token khi mô hình chắc, nhiều token khi mô hình phân vân.
+
+**Bước 4: rút một token** theo phân phối cuối cùng, nối nó vào văn bản, rồi lặp lại từ đầu cho token sau.
+
+:::note[Ghi nhớ]
+Logit → chia cho $T$ → softmax → (top-k, top-p cắt đuôi rồi chuẩn hóa lại) → rút một token. $T$ không đổi thứ tự các token, chỉ đổi độ nhọn: $T$ nhỏ thì nhọn, gần với chọn token cao nhất; $T$ lớn thì phẳng, đa dạng hơn. Top-k giữ số token cố định, top-p giữ số token thay đổi theo độ chắc chắn của mô hình.
+:::
+
+**Trong API.** Chat Completions có `temperature` (OpenAI cho từ 0 tới 2) và `top_p`, nhưng **không** có `top_k`. OpenAI khuyên chỉ chỉnh một trong hai, vì cả hai cùng đổi phân phối nên khó đoán tác động riêng. `temperature=0` hợp với trích xuất thông tin, nhưng không bảo đảm lần nào cũng ra đúng một câu: OpenAI ghi rõ tính tất định không được bảo đảm, và Groq đổi `0` thành `1e-8`.
+
+### Streaming
+
+Mô hình viết từng token, nên không cần đợi viết xong mới gửi. Đặt `stream=True`, API trả về nhiều **mảnh** (chunk) theo thời gian, mỗi mảnh mang vài token mới trong `choices[0].delta.content`. Tổng thời gian gần như không đổi, nhưng chữ đầu tiên hiện sau một khoảnh khắc thay vì sau vài giây. Đoạn trích sau dùng `client`, `MODEL`, `messages` như ô hội thoại ở mục Ví dụ code:
+
+```python
+stream = client.chat.completions.create(model=MODEL, messages=messages,
+                                        stream=True)
+for chunk in stream:
+    # choices rỗng: mảnh usage (khi bật include_usage), hoặc ở vài nhà cung cấp
+    if not chunk.choices:
+        continue
+    text = chunk.choices[0].delta.content
+    if text:  # mảnh đầu, mảnh cuối có thể không mang chữ
+        print(text, end="", flush=True)  # flush: in ngay, không gom lại
+```
+
+Muốn biết số token khi stream, đặt thêm `stream_options={"include_usage": True}`: số token nằm ở một mảnh cuối có `choices` rỗng, và luồng đứt giữa chừng thì có thể không nhận được mảnh đó. SDK cũng **không tự thử lại** một luồng đã đứt: phần đã nhận là phần dở dang.
+
+### Lỗi, rate limit và retry
+
+Gọi qua mạng thì sẽ có lúc lỗi. Mọi lỗi khi gọi API đều kế thừa `openai.APIError`. Các lỗi hay gặp:
+
+| Mã HTTP | Lớp lỗi | Thường do | SDK tự thử lại? |
+|---|---|---|---|
+| — | `APIConnectionError` (lớp con `APITimeoutError`) | Không tới được máy chủ, hoặc quá thời gian chờ | Có |
+| 400 | `BadRequestError` | Yêu cầu sai, ví dụ tham số nhà cung cấp không hỗ trợ | Không |
+| 401 | `AuthenticationError` | Key sai, thiếu, hoặc key của nhà cung cấp khác | Không |
+| 403 | `PermissionDeniedError` | Key không có quyền dùng mô hình hay tính năng đó | Không |
+| 404 | `NotFoundError` | Sai tên mô hình hoặc sai `base_url` | Không |
+| 429 | `RateLimitError` | Vượt **rate limit** (giới hạn số yêu cầu hay số token mỗi phút, mỗi ngày) | Có |
+| ≥ 500 | `InternalServerError` | Lỗi phía máy chủ | Có |
+
+Mọi lỗi có mã HTTP là `APIStatusError`, có thuộc tính `status_code`. SDK còn tự thử lại hai mã ít gặp là 408 (máy chủ chờ quá lâu) và 409 (xung đột). Quy tắc chung: **chỉ thử lại lỗi tạm thời** (mạng, 408, 409, 429, ≥ 500). Lỗi 400–404 là lỗi của chính yêu cầu, thử lại bao nhiêu lần cũng vậy.
+
+Thử lại ngay lập tức thường vô ích vì máy chủ đang quá tải sẽ còn quá tải thêm, nên cách chuẩn là **lùi theo cấp số nhân** (exponential backoff): chờ lâu gấp đôi sau mỗi lần thất bại, có trần, và bớt đi một lượng ngẫu nhiên gọi là **jitter** để nhiều chương trình cùng bị lỗi không gõ cửa lại cùng một lúc. SDK `openai` 3.37 chờ khoảng 0.5, 1, 2, 4 rồi tối đa 8 giây giữa các lần, bớt ngẫu nhiên tới 25%, và theo header `Retry-After` (phần thông tin máy chủ gửi kèm phản hồi) nếu máy chủ gửi, trừ khi nó quá 120 giây thì báo lỗi luôn.
+
+Bạn không phải tự viết vòng lặp này. `OpenAI(max_retries=...)` đặt số lần thử lại (mặc định 2, đặt 0 để tắt), `OpenAI(timeout=...)` đặt thời gian chờ mỗi lần gọi (mặc định 10 phút).
+
+### Đầu ra JSON
+
+Muốn chương trình dùng được câu trả lời, bạn thường cần dữ liệu có cấu trúc, ví dụ JSON, chứ không phải đoạn văn. Có ba mức, chặt dần:
+
+1. **Chỉ dặn trong prompt:** "Chỉ trả về JSON với hai khóa…". Dễ dùng nhất, nhưng mô hình đôi khi thêm câu dẫn hay bọc JSON trong khối code.
+2. **JSON mode:** `response_format={"type": "json_object"}` bảo đảm chuỗi trả về là JSON hợp lệ, nhưng **không** bảo đảm đúng các khóa bạn muốn. Vẫn phải mô tả cấu trúc trong prompt, và chữ "JSON" phải xuất hiện đâu đó trong `messages` (OpenAI báo lỗi nếu thiếu).
+3. **Đầu ra có cấu trúc** (structured output): `{"type": "json_schema", ...}` bảo đảm khớp một schema bạn đưa khi bật `strict`. OpenAI khuyên dùng khi mô hình hỗ trợ.
+
+Mức hỗ trợ khác nhau giữa các nhà cung cấp, và JSON vẫn có thể bị cắt cụt khi chạm trần số token. Vì vậy, dù dùng mức nào, luôn đọc bằng `json.loads` trong `try`/`except`.
+
+### Giới hạn
+
+- **Mỗi nhà cung cấp "kiểu OpenAI" bỏ bớt vài tính năng.** Gửi trường không được hỗ trợ có thể bị bỏ qua im lặng, hoặc nhận lỗi 400 (bảng nhà cung cấp ở mục Ví dụ code).
+- **Câu trả lời có thể sai mà nghe vẫn rất tự tin.** Bài [Prompt Engineering](/vi/llm/prompt-engineering/) và bài [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/) bàn cách giảm chuyện này.
+- **Code ở đây chạy trong dòng lệnh.** Đưa streaming lên giao diện web là việc của bài [Làm giao diện với Gradio/Streamlit](/vi/llm/gradio-streamlit/).
+- **Bài chưa nói logit từ đâu ra.** Bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/) dựng một mô hình nhỏ và cho thấy logit được tính thế nào.
+
+## Minh họa
+
+Bảng trong hình là phân phối của token kế tiếp sau "Hôm nay trời rất", với 10 logit ở mục Lý thuyết. Thanh đậm là xác suất cuối cùng, thanh mờ phía sau là xác suất trước khi cắt đuôi. Ba thanh trượt đổi $T$, $k$ và $p$. "Lấy 1 mẫu" rút một token và viết nó vào sau câu; "Lấy 100 mẫu" đếm số lần mỗi token được chọn. Hãy thử:
+
+1. Lúc đầu, $T = 1$, top-k và top-p đều tắt: "đẹp" 0.38, "nóng" 0.26, "lạnh" 0.14, và cả 10 token đều có thể được chọn. Bấm "Lấy 100 mẫu" vài lần: "đẹp" thắng nhiều nhất, nhưng thỉnh thoảng cả những token cuối bảng như "ẩm" hay "tối" cũng ra.
+2. Kéo top-k về 3: bảy token bị đánh dấu "đã loại", ba token còn lại thành 0.49, 0.33, 0.18.
+3. Đưa top-k về 10, kéo top-p về 0.9: còn 5 token, "đẹp" thành 0.41. Giữ top-p 0.9 rồi kéo $T$ xuống 0.5: chỉ còn 3 token. Kéo $T$ lên 1.5: còn 7 token.
+4. Kéo $T$ về 0: "đẹp" có xác suất 1, mọi token khác bị loại. "Lấy 100 mẫu" ra 100 lần "đẹp": đó là giải mã tham lam.
+
+Thứ tự nhiệt độ, rồi top-k, rồi top-p trong hình là một lựa chọn để minh họa. Nhà cung cấp API có thể áp các bước theo thứ tự khác.
+
+{/* VIZ: T làm phân phối nhọn hay phẳng mà không đổi thứ tự; top-k, top-p cắt đuôi rồi chuẩn hóa lại (top-p giữ số token đổi theo T); rồi mới rút mẫu. */}
+<SamplingViz />
+
+## Ví dụ code
+
+Code trong bài kiểm tra lần cuối tháng 10/2026, với Python 3.14 và `openai` 3.37. Ô thứ nhất chạy ngay trên trang bằng NumPy, không gọi mạng. Hai ô sau gọi API thật nên chạy trên máy bạn: bạn cần một key của nhà cung cấp và ba biến môi trường.
+
+### Chuẩn bị: nhà cung cấp và biến môi trường
+
+Code của bài không ghi tên nhà cung cấp hay tên mô hình. Nó đọc ba **biến môi trường** (environment variable): `OPENAI_API_KEY` (key), `OPENAI_BASE_URL` (địa chỉ API, bỏ trống thì dùng OpenAI) và `LLM_MODEL` (tên mô hình). Bạn chọn nhà cung cấp, tạo key trên trang của họ, và lấy tên một mô hình chat trong danh sách mô hình của họ (tên mô hình đổi rất nhanh, nên bài không ghi sẵn). Ba biến phải cùng một nhà cung cấp: key của Groq gửi tới máy chủ OpenAI cho lỗi 401, tên mô hình của nhà này gửi sang nhà kia thường cho lỗi 404.
+
+| Nhà cung cấp | `OPENAI_BASE_URL` | Gói miễn phí | Ghi chú |
+|---|---|---|---|
+| [OpenAI](https://developers.openai.com/api/docs/guides/text) | để trống | Không ghi ở đây, xem [trang giá](https://developers.openai.com/api/docs/pricing) | Mô hình reasoning: không nhận `max_tokens` (dùng `max_completion_tokens`), chỉ nhận `temperature` mặc định; xóa dòng `temperature` nếu gặp lỗi 400 |
+| [Google Gemini](https://ai.google.dev/gemini-api/docs/openai) | `https://generativelanguage.googleapis.com/v1beta/openai/` | Có bậc Free, hạn mức tính theo project, thêm key không tăng hạn mức ([trang giá](https://ai.google.dev/gemini-api/docs/pricing)) | Phần tương thích thư viện OpenAI còn ở bản beta. Gemini 2.5 Pro và Gemini 3 luôn suy nghĩ trước khi trả lời: trần token nhỏ có thể cho câu trả lời rỗng |
+| [Groq](https://console.groq.com/docs/openai) | `https://api.groq.com/openai/v1` | Có Free Plan ([hạn mức](https://console.groq.com/docs/rate-limits)) | Báo lỗi 400 nếu gửi `logprobs`, `logit_bias`; `n` phải bằng 1; đổi `temperature=0` thành `1e-8` |
+| [Ollama](https://docs.ollama.com/api/openai-compatibility) (trên máy bạn) | `http://localhost:11434/v1/` | Mô hình chạy bằng máy bạn, không tính tiền theo token | Key bắt buộc có nhưng bị bỏ qua: đặt `ollama`. Tải mô hình trước bằng `ollama pull` |
+
+Các nhà cung cấp còn khác nhau ở JSON mode và **embedding** (vectơ biểu diễn nghĩa của văn bản, dùng ở bài [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/)):
+
+| Nhà cung cấp | JSON mode | Embeddings |
+|---|---|---|
+| OpenAI | `json_object` và `json_schema` | Có |
+| Gemini | Trang tương thích chỉ có ví dụ dùng `parse()` | Có, `/embeddings` cùng `base_url` |
+| Groq | `json_object` mọi mô hình, prompt phải có chữ "JSON"; `json_schema` một số mô hình | Không thấy trong trang Models |
+| Ollama | Có `response_format` | Có, `/v1/embeddings`; tải mô hình embedding bằng `ollama pull` |
+
+Kiểm tra lần cuối: 10/2026. Giá và hạn mức đổi thường xuyên, nên bài không ghi con số.
+
+Đặt biến môi trường trong cửa sổ dòng lệnh bạn dùng để chạy code. Biến chỉ sống trong cửa sổ đó; mở cửa sổ mới thì đặt lại.
+
+<Tabs syncKey="os">
+<TabItem label="macOS, Linux (bash)">
+
+```sh
+export OPENAI_API_KEY="<key-của-bạn>"
+export OPENAI_BASE_URL="<địa chỉ API của nhà cung cấp>"
+export LLM_MODEL="<tên mô hình>"
+pip install openai
+```
+
+</TabItem>
+<TabItem label="Windows (PowerShell)">
+
+```powershell
+$env:OPENAI_API_KEY = "<key-của-bạn>"
+$env:OPENAI_BASE_URL = "<địa chỉ API của nhà cung cấp>"
+$env:LLM_MODEL = "<tên mô hình>"
+pip install openai
+```
+
+</TabItem>
+</Tabs>
+
+Dùng OpenAI thì bỏ dòng `OPENAI_BASE_URL`. Không bao giờ dán key thẳng vào code: file code hay bị chia sẻ hoặc đẩy lên Git, còn biến môi trường thì không. Chạy mỗi ô bằng `python ten_file.py`; trên Windows, nếu chữ tiếng Việt in ra bị lỗi mã hóa, chạy `python -X utf8 ten_file.py`.
+
+### Lấy mẫu token bằng NumPy
+
+Ô này làm lại phần Lý thuyết trên 10 logit của "Hôm nay trời rất": softmax có nhiệt độ ở ba mức $T$, top-k với $k = 3$, rồi rút 1000 token với top-p $0.9$.
+
+<PythonRunner code={samplingCode} title="Softmax có nhiệt độ, top-k, top-p" />
+
+Ba dòng đầu khớp bảng ở mục Lý thuyết: top-p $0.9$ giữ 3, 5 rồi 7 token khi $T$ tăng từ 0.5 lên 1.5. Dòng top-k cho 0.491, 0.329, 0.18, và 0 từ token thứ tư trở đi. Với top-p $0.9$ ở $T = 1$, năm token còn lại có xác suất 0.415, 0.278, 0.153, 0.093, 0.062; trong 1000 lần rút, chúng được chọn 386, 287, 172, 96, 59 lần, sát với xác suất. Năm token cuối không lần nào được chọn, vì xác suất của chúng đã bị đặt về 0.
+
+### Hội thoại hai lượt
+
+Ô này gửi hai câu hỏi, câu sau chỉ hiểu được nhờ câu trước. Hàm `ask` thêm câu hỏi vào `messages`, gọi API, rồi lưu câu trả lời vào `messages` với vai trò `assistant`.
+
+<LocalCode code={chatCode} title="Hội thoại hai lượt" packages={['openai']} />
+
+Khi chạy, hãy nhìn dòng trong ngoặc sau mỗi câu trả lời. Số token vào ở lượt hai lớn hơn hẳn lượt một, vì lượt hai gửi lại cả câu hỏi và câu trả lời của lượt một. `finish_reason` thường là `stop`. Thử thêm `max_tokens=20` vào lời gọi để thấy `length`: câu trả lời bị cắt giữa chừng. `or ""` phòng khi `content` là `None`, ví dụ khi mô hình reasoning tiêu hết trần token vào phần suy nghĩ ẩn. Thử đổi `messages=messages` thành `messages=[messages[0], messages[-1]]` (chỉ gửi system và câu hỏi mới): ở lượt hai, mô hình không còn biết "ví dụ" về cái gì.
+
+### Trích JSON, có retry và bắt lỗi
+
+Ô cuối gộp mọi thứ cho một việc thật: đọc một đánh giá của khách và trả về JSON gồm cảm xúc và các khía cạnh được nhắc tới. `temperature=0` vì đây là trích xuất. Client đặt `max_retries=4` và `timeout=30`. System prompt có chữ "JSON", như JSON mode đòi hỏi.
+
+<LocalCode code={extractJsonCode} title="Trích JSON từ một đánh giá" packages={['openai']} />
+
+Khi mọi thứ ổn, chương trình in một đối tượng JSON có hai khóa `cam_xuc` và `khia_canh`. Các nhánh `except` đi từ cụ thể tới chung: `RateLimitError` là một loại `APIStatusError`, nên phải đứng trước. Nhánh `APIStatusError` in kèm thông điệp của máy chủ (`e.body`). Thử đặt sai `LLM_MODEL` để thấy nhánh lỗi 404, hoặc đặt `OPENAI_BASE_URL` về một cổng không có gì chạy, ví dụ `http://127.0.0.1:9/v1`: SDK thử lại 4 lần, chờ lâu dần, rồi mới in thông báo không kết nối được. Nhà cung cấp báo lỗi 400 với `response_format` hay `temperature` thì xóa dòng đó: prompt đã yêu cầu JSON, và `json.loads` vẫn kiểm tra kết quả.
+
+## Lỗi hay gặp
+
+:::caution[Ghi key thẳng vào code rồi đẩy lên Git]
+Key trong code sẽ đi theo mọi bản sao của file: tin nhắn gửi bạn bè, kho Git công khai, ảnh chụp màn hình. Có người quét GitHub tìm key để dùng ké bằng tiền của bạn. Luôn đọc key từ biến môi trường như code của bài. Lỡ để lộ thì vào trang của nhà cung cấp thu hồi key đó và tạo key mới; xóa commit không đủ, vì key có thể đã bị quét ngay khi đẩy lên, và vẫn nằm trong lịch sử, bản fork hay cache.
+:::
+
+:::caution[Tưởng API nhớ cuộc trò chuyện]
+Chỉ gửi câu hỏi mới thì mô hình trả lời như người lạ. Bạn phải tự giữ list `messages` và gửi lại cả list mỗi lượt. Hệ quả: token vào, chi phí và thời gian chờ tăng theo độ dài lịch sử, và tới lúc lịch sử vượt cửa sổ ngữ cảnh thì yêu cầu bị từ chối. Hội thoại dài cần cắt bớt hoặc tóm tắt các lượt cũ.
+:::
+
+:::caution[Thử lại mọi lỗi, hoặc thử lại chồng lên SDK]
+Lỗi 400, 401, 403, 404 không tự hết, thử lại chỉ tốn thời gian và hạn mức. Lỗi 429 do hết tiền hoặc vượt hạn mức chi tiêu cũng vậy: chờ bao lâu cũng không tự hết, dù SDK vẫn thử lại nó như mọi lỗi 429. Còn lỗi tạm thời thì SDK đã tự thử lại 2 lần với backoff. Bọc thêm một vòng `for` gọi tối đa 5 lần bên ngoài mà không đặt `max_retries=0`, một lỗi có thể thành 15 lần gọi, làm rate limit càng nặng.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Gọi LLM là gửi `model` và list `messages` (vai trò `system`, `user`, `assistant`) qua API. API không nhớ gì, nên mỗi lượt gửi lại cả lịch sử, và tổng token vào tăng theo bình phương số lượt. Đọc `content`, `finish_reason`, `usage` trong phản hồi.
+- Mô hình cho logit $z_i$ mỗi token; xác suất là $p_i(T) = \exp(z_i/T) / \sum_j \exp(z_j/T)$. $T$ nhỏ thì nhọn, $T$ lớn thì phẳng, thứ tự không đổi. Top-k giữ $k$ token, top-p giữ tập nhỏ nhất có tổng xác suất $\ge p$, rồi chuẩn hóa lại và rút mẫu. API kiểu OpenAI có `temperature`, `top_p`, không có `top_k`.
+- `max_tokens` là trần chi phí, không làm câu ngắn lại. `stream=True` cho chữ hiện dần; luồng đứt thì không tự thử lại.
+- Chỉ thử lại lỗi tạm thời (mạng, 408, 409, 429, ≥ 500), với exponential backoff có jitter: SDK làm sẵn qua `max_retries`. Đầu ra JSON luôn đọc bằng `json.loads` trong `try`/`except`. Key luôn để trong biến môi trường.
+
+**Đọc thêm:**
+
+- OpenAI (2026). [*Text generation*](https://developers.openai.com/api/docs/guides/text) và [*Error codes*](https://developers.openai.com/api/docs/guides/error-codes). Hướng dẫn chính thức về `messages`, vai trò, Responses API, và cách xử lý lỗi 429.
+- OpenAI (2026). [*openai-python* v3.37.0](https://github.com/openai/openai-python/tree/v3.37.0), README, các mục về xử lý lỗi, retry, timeout và streaming. Tài liệu của đúng phiên bản thư viện dùng trong bài.
+- Holtzman, A., Buys, J., Du, L., Forbes, M., Choi, Y. (2020). [*The Curious Case of Neural Text Degeneration*](https://arxiv.org/abs/1904.09751). ICLR 2020, mục 3 và 6. Bài báo đề xuất top-p, so sánh với chọn tham lam, beam search, top-k và nhiệt độ.
+- Fan, A., Lewis, M., Dauphin, Y. (2018). [*Hierarchical Neural Story Generation*](https://aclanthology.org/P18-1082/). ACL 2018. Một trong những công trình đầu dùng lấy mẫu top-k để sinh truyện.
+- Hinton, G., Vinyals, O., Dean, J. (2015). [*Distilling the Knowledge in a Neural Network*](https://arxiv.org/abs/1503.02531), mục 2. Softmax có nhiệt độ $T$, dùng cho chưng cất mô hình; cùng công thức với `temperature` khi lấy mẫu.
+
+<LessonProgress />

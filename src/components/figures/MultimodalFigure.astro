@@ -1,0 +1,131 @@
+---
+// llm/multimodal, "Minh họa": LLaVA-style concatenation. The image goes through the image encoder and the
+// projector into image tokens that share one sequence with the LLM's text tokens. Two columns read top-down
+// meet in one row. Left, the image path: a 4 × 4 grid (lines with no head; cells numbered in reading order),
+// the frozen encoder, a row of image features, the learned projector (accent). Right, the text path: the
+// question and the embedding table, level with the projector, since both turn their input into D-dimensional
+// rows. The sequence is one framed row of equal cells: image tokens (dashed, second group, like the encoder
+// and the features: the image side) before text tokens (plain), bracketed with their counts. Features are
+// narrower than tokens: the projector widens D_v to D. Then L = 266 into the LLM, and the answer.
+// Narrow layout only. Words: src/data/figures/multimodal.ts; numbers as in the lesson's PyTorch cell.
+import { MULTIMODAL } from '@data/figures/multimodal';
+import type { Pt } from '@lib/figures/geometry';
+import { anchor, mainAndSmall, spread, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigMath from './kit/FigMath.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = MULTIMODAL[getPageLocale(Astro.locals.starlightRoute)];
+const l = t.labels;
+
+// Columns: image path centred on x 96, text path on x 264 (the centres of the two halves of the sequence).
+const LEFT = 96;
+const RIGHT = 264;
+const box = (centre: number, y: number, width: number, height: number): Box => ({ x: centre - width / 2, y, width, height });
+
+// The grid: 4 × 4 cells of 22, drawn as an outline and two zigzags (the inner lines), numbered in reading order.
+const GRID = { x: 52, y: 24, cell: 22, count: 4 } as const;
+const gridEnd = { x: GRID.x + GRID.cell * GRID.count, y: GRID.y + GRID.cell * GRID.count };
+const at = (i: number) => [GRID.x + GRID.cell * i, GRID.y + GRID.cell * i] as const;
+const outline = {
+  from: [GRID.x, GRID.y] as Pt,
+  via: [[gridEnd.x, GRID.y], [gridEnd.x, gridEnd.y], [GRID.x, gridEnd.y]] as Pt[],
+  to: [GRID.x, GRID.y] as Pt,
+};
+const [, x1, x2, x3] = [0, 1, 2, 3].map((i) => at(i)[0]) as number[];
+const [, y1, y2, y3] = [0, 1, 2, 3].map((i) => at(i)[1]) as number[];
+const columnsZigzag = {
+  from: [x1!, GRID.y] as Pt,
+  via: [[x1!, gridEnd.y], [x2!, gridEnd.y], [x2!, GRID.y], [x3!, GRID.y]] as Pt[],
+  to: [x3!, gridEnd.y] as Pt,
+};
+const rowsZigzag = {
+  from: [GRID.x, y1!] as Pt,
+  via: [[gridEnd.x, y1!], [gridEnd.x, y2!], [GRID.x, y2!], [GRID.x, y3!]] as Pt[],
+  to: [gridEnd.x, y3!] as Pt,
+};
+const cellCentre = (row: number, col: number): Pt => [GRID.x + GRID.cell * (col + 0.5), GRID.y + GRID.cell * (row + 0.5)];
+const numbered: { n: number; at: Pt }[] = [
+  ...[0, 1, 2, 3].map((col) => ({ n: col + 1, at: cellCentre(0, col) })),
+  { n: 5, at: cellCentre(1, 0) },
+  { n: 16, at: cellCentre(3, 3) },
+];
+
+const encoder = box(LEFT, 134, 160, 54);
+const FEATURE = { y: 210, height: 36 } as const;
+const features = spread(LEFT - 61, LEFT + 61, 3, 4);
+const projector = box(LEFT, 268, 100, 56);
+const question = box(RIGHT, 134, 136, 54);
+const embedding = box(RIGHT, 268, 136, 56);
+
+// The sequence: 7 equal cells, 3 image tokens then 4 text tokens, in a frame 4 units outside them.
+const SEQ = { y: 360, height: 36, pad: 4, from: 9, to: 351 } as const;
+const cells = spread(SEQ.from, SEQ.to, 7, 2);
+const seqFrame = {
+  from: [SEQ.from - SEQ.pad, SEQ.y - SEQ.pad] as Pt,
+  via: [[SEQ.to + SEQ.pad, SEQ.y - SEQ.pad], [SEQ.to + SEQ.pad, SEQ.y + SEQ.height + SEQ.pad], [SEQ.from - SEQ.pad, SEQ.y + SEQ.height + SEQ.pad]] as Pt[],
+  to: [SEQ.from - SEQ.pad, SEQ.y - SEQ.pad] as Pt,
+};
+const seqBottom = SEQ.y + SEQ.height + SEQ.pad;
+const imageCells = ['1', '…', '256'];
+const textCells = [...(l.words as readonly string[]), '…'];
+// Where the image part ends and the text part begins; the brackets under the two parts leave a gap there
+// for the arrow to the LLM.
+const split = Math.round((cells.starts[3] ?? 0) - 1);
+const imageMid = (SEQ.from + split) / 2;
+const textMid = (split + SEQ.to) / 2;
+const BRACKET = { top: seqBottom + 4, depth: 6 } as const;
+const bracket = (from: number, to: number) => ({
+  from: [from, BRACKET.top] as Pt,
+  via: [[from, BRACKET.top + BRACKET.depth], [to, BRACKET.top + BRACKET.depth]] as Pt[],
+  to: [to, BRACKET.top] as Pt,
+});
+const countY = BRACKET.top + BRACKET.depth + 12;
+const llm = box(split, 454, 80, 36);
+const answer: Box = { x: llm.x + llm.width + 32, y: 454, width: SEQ.to - (llm.x + llm.width + 32), height: 36 };
+const height = llm.y + llm.height + 8;
+---
+
+<FigureFrame id="multimodal" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigText x={LEFT} y={12} lines={l.image} />
+    <FigArrow {...outline} head={false} />
+    <FigArrow {...columnsZigzag} head={false} />
+    <FigArrow {...rowsZigzag} head={false} />
+    {numbered.map(({ n, at: [x, y] }) => <FigText x={x} y={y} lines={String(n)} size="small" />)}
+    <FigText x={gridEnd.x + 12} y={(GRID.y + gridEnd.y) / 2} lines={l.gridNote} size="small" anchor="start" />
+
+    <FigArrow from={[LEFT, gridEnd.y]} to={anchor(encoder, 'top')} />
+    <FigNode {...encoder} {...mainAndSmall(l.encoder)} tone="alt" />
+    <FigArrow from={anchor(encoder, 'bottom')} to={[LEFT, FEATURE.y]} />
+    <FigText x={LEFT + 8} y={(encoder.y + encoder.height + FEATURE.y) / 2} lines={l.features} size="small" anchor="start" />
+    {features.starts.map((x, i) => <FigNode x={x} y={FEATURE.y} width={features.size} height={FEATURE.height} lines={imageCells[i]!} tone="alt" />)}
+    <FigArrow from={[LEFT, FEATURE.y + FEATURE.height]} to={anchor(projector, 'top')} />
+    <FigNode {...projector} {...mainAndSmall(l.projector)} tone="accent" />
+
+    <FigNode {...question} {...mainAndSmall(l.question)} />
+    <FigArrow from={anchor(question, 'bottom')} to={anchor(embedding, 'top')} />
+    <FigNode {...embedding} lines={l.embedding} />
+
+    <FigArrow from={anchor(projector, 'bottom')} to={[LEFT, seqFrame.from[1]]} />
+    <FigText x={LEFT + 8} y={(projector.y + projector.height + seqFrame.from[1]) / 2} lines={l.imageTokens} size="small" anchor="start" />
+    <FigArrow from={anchor(embedding, 'bottom')} to={[RIGHT, seqFrame.from[1]]} />
+    <FigText x={RIGHT + 8} y={(embedding.y + embedding.height + seqFrame.from[1]) / 2} lines={l.textTokens} size="small" anchor="start" />
+    <FigArrow {...seqFrame} head={false} />
+    {imageCells.map((word, i) => <FigNode x={cells.starts[i]!} y={SEQ.y} width={cells.size} height={SEQ.height} lines={word} tone="alt" />)}
+    {textCells.map((word, i) => <FigNode x={cells.starts[3 + i]!} y={SEQ.y} width={cells.size} height={SEQ.height} lines={word} />)}
+
+    <FigArrow {...bracket(SEQ.from, split - 4)} head={false} />
+    <FigText x={imageMid} y={countY} lines={l.imageCount} size="small" />
+    <FigArrow {...bracket(split + 4, SEQ.to)} head={false} />
+    <FigText x={textMid} y={countY} lines={l.textCount} size="small" />
+    <FigArrow from={[split, seqBottom]} to={anchor(llm, 'top')} />
+    <FigMath x={split + 8} y={llm.y - 12} symbol="L" after="= 266" anchor="start" />
+    <FigNode {...llm} lines={l.llm} />
+    <FigArrow from={anchor(llm, 'right')} to={anchor(answer, 'left')} />
+    <FigNode {...answer} lines={l.answer} />
+  </Fragment>
+</FigureFrame>

@@ -1,0 +1,103 @@
+/*
+ * LocalCode (docs/architecture/llm-lessons.md, section 4.3). Loaded on every page through Starlight's customCss
+ * (astro.config.ts). Every class starts with "atlas-local". Theme tokens only, no new colour pair.
+ * Budget: 600 bytes gzip without comments.
+ */
+.atlas-local-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.atlas-local-head > p,
+.atlas-local-output > p {
+  margin: 0;
+}
+
+.atlas-local-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 4px;
+  background: var(--sl-color-gray-6);
+  color: var(--sl-color-text);
+  font-size: var(--sl-text-xs);
+  font-weight: 600;
+}
+
+/* A terminal window in the text colour: a frame with a thick title bar. */
+.atlas-local-icon {
+  box-sizing: border-box;
+  width: 12px;
+  height: 11px;
+  border: 1.5px solid;
+  border-top-width: 3px;
+  border-radius: 2px;
+}
+
+.atlas-local-title,
+.atlas-local-reqs dt {
+  font-weight: 600;
+  color: var(--sl-color-gray-3);
+}
+
+.atlas-local-title,
+.atlas-local-reqs,
+.atlas-local-output > p {
+  font-size: var(--sl-text-sm);
+}
+
+.atlas-local-reqs {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0 0 8px;
+}
+
+/* Each <div> groups one dt and its dd; the grid lays out their children. */
+.atlas-local-reqs > div {
+  display: contents;
+}
+
+.atlas-local-reqs dd {
+  margin: 0;
+}
+
+/* Starlight's inline code look (.not-content opts out of it); long pip lines wrap at 375px. */
+.atlas-local-reqs code {
+  padding: 2px 6px;
+  background: var(--sl-color-bg-inline-code);
+  font-size: var(--sl-text-code-sm);
+  overflow-wrap: anywhere;
+}
+
+.atlas-local .expressive-code {
+  margin: 0;
+}
+
+.atlas-local-output {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  margin-top: 8px;
+  padding: 12px 16px;
+  background: var(--sl-color-gray-6);
+}
+
+.atlas-local-output-label {
+  font-weight: 600;
+  color: var(--sl-color-white);
+}
+
+.atlas-local-output-note {
+  color: var(--sl-color-gray-3);
+}
+
+/* The sample output (the slot) sits a little further from its label. */
+.atlas-local-output > div {
+  margin-top: 8px;
+}

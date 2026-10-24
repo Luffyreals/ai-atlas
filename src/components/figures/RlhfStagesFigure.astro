@@ -1,0 +1,81 @@
+---
+// llm/rlhf, "Minh họa" (reused as is in llm/dpo): RLHF has three steps in a row, SFT, learning the reward model
+// (RM) from ranked answers, and RL with a KL penalty; step 3 uses the RM frozen and the SFT model as reference.
+// The lesson's three columns do not fit 360 units with readable text, so steps 1 and 2 stand side by side on
+// top and step 3, the focus, spans the width below. Their outputs (the SFT model, the RM) sit on one row, and
+// dashed second-group links run down the outer lanes into their frozen copies in step 3. Step 3 is a loop:
+// policy (accent) → answer → RM scores it → PPO → policy; the reference model feeds the KL penalty.
+// Narrow layout only: tried first (llm-lessons.md 2.9), a wide one with the same 9 boxes would double the SVG (6 210 characters),
+// past the HTML budget of viz/figures.md 8.2 g (10 000), and the content column reaches 640px only from about
+// 1440px. Words: src/data/figures/rlhf-stages.ts.
+import { RLHF_STAGES } from '@data/figures/rlhf-stages';
+import { anchor, mainAndSmall, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = RLHF_STAGES[getPageLocale(Astro.locals.starlightRoute)];
+
+// Steps 1 and 2: halves x 8–172 and 188–352. Step 3: x 28–166 and 194–332, leaving lanes at x 16 and 344.
+const LEFT = { x: 8, width: 164 } as const;
+const RIGHT = { x: 188, width: 164 } as const;
+const IN_LEFT = { x: 28, width: 138 } as const;
+const IN_RIGHT = { x: 194, width: 138 } as const;
+const LANE = { left: 16, right: 344 } as const;
+const box = (col: { x: number; width: number }, y: number, height: number): Box => ({ ...col, y, height });
+
+const demo = box(LEFT, 52, 56);
+const sft = box(LEFT, 204, 56);
+const answers = box(RIGHT, 52, 56);
+const rank = box(RIGHT, 128, 56);
+const rm = box(RIGHT, 204, 56);
+const STEP3 = 284; // y of the step 3 title
+const policy = box(IN_LEFT, 320, 56);
+const answer = box(IN_RIGHT, 320, 56);
+const ref = box(IN_LEFT, 416, 72);
+const rmScore = box(IN_RIGHT, 416, 72);
+const height = ref.y + ref.height + 8;
+
+const mid = (col: { x: number; width: number }) => col.x + col.width / 2;
+const between = (upper: Box, lower: Box) => (upper.y + upper.height + lower.y) / 2;
+const ppoX = (IN_LEFT.x + IN_LEFT.width + IN_RIGHT.x) / 2;
+const lowY = anchor(ref, 'left')[1];
+const ppoIn = anchor(policy, 'right', 0.75);
+---
+
+<FigureFrame id="rlhf-stages" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigText x={mid(LEFT)} y={16} lines={t.labels.step1} />
+    <FigText x={mid(LEFT)} y={34} lines={t.labels.step1Note} size="small" />
+    <FigNode {...demo} lines={t.labels.demo} />
+    <FigArrow from={anchor(demo, 'bottom')} to={anchor(sft, 'top')} />
+    <FigText x={mid(LEFT) + 8} y={between(demo, sft)} lines={t.labels.finetune} size="small" anchor="start" />
+    <FigNode {...sft} lines={t.labels.sft} />
+
+    <FigText x={mid(RIGHT)} y={16} lines={t.labels.step2} />
+    <FigText x={mid(RIGHT)} y={34} lines={t.labels.step2Note} size="small" />
+    <FigNode {...answers} {...mainAndSmall(t.labels.answers)} />
+    <FigArrow from={anchor(answers, 'bottom')} to={anchor(rank, 'top')} />
+    <FigNode {...rank} {...mainAndSmall(t.labels.rank)} />
+    <FigArrow from={anchor(rank, 'bottom')} to={anchor(rm, 'top')} />
+    <FigNode {...rm} {...mainAndSmall(t.labels.rm)} />
+
+    <FigText x={180} y={STEP3} lines={t.labels.step3} />
+    <FigText x={180} y={STEP3 + 18} lines={t.labels.step3Note} size="small" />
+    <FigNode {...policy} {...mainAndSmall(t.labels.policy)} tone="accent" />
+    <FigArrow from={anchor(policy, 'right', 0.35)} to={anchor(answer, 'left', 0.35)} />
+    <FigNode {...answer} lines={t.labels.answer} />
+    <FigArrow from={anchor(answer, 'bottom')} to={anchor(rmScore, 'top')} />
+    <FigNode {...rmScore} lines={t.labels.rmScore} small={t.labels.frozen} tone="alt" />
+    <FigArrow from={anchor(rmScore, 'left')} via={[[ppoX, lowY], [ppoX, ppoIn[1]]]} to={ppoIn} />
+    <FigText x={ppoX - 6} y={between(policy, ref)} lines={t.labels.ppo} anchor="end" />
+    <FigNode {...ref} lines={t.labels.ref} small={t.labels.frozen} tone="alt" />
+    <FigArrow from={anchor(ref, 'top')} to={anchor(policy, 'bottom')} />
+    <FigText x={mid(IN_LEFT) - 6} y={between(policy, ref)} lines={t.labels.kl} size="small" anchor="end" />
+
+    <FigArrow from={[LANE.left, sft.y + sft.height]} via={[[LANE.left, lowY]]} to={anchor(ref, 'left')} tone="alt" />
+    <FigArrow from={[LANE.right, rm.y + rm.height]} via={[[LANE.right, lowY]]} to={anchor(rmScore, 'right')} tone="alt" />
+  </Fragment>
+</FigureFrame>

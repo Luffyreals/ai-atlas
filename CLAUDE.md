@@ -42,6 +42,8 @@ Mốc M3 (xong bản vi, chờ duyệt trên PR #1): 4 bài ML còn lại, **ch�
 
 Mỗi phiên Claude làm trong một worktree riêng (người dùng quyết ngày 24/10/2026), không làm chung thư mục `ai-atlas`. Bước tiếp theo: M4 (ra mắt), song song với phần LLM do phiên khác làm.
 
+Phần LLM (Phần 5c, làm song song ở nhánh `llm-lessons`, worktree `ai-atlas-llm`): xong bản vi của cả 23 bài, **chờ người dùng duyệt**, bản en làm sau (`docs/decisions.md` quyết định 53, 54, 59–61; thiết kế `docs/architecture/llm-lessons.md`). Code minh họa không chạy trên trang dùng component `LocalCode` (SDK `openai`, đổi `base_url`, key đọc từ biến môi trường, không bao giờ ghi key vào code); kiểm chứng bằng `.venv-llm` (`scripts/requirements-llm.txt`) và file `.env.llm` do người dùng tự tạo. Có VIZ `SamplingViz` và 9 hình tĩnh LLM (kit FIG mở rộng, `src/lib/figures/layout.ts`).
+
 ## Công nghệ
 
 Astro + Starlight (có i18n), MDX, React (Astro islands), KaTeX (remark-math + rehype-katex), Pyodide trong Web Worker, Pagefind, Cloudflare Pages, tên miền riêng.

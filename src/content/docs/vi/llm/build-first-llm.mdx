@@ -1,0 +1,376 @@
+---
+title: Xây dựng LLM đầu tiên
+description: Đoán chữ kế tiếp trong Truyện Kiều. Cross-entropy và perplexity, bigram bằng NumPy, GPT nhỏ có mặt nạ nhân quả, và vì sao LLM cần rất nhiều dữ liệu.
+quiz:
+  - question: 'Trên tập kiểm tra, một mô hình ký tự gán xác suất $0.25$ cho ký tự đúng ở mọi vị trí. Perplexity của nó bằng bao nhiêu?'
+    options: ['$0.25$', '$\ln 4 \approx 1.386$', '$4$', '$73$']
+    answer: 2
+    explanation: 'Loss ở mỗi vị trí là $-\ln 0.25 = \ln 4 \approx 1.386$ nat, nên trung bình cũng vậy. Perplexity là $\exp(\ln 4) = 4$: mô hình phân vân như thể chọn đều giữa 4 ký tự. $1.386$ là cross-entropy, chưa lấy $\exp$. $73$ là perplexity của mô hình đoán đều trên 73 ký tự, mốc của mô hình chưa học gì.'
+  - question: 'Bạn huấn luyện một GPT ký tự trên 2 000 ký tự văn bản. Ở bước 100, loss kiểm tra là $2.4$. Tới bước 1 000, loss huấn luyện còn $0.05$ nhưng loss kiểm tra lên $6.1$. Nên làm gì?'
+    options:
+      - 'Huấn luyện thêm cho loss huấn luyện về đúng 0'
+      - 'Thêm nhiều văn bản huấn luyện, hoặc dừng sớm ở quanh bước loss trên tập kiểm định nhỏ nhất'
+      - 'Tăng số khối và số chiều để mô hình mạnh hơn'
+      - 'Giảm nhiệt độ $T$ khi sinh văn bản'
+    answer: 1
+    explanation: 'Loss huấn luyện giảm trong khi loss kiểm tra tăng là overfitting: mô hình đang học thuộc 2 000 ký tự. Thêm dữ liệu và dừng sớm đều nhắm vào đó. Huấn luyện thêm hay tăng cỡ mô hình chỉ giúp nó học thuộc nhanh hơn. Nhiệt độ chỉ đổi cách lấy mẫu khi sinh văn bản, không đổi mô hình, nên loss kiểm tra vẫn vậy.'
+  - question: 'Một bạn quên mặt nạ nhân quả khi huấn luyện GPT: vị trí $t$ nhìn được cả các ký tự sau nó. Điều gì nhiều khả năng xảy ra?'
+    options:
+      - 'Loss huấn luyện cao hơn hẳn, vì mô hình bị rối bởi quá nhiều thông tin'
+      - 'Code báo lỗi sai kích thước ma trận'
+      - 'Không khác gì, vì attention tự học cách bỏ qua tương lai'
+      - 'Loss huấn luyện thấp bất thường, nhưng văn bản sinh ra thì tệ'
+    answer: 3
+    explanation: 'Đáp án của vị trí $t$ là ký tự $t + 1$, mà ký tự đó giờ nằm ngay trong tầm nhìn. Mô hình học cách chép lại nó, nên loss huấn luyện xuống rất thấp. Khi sinh văn bản, ký tự tương lai chưa tồn tại, nên mẹo chép vô dụng. Kích thước ma trận không đổi, nên code chạy êm, không báo lỗi gì. Chính vì vậy lỗi này nguy hiểm.'
+  - question: 'Mô hình A tách token theo ký tự, perplexity trên tập kiểm tra là $12$. Mô hình B tách theo từ, perplexity $150$ trên cùng văn bản kiểm tra. Kết luận nào đúng?'
+    options:
+      - 'Chưa so được trực tiếp: hai mô hình đoán hai loại token khác nhau, nên số lựa chọn ở mỗi bước khác nhau'
+      - 'A tốt hơn, vì perplexity nhỏ hơn'
+      - 'B tốt hơn, vì mỗi bước đoán được cả một từ'
+      - 'Hai mô hình như nhau, vì cùng một tập kiểm tra'
+    answer: 0
+    explanation: 'Perplexity tính trên mỗi token. Một từ gồm nhiều ký tự, nên đoán đúng một từ khó hơn đoán đúng một ký tự, và perplexity theo từ tự nhiên lớn hơn. Muốn so, hãy đổi về cùng một đơn vị, ví dụ tổng loss trên cả văn bản, tức số token nhân với loss trung bình. Kết luận A tốt hơn chỉ vì $12 < 150$ là cái bẫy hay gặp nhất.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import SamplingViz from '@components/viz/SamplingViz.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import bigramCode from '@code/llm/build-first-llm/bigram.vi.py?raw';
+import tinyGptCode from '@code/llm/build-first-llm/tiny-gpt.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu một mô hình ngôn ngữ (language model) chỉ làm một việc: cho xác suất của token kế tiếp (next-token prediction). Sinh văn bản là lặp lại việc đó.
+- Tự dẫn được hàm mất mát cross-entropy từ xác suất của cả đoạn văn, và đọc được perplexity như "số lựa chọn mà mô hình đang phân vân".
+- Cài đặt được mô hình bigram mức ký tự bằng NumPy, và đọc hiểu một GPT nhỏ chỉ có decoder (decoder-only), có mặt nạ nhân quả (causal mask), viết bằng PyTorch.
+- Nhận ra overfitting khi huấn luyện mô hình ngôn ngữ trên ít dữ liệu, và giải thích được vì sao LLM cần rất nhiều văn bản.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+**Token** là đơn vị văn bản mô hình đọc và viết: một ký tự, một từ hay một mảnh từ. **Bộ tách từ** (tokenizer) đổi văn bản thành dãy số thứ tự của token trong một **từ vựng** (vocabulary) gồm $V$ token. Mỗi token được đổi thành một vectơ, gọi là **embedding**. **Self-attention** cho mỗi vị trí nhìn các vị trí khác: nó chấm điểm mức liên quan giữa từng cặp vị trí, đổi điểm thành trọng số bằng softmax, rồi lấy trung bình có trọng số của thông tin ở các vị trí đó. Một **khối Transformer** (Transformer block) gồm self-attention và một mạng truyền thẳng nhỏ (MLP), mỗi phần có **kết nối tắt** (residual connection) và **chuẩn hóa lớp** (layer normalization). Đầu ra cuối cùng là một **logit** cho mỗi token; softmax đổi logit thành xác suất, và nhiệt độ $T$ làm phân phối nhọn hay phẳng, như ở bài [Sử dụng API văn bản](/vi/llm/text-api/).
+:::
+
+## Trực giác
+
+### Trò đoán chữ
+
+Che chữ cuối của câu thơ này và đoán thử:
+
+> Trăm năm trong cõi người ...
+
+Nếu thuộc Truyện Kiều, bạn điền ngay "ta". Có hai điều đáng để ý. Thứ nhất, bạn **dùng ngữ cảnh**: chỉ nhìn chữ "người" thì khó đoán, nhìn cả câu thì dễ. Thứ hai, câu trả lời của bạn **không chắc chắn hoàn toàn**: "ta" có lẽ 95%, "đời" một chút, các chữ khác ít hơn nữa.
+
+Một **mô hình ngôn ngữ** làm đúng trò này. Cho đoạn văn đã có, nó trả về một **phân phối xác suất** trên mọi token có thể đứng tiếp theo. Muốn viết văn bản, bạn chọn một token theo phân phối đó, nối vào, rồi hỏi lại. ChatGPT trả lời bạn cũng theo cách ấy, từng token một.
+
+Trong bài này, mỗi **ký tự** là một token. Như vậy không cần bộ tách từ, và từ vựng rất nhỏ: 24 câu đầu Truyện Kiều, viết thường, chỉ có 73 ký tự khác nhau, kể cả khoảng trắng, dấu câu và xuống dòng. Ở mức ký tự, trò đoán chữ vẫn có quy luật: trong 20 câu đầu, sau "q" luôn là "u", sau dấu phẩy luôn là khoảng trắng hoặc xuống dòng. Mô hình chỉ nhìn **một** ký tự đứng trước gọi là **bigram**. GPT nhìn cả một đoạn dài phía trước.
+
+### Vì sao tự xây một LLM đồ chơi
+
+Bài này chia việc dùng LLM thành bốn cấp. Đây là cách chia của AI Atlas để sắp xếp các bài, không phải một chuẩn chung:
+
+| Cấp | Bạn làm gì | Cần gì | Bài trong lộ trình |
+|---|---|---|---|
+| 1 | Gọi LLM có sẵn qua API | Key, vài dòng code | [Sử dụng API văn bản](/vi/llm/text-api/) |
+| 2 | Xây prompt, RAG, agent trên LLM có sẵn | Dữ liệu của bạn, thiết kế hệ thống | [Prompt Engineering](/vi/llm/prompt-engineering/), [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/), [Agents](/vi/llm/agents/) |
+| 3 | Fine-tune hoặc huấn luyện tiếp một LLM | Fine-tune: vài nghìn tới vài trăm nghìn mẫu. Huấn luyện tiếp trên văn bản một lĩnh vực: thường từ hàng tỉ token. Cả hai cần GPU | [Họ GPT và fine-tune đa nhiệm](/vi/llm/gpt-family-finetuning/), [Đánh giá mô hình và PEFT](/vi/llm/evaluation-peft/) |
+| 4 | Pre-train từ đầu | Từ hàng trăm tỉ tới hàng chục nghìn tỉ token, cụm GPU lớn | [Chuẩn bị dữ liệu pre-train](/vi/llm/pretraining-data/), [Họ LLaMA](/vi/llm/llama-family/) |
+
+
+Phần lớn công việc thật nằm ở cấp 1 và 2. Bài này làm một bản đồ chơi của cấp 4 để bạn thấy bên trong một LLM, và hiểu vì sao cùng câu hỏi mỗi lần một câu trả lời, vì sao mô hình có thể "bịa" một cách tự tin, và vì sao phải gom nhiều văn bản tới vậy.
+
+Bài toán của bài này là: **từ 20 câu thơ, xây một mô hình cho xác suất của ký tự kế tiếp, chấm nó bằng một con số trên 4 câu mà nó chưa thấy, rồi dùng nó để viết tiếp.**
+
+## Lý thuyết
+
+### Mô hình ngôn ngữ: xác suất của token kế tiếp
+
+Gọi một đoạn văn là dãy token $x_1, x_2, \dots, x_L$, với $L$ là **độ dài chuỗi**, tức số token của đoạn đó. Viết gọn $x_{<t}$ cho các token đứng trước vị trí $t$, tức $x_1, \dots, x_{t-1}$. Theo **quy tắc nhân xác suất** (chain rule of probability), xác suất của cả đoạn bằng tích các xác suất có điều kiện:
+
+$$
+p(x_1, \dots, x_L) = \prod_{t=1}^{L} p(x_t \mid x_{<t})
+$$
+
+Ví dụ, $p(\text{trăm năm trong}) = p(\text{trăm}) \cdot p(\text{năm} \mid \text{trăm}) \cdot p(\text{trong} \mid \text{trăm năm})$. Công thức này luôn đúng, không cần giả định gì. Vậy chỉ cần đoán được **token kế tiếp**, bạn có xác suất của mọi đoạn văn. Mọi mô hình ngôn ngữ, từ bigram tới GPT, chỉ khác nhau ở cách tính $p(x_t \mid x_{<t})$.
+
+Mô hình cho ra một vectơ **logit** $\mathbf{z} \in \mathbb{R}^V$, mỗi token trong từ vựng một số, rồi **softmax** đổi logit thành xác suất:
+
+$$
+p_i = \frac{\exp(z_i)}{\sum_{j=1}^{V} \exp(z_j)}
+$$
+
+Mô hình có các **tham số** $\boldsymbol{\theta}$ (bảng đếm của bigram, các ma trận trọng số của GPT). Ta viết $p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$ khi cần nói rõ xác suất phụ thuộc vào $\boldsymbol{\theta}$.
+
+### Cross-entropy: chấm điểm một mô hình ngôn ngữ
+
+Mô hình tốt là mô hình gán xác suất cao cho văn bản thật. Ta đi từ ý đó tới một hàm mất mát, qua ba bước. Gọi văn bản huấn luyện là $x_1, \dots, x_m$, trong đó $m$ là số vị trí được dự đoán; mỗi vị trí là một mẫu.
+
+**Bước 1: xác suất của cả văn bản.** Theo quy tắc nhân, mô hình gán cho văn bản huấn luyện xác suất $\prod_{t=1}^{m} p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$, gọi là **likelihood**. Ta muốn chọn $\boldsymbol{\theta}$ làm số này lớn nhất.
+
+**Bước 2: lấy logarit.** $\ln$ là hàm đồng biến, nên $\boldsymbol{\theta}$ làm likelihood lớn nhất cũng làm $\ln$ của nó lớn nhất. Logarit của tích bằng tổng các logarit:
+
+$$
+\ln \prod_{t=1}^{m} p_{\boldsymbol{\theta}}(x_t \mid x_{<t}) = \sum_{t=1}^{m} \ln p_{\boldsymbol{\theta}}(x_t \mid x_{<t})
+$$
+
+Bước này còn tránh lỗi số: tích của 659 số cỡ 0.1 là $10^{-659}$, nhỏ hơn mọi số dương mà kiểu `float64` biểu diễn được (nhỏ nhất khoảng $5 \times 10^{-324}$), nên máy làm tròn thành 0. Tổng các logarit thì không sao.
+
+**Bước 3: đổi dấu và chia trung bình.** Đổi dấu để biến "lớn nhất" thành "nhỏ nhất", như mọi hàm mất mát ở phần ML. Chia cho $m$ để con số không phụ thuộc độ dài văn bản:
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = -\frac{1}{m} \sum_{t=1}^{m} \ln p_{\boldsymbol{\theta}}(x_t \mid x_{<t})
+$$
+
+Đây là hàm mất mát mà GPT-1 (Radford và cộng sự, 2018) và gần như mọi LLM dùng khi pre-train. Mỗi vị trí đóng góp $-\ln p$, với $p$ là xác suất mô hình gán cho **token thật**:
+
+| $p$ gán cho token thật | 1 | 0.5 | 0.1 | 1/73 | 0.01 |
+|---|---:|---:|---:|---:|---:|
+| $-\ln p$ (nat) | 0 | 0.693 | 2.303 | 4.290 | 4.605 |
+
+Đoán chắc và đúng thì không mất gì; gán xác suất càng nhỏ cho token thật thì phạt càng nặng, tới vô cùng khi $p \to 0$. Có thể đọc $-\ln p$ là mức mô hình **ngạc nhiên** khi thấy token thật. Bài dùng $\ln$ như NumPy và PyTorch, nên đơn vị là **nat** (dùng $\log_2$ thì là bit).
+
+**Vì sao gọi là cross-entropy?** Viết token thật thành vectơ one-hot $\mathbf{y}$: $y_c = 1$ ở vị trí $c$ của token thật, 0 ở mọi chỗ khác. **Entropy chéo** (cross-entropy) giữa $\mathbf{y}$ và phân phối $\mathbf{p}$ của mô hình là:
+
+$$
+\mathrm{CE}(\mathbf{y}, \mathbf{p}) = -\sum_{i=1}^{V} y_i \ln p_i = -\ln p_c
+$$
+
+Đẳng thức thứ hai có được vì mọi số hạng có $y_i = 0$ đều biến mất, chỉ còn số hạng của token thật. Vậy $\mathcal{L}$ là cross-entropy trung bình trên các vị trí. Hàm `nn.functional.cross_entropy` của PyTorch nhận logit và chỉ số token thật, tự làm softmax rồi tính đúng số này.
+
+### Perplexity: đọc loss thành số lựa chọn
+
+Con số 2.7 nat khó hình dung. **Perplexity** đổi nó sang một đơn vị dễ đọc hơn:
+
+$$
+\mathrm{PPL} = \exp(\mathcal{L})
+$$
+
+Để hiểu nó, viết lại theo các xác suất $p_t = p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$:
+
+$$
+\begin{aligned}
+\mathrm{PPL} &= \exp\!\left(-\frac{1}{m}\sum_{t=1}^{m} \ln p_t\right) \\
+&= \exp\!\left(\frac{1}{m}\sum_{t=1}^{m} \ln \frac{1}{p_t}\right) \\
+&= \left(\prod_{t=1}^{m} \frac{1}{p_t}\right)^{1/m}
+\end{aligned}
+$$
+
+Dòng thứ hai đưa dấu trừ vào trong logarit: $-\ln p = \ln(1/p)$. Dòng thứ ba dùng $\exp\left(\frac{1}{m}\sum \ln a_t\right) = \left(\prod a_t\right)^{1/m}$, vì $\exp$ của tổng là tích, và chia $m$ trong số mũ là lấy căn bậc $m$. Vậy perplexity là **trung bình nhân** của $1/p_t$.
+
+Giờ giả sử ở mọi vị trí, mô hình phân vân đều giữa $K$ token và token thật nằm trong số đó: $p_t = 1/K$, nên $\mathrm{PPL} = K$. Vì vậy:
+
+- **Perplexity là số lựa chọn đều nhau tương đương** mà mô hình đang phân vân ở mỗi bước. Nhỏ hơn là tốt hơn, nhỏ nhất là 1 (luôn chắc và đúng).
+- **Mô hình chưa học gì** đoán đều trên $V$ token có $\mathcal{L} = \ln V$ và $\mathrm{PPL} = V$. Với 73 ký tự, đó là $\ln 73 \approx 4.290$ và perplexity 73: mốc để so.
+- **Chỉ so được khi cùng cách tách token và cùng tập kiểm tra** (hộp thứ hai ở mục Lỗi hay gặp).
+
+### Mô hình bigram: đếm rồi chia
+
+Mô hình đơn giản nhất chỉ nhìn **một** token đứng trước: $p(x_t \mid x_{<t}) \approx p(x_t \mid x_{t-1})$. Với $V$ ký tự, toàn bộ mô hình là một bảng $V \times V$: hàng $i$ là phân phối của ký tự kế tiếp khi ký tự trước là $i$.
+
+"Huấn luyện" chỉ là đếm. Gọi $C_{ij}$ là số lần ký tự $j$ đứng ngay sau ký tự $i$ trong văn bản huấn luyện. Lấy tỉ lệ đếm của từng hàng:
+
+$$
+p(j \mid i) = \frac{C_{ij} + k}{\sum_{j'=1}^{V} C_{ij'} + kV}
+$$
+
+Khi $k = 0$, đây đúng là tỉ lệ đếm, và có thể chứng minh nó là lựa chọn làm cross-entropy trên tập huấn luyện nhỏ nhất. Nhưng $k = 0$ có một lỗ hổng: cặp chưa từng gặp có xác suất đúng bằng 0, và chỉ một cặp như thế trong tập kiểm tra cũng làm $-\ln 0 = \infty$, tức perplexity vô hạn. Chuyện này không hiếm: ở ô bigram bên dưới, 26 trong 130 cặp của tập kiểm tra chưa từng gặp trong tập huấn luyện. **Làm trơn cộng $k$** (add-$k$ smoothing) cộng thêm $k > 0$ lần đếm "giả" cho mọi ô. Mỗi hàng có $V$ ô nên mẫu số cộng thêm $kV$, để hàng vẫn cộng lại bằng 1.
+
+Cái giá của làm trơn: hàng nào ít dữ liệu thì bị kéo mạnh về phân phối đều. Trong 20 câu đầu, "q" chỉ xuất hiện 3 lần, lần nào cũng theo sau là "u". Với $V = 73$ và $k = 0.1$, mẫu số là $3 + 7.3$, nên $p(\text{u} \mid \text{q}) = 3.1/10.3 \approx 0.301$, thấp hơn nhiều so với 1. Không có $k$ nào đúng cho mọi trường hợp. Bài chọn $k = 0.1$.
+
+### GPT: Transformer chỉ có decoder
+
+Bigram chỉ có ngữ cảnh một ký tự, nên không biết đang ở chữ thứ mấy của câu thơ. GPT tính $p(x_t \mid x_{<t})$ từ cả đoạn phía trước, tối đa $L$ token, bằng một chồng khối Transformer. Từ đây, $L$ là **cửa sổ ngữ cảnh** (context window): độ dài đoạn dài nhất mô hình nhìn trong một lần.
+
+1. **Embedding.** Mỗi token $x_t$ được thay bằng một hàng của ma trận $V \times D$, cộng với một vectơ vị trí (một hàng của ma trận $L \times D$), để mô hình biết token đứng ở đâu. Kết quả là ma trận ẩn $\mathbf{H} \in \mathbb{R}^{L \times D}$, mỗi hàng một vị trí.
+2. **Các khối Transformer.** Mỗi khối làm $\mathbf{H} \leftarrow \mathbf{H} + \mathrm{Attn}(\mathrm{LN}(\mathbf{H}))$, rồi $\mathbf{H} \leftarrow \mathbf{H} + \mathrm{MLP}(\mathrm{LN}(\mathbf{H}))$, với $\mathrm{LN}$ là chuẩn hóa lớp. Dấu cộng là kết nối tắt: mỗi khối chỉ thêm một phần hiệu chỉnh, nên chồng nhiều khối vẫn huấn luyện được.
+3. **Đầu ra.** Thêm một lần $\mathrm{LN}$, rồi một lớp tuyến tính $D \to V$ cho logit ở **mọi** vị trí.
+
+Cách đặt LN trước attention và MLP, cộng một LN cuối, là của GPT-2 (Radford và cộng sự, 2019, mục 2.3). GPT-1 và Transformer gốc đặt LN sau phép cộng.
+
+Transformer gốc (Vaswani và cộng sự, 2017) có hai nửa: encoder đọc câu nguồn, decoder sinh câu đích và nhìn sang encoder qua cross-attention. GPT bỏ encoder và cross-attention, chỉ giữ chồng khối self-attention có mặt nạ, nên gọi là **decoder-only**. GPT-1 (2018) có 12 khối, $D = 768$, ngữ cảnh 512 token. GPT nhỏ của bài có 2 khối, $D = 64$, ngữ cảnh $L = 32$ ký tự, khoảng 112 nghìn tham số.
+
+**Self-attention có mặt nạ nhân quả.** Từ $\mathbf{H}$ (đã chuẩn hóa), mỗi đầu attention nhân với ba ma trận học được để có **truy vấn** (query) $\mathbf{Q}$, **khóa** (key) $\mathbf{K}$ và **giá trị** (value) $\mathbf{V}$, mỗi ma trận $L \times d$. Ở đây $\mathbf{V}$ in đậm là ma trận giá trị, đừng nhầm với cỡ từ vựng $V$. Rồi:
+
+$$
+\mathrm{Attn}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \mathrm{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d}} + \mathbf{M}\right)\mathbf{V},
+\qquad
+M_{ij} =
+\begin{cases}
+0, & j \le i \\
+-\infty, & j > i
+\end{cases}
+$$
+
+Đọc từng phần:
+
+- **$\mathbf{Q}\mathbf{K}^\top$** là ma trận $L \times L$. Ô $(i, j)$ là tích vô hướng của truy vấn ở vị trí $i$ với khóa ở vị trí $j$: vị trí $i$ "quan tâm" tới vị trí $j$ bao nhiêu.
+- **Chia $\sqrt{d}$.** Nếu các thành phần của truy vấn và khóa độc lập, trung bình 0, phương sai 1, thì tích vô hướng của chúng có phương sai $d$. Không chia, $d$ càng lớn thì điểm càng lớn, softmax càng nhọn về một ô, và gradient gần như bằng 0. Chia $\sqrt{d}$ đưa phương sai về 1.
+- **Cộng $\mathbf{M}$.** Ô có $j > i$ (vị trí ở tương lai) bị cộng $-\infty$. Softmax làm theo từng hàng, và $\exp(-\infty) = 0$, nên các ô đó có trọng số đúng 0. Các ô còn lại, $j \le i$, vẫn cộng lại bằng 1. Hàng $i$ của kết quả là trung bình có trọng số của các hàng giá trị ở vị trí $1, \dots, i$.
+- **Nhiều đầu** (multi-head). $H$ đầu chạy song song, mỗi đầu $d = D/H$ chiều, rồi ghép lại. Chữ $H$ không đậm là số đầu, khác với ma trận ẩn $\mathbf{H}$ in đậm. GPT nhỏ của bài có $H = 4$ đầu, mỗi đầu $d = 16$.
+
+Với 4 ký tự đầu bài thơ, mặt nạ cho phép nhìn như sau:
+
+| Vị trí | nhìn "t" | nhìn "r" | nhìn "ă" | nhìn "m" |
+|---|---|---|---|---|
+| 1: "t" | có | che | che | che |
+| 2: "r" | có | có | che | che |
+| 3: "ă" | có | có | có | che |
+| 4: "m" | có | có | có | có |
+
+**Mặt nạ cho phép huấn luyện song song.** Lấy một đoạn $L + 1$ ký tự. Đầu vào là ký tự $1$ tới $L$, đáp án là ký tự $2$ tới $L + 1$. Đầu ra ở vị trí $t$ dự đoán ký tự $t + 1$, và nhờ mặt nạ nó chỉ dựa vào các ký tự $1, \dots, t$. Như vậy **một** lần chạy qua đoạn cho $L$ dự đoán, mỗi dự đoán như thể tờ giấy che đúng phần phía sau nó, và $\mathcal{L}$ là trung bình của cả $L$ số hạng. Không có mặt nạ, vị trí $t$ nhìn thấy luôn đáp án $x_{t+1}$.
+
+### Sinh văn bản
+
+Khi đã có mô hình, sinh văn bản là một vòng lặp:
+
+1. Đưa ngữ cảnh hiện tại (tối đa $L$ token cuối) vào mô hình, lấy logit ở vị trí cuối.
+2. Chia logit cho nhiệt độ $T$, lấy softmax, rồi rút một token theo phân phối đó.
+3. Nối token vừa rút vào ngữ cảnh, quay lại bước 1.
+
+Bước 2 chính là phần lấy mẫu của bài [Sử dụng API văn bản](/vi/llm/text-api/), kể cả top-k và top-p nếu muốn. Với bigram, phân phối đã là xác suất $p_i$, nên lấy $z_i = \ln p_i$ làm logit. Khi đó $\exp(z_i/T) = p_i^{1/T}$, tức softmax có nhiệt độ chỉ là nâng mỗi xác suất lên lũy thừa $1/T$ rồi chuẩn hóa lại. $T = 0.5$ là bình phương các xác suất: số lớn càng lớn so với số nhỏ.
+
+:::note[Ghi nhớ]
+Mô hình ngôn ngữ cho $p(x_t \mid x_{<t})$. Huấn luyện là làm nhỏ cross-entropy $\mathcal{L} = -\frac{1}{m}\sum_t \ln p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$, và $\mathrm{PPL} = \exp(\mathcal{L})$ là số lựa chọn tương đương, bằng $V$ khi đoán đều. Bigram đếm cặp ký tự. GPT là chồng khối self-attention có mặt nạ nhân quả, nên một lần chạy cho $L$ dự đoán. Sinh văn bản là lặp: dự đoán, lấy mẫu, nối vào.
+:::
+
+### Giới hạn
+
+- **Mô hình học cho khớp văn bản, không học cho đúng sự thật.** Nó chỉ được thưởng khi đoán đúng token kế tiếp của văn bản huấn luyện. Câu nghe hợp lý nhưng sai vẫn có thể có xác suất cao. Các bài [RLHF](/vi/llm/rlhf/) và [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/) bàn cách giảm chuyện này.
+- **Token ký tự làm chuỗi rất dài.** LLM thật dùng token là mảnh từ, để mỗi bước mang nhiều thông tin hơn (bài Tách từ trong phần NLP).
+- **Một LLM thật cần nhiều hơn pre-train.** Chuyển từ "viết tiếp văn bản" sang "làm theo yêu cầu" là việc của bài [Họ GPT và fine-tune đa nhiệm](/vi/llm/gpt-family-finetuning/).
+
+## Minh họa
+
+Bước "rút một token" là chỗ duy nhất có ngẫu nhiên trong vòng lặp sinh văn bản. Hình dưới dùng chung với bài [Sử dụng API văn bản](/vi/llm/text-api/): sau ngữ cảnh "Hôm nay trời rất", mô hình cho 10 token với 10 logit cố định. Thanh đậm là xác suất cuối cùng, thanh mờ là xác suất trước khi cắt đuôi. Ba thanh trượt đổi $T$, top-k và top-p. Nút "Lấy 1 mẫu" rút một token, "Lấy 100 mẫu" rút 100 lần và đếm. Hãy thử:
+
+1. Lúc đầu, $T = 1$, top-k và top-p đều tắt: token đầu, "đẹp", có xác suất 0.38, và cả 10 token đều có thể được rút.
+2. Kéo $T$ xuống 0.5: token đầu lên 0.60, ba token đầu chiếm gần hết xác suất. Đây là việc ô bigram làm ở $T = 0.5$.
+3. Kéo $T$ lên 1.5: token đầu còn 0.29, đuôi dày lên. Rút 100 mẫu, bạn sẽ thấy cả những token cuối bảng.
+4. Đặt top-p 0.9: ở $T = 1$ còn 5 token, ở $T = 0.5$ còn 3, ở $T = 1.5$ còn 7. Kéo $T$ về 0: chỉ còn một token, xác suất 1.
+
+Mô hình không đổi khi bạn kéo thanh trượt: logit vẫn vậy, chỉ cách chọn từ phân phối là khác.
+
+{/* VIZ: logit của mô hình không đổi; T làm phân phối nhọn hay phẳng, top-k và top-p cắt đuôi rồi chuẩn hóa lại, rồi mới rút một token. */}
+<SamplingViz />
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026: ô bigram với Python 3.14 và NumPy 2.4 (bản có trong Pyodide), ô GPT với Python 3.14 và PyTorch 2.14 trên CPU. Ô bigram chạy ngay trên trang. Ô GPT cần PyTorch nên chạy trên máy bạn.
+
+Hai ô dùng cùng dữ liệu: 24 câu đầu Truyện Kiều, lấy từ [trang Truyện Kiều trên Wikisource tiếng Việt](https://vi.wikisource.org/w/index.php?title=Truy%E1%BB%87n_Ki%E1%BB%81u&oldid=205132) (bản sửa ngày 6/5/2026, lấy ngày 24/10/2026). Tác phẩm thuộc phạm vi công cộng; văn bản quốc ngữ do cộng đồng Wikisource hiệu đính, trang phát hành theo CC BY-SA 4.0. Mỗi dòng code chứa hai câu thơ, cách nhau bởi `" / "`. Code chuẩn hóa Unicode về dạng NFC, đổi sang chữ thường, rồi tách mỗi câu một dòng: 790 ký tự. Câu 1 tới 20 (660 ký tự) để huấn luyện, câu 21 tới 24 để kiểm tra. Từ vựng lấy từ cả 24 câu, để ký tự nào ở tập kiểm tra cũng có số thứ tự.
+
+### Bigram bằng NumPy
+
+Ô dưới đây đếm cặp ký tự trên tập huấn luyện, làm trơn với $k = 0.1$, in loss và perplexity trên hai tập, in $p(\text{u} \mid \text{q})$, rồi sinh hai dòng ở $T = 1$ và hai dòng ở $T = 0.5$.
+
+<PythonRunner code={bigramCode} title="Bigram ký tự trên 24 câu Truyện Kiều" />
+
+Đọc kết quả:
+
+- **Mốc đoán đều:** loss 4.290, perplexity 73.
+- **Tập huấn luyện:** loss 2.076, perplexity 7.98. **Tập kiểm tra:** loss 2.720, perplexity 15.18. Chỉ nhờ đếm cặp, mô hình đã bớt phân vân từ 73 xuống khoảng 15 lựa chọn trên văn bản nó chưa thấy. Số trên tập huấn luyện đẹp hơn vì bảng đếm được lập từ chính tập đó, nên muốn biết mô hình tốt tới đâu, hãy nhìn tập kiểm tra.
+- **$p(\text{u} \mid \text{q}) = 0.301$**, đúng như tính tay ở mục Lý thuyết.
+
+Hai dòng ở $T = 1$ có nhiều ký tự lạ, như "ồĩầyộẳ". Hàng của các ký tự hiếm (ví dụ "ĩ" chỉ có 2 lần đếm) gần như toàn là phần làm trơn, nên ký tự kế tiếp gần như được chọn đều trong 73 ký tự. Ở $T = 0.5$, các cặp hay gặp chiếm ưu thế và văn trông "giống tiếng Việt" hơn: có "trời", "trông", "lặn". Nhưng vẫn không có nghĩa, và một dòng dài hơn 100 ký tự: bigram không biết câu lục bát có 6 hay 8 chữ, vì nó chỉ nhớ đúng một ký tự trước.
+
+### GPT nhỏ bằng PyTorch
+
+File dưới đây dựng GPT của mục Lý thuyết: 2 khối, 4 đầu, $D = 64$, $L = 32$. Mỗi khối là `nn.TransformerEncoderLayer` với `norm_first=True`, đúng thứ tự chuẩn hóa lớp, attention, kết nối tắt, rồi chuẩn hóa lớp, MLP, kết nối tắt. PyTorch gọi lớp này là "Encoder", nhưng khi có mặt nạ nhân quả và không có cross-attention, nó có đúng cấu trúc khối decoder của GPT; chỉ khác hàm kích hoạt (PyTorch mặc định ReLU, GPT dùng GELU). Mặt nạ là `torch.triu(..., 1)` kiểu `bool`, `True` nghĩa là **cấm** nhìn. Vòng lặp chạy các bước 0 tới 300 bằng AdamW, tức 301 lần cập nhật, mỗi lần một lô 32 đoạn dài 33 ký tự. Cứ 50 bước, file in loss của lô vừa học, tính trước khi cập nhật (`train`, nên hơi lên xuống), và loss trên mọi đoạn của tập kiểm tra (`test`). Cuối cùng, nó viết tiếp 60 ký tự sau "trăm năm" ở $T = 0.8$.
+
+Trên Windows và macOS, `pip install torch` cài bản không kèm CUDA. Trên Linux, lệnh đó mặc định tải bản có CUDA, nặng hơn nhiều; muốn bản chỉ chạy CPU thì dùng chỉ mục riêng của PyTorch:
+
+```sh
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+```
+
+<LocalCode
+  code={tinyGptCode}
+  title="GPT nhỏ trên 24 câu Truyện Kiều"
+  packages={['torch']}
+  hardware="CPU là đủ, không cần GPU. Khoảng 20 giây trên máy phát triển, có thể vài phút trên máy chậm hoặc đang bận"
+  sampleVaries={false}
+>
+
+```text
+step 0: train 4.467, test 4.173
+step 50: train 1.770, test 2.613
+step 100: train 1.123, test 3.065
+step 150: train 0.548, test 3.744
+step 200: train 0.219, test 4.459
+step 250: train 0.211, test 5.031
+step 300: train 0.183, test 5.341
+trăm năm trong cõi người ta,
+chữ tài chữ mệnh khéo là ghéi ghét nha.
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Bước 0:** loss khoảng 4.2 tới 4.5, gần $\ln 73 = 4.290$. Mô hình mới khởi tạo gần như đoán đều.
+- **Bước 50:** loss kiểm tra 2.613 (perplexity khoảng 13.6), thấp hơn bigram (2.720) một chút. Đây là lúc mô hình tốt nhất trên văn bản chưa thấy, trong các lần in ra. Phép so này chỉ tương đối: GPT tính loss trên các đoạn chồng lấn nhau (một ký tự được tính nhiều lần), còn bigram tính mỗi cặp một lần.
+- **Từ bước 100 trở đi:** loss huấn luyện giảm tiếp, về 0.183, còn loss kiểm tra **tăng** đều, lên 5.341. Từ bước 200, nó đã cao hơn cả mốc đoán đều 4.290; ở bước 300, perplexity kiểm tra khoảng 209, tệ hơn đoán bừa giữa 73 ký tự. Mô hình quá tự tin vào những gì nó thuộc lòng, nên khi văn bản mới đi khác, nó gán xác suất rất nhỏ cho ký tự thật và bị phạt nặng.
+- **Văn sinh ra** chép lại gần nguyên văn hai câu đầu bài thơ. Chỗ "ghéi ghét nha" là do lấy mẫu ở $T = 0.8$ thỉnh thoảng rút trúng một ký tự kém hơn. Mô hình đang **nhớ**, không phải đang viết.
+
+Trên máy khác hoặc bản PyTorch khác, các con số có thể lệch đôi chút, nhưng hình dạng thì như nhau.
+
+### Vì sao LLM cần rất nhiều dữ liệu
+
+Đây chính là overfitting của bài [Overfitting và Underfitting](/vi/ml/overfitting-underfitting/). Ở đó, đa thức bậc 15 đi qua đúng 16 điểm train, MSE train bằng 0 còn MSE test khoảng 133. Ở đây, khoảng 112 nghìn tham số học 660 ký tự: thừa sức nhớ từng ký tự. Loss huấn luyện giảm mãi, loss kiểm tra giảm rồi tăng.
+
+Các cách chữa cũng như ở phần ML:
+
+- **Thêm dữ liệu.** Đây là con đường của LLM. GPT-2 (Radford và cộng sự, 2019) có bản lớn nhất khoảng 1.5 tỉ tham số, học trên khoảng 40 GB văn bản. Khi văn bản nhiều hơn khả năng nhớ của mô hình, cách duy nhất để loss giảm là học quy luật chung của ngôn ngữ: chính tả, ngữ pháp, rồi tới nghĩa.
+- **Dừng sớm** (early stopping). Giữ lại mô hình ở bước có loss nhỏ nhất trên một **tập kiểm định** riêng, không phải tập kiểm tra. Chọn bước 50 vì nhìn cột `test` ở trên là lỗi "chọn mô hình bằng tập test" mà bài [Overfitting và Underfitting](/vi/ml/overfitting-underfitting/) đã cảnh báo.
+- **Mô hình nhỏ hơn, hoặc regularization.** Dropout, hay weight decay (cùng ý với phạt L2 ở bài [Ridge, Lasso, Elastic Net](/vi/ml/regularization/): kéo trọng số về 0; AdamW áp nó tách khỏi gradient nên không trùng hẳn với cộng phạt L2 vào loss). Ô GPT ở trên đã dùng weight decay 0.01 mặc định của AdamW mà vẫn học thuộc: chúng làm chậm việc học thuộc, nhưng không thay được dữ liệu.
+
+Bạn có thể tự thấy tác dụng của dữ liệu: chép các câu thơ giữa hai thẻ `<poem>` trong bản thô của trang Wikisource (thêm `&action=raw` vào địa chỉ, rồi bỏ dấu tab đầu dòng và các mã đánh số dạng `{{số|5}}`) vào `POEM`, đổi dòng `cut` thành `cut = int(len(text) * 0.9)` và `range(301)` thành `range(1001)`. Ở lần chạy thử của bài, khoảng cách giữa hai loss gần như biến mất (bước 1 000: huấn luyện 1.676, kiểm tra 1.732; tập kiểm tra đã khác nên đừng so với các số ở trên). Văn sinh ra không còn chép nguyên câu, dù phần lớn vẫn vô nghĩa.
+
+## Lỗi hay gặp
+
+:::caution[Chỉ nhìn loss huấn luyện]
+Loss huấn luyện giảm đều trông như mô hình đang học tốt, nhưng ở ô GPT, loss kiểm tra cùng lúc tăng từ 2.613 lên 5.341. Luôn in cả hai. Văn sinh ra trông hay cũng chưa chắc là tốt: có thể mô hình chỉ đang chép lại dữ liệu huấn luyện.
+:::
+
+:::caution[So perplexity giữa hai cách tách token, hay hai tập kiểm tra]
+Perplexity tính trên mỗi token. Mô hình ký tự đoán một ký tự mỗi bước, mô hình từ đoán cả một từ, nên perplexity của mô hình từ tự nhiên lớn hơn mà không có nghĩa là kém hơn. Hai tập kiểm tra khác nhau cũng không so được: 4 câu cuối của bài có thể dễ hoặc khó hơn 4 câu khác. Muốn so, giữ cùng tập kiểm tra và đổi về cùng một đơn vị, ví dụ tổng loss trên cả văn bản.
+:::
+
+:::caution[Thiếu mặt nạ nhân quả, hoặc đặt ngược chiều]
+Không có mặt nạ, vị trí $t$ nhìn thấy đáp án $x_{t+1}$, nên loss huấn luyện thấp bất thường và mô hình vô dụng khi sinh văn bản. Code vẫn chạy êm vì kích thước ma trận không đổi. Chiều của mặt nạ cũng dễ nhầm: với `attn_mask` kiểu `bool` của `nn.MultiheadAttention`, `True` là **cấm** nhìn, nên dùng `torch.triu(..., 1)` (che phần trên đường chéo), còn `F.scaled_dot_product_attention` dùng quy ước ngược lại (`True` là được nhìn); với `attn_mask` kiểu số thực, giá trị được cộng thẳng vào điểm, nên ô bị cấm phải là `-inf`. Cách kiểm nhanh: đổi một ký tự ở vị trí $t + 1$, rồi xem logit ở các vị trí từ $t$ trở về trước có giữ nguyên không.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Mô hình ngôn ngữ cho xác suất của token kế tiếp, $p(x_t \mid x_{<t})$. Theo quy tắc nhân, thế là đủ để có xác suất của mọi đoạn văn. Sinh văn bản là lặp: dự đoán, lấy mẫu với nhiệt độ $T$, nối vào.
+- Huấn luyện là làm nhỏ cross-entropy $\mathcal{L} = -\frac{1}{m}\sum_t \ln p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$, tức làm lớn likelihood của văn bản. $\mathrm{PPL} = \exp(\mathcal{L})$ là số lựa chọn đều nhau tương đương, bằng $V$ khi đoán đều. Chỉ so perplexity khi cùng cách tách token và cùng tập kiểm tra.
+- Bigram chỉ đếm cặp ký tự và cần làm trơn. GPT là Transformer chỉ có decoder: embedding, chồng khối self-attention có mặt nạ nhân quả và MLP, rồi logit. Mặt nạ giúp một lần chạy cho $L$ dự đoán mà không nhìn trước đáp án.
+- Trên 24 câu thơ, bigram có loss kiểm tra 2.720; GPT tốt nhất ở 2.613 rồi overfit tới 5.341. LLM cần rất nhiều văn bản để buộc mô hình học quy luật thay vì học thuộc.
+
+**Đọc thêm:**
+
+- Radford, A., Narasimhan, K., Salimans, T., Sutskever, I. (2018). [*Improving Language Understanding by Generative Pre-Training*](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf) (PDF), báo cáo kỹ thuật của OpenAI, mục 3.1 và phần thiết lập mô hình. GPT-1: hàm mất mát của pre-train và Transformer chỉ có decoder.
+- Radford, A., Wu, J., Child, R., Luan, D., Amodei, D., Sutskever, I. (2019). [*Language Models are Unsupervised Multitask Learners*](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) (PDF), báo cáo kỹ thuật của OpenAI, mục 2. GPT-2: dữ liệu WebText, BPE mức byte, các cỡ mô hình. Bài viết xác suất của chuỗi đúng như quy tắc nhân ở mục Lý thuyết.
+- Vaswani, A. và cộng sự (2017). [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762), arXiv:1706.03762, mục 3.2. Gốc của self-attention có chia $\sqrt{d}$ và attention nhiều đầu. Bài báo dùng $d_k$ cho số chiều của khóa, chỗ bài này viết $d$.
+- Bengio, Y., Ducharme, R., Vincent, P., Jauvin, C. (2003). [*A Neural Probabilistic Language Model*](https://www.jmlr.org/papers/v3/bengio03a.html). *Journal of Machine Learning Research* 3, 1137–1155. Một trong những bài đầu tiên cho thấy mạng nơ-ron với vectơ biểu diễn của từ đoán từ kế tiếp tốt hơn mô hình đếm n-gram.
+- Loshchilov, I., Hutter, F. (2019). [*Decoupled Weight Decay Regularization*](https://arxiv.org/abs/1711.05101). ICLR 2019, arXiv:1711.05101. Bài báo của AdamW: vì sao weight decay tách khỏi gradient không trùng với cộng phạt L2 vào loss khi dùng Adam.
+- Karpathy, A. [*nanoGPT*](https://github.com/karpathy/nanoGPT) (GitHub, giấy phép MIT). Một GPT khoảng 300 dòng, có ví dụ huấn luyện GPT mức ký tự trên Shakespeare, giống tinh thần của bài này ở quy mô lớn hơn. Tác giả ghi repo đã cũ và ngừng cập nhật (11/2025), và giới thiệu dự án mới `nanochat`.
+
+<LessonProgress />

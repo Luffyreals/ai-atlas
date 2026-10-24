@@ -1,0 +1,336 @@
+---
+title: Docker và Cloud
+description: Ứng dụng chạy tốt trên máy bạn nhưng lỗi trên máy người khác. Đóng gói nó thành image Docker, đưa key vào lúc chạy, rồi đẩy lên registry và cloud.
+quiz:
+  - question: 'Bạn dựng image từ Dockerfile của bài nhưng lỡ xóa dòng `ENV GRADIO_SERVER_NAME=0.0.0.0`. Chạy `docker run --rm -p 127.0.0.1:7860:7860 --env-file .env.llm atlas-chat`, log hiện `Running on local URL:  http://127.0.0.1:7860`, nhưng trình duyệt trên máy bạn không mở được `http://localhost:7860`. Vì sao?'
+    options:
+      - 'Vì cần thêm một dòng `EXPOSE 7860` nữa thì Docker mới mở cổng'
+      - 'Vì cổng 7860 trên máy bạn đang bị chương trình khác dùng'
+      - 'Vì trong container, `127.0.0.1` là chính container đó; yêu cầu từ máy bạn đi vào qua mạng của container nên ứng dụng không nhận được'
+      - 'Vì phải viết `-p 7860:7860`, không được ghi thêm `127.0.0.1:` phía trước'
+    answer: 2
+    explanation: 'Mỗi container có mạng riêng. Docker chuyển yêu cầu tới địa chỉ mạng của container, không tới `127.0.0.1` bên trong nó, nên ứng dụng phải nghe `0.0.0.0`. Khi thử, gọi từ bên trong container vẫn được trả 200, còn từ máy thì không. `EXPOSE` chỉ là ghi chú. Nếu cổng 7860 trên máy đã bị chiếm, chính lệnh `docker run` báo lỗi ngay, không chạy được tới dòng log.'
+  - question: 'Thư mục dự án có file `.env.llm` chứa key. Dockerfile có `COPY . .`, nhưng bạn quên tạo `.dockerignore`. Bạn dựng image rồi chạy bằng `--env-file .env.llm`. Lệnh `docker image inspect` không thấy key trong mục `Env`. Kết luận nào đúng?'
+    options:
+      - 'Image an toàn: key chỉ có trong container lúc chạy'
+      - 'Key vẫn nằm trong image, dưới dạng file `/app/.env.llm`; ai có image đều đọc được'
+      - 'Docker tự bỏ qua các file có tên bắt đầu bằng dấu chấm khi `COPY`'
+      - 'Key chỉ lộ khi viết bằng `ENV`; file chép bằng `COPY` thì không ai đọc được'
+    answer: 1
+    explanation: '`COPY . .` chép mọi thứ trong ngữ cảnh dựng mà `.dockerignore` không loại, kể cả file ẩn. `docker image inspect` chỉ cho xem cấu hình như `Env`, không cho xem nội dung file, nên nó không thấy key. Nhưng chỉ cần `docker run ... ls -a /app` là thấy `.env.llm`. Image đó đẩy lên registry công khai là lộ key cho cả thế giới.'
+  - question: 'Một bạn viết Dockerfile chỉ có một lệnh `COPY . .`, ngay sau đó là `RUN pip install --no-cache-dir -r requirements.txt`. Bạn sửa một chữ trong `app.py` rồi dựng lại. Điều gì xảy ra?'
+    options:
+      - 'Chỉ bước chép `app.py` chạy lại, còn `pip install` lấy từ bộ nhớ đệm'
+      - 'Docker báo lỗi vì đã có image cùng tên'
+      - 'Container đang chạy tự nhận code mới'
+      - 'Bước `pip install` chạy lại từ đầu, vì lớp ngay trước nó (`COPY . .`) đã đổi'
+    answer: 3
+    explanation: 'Docker xét các lệnh theo thứ tự. Gặp lệnh đầu tiên có đầu vào đổi, nó dựng lại lệnh đó và mọi lệnh sau. `app.py` đổi nên `COPY . .` đổi, kéo theo `pip install`. Vì vậy Dockerfile của bài chép `requirements.txt` và cài gói trước, rồi mới chép code. Phương án thứ nhất chỉ đúng với thứ tự đó.'
+  - question: 'Bạn đưa image lên một dịch vụ chạy container. Dịch vụ đặt `PORT=8080` và gửi yêu cầu tới cổng đó. Ứng dụng của bạn ghi cứng `demo.launch(server_port=7860)`, còn Dockerfile có `EXPOSE 7860`. Thường thì chuyện gì xảy ra?'
+    options:
+      - 'Dịch vụ không gọi được ứng dụng (thường báo container không khởi động được), vì không có gì nghe ở cổng 8080'
+      - 'Chạy bình thường, vì dịch vụ đọc `EXPOSE 7860` và tự gửi tới cổng 7860'
+      - 'Chạy bình thường, vì Gradio tự đọc biến `PORT`'
+      - 'Ứng dụng tự chuyển sang cổng 8080'
+    answer: 0
+    explanation: 'Dịch vụ làm theo hợp đồng của nó: gửi tới cổng ghi trong `PORT`. `EXPOSE` chỉ là ghi chú. Gradio đọc `GRADIO_SERVER_PORT`, không đọc `PORT`, nên code của bài tự đọc `PORT` và dùng 7860 khi không có biến này. Nhiều dịch vụ cho bạn khai báo cổng khác trong phần cấu hình, nhưng bạn phải tự làm việc đó.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import ContainerImageFigure from '@components/figures/ContainerImageFigure.astro';
+import appCode from '@code/llm/docker-cloud/app.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Phân biệt được **image** (bản đóng gói chỉ đọc, gồm nhiều lớp) và **container** (một lần chạy của image).
+- Viết được một **Dockerfile** cho ứng dụng Gradio, dựng image bằng `docker build` và chạy nó bằng `docker run`.
+- Đưa API key vào container **lúc chạy**, và biết vì sao không bao giờ để key nằm trong image.
+- Hiểu một dịch vụ chạy container trên cloud đòi gì ở image của bạn: cổng qua biến `PORT`, nghe ở `0.0.0.0`, hệ tệp chỉ là tạm.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Ở bài [Làm giao diện với Gradio/Streamlit](/vi/llm/gradio-streamlit/), bạn viết một ứng dụng chat Gradio. `demo.launch()` mở server ở cổng 7860, và mặc định chỉ nghe ở `127.0.0.1`, tức chỉ chính máy bạn vào được. Ứng dụng đọc ba **biến môi trường** (environment variable) `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `LLM_MODEL`, như ở bài [Sử dụng API văn bản](/vi/llm/text-api/).
+:::
+
+## Trực giác
+
+Ứng dụng chat của bạn chạy tốt. Bạn gửi code cho một người bạn. Một tiếng sau họ nhắn lại: "Lỗi ở dòng 28". Máy họ cài Gradio 5, còn bạn dùng Gradio 6. Sửa xong, họ lại gặp lỗi khác: Python của họ là 3.9, cũ hơn mức `openai` đòi.
+
+Code giống hệt nhau. Thứ khác nhau là **môi trường**: bản Python, bản của từng gói, thư viện hệ thống, hệ điều hành.
+
+**Docker** giải quyết bằng cách đóng gói chương trình **cùng với** môi trường của nó thành một khối, gọi là **image**. Image chứa một hệ điều hành Linux tối giản, đúng bản Python, đúng bản từng gói, và code của bạn. Ở đâu có Docker, image đó chạy giống hệt nhau. Mỗi lần chạy một image, bạn có một **container**.
+
+Hãy hình dung image như một cuốn sách dạy nấu ăn đã in xong: không ai sửa được nội dung. Container là một bữa ăn nấu theo sách đó. Từ một cuốn sách, bạn nấu được nhiều bữa, bữa nào cũng như nhau. Đổ bữa ăn đi thì sách vẫn còn nguyên, nấu lại ra đúng món cũ.
+
+Image cũng là thứ nhiều dịch vụ cloud nhận để chạy: bạn đưa image, dịch vụ chạy nó và cho bạn một địa chỉ web. Chỉ có một thứ **không** được đóng vào image: API key. Image sẽ được chia sẻ và chạy trên máy người khác, nên key phải được đưa vào riêng, đúng lúc container chạy.
+
+**Bài toán: đóng gói ứng dụng Gradio thành một image chạy giống nhau ở mọi nơi có Docker, đưa key vào lúc chạy chứ không đóng vào image, rồi đưa image lên cloud để người khác dùng được.**
+
+## Lý thuyết
+
+Bài này không có công thức. "Lý thuyết" là cách Docker dựng và chạy image. Bài dùng Docker 29 (bản trên máy thử, 10/2026). Cách cài nằm ở trang [Get Docker](https://docs.docker.com/get-started/get-docker/) của Docker.
+
+### Image và container
+
+**Image** là một bản đóng gói **chỉ đọc**, gồm nhiều **lớp** (layer) xếp chồng lên nhau. Lớp dưới cùng là **base image**, ví dụ `python:3.12-slim`: một Debian tối giản đã cài sẵn Python 3.12. Mỗi lệnh dựng image (chép file, cài gói) đặt thêm một lớp lên trên. Mỗi lớp chỉ ghi phần thay đổi so với lớp dưới nó.
+
+**Container** là một lần chạy của image. Docker lấy các lớp của image, đặt thêm **một lớp ghi** mỏng ở trên cùng, rồi chạy lệnh khởi động. Mọi file chương trình ghi ra nằm ở lớp này. Xóa container là xóa lớp ghi; image không hề đổi. Từ đó có ba hệ quả:
+
+- **Một image, nhiều container.** Chạy hai lần là có hai container độc lập, mỗi cái một lớp ghi riêng.
+- **Sửa code trên máy không làm container đổi theo.** Container chạy từ image đã dựng. Muốn có code mới thì phải dựng lại image.
+- **Dữ liệu ghi trong container là dữ liệu tạm.** Lịch sử chat hay file người dùng tải lên mà lưu trong container thì mất khi container bị xóa.
+
+{/* FIG: image là một chồng lớp chỉ đọc; mỗi container chạy từ nó chỉ thêm một lớp ghi tạm của riêng nó. */}
+<ContainerImageFigure />
+
+### Dockerfile: công thức dựng image
+
+**Dockerfile** là một file chữ, mỗi dòng một lệnh, nói cách dựng image. Đây là Dockerfile cho ứng dụng chat của bài. Bạn sẽ dựng nó ở mục Ví dụ code.
+
+```dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+ENV GRADIO_SERVER_NAME=0.0.0.0
+ENV PYTHONUNBUFFERED=1
+EXPOSE 7860
+CMD ["python", "app.py"]
+```
+
+| Lệnh | Làm gì | Chạy khi nào |
+|---|---|---|
+| `FROM` | Chọn base image | Lúc dựng |
+| `WORKDIR` | Đặt thư mục làm việc trong image (tạo nếu chưa có) | Lúc dựng |
+| `COPY` | Chép file từ thư mục của bạn vào image | Lúc dựng |
+| `RUN` | Chạy một lệnh, ví dụ `pip install` | Lúc dựng |
+| `ENV` | Đặt biến môi trường, **lưu lại trong image** | Có hiệu lực cả lúc dựng lẫn lúc chạy |
+| `EXPOSE` | **Ghi chú** ứng dụng dùng cổng nào. Không mở cổng nào cả | Không chạy gì |
+| `CMD` | Lệnh mặc định khi container khởi động | Lúc chạy |
+
+Điểm dễ nhầm nhất là `RUN` và `CMD`. `RUN pip install` chạy **một lần, lúc dựng**, và các gói đã cài thành một lớp của image. `CMD ["python", "app.py"]` **không chạy lúc dựng**; nó được ghi vào image để mỗi container chạy khi khởi động. Có nhiều `CMD` thì chỉ cái cuối có hiệu lực. Dạng danh sách JSON như trên (dạng exec) cho Docker chạy thẳng `python`, không qua shell.
+
+Ba chi tiết còn lại:
+
+- **Base image `python:3.12-slim`.** Bản `slim` bỏ bớt gói Debian nên nhỏ hơn, đổi lại thiếu trình biên dịch: gói pip phải biên dịch từ mã nguồn có thể lỗi, khi đó cài thêm gói Debian hoặc dùng image đầy đủ. Ghi rõ phiên bản trong tag, không dùng `latest`: tag này trỏ tới bản mới hơn theo thời gian, nên dựng hôm nay và tháng sau ra hai image khác nhau. `3.12-slim` vẫn nhận bản vá 3.12.x nhưng không nhảy sang 3.13; muốn cố định tuyệt đối thì ghim digest (`python:3.12-slim@sha256:…`). Bài chọn 3.12 vì cả Gradio 6.30 (cần Python 3.10 trở lên) lẫn Streamlit 1.66 (cần 3.11 trở lên) đều chạy được.
+- **`requirements.txt`** liệt kê các gói, mỗi dòng một gói. Trong image nên ghim đúng bản đã thử (`gradio==6.30.0`), cùng lý do như với tag của base image. `--no-cache-dir` bảo pip không giữ file tải về, cho image nhỏ hơn.
+- **Hai dòng `ENV`.** `GRADIO_SERVER_NAME=0.0.0.0` bảo Gradio nghe mọi địa chỉ (mục Cổng bên dưới). `PYTHONUNBUFFERED=1` bảo Python in log ra ngay. Khi thử mà thiếu dòng này, `docker logs` không hiện gì, kể cả dòng "Running on local URL" của Gradio, vì Python gom chữ in ra vào bộ đệm khi không chạy trong cửa sổ dòng lệnh. Hai biến này không bí mật, nên được phép nằm trong image.
+
+### Thứ tự lệnh và bộ nhớ đệm
+
+Khi dựng lại, Docker xét các lệnh theo thứ tự. Lệnh nào có đầu vào không đổi (cùng lệnh, cùng file được chép) thì dùng lại lớp cũ, gọi là dùng **bộ nhớ đệm** (build cache). Gặp lệnh đầu tiên có đầu vào đổi, Docker dựng lại lệnh đó và **mọi lệnh sau nó**.
+
+Vì vậy Dockerfile của bài chép `requirements.txt` và cài gói **trước**, rồi mới `COPY . .` phần code: bạn sửa code thường xuyên, nhưng ít khi đổi danh sách gói. Sửa `app.py` thì chỉ bước `COPY . .` chạy lại. Bước `pip install`, lâu nhất (45 đến 85 giây ở các lần thử, tùy mạng), được lấy từ bộ nhớ đệm.
+
+### `.dockerignore`: thứ không được vào image
+
+Khi bạn gõ `docker build .`, dấu chấm là **ngữ cảnh dựng** (build context): thư mục mà Docker được phép đọc khi dựng. `COPY . .` chép mọi thứ trong đó vào image, kể cả file ẩn như `.env.llm`, thư mục `.venv/`, `.git/`.
+
+File `.dockerignore`, đặt cạnh Dockerfile, liệt kê những thứ phải loại khỏi ngữ cảnh dựng. Cú pháp gần giống `.gitignore`, nhưng mỗi mẫu tính từ gốc ngữ cảnh dựng; muốn khớp ở mọi thư mục con thì viết `**/` phía trước:
+
+```text
+**/.env*
+**/.venv*/
+.git/
+**/__pycache__/
+```
+
+Dòng `**/.env*` quan trọng nhất: nó chặn file chứa key, dù file nằm ở gốc thư mục dự án hay trong một thư mục con. Nếu chỉ viết `.env*`, Docker chỉ loại file ở gốc: khi thử, `pkg/.env.llm` vẫn lọt vào image. Các dòng còn lại giữ cho image nhỏ và sạch.
+
+### Cổng: `EXPOSE`, `-p` và `0.0.0.0`
+
+Mỗi container có **mạng riêng**. Bên trong container, `127.0.0.1` (localhost) là **chính container đó**, không phải máy bạn. Hệ quả là hai việc phải làm cùng lúc:
+
+1. **Ứng dụng phải nghe ở `0.0.0.0`**, tức mọi địa chỉ mạng của container. Docker chuyển yêu cầu từ ngoài vào qua mạng của container, không qua `127.0.0.1` bên trong nó, nên ứng dụng chỉ nghe `127.0.0.1` thì không ai ở ngoài vào được. Gradio đọc địa chỉ nghe từ biến `GRADIO_SERVER_NAME`, nên Dockerfile đặt biến này là `0.0.0.0`.
+2. **Bạn phải nối cổng khi chạy**, bằng cờ `-p <cổng trên máy>:<cổng trong container>`, ví dụ `-p 7860:7860`. `EXPOSE 7860` không làm việc này; nó chỉ là ghi chú.
+
+Viết `-p 7860:7860` thì máy khác trong cùng mạng cũng có thể vào ứng dụng của bạn (tùy tường lửa), và mỗi lượt chat của họ tính vào key của bạn. Khi chỉ thử trên máy mình, ghi thêm địa chỉ: `-p 127.0.0.1:7860:7860`.
+
+### Biến môi trường và secret
+
+**Secret** là giá trị bí mật như key, mật khẩu. Ứng dụng cần ba biến: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `LLM_MODEL`. Có ba chỗ trông như đặt được chúng, nhưng chỉ một chỗ đúng với key:
+
+- **`ENV OPENAI_API_KEY=...` trong Dockerfile: sai.** Giá trị của `ENV` nằm lại trong image. Ai có image cũng xem được bằng `docker image inspect`.
+- **`ARG` (tham số lúc dựng) hay `COPY .env.llm`: cũng sai.** Tài liệu Docker cảnh báo không dùng `ARG` cho mật khẩu hay token, vì giá trị có thể lộ qua `docker history`. File chép vào bằng `COPY` thì nằm trong một lớp của image, ai chạy image cũng đọc được.
+- **Đưa vào lúc chạy: đúng.** `docker run -e OPENAI_API_KEY ...` lấy giá trị từ biến môi trường cùng tên đã đặt trong phiên dòng lệnh, hoặc `docker run --env-file .env.llm ...` đọc từ một file trên máy. Key không nằm trong image. Nó vẫn có trong cấu hình của container: ai dùng được Docker trên máy đó xem được bằng `docker inspect <container>`, nhưng image bạn chia sẻ thì không chứa nó.
+
+Code không cần đổi gì: nó vẫn đọc `os.environ["OPENAI_API_KEY"]`, chỉ khác là giá trị do Docker đặt vào.
+
+File cho `--env-file` có mỗi dòng `TÊN=giá trị`; dòng bắt đầu bằng `#` bị bỏ qua. Docker **không bỏ dấu nháy**: khi thử với Docker 29.8, dòng `B="abc"` cho giá trị `"abc"` có cả hai dấu nháy. Một dấu `#` ở giữa dòng cũng thuộc về giá trị.
+
+Có trường hợp cần secret ngay **lúc dựng**, ví dụ để tải gói từ một kho riêng. Khi đó dùng `docker build --secret` cùng `RUN --mount=type=secret`, không dùng `ARG` hay `ENV`. Ứng dụng của bài không cần.
+
+### Registry: nơi chia sẻ image
+
+**Registry** là kho chứa image trên mạng, giống GitHub nhưng cho image. Docker Hub là registry mặc định: `python:3.12-slim` được kéo về từ đó. Ngoài ra còn GitHub Container Registry và registry của các nhà cung cấp cloud.
+
+Tên image có dạng `<registry>/<tài-khoản>/<tên>:<tag>`; bỏ trống phần registry nghĩa là Docker Hub. Quy trình: dựng một lần, gắn tên theo registry (`docker tag`), đăng nhập (`docker login`), đẩy lên (`docker push`). Máy khác kéo về (`docker pull`) và chạy, không cần dựng lại. Image công khai thì ai cũng kéo về và đọc được mọi file bên trong, thêm một lý do để key không nằm trong image.
+
+### Chạy container trên cloud
+
+Nhiều dịch vụ cloud nhận image và chạy nó cho bạn, theo cùng một cách ở mức chung: bạn chỉ ra image (thường trên một registry), đặt biến môi trường và secret trong phần cấu hình, rồi dịch vụ chạy container và cấp một địa chỉ HTTPS. Bài không chọn dịch vụ nào và không nói giá: những thứ này đổi thường xuyên, hãy xem trang giá chính thức của dịch vụ bạn chọn.
+
+Mỗi dịch vụ có một **hợp đồng** (container contract): những điều image của bạn phải tuân theo. Lấy [hợp đồng của Cloud Run](https://docs.cloud.google.com/run/docs/container-contract) (Google Cloud) làm ví dụ:
+
+- **Cổng do dịch vụ báo qua biến `PORT`** (Cloud Run mặc định là 8080), và ứng dụng phải nghe ở `0.0.0.0` trên cổng đó. Ghi cứng 7860 mà để cổng mặc định của dịch vụ thì dịch vụ không gọi được ứng dụng. Gradio không tự đọc `PORT`, nên code của bài tự đọc: `PORT = int(os.environ.get("PORT", "7860"))`.
+- **Hệ tệp chỉ là tạm.** File ghi ra mất khi container dừng. Dữ liệu cần giữ phải để ở một dịch vụ lưu trữ hay cơ sở dữ liệu bên ngoài.
+- **Container có thể bị tắt bất cứ lúc nào** khi không có yêu cầu, và có thể có nhiều bản chạy song song khi đông người dùng.
+- **Key đặt qua phần biến môi trường hoặc secret của dịch vụ**, tương tự `--env-file` trên máy bạn.
+
+Ứng dụng đã lên Internet thì ai có địa chỉ cũng chat được, và mỗi lượt tính vào key của bạn. Hãy đặt mật khẩu (tham số `auth` của `launch` trong Gradio, như ở bài trước) và đặt giới hạn chi tiêu ở trang quản lý của nhà cung cấp API.
+
+:::note[Ghi nhớ]
+Image là bản đóng gói chỉ đọc, dựng một lần từ Dockerfile; container là một lần chạy của nó, có lớp ghi tạm. Trong container, ứng dụng nghe ở `0.0.0.0`, và cổng chỉ mở khi `docker run -p`. Key đưa vào lúc chạy (`--env-file`, hoặc phần secret của dịch vụ cloud), không bao giờ qua `ENV`, `ARG` hay `COPY`, và `.dockerignore` chặn `**/.env*`. Trên cloud, đọc cổng từ biến `PORT` và đừng lưu dữ liệu trong container.
+:::
+
+### Giới hạn
+
+- **Container chạy bằng người dùng root** theo mặc định. Docker khuyên tạo người dùng riêng bằng lệnh `USER`; bài bỏ qua cho Dockerfile ngắn.
+- **Image khá nặng.** Image của bài chiếm 676 MB trên đĩa khi thử, trong đó riêng lớp `pip install` là 386 MB (Gradio kéo theo pandas, NumPy, Pillow…). Dựng nhiều giai đoạn (multi-stage build) giúp nhỏ hơn.
+- **Kiến trúc CPU.** Image dựng trên máy chip ARM (ví dụ Mac Apple Silicon) mặc định là bản ARM, có thể không chạy trên máy chủ x86; khi đó dựng với `--platform linux/amd64`. Dựng kiểu này chạy giả lập nên chậm hơn.
+- **Dừng chậm.** `docker stop` gửi tín hiệu SIGTERM. Python chạy ở PID 1 trong container bỏ qua tín hiệu này, nên container chỉ dừng khi Docker buộc tắt nó sau thời gian chờ (mã thoát 137). Ctrl+C (SIGINT) thì ứng dụng thoát gọn.
+- **Chưa có chỗ lưu dữ liệu bền**, nên lịch sử chat vẫn mất. Đưa mô hình của riêng bạn vào container là việc của bài [Deploy mô hình riêng](/vi/llm/deploy-custom-model/).
+
+## Minh họa
+
+Bảng dưới là các lần chạy thật với Dockerfile của bài trên máy thử (Docker 29.8.1). Bạn nên nhìn vào cột cuối: cùng một image, chỉ đổi cách chạy là kết quả đổi hẳn. Cổng trên máy được chọn ngẫu nhiên khi thử, ở đây ghi 7860 cho dễ đọc. `fake.env` là file có key giả.
+
+| Thử | Lệnh (rút gọn) | Kết quả |
+|---|---|---|
+| Chạy đúng cách | `docker run -p 127.0.0.1:7860:7860 --env-file fake.env atlas-chat` | Trang trả mã HTTP 200. Log: `Running on local URL:  http://0.0.0.0:7860` |
+| Không đưa key | `docker run atlas-chat` | Container dừng ngay, mã thoát 1, log kết thúc bằng `KeyError: 'OPENAI_API_KEY'` |
+| Không nối cổng | `docker run --env-file fake.env atlas-chat` | Ứng dụng vẫn chạy. `docker ps` chỉ ghi `7860/tcp`, không có cổng nào trên máy nối vào |
+| Ứng dụng nghe `127.0.0.1` | thêm `-e GRADIO_SERVER_NAME=127.0.0.1` | Từ máy: kết nối bị cắt, không có trả lời. Từ trong container: vẫn HTTP 200 |
+| Cổng theo `PORT` | `-e PORT=8080 -p 127.0.0.1:8080:8080` | HTTP 200. Log: `Running on local URL:  http://0.0.0.0:8080` |
+| Xem image có key không | `docker image inspect atlas-chat` | Mục `Env` chỉ có các biến của base image và hai biến `ENV` của bài. Không có key |
+| Bỏ `.dockerignore` | `docker run atlas-chat ls -a /app` | Có `.env.llm`, `.venv`, `__pycache__`. Với `.dockerignore`: chỉ `Dockerfile`, `.dockerignore`, `app.py`, `requirements.txt` |
+| Sửa `app.py`, dựng lại | `docker build -t atlas-chat .` | Ba bước `WORKDIR`, `COPY requirements.txt`, `pip install` ghi `CACHED`. Chỉ `COPY . .` chạy lại; cả lần dựng khoảng 3 giây |
+
+Dòng "Xem image có key không" và dòng "Bỏ `.dockerignore`" đi cùng nhau: `docker image inspect` không thấy key không có nghĩa là image sạch, vì lệnh này không cho xem nội dung file.
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026, với Docker 29.8, image `python:3.12-slim` (Python 3.12.15), `openai` 3.37 và `gradio` 6.30.0. Không có ô nào chạy trên trang: mọi thứ chạy trên máy bạn và cần Docker đã cài. Lệnh `docker` gõ giống nhau trong bash và PowerShell.
+
+### Bước 1: ứng dụng
+
+Tạo một thư mục, ví dụ `atlas-chat/`, rồi lưu code dưới đây thành `app.py`. Đây là ứng dụng chat Gradio của bài trước, sửa hai chỗ: cổng đọc từ biến `PORT` (không có thì dùng 7860), và một ghi chú rằng địa chỉ nghe do biến `GRADIO_SERVER_NAME` quyết định. Hai câu hỏi mẫu (`examples`) được bỏ cho gọn.
+
+<LocalCode
+  code={appCode}
+  title="Ứng dụng chat Gradio, sẵn sàng cho container"
+  file="app.py"
+  packages={['openai', 'gradio>=6']}
+/>
+
+Chạy thẳng `python app.py` trên máy vẫn được như ở bài trước: không có `GRADIO_SERVER_NAME` nên Gradio chỉ nghe `127.0.0.1`, đúng điều bạn muốn trên máy mình. Thiếu `OPENAI_API_KEY` hay `LLM_MODEL` thì chương trình dừng ngay với `KeyError`, trong container cũng vậy (dòng "Không đưa key" ở bảng Minh họa).
+
+### Bước 2: ba file cho Docker
+
+Cạnh `app.py`, tạo `requirements.txt` với đúng bản đã thử:
+
+```text
+openai==3.37.0
+gradio==6.30.0
+```
+
+Tạo `Dockerfile` (không có đuôi) với nội dung ở mục Lý thuyết, và `.dockerignore` với bốn dòng ở mục `.dockerignore`. Thư mục lúc này có dạng:
+
+```text
+atlas-chat/
+├── .dockerignore
+├── .env.llm          (bị .dockerignore loại, không vào image)
+├── Dockerfile
+├── app.py
+└── requirements.txt
+```
+
+`.env.llm` chứa ba biến, không bọc nháy. Nếu thư mục là một repo Git, thêm `.env*` vào cả `.gitignore`.
+
+```dotenv
+OPENAI_API_KEY=<key-của-bạn>
+OPENAI_BASE_URL=<địa chỉ API của nhà cung cấp>
+LLM_MODEL=<tên model>
+```
+
+Dùng OpenAI thì xóa hẳn dòng `OPENAI_BASE_URL`; để `OPENAI_BASE_URL=` (rỗng) thì SDK nhận chuỗi rỗng và báo lỗi kết nối. Bảng nhà cung cấp và `OPENAI_BASE_URL` của từng nơi ở bài [Sử dụng API văn bản](/vi/llm/text-api/).
+
+### Bước 3: dựng và chạy
+
+Trong thư mục `atlas-chat/`:
+
+```sh
+docker build -t atlas-chat .
+docker run --rm -p 127.0.0.1:7860:7860 --env-file .env.llm atlas-chat
+```
+
+Lệnh đầu dựng image tên `atlas-chat` từ thư mục hiện tại. Lần đầu mất một đến hai phút trên máy thử, tùy mạng: Docker kéo base image, rồi pip cài 56 gói (Gradio kéo theo nhiều gói phụ thuộc). Lệnh thứ hai chạy một container: `--rm` xóa container khi nó dừng, `-p` nối cổng, `--env-file` đưa key vào. Khi thử, log của container là:
+
+```text
+* Running on local URL:  http://0.0.0.0:7860
+* To create a public link, set `share=True` in `launch()`.
+```
+
+`0.0.0.0` là địa chỉ nghe bên trong container, không phải địa chỉ để mở. Trên máy bạn, mở `http://localhost:7860`; bấm Ctrl+C để dừng. Muốn chạy nền thì thêm `-d`, rồi dùng `docker ps` (liệt kê container và `<id>`), `docker logs <id>`, `docker stop <id>`. Sửa `app.py` thì chạy lại cả hai lệnh: dựng lại image (nhanh, nhờ bộ nhớ đệm) rồi chạy container mới.
+
+### Bước 4: đẩy lên registry
+
+Với Docker Hub, `<tài-khoản>` là tên tài khoản Docker Hub của bạn:
+
+```sh
+docker login
+docker tag atlas-chat <tài-khoản>/atlas-chat:1.0
+docker push <tài-khoản>/atlas-chat:1.0
+```
+
+`docker tag` không chép gì, chỉ gắn thêm một tên cho cùng image. Repo chưa có thì `docker push` tạo mới, theo mục Default privacy trong phần cài đặt tài khoản Docker Hub, với tài khoản mới thường là công khai. Muốn riêng tư thì kiểm mục này trước khi đẩy. Từ đây, máy nào cũng chạy được bằng `docker run ... <tài-khoản>/atlas-chat:1.0`: Docker tự kéo image về. Khi thử, bài đẩy và kéo lại image qua một registry chạy ngay trên máy (image `registry:3`), không qua Docker Hub. Đưa lên dịch vụ cloud thì làm theo tài liệu của dịch vụ bạn chọn: chỉ ra image, đặt biến môi trường và secret, kiểm cổng.
+
+## Lỗi hay gặp
+
+:::caution[Chạy được nhưng trình duyệt không vào được]
+Có ba nguyên nhân. Ứng dụng nghe `127.0.0.1` trong container (log ghi `http://127.0.0.1:7860`): đặt `GRADIO_SERVER_NAME=0.0.0.0`, hoặc với Streamlit, chạy `streamlit run app.py --server.address=0.0.0.0`. Quên `-p`, vì tưởng `EXPOSE` đã mở cổng: `docker ps` không có mũi tên `->` ở cột cổng là chưa nối. Nối sai cổng, ví dụ `-p 8501:8501` cho ứng dụng Gradio đang nghe 7860: số bên phải dấu `:` phải là cổng ứng dụng nghe trong container.
+:::
+
+:::caution[Key nằm trong image]
+`ENV OPENAI_API_KEY=...`, `ARG` chứa key, hay `COPY . .` mà không có `.dockerignore` đều để key lại trong image. Đẩy image lên registry công khai là ai cũng lấy được key. Dựng lại image không cứu được image đã đẩy lên: hãy **thu hồi key** ở trang của nhà cung cấp, tạo key mới, rồi mới sửa Dockerfile. Từ đầu: key chỉ vào qua `--env-file` hay `-e` lúc chạy, và `.dockerignore` luôn có `**/.env*`.
+:::
+
+:::caution[Coi container như một máy chủ lâu dài]
+Sửa code trên máy rồi khởi động lại container cũ thì vẫn chạy code cũ, vì container chạy từ image đã dựng: phải `docker build` lại. Lịch sử chat hay file tải lên ghi vào container thì mất khi container bị xóa, hoặc khi dịch vụ cloud tắt container. Dữ liệu cần giữ phải để ở cơ sở dữ liệu hay dịch vụ lưu trữ bên ngoài.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Docker đóng gói chương trình cùng môi trường của nó. Image là bản đóng gói chỉ đọc gồm nhiều lớp; container là một lần chạy của image, có lớp ghi tạm mất khi container bị xóa.
+- Dockerfile: `FROM` base image ghim phiên bản, chép `requirements.txt` và `pip install` trước, chép code sau để dùng lại bộ nhớ đệm. `RUN` chạy lúc dựng, `CMD` chạy lúc container khởi động; `EXPOSE` chỉ là ghi chú.
+- Trong container, ứng dụng nghe `0.0.0.0`; cổng mở bằng `docker run -p`. Key vào lúc chạy bằng `--env-file`, không qua `ENV`, `ARG` hay `COPY`; `.dockerignore` chặn `**/.env*`.
+- Registry để chia sẻ image (`docker tag`, `docker push`). Dịch vụ cloud chạy image theo hợp đồng của nó: cổng qua `PORT`, hệ tệp tạm, key đặt trong phần secret của dịch vụ.
+
+**Đọc thêm:**
+
+- Docker. [*Building best practices*](https://docs.docker.com/build/building/best-practices/). Chọn base image, ghim phiên bản, `.dockerignore`, `USER`, dựng nhiều giai đoạn: những điều bài chỉ nhắc qua.
+- Docker. [*Dockerfile reference*](https://docs.docker.com/reference/dockerfile/), các mục `FROM`, `COPY`, `RUN`, `ENV`, `ARG`, `EXPOSE`, `CMD`. Tra cứu chính xác từng lệnh, kể cả cảnh báo về `ARG` và secret.
+- Docker. [*Build secrets*](https://docs.docker.com/build/building/secrets/). Cách đưa secret vào lúc dựng mà không để lại trong image, khi bạn thật sự cần.
+- Gradio. [*Deploying Gradio with Docker*](https://www.gradio.app/guides/deploying-gradio-with-docker). Hướng dẫn chính thức, cùng cách đặt `GRADIO_SERVER_NAME`. Ví dụ trên trang dùng Python 3.10; bài đã thử với 3.12 và Gradio 6.30.0. Với Streamlit, xem [*Deploy Streamlit using Docker*](https://docs.streamlit.io/deploy/tutorials/docker).
+- Google Cloud. [*Container runtime contract*](https://docs.cloud.google.com/run/docs/container-contract). Hợp đồng của Cloud Run: cổng qua `PORT`, hệ tệp tạm, vòng đời container. Đọc như một ví dụ cụ thể về điều dịch vụ cloud đòi ở image.
+
+<LessonProgress />

@@ -8,6 +8,7 @@
 #   Sidebar sinh từ roadmap.ts, không cần sidebar.order.
 # - Viết xong thì xóa mọi comment "#" trong frontmatter và mọi khối {/* Hướng dẫn: ... */} trong thân bài.
 #   Giữ các comment còn lại: ở "Cần biết trước", "Minh họa" và "Kiểm tra nhanh".
+# - Bài phần LLM: đọc thêm docs/architecture/llm-lessons.md mục 2.7 và 4.8.
 #
 # GỢI Ý QUY MÔ (không phải luật cứng): thân bài khoảng 10–13 phút đọc, 2–3 ô code, 1 VIZ (tối đa 2),
 # 3–5 câu quiz.
@@ -21,6 +22,7 @@
 #   MSE dùng \frac{1}{m}, khớp scikit-learn: \mathcal{L} = \frac{1}{m}\sum_{i=1}^{m}(\hat{y}^{(i)} - y^{(i)})^2
 #   ma trận thiết kế \mathbf{X}: m hàng, cột toàn số 1 đặt cuối, nên \boldsymbol{\theta} = [\mathbf{w}; b],
 #   tức [w_1, ..., w_n, b]^\top
+#   phần LLM (quyết định 60 trong docs/decisions.md): độ dài chuỗi L, nhiệt độ T
 #
 # QUY ƯỚC CHUNG
 # - Thuật ngữ theo docs/glossary.md. Lần đầu xuất hiện thì ghi kèm tiếng Anh: "phần dư (residual)".
@@ -68,6 +70,8 @@ import TenMinhHoa from '@components/viz/TenMinhHoa.astro';
 import TenHinhFigure from '@components/figures/TenHinhFigure.astro';
 import numpyCode from '@code/<phần>/<bài>/<tên-1>.vi.py?raw';
 import sklearnCode from '@code/<phần>/<bài>/<tên-2>.vi.py?raw';
+import LocalCode from '@components/LocalCode.astro';
+import chatCode from '@code/<phần>/<bài>/<tên-3>.vi.py?raw';
 
 {/* Hướng dẫn: import.
     - Bốn dòng đầu: bài nào cũng có. Component tự gắn client:*, không viết client:* trong MDX.
@@ -80,7 +84,9 @@ import sklearnCode from '@code/<phần>/<bài>/<tên-2>.vi.py?raw';
       Chỉ thêm khi hình đã có (giai đoạn 2, xem mục Minh họa). Trước đó thì xóa dòng này.
     - Code: mỗi ô một cặp file src/code/<phần>/<bài>/<tên>.vi.py và <tên>.en.py, chỉ khác comment,
       cùng số dòng (test code-pairs). Chưa dịch thì .en.py là bản sao của .vi.py.
-      Tên biến import theo nội dung ô, ví dụ outlierCode. Bản en của bài import <tên>.en.py. */}
+      Tên biến import theo nội dung ô, ví dụ outlierCode. Bản en của bài import <tên>.en.py.
+    - LocalCode và file code của nó: chỉ giữ khi bài có code chạy trên máy (cần mạng, PyTorch, GPU hoặc
+      thư viện ngoài Pyodide). Bài không có thì xóa hai dòng này. */}
 
 ## Mục tiêu
 
@@ -102,7 +108,8 @@ Sau bài này, bạn sẽ:
 
 {/* Hướng dẫn: khối "Nhắc nhanh", tùy chọn. Dùng khi có bài cần biết trước chưa xuất bản: khoảng 2–3 câu
     nhắc đúng phần kiến thức mà bài này dùng tới, thuật ngữ in đậm và kèm tiếng Anh.
-    Khi các bài đó đã xuất bản thì có thể bỏ khối này, vì Prerequisites đã có link. */}
+    Khi các bài đó đã xuất bản thì có thể bỏ khối này, vì Prerequisites đã có link.
+    Phần LLM: ba bài build-first-llm, rag-chatbot, multimodal được dài tới khoảng một đoạn. */}
 
 :::tip[Nhắc nhanh]
 **Khái niệm thứ nhất** (English term) là ... **Khái niệm thứ hai** (English term) là ...
@@ -113,6 +120,7 @@ Sau bài này, bạn sẽ:
 {/* Hướng dẫn: mở bằng một tình huống đời thường hoặc một câu hỏi cụ thể. Chưa dùng công thức.
     - Bài có bộ dữ liệu chung: đưa bảng ra ngay ở đây bằng DatasetTable, không gõ tay. Dùng lại đúng bảng đó
       ở Minh họa và Ví dụ code. Bảng nhỏ chỉ dùng một lần thì viết bảng Markdown, cột số căn phải (---:).
+      Ô tiêu đề góc không để trống ("Tiêu chí", "Thông số"…): trình đọc màn hình cần tên cho mọi cột.
     - Phần này dài thì chia H3: thử vài cách làm đơn giản, chỉ ra chỗ chưa ổn, rồi đi tới ý tưởng chính.
     - Kết thúc bằng bài toán phát biểu bằng lời, in đậm. Người đọc "cảm" được vấn đề trước khi gặp toán. */}
 
@@ -177,7 +185,8 @@ Kết quả chính của mục, viết lại bằng lời.
       · Trước hình tĩnh: một câu dẫn nói người đọc nên nhìn vào đâu. Không có danh sách "Hãy thử".
     - Cần đọc số liệu: DatasetTable hoặc bảng Markdown.
     - Bài không cần VIZ: giữ mục này với hình tĩnh hoặc bảng. Nếu không có hình nào thật sự giúp hiểu thì bỏ
-      cả mục (heading lẫn nội dung) và báo lại lý do.
+      cả mục (heading lẫn nội dung) và báo lại lý do, trừ phần LLM: giữ mục với bảng, hội thoại mẫu hoặc
+      kết quả mẫu (llm-lessons.md mục 2.7).
     Trước hình: một đoạn nói hình cho thấy gì và mỗi điều khiển làm gì, rồi danh sách "Hãy thử" 3–4 bước,
     mỗi bước có giá trị cụ thể và điều người đọc sẽ thấy. Số trong các bước phải khớp số VIZ hiện ra:
     ở giai đoạn 1 viết theo mô tả, có VIZ rồi thì điền hoặc kiểm lại số.
@@ -231,7 +240,13 @@ Hình cho thấy gì, mỗi điều khiển làm gì. Hãy thử:
       có gì, xu hướng chính. Code có input(): thêm stdin={'dòng 1\ndòng 2'}.
     - Chạy thử bằng Python khớp phiên bản Pyodide (venv ghi ở docs/architecture/viz/README.md mục 2.5) trước khi
       trích số vào bài.
-    - Phần DL, NLP, CV, LLM có code cần PyTorch hoặc GPU: dùng khối code python thường, không dùng PythonRunner. */}
+    - Code cần mạng, PyTorch, GPU hoặc thư viện ngoài Pyodide: file .py như trên, hiện bằng LocalCode
+      (llm-lessons.md mục 2.1–2.3). Code không phải Python viết thẳng trong MDX.
+      Mỗi ô LocalCode đi kèm một đoạn giải thích output, như PythonRunner. Khối "Kết quả mẫu" (nội dung
+      bên trong thẻ) chỉ lấy từ một lần chạy thật, chép nguyên văn; chưa chạy thật thì bỏ trống.
+    - Phần LLM: mở mục bằng câu phiên bản, theo gói thật của bài, ví dụ "Code trong bài chạy thử lần cuối
+      tháng 10/2026, với Python 3.14 và `openai` 3.37." (llm-lessons.md mục 2.6), rồi một câu nói ô nào
+      chạy trên trang, ô nào chạy trên máy bạn. */}
 
 Các ô dưới đây chạy độc lập. Ô thứ hai lần đầu chạy lâu hơn, vì trình duyệt phải tải thêm scikit-learn.
 
@@ -250,6 +265,18 @@ Giải thích kết quả in ra và nối lại với lý thuyết.
 />
 
 Giải thích kết quả in ra và hình.
+
+Ô chạy trên máy bạn làm gì.
+
+<LocalCode code={chatCode} title="Tên ngắn của ô" packages={['openai']}>
+
+```text
+Kết quả của một lần chạy thật, chép nguyên văn.
+```
+
+</LocalCode>
+
+Giải thích kết quả mẫu và nối lại với lý thuyết.
 
 ## Lỗi hay gặp
 

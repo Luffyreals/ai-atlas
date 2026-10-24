@@ -1,0 +1,87 @@
+---
+// llm/docker-cloud, "Lý thuyết" (reused in llm/deploy-custom-model with stack="api"): an image is a read-only
+// stack of layers; each container run from it shares those layers and adds only a temporary write layer of
+// its own. Top: the image, three accent layers bottom-up (base image, pip packages, code). Two straight
+// "docker run" arrows go down to two containers (plain frames, closed polylines with no head). Each container
+// has its write layer on top (dashed, second group, "lost when the container is removed") over the image's
+// three layers redrawn as bare bars, plain and dimmer, named "shared image layers". Narrow layout only.
+// `stack` picks the layer labels of the lesson's own Dockerfile ("chat" for docker-cloud, "api" for
+// deploy-custom-model); everything else is the same. Words: src/data/figures/container-image.ts.
+import { CONTAINER_IMAGE, CONTAINER_IMAGE_API } from '@data/figures/container-image';
+import type { Pt } from '@lib/figures/geometry';
+import { mainAndSmall, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+interface Props {
+  /** The image layers of the lesson's Dockerfile: "chat" (docker-cloud, default) or "api" (deploy-custom-model). */
+  stack?: 'chat' | 'api';
+}
+
+const { stack = 'chat' } = Astro.props;
+const locale = getPageLocale(Astro.locals.starlightRoute);
+const base = CONTAINER_IMAGE[locale];
+const t = stack === 'api' ? { ...base, description: CONTAINER_IMAGE_API[locale].description } : base;
+const l = t.labels;
+const layers = stack === 'api' ? [l.apiCode, l.apiPip, l.apiBase] : [l.code, l.pip, l.base];
+
+// The image stack, top to bottom: code, pip packages, base image.
+const STACK = { x: 70, width: 220, top: 24, height: 54, gap: 4 } as const;
+const image: Box[] = layers.map((_, i) => ({
+  x: STACK.x,
+  y: STACK.top + i * (STACK.height + STACK.gap),
+  width: STACK.width,
+  height: STACK.height,
+}));
+const stackBottom = STACK.top + 3 * STACK.height + 2 * STACK.gap;
+
+// Two containers side by side; each frame holds its name, the write layer and 3 bars, then the bars' name.
+const C = { top: 234, width: 172, pad: 8 } as const;
+const BAR = { height: 10, gap: 3 } as const;
+const containers = [
+  { x: 4, name: l.container1 },
+  { x: 184, name: l.container2 },
+].map(({ x, name }) => {
+  const inner = { x: x + C.pad, width: C.width - 2 * C.pad };
+  const write: Box = { ...inner, y: C.top + 28, height: 54 };
+  const bars: Box[] = [0, 1, 2].map((i) => ({ ...inner, y: write.y + write.height + 6 + i * (BAR.height + BAR.gap), height: BAR.height }));
+  const barsBottom = (bars[2]?.y ?? 0) + BAR.height;
+  const bottom = barsBottom + 34;
+  return {
+    name,
+    centre: x + C.width / 2,
+    write,
+    bars,
+    sharedY: barsBottom + 15,
+    frame: {
+      from: [x, C.top] as Pt,
+      via: [[x + C.width, C.top], [x + C.width, bottom], [x, bottom]] as Pt[],
+      to: [x, C.top] as Pt,
+    },
+  };
+});
+const height = (containers[0]?.frame.via[1]?.[1] ?? 0) + 6;
+---
+
+<FigureFrame id="container-image" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigText x={STACK.x + STACK.width / 2} y={12} lines={l.image} />
+    {image.map((layer, i) => <FigNode {...layer} {...mainAndSmall(layers[i]!)} tone="accent" />)}
+    {containers.map((c) => <FigArrow from={[c.centre, stackBottom]} to={[c.centre, C.top]} />)}
+    <FigText x={180} y={(stackBottom + C.top) / 2} lines={l.dockerRun} size="small" />
+    {
+      containers.map((c) => (
+        <>
+          <FigArrow {...c.frame} head={false} />
+          <FigText x={c.centre} y={C.top + 14} lines={c.name} />
+          <FigNode {...c.write} {...mainAndSmall(l.write)} tone="alt" />
+          {c.bars.map((b) => <FigNode {...b} bare />)}
+          <FigText x={c.centre} y={c.sharedY} lines={l.shared} size="small" />
+        </>
+      ))
+    }
+  </Fragment>
+</FigureFrame>

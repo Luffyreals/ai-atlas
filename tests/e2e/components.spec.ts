@@ -1,9 +1,13 @@
 import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type ConsoleMessage, type Locator, type Page } from '@playwright/test';
 import { getLessonsByPart } from '../../src/lib/roadmap';
 import { LESSONS, LOCALES, type Locale } from '../../src/data/roadmap';
-import { s, scrollThrough } from './helpers';
+import { pipCommand, readEnvVars } from '../../src/lib/local-code';
+import { codeImports, localCodeTags, type LocalCodeTag } from '../unit/fixtures/local-code-tags';
+import { installContrast, s, scrollThrough, type Contrast } from './helpers';
+import { readSource, WITH_PAGE } from './lesson-pages';
 
 // M1 components on the demo page (docs/architecture/components.md, plan row M1-7). Runs in CI, no network:
 // nothing here may download Pyodide. All URLs end with "/" (trailingSlash 'always').
@@ -503,3 +507,234 @@ test.describe('learned lessons on the homepage map', () => {
     await expect(page.locator('.legend-done')).toBeVisible();
   });
 });
+
+// --- LocalCode on the demo page (docs/architecture/llm-lessons.md, 4.4 and 4.5). No island, no network. ---
+
+const CODE_DIR = fileURLToPath(new URL('../../src/code/', import.meta.url));
+// Demo page: local-chat, then local-app (whose first line is the comment "# app.py", section 2.2).
+const LOCAL_BLOCKS = 2;
+
+interface DemoBlock {
+  tag: LocalCodeTag;
+  /** Path under src/code/, e.g. 'dev/local-chat.vi.py'. */
+  path: string;
+  /** The file's lines, without the final line break, trailing spaces removed. */
+  lines: string[];
+  source: string;
+}
+
+/** The LocalCode tags written in the demo page of a locale, with the file each one shows. */
+function demoBlocks(locale: Locale): DemoBlock[] {
+  const page = readSource(locale, 'dev/components');
+  const imports = codeImports(page);
+  return localCodeTags(page).map((tag) => {
+    const path = imports.get(tag.code ?? '');
+    if (!path) throw new Error(`no @code import for code={${tag.code}} in ${locale}/dev/components`);
+    const source = readFileSync(join(CODE_DIR, path), 'utf8');
+    const lines = source.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n').map((line) => line.trimEnd());
+    return { tag, path, lines, source };
+  });
+}
+
+/** [label, value] of each requirement row the props and the code call for, in the order of section 4.1. */
+function expectedRequirements(locale: Locale, block: DemoBlock): [string, string][] {
+  const rows: [string, string][] = [];
+  const install = pipCommand(block.tag.packages);
+  if (install) rows.push([s(locale, 'localCode.install'), install]);
+  const vars = readEnvVars(block.source);
+  if (vars.length > 0) {
+    const optional = s(locale, 'localCode.optional');
+    rows.push([s(locale, 'localCode.env'), vars.map((v) => (v.optional ? `${v.name} (${optional})` : v.name)).join(', ')]);
+  }
+  if (block.tag.command) rows.push([s(locale, 'localCode.command'), block.tag.command]);
+  if (block.tag.hardware) rows.push([s(locale, 'localCode.hardware'), block.tag.hardware]);
+  return rows;
+}
+
+/** Contrast of the text of every element matching each selector, against the background behind it. */
+async function textContrast(root: Locator, selectors: string[]): Promise<Contrast[]> {
+  return root.evaluate(
+    (el, list) =>
+      list.flatMap((selector) =>
+        [...el.querySelectorAll(selector)].map((node) =>
+          window.atlasContrast!.pair(selector, getComputedStyle(node).color, window.atlasContrast!.backgroundOf(node)),
+        ),
+      ),
+    selectors,
+  );
+}
+
+for (const locale of LOCALES) {
+  test.describe(`LocalCode on /${locale}/dev/components/`, () => {
+    const blocks = demoBlocks(locale);
+
+    test('(1) two blocks, no island or script inside, badge and lang of the page', async ({ page }) => {
+      expect(blocks).toHaveLength(LOCAL_BLOCKS);
+      await page.goto(demo(locale));
+      const local = page.locator('.atlas-local');
+      await expect(local).toHaveCount(LOCAL_BLOCKS);
+      await expect(local.locator('astro-island, script')).toHaveCount(0);
+      // LocalCode adds no island: the demo page keeps its 7 (section 4.4).
+      await expect(page.locator('astro-island')).toHaveCount(ISLANDS);
+      for (const block of await local.all()) {
+        await expect(block).toHaveAttribute('lang', locale);
+        await expect(block.locator('.atlas-local-badge')).toHaveText(s(locale, 'localCode.badge'));
+        await expect(block.locator('.atlas-local-badge')).toHaveAttribute('data-pagefind-ignore', '');
+        // The demo page has its own file in both languages: the code inherits the page's lang.
+        await expect(block.locator('.atlas-local-code')).not.toHaveAttribute('lang', /./);
+      }
+      await expect(local.locator('.atlas-local-title')).toHaveText(blocks.map((block) => block.tag.title ?? ''));
+    });
+
+    test('(2, 5) the code shown is the file, line for line, and the copy button copies the file', async ({ page }) => {
+      await page.goto(demo(locale));
+      const local = page.locator('.atlas-local');
+      for (const [index, block] of blocks.entries()) {
+        const root = local.nth(index);
+        const shown = await root
+          .locator('.atlas-local-code pre .ec-line')
+          .evaluateAll((lines) => lines.map((line) => (line.textContent ?? '').replace(/\n$/, '').trimEnd()));
+        expect(shown, `${block.path}: lines shown`).toEqual(block.lines);
+
+        const copy = root.locator('.atlas-local-code .copy button');
+        await expect(copy, `${block.path}: one copy button`).toHaveCount(1);
+        // Expressive Code joins the lines of data-code with U+007F.
+        const copied = ((await copy.getAttribute('data-code')) ?? '').split('\u007f').map((line) => line.trimEnd());
+        expect(copied, `${block.path}: data-code of the copy button`).toEqual(block.lines);
+
+        // The frame title: the file prop, or no title at all (never a comment taken from the code, section 2.2).
+        const title = root.locator('.atlas-local-code figcaption .title');
+        if (block.tag.file) await expect(title).toHaveText(block.tag.file);
+        else await expect(title).toHaveCount(0);
+      }
+      // The case that motivated title={file ?? ''}: local-app starts with "# app.py", and that line is shown.
+      const app = blocks.findIndex((block) => block.path.startsWith('dev/local-app.'));
+      expect(app, 'local-app is on the demo page').toBeGreaterThanOrEqual(0);
+      expect(blocks[app]?.lines[0]).toBe('# app.py');
+      await expect(local.nth(app).locator('.atlas-local-code pre .ec-line').first()).toHaveText('# app.py');
+    });
+
+    test('(3, 4) requirement rows follow the props and the code; a sample output only when the tag has content', async ({
+      page,
+    }) => {
+      await page.goto(demo(locale));
+      const local = page.locator('.atlas-local');
+      for (const [index, block] of blocks.entries()) {
+        const root = local.nth(index);
+        const rows = await root.locator('.atlas-local-reqs > div').evaluateAll((groups) =>
+          groups.map((group) => [
+            (group.querySelector('dt')?.textContent ?? '').trim(),
+            (group.querySelector('dd')?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+          ]),
+        );
+        expect(rows, `${block.path}: requirement rows`).toEqual(expectedRequirements(locale, block));
+        // Each variable name is its own <code>, so it can be selected and copied alone.
+        const vars = readEnvVars(block.source);
+        if (vars.length > 0) {
+          const env = root
+            .locator('.atlas-local-reqs > div')
+            .filter({ has: page.getByText(s(locale, 'localCode.env'), { exact: true }) });
+          await expect(env.locator('dd code')).toHaveText(vars.map((v) => v.name));
+        }
+
+        const output = root.locator('.atlas-local-output');
+        await expect(output, `${block.path}: sample output`).toHaveCount(block.tag.hasOutput ? 1 : 0);
+        if (block.tag.hasOutput) {
+          await expect(output.locator('.atlas-local-output-label')).toHaveText(s(locale, 'localCode.sampleOutput'));
+          await expect(output.locator('.atlas-local-output-note')).toHaveText(
+            s(locale, block.tag.sampleVaries ? 'localCode.sampleNote' : 'localCode.sampleNoteFixed'),
+          );
+        }
+      }
+      // Control for the expected rows: the chat block reads the three variables of section 2.3, in this order.
+      const chat = blocks.find((block) => block.path.startsWith('dev/local-chat.'));
+      expect(chat && readEnvVars(chat.source).map((v) => `${v.name}${v.optional ? '?' : ''}`)).toEqual([
+        'OPENAI_BASE_URL?',
+        'OPENAI_API_KEY',
+        'LLM_MODEL',
+      ]);
+    });
+
+    for (const scheme of ['light', 'dark'] as const) {
+      test(`(6) in ${scheme} mode the badge, title and labels reach a contrast of 4.5`, async ({ page }) => {
+        await page.emulateMedia({ colorScheme: scheme });
+        await page.goto(demo(locale));
+        await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+        await installContrast(page);
+        const pairs: Contrast[] = [];
+        for (const block of await page.locator('.atlas-local').all()) {
+          pairs.push(
+            ...(await textContrast(block, [
+              '.atlas-local-badge',
+              '.atlas-local-title',
+              '.atlas-local-reqs dt',
+              '.atlas-local-reqs dd',
+              '.atlas-local-reqs code',
+              '.atlas-local-output-label',
+              '.atlas-local-output-note',
+            ])),
+          );
+        }
+        expect(pairs.length).toBeGreaterThanOrEqual(LOCAL_BLOCKS * 3);
+        expect(pairs.filter((pair) => pair.ratio < 4.5)).toEqual([]);
+      });
+    }
+
+    test('(7) at 375px no block is wider than the text column', async ({ page }) => {
+      await page.setViewportSize({ width: 375, height: 800 });
+      await page.goto(demo(locale));
+      const report = await page.locator('.atlas-local').evaluateAll((items) =>
+        items.map((el) => {
+          const column = el.closest('.sl-markdown-content') ?? el.parentElement!;
+          const box = el.getBoundingClientRect();
+          const col = column.getBoundingClientRect();
+          return {
+            scroll: el.scrollWidth,
+            client: el.clientWidth,
+            insideColumn: box.left >= col.left - 1 && box.right <= col.right + 1,
+          };
+        }),
+      );
+      expect(report).toHaveLength(LOCAL_BLOCKS);
+      for (const item of report) {
+        expect(item.scroll).toBeLessThanOrEqual(item.client + 1);
+        expect(item.insideColumn).toBe(true);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    });
+  });
+}
+
+test('(7) control: the column check sees a LocalCode block that is too wide', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 800 });
+  await page.goto(demo('vi'));
+  const block = page.locator('.atlas-local').first();
+  await block.evaluate((el) => {
+    const wide = document.createElement('div');
+    wide.style.width = '600px';
+    wide.style.height = '1px';
+    el.append(wide);
+  });
+  expect(await block.evaluate((el) => el.scrollWidth > el.clientWidth + 1)).toBe(true);
+});
+
+// Neither demo block has a sample output (no .env.llm when they were written), so the contrast of the output
+// label and note is measured on the first lesson that has one.
+const WITH_OUTPUT = WITH_PAGE.find((lesson) => localCodeTags(readSource('vi', lesson.id)).some((tag) => tag.hasOutput));
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`(6) in ${scheme} mode a sample output's label and note reach a contrast of 4.5 (on a lesson)`, async ({
+    page,
+  }) => {
+    test.skip(!WITH_OUTPUT, 'no lesson has a LocalCode with a sample output yet');
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto(`/vi/${WITH_OUTPUT!.id}/`);
+    await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+    await installContrast(page);
+    const output = page.locator('.atlas-local-output').first();
+    await expect(output).toBeVisible();
+    const pairs = await textContrast(output, ['.atlas-local-output-label', '.atlas-local-output-note']);
+    expect(pairs).toHaveLength(2);
+    expect(pairs.filter((pair) => pair.ratio < 4.5)).toEqual([]);
+  });
+}
