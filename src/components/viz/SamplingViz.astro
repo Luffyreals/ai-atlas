@@ -1,0 +1,40 @@
+---
+// SamplingViz for llm/text-api and llm/build-first-llm (docs/architecture/llm-lessons.md, section 4.6). The only
+// file a lesson imports: <SamplingViz />, no props, no client:* in MDX. Here, at build time: UI strings, the
+// context and tokens of the page locale, and KaTeX for the three slider labels. The island computes the
+// distribution itself from the 10 logits (sampling.ts), with the same code at build time and in the browser.
+// The island hydrates 200px before it scrolls into view. Styles: viz.css, through Starlight's customCss.
+import SamplingVizIsland from './sampling-viz/SamplingVizIsland';
+import { NEXT_TOKEN, NEXT_TOKEN_SAMPLING } from '@data/datasets/next-token';
+import { getStrings } from '@i18n/ui';
+import { inlineMarkupLabel, renderInlineMarkup } from '@lib/inline-markup';
+import { getPageLocale } from '@lib/page-locale';
+
+const route = Astro.locals.starlightRoute;
+const locale = getPageLocale(route);
+const strings = getStrings(Astro.locals.t, 'vizSampling');
+const tCommon = getStrings(Astro.locals.t, 'common');
+
+const labels = {
+  temperatureHtml: renderInlineMarkup(strings.temperatureLabel),
+  temperatureText: inlineMarkupLabel(strings.temperatureLabel),
+  topKHtml: renderInlineMarkup(strings.topKLabel),
+  topKText: inlineMarkupLabel(strings.topKLabel),
+  topPHtml: renderInlineMarkup(strings.topPLabel),
+  topPText: inlineMarkupLabel(strings.topPLabel),
+};
+---
+
+<div class="atlas-viz not-content" lang={locale} data-pagefind-ignore>
+  <SamplingVizIsland
+    client:visible={{ rootMargin: '200px' }}
+    context={NEXT_TOKEN.context[locale]}
+    tokens={NEXT_TOKEN.tokens[locale]}
+    logits={NEXT_TOKEN.logits}
+    description={NEXT_TOKEN.description[locale]}
+    config={NEXT_TOKEN_SAMPLING}
+    labels={labels}
+    strings={strings}
+  />
+  <noscript><p class="atlas-viz-noscript">{tCommon.needsScript}</p></noscript>
+</div>

@@ -1,0 +1,310 @@
+---
+title: RLHF
+description: 'SFT chỉ dạy bắt chước. RLHF dạy mô hình câu nào được người ưa hơn: SFT, reward model Bradley–Terry, PPO có phạt KL, và vì sao điểm thưởng cao chưa chắc tốt.'
+quiz:
+  - question: 'Người gán nhãn chọn $\mathbf{y}_w$ thay vì $\mathbf{y}_l$. RM hiện chấm $r(\mathbf{y}_w) = 1.2$ và $r(\mathbf{y}_l) = 3.2$. Nhận xét nào đúng?'
+    options:
+      - 'Loss của cặp là $-\ln\sigma(-2) \approx 2.13$, và cặp này được đẩy mạnh, với trọng số $1 - \sigma(-2) \approx 0.88$'
+      - 'Loss của cặp là $-\ln\sigma(2) \approx 0.13$, vì hai điểm cách nhau 2'
+      - 'Loss bằng 0, vì cả hai điểm đều dương'
+      - 'Cộng 5 vào cả hai điểm thì loss của cặp giảm'
+    answer: 0
+    explanation: 'Lề là $\Delta = r(\mathbf{y}_w) - r(\mathbf{y}_l) = -2$: RM đang xếp ngược ý người. Loss $-\ln\sigma(-2) \approx 2.13$ lớn, và gradient nhân với $1 - \sigma(\Delta) \approx 0.88$, gần mức lớn nhất. Phương án thứ hai lấy lề theo trị tuyệt đối, quên rằng dấu của lề mới quyết định đúng hay sai. Cộng cùng một số vào hai điểm không đổi hiệu, nên không đổi loss.'
+  - question: 'Khi chạy PPO, bạn hạ hệ số phạt KL $\beta$ gần về 0 nhưng giữ kẹp $\epsilon = 0.2$. Sau nhiều vòng cập nhật, điều gì nhiều khả năng xảy ra?'
+    options:
+      - 'Chính sách vẫn ở gần mô hình SFT, vì kẹp của PPO đã giữ nó lại'
+      - 'RM tự cập nhật theo chính sách, nên không có gì để khai thác'
+      - 'Mỗi lần cập nhật vẫn nhỏ, nhưng các bước nhỏ cộng dồn lại nên chính sách có thể đi rất xa SFT và khai thác lỗi của RM'
+      - 'Loss của RM tăng lên, nên quá trình tự dừng'
+    answer: 2
+    explanation: 'Kẹp của PPO so chính sách mới với chính sách của vòng ngay trước, nên nó chỉ giới hạn từng bước. Không có gì **trực tiếp** giữ tổng quãng đường so với mô hình SFT. Việc đó là của phạt KL. RM đã đóng băng ở bước 3, nên không tự sửa theo chính sách. Phương án thứ nhất là nhầm hai sợi dây với nhau.'
+  - question: 'Trong lúc RL, điểm RM trung bình của các câu trả lời tăng đều từ đầu tới cuối. Kết luận nào hợp lý nhất?'
+    options:
+      - 'Chất lượng thật chắc chắn cũng tăng, vì RM học từ chính lựa chọn của người'
+      - 'Chưa kết luận được: cần đánh giá bằng người hoặc bằng thước đo khác, vì chính sách có thể đang khai thác chỗ RM chấm sai'
+      - 'Nên giảm $\beta$ để điểm tăng nhanh hơn nữa'
+      - 'RM đang underfit, nên huấn luyện RM thêm vài epoch'
+    answer: 1
+    explanation: 'RM chỉ là một hàm xấp xỉ học từ một ít cặp so sánh. Chính sách được tối ưu đúng theo nó, nên điểm RM gần như luôn tăng, kể cả khi chất lượng thật đã đi xuống (luật Goodhart). Phương án thứ nhất là hiểu nhầm hay gặp nhất. Giảm $\beta$ chỉ làm chính sách đi xa nhanh hơn. Còn thêm epoch cho RM lại dễ làm nó overfit.'
+  - question: 'Chính sách tối ưu là $\pi^*(\mathbf{y} \mid \mathbf{x}) \propto \pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})\, e^{r(\mathbf{x}, \mathbf{y}) / \beta}$. Hai đáp án B và C có điểm RM chênh nhau 1, C cao hơn, và $\beta = 0.5$. So với mô hình tham chiếu, tỉ số $\pi(C) / \pi(B)$ tăng bao nhiêu lần?'
+    options: ['2 lần', 'Khoảng 1.65 lần ($e^{0.5}$)', 'Không đổi, vì $\pi^*$ đã chuẩn hóa', 'Khoảng 7.39 lần ($e^{2}$)']
+    answer: 3
+    explanation: 'Lấy tỉ số thì hằng số chuẩn hóa triệt tiêu: $\pi^*(C)/\pi^*(B) = \frac{\pi_{\text{ref}}(C)}{\pi_{\text{ref}}(B)} \cdot e^{(r_C - r_B)/\beta}$, tức nhân thêm $e^{1/0.5} = e^2 \approx 7.39$. Số 2 là quên lũy thừa. $e^{0.5}$ là nhân hiệu điểm với $\beta$ thay vì chia. Công thức còn cho thấy: đáp án nào mô hình tham chiếu gần như không bao giờ viết thì $\pi^*$ cũng gần như không viết.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import RlhfStagesFigure from '@components/figures/RlhfStagesFigure.astro';
+import rewardModelCode from '@code/llm/rlhf/reward-model.vi.py?raw';
+import klLeashCode from '@code/llm/rlhf/kl-leash.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Kể được ba bước của **học tăng cường từ phản hồi của người** (reinforcement learning from human feedback, RLHF) theo InstructGPT: fine-tune có giám sát, học **mô hình phần thưởng** (reward model, RM) từ các cặp so sánh, rồi tối ưu **chính sách** (policy) bằng học tăng cường.
+- Tự dẫn được hàm mất mát của RM từ **mô hình Bradley–Terry** (Bradley–Terry model), $-\ln\sigma(r_w - r_l)$, và gradient của nó.
+- Hiểu mục tiêu của bước học tăng cường: điểm RM trừ một khoản **phạt KL** (KL penalty) giữ chính sách gần mô hình SFT. Phân biệt được nó với cái kẹp của PPO.
+- Nhận ra **reward hacking**, hay **tối ưu quá mức** (overoptimization): điểm RM tăng mãi trong khi chất lượng thật đi xuống.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài [Họ GPT và fine-tune đa nhiệm](/vi/llm/gpt-family-finetuning/) dừng ở **fine-tune có giám sát** (supervised fine-tuning, SFT): huấn luyện trên **lời trình diễn** (demonstration) do người viết, loss cross-entropy chỉ tính trên phần trả lời. Đó là bước đầu của InstructGPT. Bài này là hai bước còn lại.
+:::
+
+## Trực giác
+
+### Bắt chước thì chưa biết cái nào hay hơn
+
+Bạn đã SFT xong một mô hình. Bạn hỏi nó: "Giải thích lãi kép cho học sinh lớp 7". Cho nó trả lời ba lần, bạn được ba đáp án khác nhau. Cả ba đều đúng ngữ pháp, đúng định dạng. Một bản ngắn mà rõ. Một bản dài, nhiều thuật ngữ. Một bản có ví dụ con heo đất rất dễ hiểu, nhưng tính sai một con số.
+
+SFT không giúp gì ở đây. Nó chỉ đẩy xác suất về phía đáp án mẫu, không cho mô hình biết đáp án nào **tốt hơn** đáp án nào. Muốn dạy thêm bằng SFT thì phải viết thêm đáp án mẫu, mà viết một câu trả lời hoàn hảo cho mỗi prompt vừa chậm vừa đắt.
+
+Có một việc dễ hơn nhiều: đặt hai đáp án cạnh nhau và hỏi "bản nào tốt hơn?". Bạn không cần tự viết được bản hoàn hảo mới nói được bản nào hay hơn. So sánh cũng tránh được chuyện mỗi người hiểu thang "7 trên 10" một kiểu.
+
+### Ba bước, như học nấu ăn
+
+Hình dung bạn học nấu một món:
+
+1. **Xem đầu bếp làm mẫu, rồi bắt chước.** Đó là SFT.
+2. **Nấu thử nhiều phiên bản, nhờ giám khảo nếm từng cặp và chọn món ngon hơn.** Sau nhiều lần, bạn đoán được khẩu vị của giám khảo, tức có một "giám khảo ảo" trong đầu. Đó là RM.
+3. **Tự nấu đi nấu lại để giám khảo ảo cho điểm cao.** Nhưng giám khảo ảo chỉ đoán đúng với những món gần giống món đã nếm. Nên có một sợi dây giữ bạn không đi quá xa cách nấu quen thuộc. Đó là học tăng cường có phạt KL.
+
+Cái bẫy nằm ở bước 3. Nếu sợi dây quá lỏng, bạn sẽ tìm ra món mà giám khảo ảo chấm rất cao nhưng giám khảo thật thấy dở, ví dụ cho thật nhiều đường vì giám khảo ảo hơi thiên về vị ngọt.
+
+Bài toán của bài này là: **chỉ từ các lựa chọn "bản này hơn bản kia" của người, làm sao học được một hàm chấm điểm, rồi dùng nó để cải thiện mô hình mà không để mô hình lợi dụng chỗ hàm chấm điểm sai?**
+
+## Lý thuyết
+
+### Ba bước của InstructGPT
+
+Ý "học phần thưởng từ so sánh cặp của người" có từ học tăng cường cổ điển: Christiano và cộng sự (2017) dạy **tác nhân** (agent) chơi game Atari và điều khiển robot mô phỏng, người chỉ cần cho phản hồi trên chưa tới 1% số bước tương tác. Ziegler và cộng sự (2019) đưa nó vào mô hình ngôn ngữ. Stiennon và cộng sự (2020) dùng nó cho bài toán tóm tắt. InstructGPT (Ouyang và cộng sự, 2022) dùng cho chỉ dẫn tổng quát, theo ba bước:
+
+1. **SFT.** Fine-tune GPT-3 trên lời trình diễn, khoảng 13 nghìn prompt.
+2. **Huấn luyện RM.** Với mỗi prompt, lấy nhiều câu trả lời của mô hình. Người gán nhãn (labeler) xếp hạng chúng, và RM học dự đoán thứ hạng đó. Khoảng 33 nghìn prompt.
+3. **Tối ưu chính sách.** Lấy điểm RM làm phần thưởng, tối ưu mô hình bằng thuật toán PPO. Khoảng 31 nghìn prompt. Bước 2 và 3 có thể lặp lại.
+
+Trong học tăng cường, **chính sách** là thứ chọn hành động. Ở đây, chính sách là chính mô hình ngôn ngữ đang được huấn luyện, hành động là câu trả lời nó sinh ra. Bài ký hiệu prompt là $\mathbf{x}$, câu trả lời là $\mathbf{y}$, chính sách là $\pi_{\boldsymbol{\phi}}(\mathbf{y} \mid \mathbf{x})$ với tham số $\boldsymbol{\phi}$, và RM là $r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y})$ với tham số $\boldsymbol{\theta}$. Hai bộ tham số tách riêng vì đây là **hai mô hình khác nhau**.
+
+### Mô hình phần thưởng
+
+**Kiến trúc.** Lấy mô hình SFT, bỏ lớp đầu ra (lớp cho xác suất trên từ vựng), thay bằng một lớp cho ra **một con số**. Vào là cặp (prompt, câu trả lời), ra là điểm $r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y})$. InstructGPT dùng RM 6 tỉ tham số, vì tiết kiệm nhiều tính toán, và RM 175 tỉ có thể huấn luyện không ổn định nên khó dùng làm hàm giá trị.
+
+**Dữ liệu.** Mỗi mẫu là một bộ ba $(\mathbf{x}, \mathbf{y}_w, \mathbf{y}_l)$: prompt, đáp án được chọn ($w$ là win) và đáp án bị loại ($l$ là lose). Ta không có điểm của từng đáp án, chỉ biết bản nào thắng. Vậy cần một mô hình nối điểm với xác suất thắng.
+
+**Từ hiệu điểm ra xác suất.** Ta muốn $P(\mathbf{y}_w \succ \mathbf{y}_l \mid \mathbf{x})$, xác suất người chọn $\mathbf{y}_w$ thay vì $\mathbf{y}_l$, chỉ phụ thuộc vào **hiệu điểm**. Hai điểm bằng nhau thì 50/50. Hiệu càng lớn thì càng gần 1. Hàm **sigmoid** $\sigma(z) = \frac{1}{1 + e^{-z}}$ là một lựa chọn tự nhiên: $\sigma(0) = 0.5$, tăng dần từ 0 tới 1. Nó còn có tính chất $\sigma(z) + \sigma(-z) = 1$, nên xác suất A thắng B cộng xác suất B thắng A luôn bằng 1. Đặt $r_w = r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y}_w)$, $r_l = r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y}_l)$:
+
+$$
+P(\mathbf{y}_w \succ \mathbf{y}_l \mid \mathbf{x}) = \sigma(r_w - r_l) = \frac{1}{1 + e^{-(r_w - r_l)}}
+$$
+
+**Viết lại cho dễ nhận ra.** Nhân cả tử và mẫu với $e^{r_w}$. Ở mẫu, $e^{r_w} \cdot e^{-(r_w - r_l)} = e^{r_l}$:
+
+$$
+P(\mathbf{y}_w \succ \mathbf{y}_l \mid \mathbf{x}) = \frac{e^{r_w}}{e^{r_w} + e^{r_l}}
+$$
+
+Đây là mô hình so sánh cặp của Bradley và Terry (1952): mỗi đối thủ có một "sức mạnh" dương, ở đây là $e^{r}$, và xác suất thắng là sức mạnh của mình chia tổng sức mạnh hai bên. Christiano và cộng sự ví nó với hệ số Elo trong cờ vua: chỉ hiệu điểm quyết định xác suất thắng. Lề 0 thì 50%, lề 2 thì $\sigma(2) \approx 0.88$, lề 4 thì $\sigma(4) \approx 0.98$.
+
+**Hàm mất mát.** Coi các cặp là độc lập. Likelihood của bộ dữ liệu $\mathcal{D}$ là tích xác suất mô hình gán cho lựa chọn thật của người ở từng cặp. Lấy $-\ln$ để tích thành tổng và bài toán cực đại thành cực tiểu, rồi lấy trung bình trên các cặp:
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = -\,\mathbb{E}_{(\mathbf{x}, \mathbf{y}_w, \mathbf{y}_l) \sim \mathcal{D}}\Big[\ln \sigma\big(r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y}_w) - r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y}_l)\big)\Big]
+$$
+
+Đây đúng là cross-entropy của một bài phân loại hai lớp, với "lớp" là "người chọn $\mathbf{y}_w$". Nếu bạn đã biết **hồi quy logistic** (logistic regression) thì đây chính là nó, áp lên hiệu điểm. Gọi **lề** (margin) là $\Delta = r_w - r_l$. Loss của một cặp chỉ phụ thuộc vào $\Delta$:
+
+| Lề $\Delta$ | $-2$ | $-1$ | $0$ | $1$ | $2$ | $4$ |
+|---|---:|---:|---:|---:|---:|---:|
+| $\sigma(\Delta)$ | 0.119 | 0.269 | 0.500 | 0.731 | 0.881 | 0.982 |
+| $-\ln\sigma(\Delta)$ | 2.1269 | 1.3133 | 0.6931 | 0.3133 | 0.1269 | 0.0181 |
+
+Khi RM chưa học gì và chấm mọi đáp án như nhau, $\Delta = 0$ và loss bằng $\ln 2 \approx 0.6931$: đoán mò. Lề âm, tức RM xếp ngược ý người, thì loss lớn.
+
+**Gradient.** Viết $\ln\sigma(z) = -\ln(1 + e^{-z})$ rồi đạo hàm theo $z$. Đạo hàm của $\ln u$ là $u'/u$, với $u = 1 + e^{-z}$ và $u' = -e^{-z}$. Hai dấu trừ triệt tiêu, nên được $\frac{e^{-z}}{1 + e^{-z}}$. Phân số này bằng $1 - \frac{1}{1 + e^{-z}} = 1 - \sigma(z)$. Loss một cặp là $-\ln\sigma(\Delta)$, nên đạo hàm của nó theo lề là $-(1 - \sigma(\Delta))$. Theo quy tắc chuỗi, đạo hàm của $\Delta$ theo $\boldsymbol{\theta}$ là $\nabla r_w - \nabla r_l$, nên:
+
+$$
+\nabla_{\boldsymbol{\theta}}\big[-\ln\sigma(\Delta)\big] = -\big(1 - \sigma(\Delta)\big)\big(\nabla_{\boldsymbol{\theta}} r_w - \nabla_{\boldsymbol{\theta}} r_l\big)
+$$
+
+Đi ngược gradient thì $r_w$ tăng, $r_l$ giảm. Trọng số $1 - \sigma(\Delta)$ là xác suất RM cho rằng người đã chọn bản kia: cặp đã xếp đúng với lề lớn gần như không được đẩy thêm, cặp xếp sai được đẩy mạnh nhất. Ô code thứ nhất dùng RM tuyến tính $r = \mathbf{w}^\top\mathbf{f}(\mathbf{y})$, với $\mathbf{f}(\mathbf{y})$ là vectơ đặc trưng của đáp án. Khi đó $\Delta = \mathbf{w}^\top\big(\mathbf{f}(\mathbf{y}_w) - \mathbf{f}(\mathbf{y}_l)\big)$, nên gradient của $\Delta$ theo $\mathbf{w}$ là $\mathbf{f}(\mathbf{y}_w) - \mathbf{f}(\mathbf{y}_l)$.
+
+**Điểm không có gốc.** Loss chỉ phụ thuộc hiệu điểm, nên cộng cùng một hằng số vào mọi điểm không đổi gì. Một mình điểm $r = 5$ không có nghĩa gì. Vì vậy InstructGPT chuẩn hóa RM sao cho lời trình diễn có điểm trung bình 0 trước khi chạy RL.
+
+**Vài chi tiết thực hành của InstructGPT.** Người gán nhãn xếp hạng $K$ đáp án cho một prompt, $K$ từ 4 tới 9, cho ra $\binom{K}{2}$ cặp. Các cặp cùng một prompt rất tương quan. Nếu xáo trộn chúng như những mẫu độc lập, RM overfit (xem [Overfitting và Underfitting](/vi/ml/overfitting-underfitting/)) chỉ sau một epoch. Họ đưa mọi cặp của một prompt vào cùng một batch, và chỉ huấn luyện RM **một epoch**. Ngược với bước SFT ở bài trước, nơi InstructGPT huấn luyện 16 epoch mà đánh giá của người vẫn tốt lên. Thư viện TRL của Hugging Face có `RewardTrainer` (bản 1.16.0) làm đúng loss này, trên dữ liệu có hai cột `chosen` và `rejected`. Để ý: `RewardConfig` của bản này mặc định `num_train_epochs=3.0`.
+
+### Tối ưu chính sách có phạt KL
+
+**Bài toán.** Đây là bước 3. RM đã huấn luyện xong và được **đóng băng**. Mỗi lượt: lấy một prompt $\mathbf{x}$, chính sách sinh trọn một câu trả lời $\mathbf{y}$, RM cho một điểm duy nhất, hết lượt. Ta muốn chỉnh $\boldsymbol{\phi}$ để điểm trung bình cao lên. Chính sách khởi tạo từ mô hình SFT.
+
+Vì sao phải dùng học tăng cường mà không lan truyền ngược thẳng từ điểm RM? Vì câu trả lời được **lấy mẫu** từng token. Phép chọn một token rời rạc không có đạo hàm. Học tăng cường né chỗ này: nó không đạo hàm qua câu trả lời, mà tăng xác suất của những câu trả lời đã sinh ra có điểm cao, giảm xác suất của những câu điểm thấp.
+
+**Mục tiêu.** Nếu chỉ tối đa điểm RM, chính sách sẽ chạy tới bất cứ chỗ nào RM chấm cao, kể cả chỗ RM chấm sai. Từ Ziegler và cộng sự (2019), rồi Stiennon và cộng sự (2020) và InstructGPT, người ta trừ vào phần thưởng một khoản phạt:
+
+$$
+R(\mathbf{x}, \mathbf{y}) = r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y}) - \beta \ln\frac{\pi_{\boldsymbol{\phi}}(\mathbf{y} \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})}
+$$
+
+rồi tối đa kỳ vọng của $R$, với $\mathbf{x}$ lấy từ tập prompt và $\mathbf{y}$ do chính sách sinh ra. Đọc từng phần:
+
+- **$\pi_{\text{ref}}$** là **mô hình tham chiếu** (reference model): bản sao đóng băng của mô hình SFT.
+- **Log tỉ số** dương khi chính sách gán cho $\mathbf{y}$ xác suất cao hơn mô hình SFT, âm khi thấp hơn. Nó đo chính sách đã lệch khỏi mô hình SFT bao nhiêu ở câu trả lời này.
+- **$\beta$** là hệ số phạt KL. InstructGPT dùng $\beta = 0.02$. Bai và cộng sự (2022) dùng một giá trị rất nhỏ, $0.001$.
+- **Tính theo token.** Câu trả lời dài $L$ token có $\ln\pi(\mathbf{y} \mid \mathbf{x}) = \sum_{t=1}^{L} \ln\pi(y_t \mid \mathbf{x}, y_{<t})$, nên log tỉ số của cả câu là tổng log tỉ số của từng token. Vì thế InstructGPT gọi nó là phạt KL theo token (per-token KL penalty).
+
+Vì sao gọi là phạt **KL**? Lấy kỳ vọng của log tỉ số theo $\mathbf{y} \sim \pi_{\boldsymbol{\phi}}$, ta được đúng định nghĩa của **độ lệch KL** (Kullback–Leibler divergence) giữa hai phân phối:
+
+$$
+\mathbb{E}_{\mathbf{y} \sim \pi_{\boldsymbol{\phi}}}\left[\ln\frac{\pi_{\boldsymbol{\phi}}(\mathbf{y} \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})}\right] = D_{\mathrm{KL}}\big(\pi_{\boldsymbol{\phi}} \,\|\, \pi_{\text{ref}}\big)
+$$
+
+KL luôn $\ge 0$, và chỉ bằng 0 khi hai phân phối trùng nhau. Vậy kỳ vọng của $R$ là $\mathbb{E}[r] - \beta\, D_{\mathrm{KL}}$: điểm RM trừ một khoản phạt cho việc đi xa mô hình SFT.
+
+Stiennon và cộng sự nêu hai tác dụng của khoản phạt. Một, nó giữ chính sách không sụp về một kiểu trả lời duy nhất. Hai, nó giữ đầu ra ở gần vùng mà RM đã thấy khi huấn luyện, nơi điểm của RM còn đáng tin.
+
+**Chính sách tối ưu.** Với một prompt cố định, nếu chính sách được chọn tự do trong mọi phân phối, có thể chứng minh mục tiêu này đạt lớn nhất tại
+
+$$
+\pi^*(\mathbf{y} \mid \mathbf{x}) = \frac{1}{Z(\mathbf{x})}\,\pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})\, e^{r(\mathbf{x}, \mathbf{y}) / \beta}
+$$
+
+với $Z(\mathbf{x})$ là hằng số làm tổng xác suất bằng 1. Bài [DPO](/vi/llm/dpo/) sẽ dẫn công thức này. Ở đây chỉ cần đọc nó: lấy xác suất của mô hình SFT, nhân với $e^{r/\beta}$, rồi chuẩn hóa. $\beta$ lớn thì thừa số gần 1, chính sách gần như đứng yên. $\beta$ nhỏ thì thừa số của đáp án điểm cao nhất lớn hơn hẳn thừa số của các đáp án khác, chính sách dồn hết về đó. Ô code thứ hai cho bạn thấy điều này bằng số.
+
+### PPO, ở mức trực giác
+
+InstructGPT tối ưu mục tiêu trên bằng **PPO** (Proximal Policy Optimization, Schulman và cộng sự, 2017). Bài chỉ nói ý chính, không dẫn thuật toán.
+
+PPO thuộc họ policy gradient: sinh một lô câu trả lời, xem câu nào được thưởng cao hơn mức kỳ vọng, rồi tăng xác suất của chúng. Sinh câu trả lời tốn kém, nên ta muốn cập nhật nhiều lần trên cùng một lô. Nhưng cập nhật nhiều quá thì chính sách đổi quá xa so với lúc sinh lô đó, và lô dữ liệu không còn đại diện cho nó nữa. PPO **kẹp** tỉ số $\rho = \pi_{\boldsymbol{\phi}}(\mathbf{y} \mid \mathbf{x}) / \pi_{\text{old}}(\mathbf{y} \mid \mathbf{x})$ vào khoảng $[1 - \epsilon, 1 + \epsilon]$, ví dụ $\epsilon = 0.2$. Ở đây $\pi_{\text{old}}$ là chính sách lúc sinh lô. Khi $\rho$ đã ra khỏi khoảng đó, đi thêm theo hướng có lợi cũng không được thưởng thêm. Kết quả là những bước nhỏ, an toàn.
+
+Đừng nhầm hai sợi dây này:
+
+| Tiêu chí | Phạt KL | Kẹp của PPO |
+|---|---|---|
+| Giữ chính sách gần | Mô hình SFT ban đầu, $\pi_{\text{ref}}$, cố định suốt quá trình | Chính sách của lô vừa rồi, $\pi_{\text{old}}$, đổi sau mỗi vòng |
+| Giới hạn | Kéo lại khi tổng quãng đường lớn | Hãm từng bước |
+| Nằm ở | Phần thưởng | Thuật toán tối ưu |
+
+Gao và cộng sự (2022) cũng nhấn mạnh điểm này: kẹp của PPO ngầm phạt độ lệch so với chính sách gần nhất, không phải mô hình ban đầu. Nó chỉ làm KL so với mô hình SFT tăng chậm lại. Trong thí nghiệm của họ, không có phạt KL thì KL vẫn tăng đều theo số bước.
+
+PPO cần thêm một **hàm giá trị** (value function) để ước lượng mức kỳ vọng. InstructGPT khởi tạo nó từ RM. Vậy lúc chạy bước 3 có bốn mô hình cùng lúc: chính sách, mô hình tham chiếu, RM và hàm giá trị.
+
+**PPO-ptx.** InstructGPT thấy RL làm tụt điểm trên một số tập dữ liệu NLP công khai. Họ gọi cái giá này là **alignment tax**. Cách giảm: cộng vào mục tiêu một số hạng $\gamma\,\mathbb{E}_{\mathbf{x} \sim \mathcal{D}_{\text{pretrain}}}[\ln\pi_{\boldsymbol{\phi}}(\mathbf{x})]$, tức log-likelihood trên dữ liệu pre-train, với $\gamma$ là hệ số. Chính sách vừa theo RM, vừa không quên việc dự đoán văn bản thường. Theo họ, cách này hiệu quả hơn việc chỉ tăng $\beta$. Bai và cộng sự (2022) thì thấy alignment tax chủ yếu xảy ra ở mô hình nhỏ: mô hình 13 tỉ và 52 tỉ tham số của họ còn tốt lên khi đánh giá zero-shot.
+
+### Reward hacking: khi điểm cao không còn là tốt
+
+RM chỉ là một hàm xấp xỉ, học từ vài chục nghìn prompt được xếp hạng. Ở bước 3, chính sách được tối ưu đúng theo nó, nên sẽ tìm ra mọi chỗ RM chấm cao hơn người. Đó là **reward hacking**. Hiện tượng này là một dạng của **luật Goodhart** (Goodhart's law): khi một thước đo trở thành mục tiêu, nó không còn là thước đo tốt.
+
+- **Stiennon và cộng sự (2020)**, bài toán tóm tắt. Tối ưu vừa phải thì bản tóm tắt tốt lên. Tối ưu mạnh thì chất lượng thật, do người chấm, đi xuống. Tới một mức, điểm RM còn ngược chiều với đánh giá của người.
+- **Gao và cộng sự (2022)** đo việc này có hệ thống. Họ dùng một RM lớn làm "người chấm vàng" thay cho người thật, rồi huấn luyện một RM nhỏ hơn từ nhãn của RM vàng. Khi chính sách đi xa dần khỏi lúc khởi tạo (KL tăng), điểm RM nhỏ tăng mãi, còn điểm vàng tăng rồi giảm. RM và bộ dữ liệu so sánh càng lớn thì càng ít bị.
+- **Hack trông thế nào.** Ziegler và cộng sự (2019) thấy các mô hình tóm tắt hay chép nguyên câu từ văn bản gốc, và nói chúng có thể đang khai thác việc người gán nhãn dựa vào quy tắc đơn giản. InstructGPT nhận xét mô hình đôi khi rào đón quá mức, và nghi một phần là do người gán nhãn được dặn thưởng cho sự khiêm tốn.
+
+Phạt KL có chữa được không? Nói cẩn thận. Stiennon và cộng sự dùng nó như sợi dây giữ chính sách ở vùng RM còn đáng tin. Nhưng trong thiết lập của Gao và cộng sự, thêm phạt KL **không** cho điểm vàng cao hơn ở cùng một mức KL. Tác dụng chính của nó là làm quá trình dừng ở KL nhỏ hơn, giống **dừng sớm** (early stopping). Họ cũng ghi kết luận này có thể nhạy với siêu tham số. Cách hiểu an toàn: phạt KL làm chậm việc rời xa mô hình SFT, nó không bảo đảm chính sách không hack. Vẫn phải đánh giá bằng người (xem [Đánh giá mô hình và PEFT](/vi/llm/evaluation-peft/)).
+
+:::note[Ghi nhớ]
+RLHF có ba bước: SFT, học RM từ các cặp so sánh, rồi tối ưu chính sách bằng học tăng cường. RM học bằng loss Bradley–Terry $-\ln\sigma(r_w - r_l)$, chỉ phụ thuộc hiệu điểm. Bước 3 tối đa $\mathbb{E}[r] - \beta\, D_{\mathrm{KL}}(\pi_{\boldsymbol{\phi}} \,\|\, \pi_{\text{ref}})$. Phạt KL giữ chính sách gần mô hình SFT, còn kẹp của PPO giữ từng bước gần chính sách vừa rồi. Điểm RM cao chưa chắc là tốt: tối ưu quá tay thì chất lượng thật đi xuống.
+:::
+
+### Giới hạn
+
+- **Đắt và nhiều phần.** Cần người gán nhãn (InstructGPT thuê khoảng 40 người), nhiều mô hình chạy cùng lúc như đã kể ở trên, và nhiều siêu tham số nhạy cảm. Bài [DPO](/vi/llm/dpo/) bỏ hẳn RM và vòng RL.
+- **RLHF dạy hành vi, không thêm kiến thức.** Năm 2022, InstructGPT vẫn bịa thông tin và vẫn nhận giả thuyết sai trong câu hỏi làm tiền đề.
+- **Hữu ích và vô hại hay kéo ngược nhau.** Bai và cộng sự (2022) thu hai bộ so sánh riêng cho hai mục tiêu này. Họ cũng cập nhật RM và chính sách gần như hằng tuần bằng phản hồi mới, thay vì huấn luyện RM một lần.
+- **RLHF không đồng nghĩa với PPO.** PPO chỉ là thuật toán của bước 3 trong các paper trên.
+
+## Minh họa
+
+Bảng dưới đặt ba bước của InstructGPT cạnh nhau. Hãy nhìn hai cột giữa: mỗi bước người làm một việc khác nhau, và mô hình được huấn luyện cũng khác nhau. Bước 2 huấn luyện RM, một mô hình riêng. Bước 3 mới quay lại cập nhật mô hình ngôn ngữ.
+
+{/* FIG: RLHF có ba bước nối tiếp; bước 3 dùng RM đã đóng băng và mô hình SFT làm tham chiếu. */}
+<RlhfStagesFigure />
+
+| Bước | Người làm gì | Mô hình được huấn luyện | Tối ưu cái gì | Số prompt ở InstructGPT |
+|---|---|---|---|---:|
+| 1. SFT | Viết câu trả lời mẫu | Mô hình ngôn ngữ, khởi tạo từ GPT-3 | Cross-entropy trên phần trả lời | khoảng 13 nghìn |
+| 2. Học RM | Xếp hạng 4–9 câu trả lời do mô hình sinh ra | RM, khởi tạo từ mô hình SFT, thêm đầu ra một số | $-\ln\sigma(r_w - r_l)$, một epoch | khoảng 33 nghìn |
+| 3. RL | Không làm gì trong lúc chạy | Chính sách, khởi tạo từ mô hình SFT | $\mathbb{E}[r] - \beta\, D_{\mathrm{KL}}$, bằng PPO | khoảng 31 nghìn |
+
+Kết quả đáng nhớ của InstructGPT: trong đánh giá của họ, trên phân phối prompt của họ, người gán nhãn ưa câu trả lời của mô hình 1.3 tỉ tham số qua RLHF hơn câu trả lời của GPT-3 175 tỉ tham số, dù số tham số chưa bằng 1/100.
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026, với Python 3.14 và NumPy 2.4 (bản có trong Pyodide). Cả hai ô chạy ngay trên trang và chạy độc lập. Không ô nào cần GPU hay mô hình thật: ô thứ nhất làm lại bước 2, ô thứ hai làm lại bước 3 trên một ví dụ đủ nhỏ để tính chính xác.
+
+### Học RM từ sáu cặp so sánh
+
+Mỗi đáp án được tóm bằng hai đặc trưng: độ đúng (từ 0 tới 1) và độ dài (tính theo trăm từ). RM tuyến tính chấm $r = \mathbf{w}^\top\mathbf{f}(\mathbf{y})$, không có hệ số tự do $b$, vì $b$ triệt tiêu trong hiệu $r_w - r_l$. Có 6 cặp. Ở 4 cặp, đáp án được chọn đúng hơn. Một cặp hai bản đúng như nhau, và một cặp người chọn bản dài mà kém đúng hơn. Còn độ dài thì ở 5 trong 6 cặp, bản được chọn dài hơn. Ô in loss và gradient tại $\mathbf{w} = \mathbf{0}$, chạy 100 bước gradient descent với $\eta = 1$, in loss và độ chính xác ở bước 1, 10 và 100 (đo **sau** khi cập nhật), rồi cho RM chấm một cặp mới.
+
+<PythonRunner code={rewardModelCode} title="RM Bradley–Terry trên sáu cặp" />
+
+Đọc kết quả:
+
+- **`w = 0: loss 0.6931`**: đúng $\ln 2$, như bảng ở mục Lý thuyết. Gradient là $(-0.1417, -0.3167)$. Tại $\mathbf{w} = \mathbf{0}$, mọi $\sigma(\Delta) = 0.5$, nên gradient bằng $-0.5$ nhân trung bình của $\mathbf{f}(\mathbf{y}_w) - \mathbf{f}(\mathbf{y}_l)$. Thành phần độ dài lớn hơn, vì trung bình hiệu độ dài ($0.63$) lớn hơn trung bình hiệu độ đúng ($0.28$).
+- **`step 1: acc 0.83`**: sau bước đầu, RM xếp đúng 5 trên 6 cặp. Cặp sai là cặp duy nhất người chọn bản **ngắn hơn**, vì bước đầu đẩy trọng số độ dài mạnh hơn.
+- **`step 100: loss 0.0567, acc 1.00`**: mọi cặp đều đúng, và loss vẫn đang giảm. Sáu cặp này tách được tuyến tính, nên loss chỉ về 0 khi $\mathbf{w}$ lớn vô hạn. Với dữ liệu thật, đó là thêm một lý do để huấn luyện RM ít epoch.
+- **`w [4.9 3.08]`**: RM thưởng cả độ đúng lẫn độ dài. Nó học được "dài là tốt" vì trong dữ liệu, đáp án được chọn thường dài hơn. Người không có ý đó, nhưng dữ liệu nói vậy.
+- **Cặp mới**: một đáp án đúng, ngắn được 5.95 điểm. Một đáp án sai, dài 300 từ, dài hơn mọi đáp án RM từng thấy, được 10.70 điểm. RM tin tới 99.1% rằng người sẽ chọn bản sai. Ở bước 3, chính sách sẽ tìm ra đúng chỗ này. Đó là lý do phải giữ nó gần vùng RM đã thấy.
+
+Muốn chắc công thức gradient đúng, bạn có thể tự kiểm bằng sai phân tại $\mathbf{w} = \mathbf{0}$: tính loss với $w_1$ cộng và trừ $10^{-6}$, lấy hiệu chia cho $2 \cdot 10^{-6}$, rồi so với thành phần đầu của gradient.
+
+### Sợi dây KL trên ba đáp án
+
+Một prompt, ba đáp án: A cụt lủn, B đúng và gọn, C dài dòng và sai một ý. Mô hình SFT viết A, B, C với xác suất $0.6$, $0.3$, $0.1$. RM bị lệch như ở ô trước, thích câu dài: chấm A, B, C lần lượt $0$, $1$, $3$. Ô còn ghi thêm **chất lượng thật** $q = (0, 1, 0.3)$, con số chỉ ví dụ đồ chơi mới biết. Gao và cộng sự dùng RM vàng để đóng vai này. Với mỗi $\beta$, ô tính $\pi^*$ theo công thức ở mục Lý thuyết, kiểm rằng không phân phối nào trong 20 000 phân phối ngẫu nhiên có mục tiêu lớn hơn, rồi in KL, điểm RM trung bình $\mathbb{E}[r]$ và chất lượng thật trung bình $\mathbb{E}[q]$.
+
+<PythonRunner code={klLeashCode} title="Chính sách tối ưu theo β" />
+
+Đọc từ trên xuống, tức thả sợi dây lỏng dần:
+
+- **Dòng `ref`** là mô hình SFT: điểm RM trung bình $0.600$, chất lượng thật $0.330$.
+- **$\beta = 10$**: dây rất chặt. Chính sách gần như đứng yên, KL chỉ $0.005$.
+- **$\beta = 1.5$**: chính sách dịch dần sang C, KL $0.317$. Chất lượng thật đạt cao nhất bảng, $0.419$, vì xác suất chủ yếu rời khỏi A, đáp án tệ nhất. Sang C, dù C sai một ý, vẫn hơn ở lại A.
+- **$\beta = 0.5$ và $0.3$**: dây lỏng, chính sách dồn $93.5\%$ rồi $99.6\%$ vào C. Ở $\beta = 0.5$, chất lượng thật đã về $0.332$, ngang mô hình SFT. Ở $\beta = 0.3$, điểm RM $2.992$ gần chạm tối đa, còn chất lượng thật $0.303$, **thấp hơn cả mô hình SFT**.
+
+Cột $\mathbb{E}[r]$ tăng đều khi KL tăng. Cột $\mathbb{E}[q]$ tăng rồi giảm. Đó là hình dạng mà Stiennon và cộng sự, rồi Gao và cộng sự, đo được với mô hình ngôn ngữ thật. Trong ví dụ này, $\beta$ quyết định chính sách dừng ở đâu trên đường đi, đúng như "dừng sớm". Nhưng chọn $\beta$ tốt cần biết $q$, mà đời thực không có $q$. Vì thế phải đánh giá bằng người.
+
+## Lỗi hay gặp
+
+:::caution[Coi điểm RM cao là câu trả lời tốt]
+RM chỉ là xấp xỉ từ một ít dữ liệu so sánh, như ô thứ nhất học nhầm "dài là tốt". Trong lúc RL, điểm RM gần như luôn tăng, vì chính sách được tối ưu đúng theo nó. Đừng dùng đường cong điểm RM để quyết định dừng hay để báo cáo chất lượng. Theo dõi thêm KL so với mô hình SFT, đọc các câu trả lời, và đánh giá bằng người hoặc bằng một thước đo độc lập với RM. Phạt KL không thay được việc này: nó làm chậm việc rời xa mô hình SFT, chứ không bảo đảm chặn được hack.
+:::
+
+:::caution[Nhầm phạt KL với kẹp của PPO]
+Hai sợi dây giữ chính sách gần hai thứ khác nhau (xem bảng ở mục PPO): bỏ phạt KL mà giữ kẹp thì mỗi bước vẫn nhỏ, nhưng sau hàng nghìn bước chính sách vẫn có thể đi rất xa mô hình SFT.
+:::
+
+:::caution[Huấn luyện RM như một bộ phân loại bình thường]
+Đừng xáo trộn các cặp cùng một prompt như mẫu độc lập, và đừng chạy nhiều epoch "cho hội tụ": RM overfit rất nhanh, và dữ liệu tách được thì loss chỉ về 0 khi trọng số vô hạn. Cũng đừng đọc điểm RM như điểm tuyệt đối: hãy chuẩn hóa, ví dụ đưa điểm trung bình của lời trình diễn về 0, hoặc dùng `center_rewards_coefficient` của TRL.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- RLHF thêm vào sau SFT hai bước: học một RM từ các cặp "bản này hơn bản kia" của người, rồi dùng điểm RM làm phần thưởng để tối ưu chính sách bằng học tăng cường. Nó dạy hành vi, không thêm kiến thức.
+- RM dùng mô hình Bradley–Terry, $P(\mathbf{y}_w \succ \mathbf{y}_l) = \sigma(r_w - r_l)$, và loss $-\ln\sigma(r_w - r_l)$. Gradient đẩy $r_w$ lên, $r_l$ xuống, mạnh nhất ở cặp đang xếp sai. Điểm không có gốc, chỉ hiệu điểm có nghĩa.
+- Bước 3 tối đa $\mathbb{E}[r] - \beta\, D_{\mathrm{KL}}(\pi_{\boldsymbol{\phi}} \,\|\, \pi_{\text{ref}})$, có nghiệm $\pi^* \propto \pi_{\text{ref}}\, e^{r/\beta}$. InstructGPT dùng PPO, có kẹp giữ từng bước gần chính sách vừa rồi, khác phạt KL giữ gần mô hình SFT. PPO-ptx trộn thêm log-likelihood trên dữ liệu pre-train để giảm alignment tax.
+- Tối ưu quá tay thì điểm RM tăng mà chất lượng thật giảm (reward hacking, luật Goodhart). Phạt KL làm chậm việc này, không bảo đảm chặn được. Vẫn cần đánh giá bằng người.
+
+**Đọc thêm:**
+
+- Ouyang, L., Wu, J., Jiang, X., và cộng sự (2022). [*Training language models to follow instructions with human feedback*](https://arxiv.org/abs/2203.02155), arXiv:2203.02155, mục 3.5 và phụ lục C. InstructGPT: ba bước, cách huấn luyện RM, mục tiêu PPO-ptx.
+- Stiennon, N., Ouyang, L., Wu, J., và cộng sự (2020). [*Learning to summarize from human feedback*](https://arxiv.org/abs/2009.01325), arXiv:2009.01325, NeurIPS 2020, mục 3 và 4.3. Khuôn mà InstructGPT theo, có phạt KL và đường cong tối ưu quá mức.
+- Christiano, P., Leike, J., Brown, T. B., Martic, M., Legg, S., Amodei, D. (2017). [*Deep reinforcement learning from human preferences*](https://arxiv.org/abs/1706.03741), arXiv:1706.03741, mục 2.2. Nguồn gốc của ý học phần thưởng từ so sánh cặp, với mô hình Bradley–Terry và phép so sánh Elo.
+- Gao, L., Schulman, J., Hilton, J. (2022). [*Scaling Laws for Reward Model Overoptimization*](https://arxiv.org/abs/2210.10760), arXiv:2210.10760, mục 1 và 3.6. Đo reward hacking bằng RM vàng, và vai trò của phạt KL.
+- Schulman, J., Wolski, F., Dhariwal, P., Radford, A., Klimov, O. (2017). [*Proximal Policy Optimization Algorithms*](https://arxiv.org/abs/1707.06347), arXiv:1707.06347, mục 3. Mục tiêu có kẹp của PPO, nếu bạn muốn xem chi tiết.
+- Bai, Y., Jones, A., Ndousse, K., Askell, A., và cộng sự (2022). [*Training a Helpful and Harmless Assistant with Reinforcement Learning from Human Feedback*](https://arxiv.org/abs/2204.05862), arXiv:2204.05862. Hữu ích và vô hại, cập nhật RM liên tục. Bộ dữ liệu so sánh công khai ở [Anthropic/hh-rlhf](https://huggingface.co/datasets/Anthropic/hh-rlhf) trên Hugging Face (repo GitHub [anthropics/hh-rlhf](https://github.com/anthropics/hh-rlhf) đã được lưu trữ, chỉ còn đọc).
+- Hugging Face. [*Reward Modeling*](https://huggingface.co/docs/trl/v1.16.0/en/reward_trainer) (TRL 1.16.0), tài liệu chính thức, đọc tháng 10/2026. `RewardTrainer`, định dạng dữ liệu `chosen`/`rejected`, tùy chọn `center_rewards_coefficient` để giữ điểm quanh 0.
+
+<LessonProgress />

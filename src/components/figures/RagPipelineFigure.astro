@@ -1,0 +1,77 @@
+---
+// llm/rag-chatbot, "Hai giai đoạn của RAG" (reused as is in llm/langchain-llamaindex and llm/graph-rag): the
+// question is used to retrieve the relevant chunks, and those chunks go into the prompt before the chat model.
+// Two columns, the lesson's two rows turned on their side for a phone: indexing on the left (second group,
+// dashed borders), query on the right. The query column starts one row lower, so the two "Embedding" boxes
+// sit side by side (joined by a dashed "same model" link) and "Vector store" sits beside "Top-k search".
+// The two steps the idea rests on, retrieve and build the prompt, are the focus (accent).
+// Narrow layout only: a wide one doubles the SVG and would pass the HTML budget of viz/figures.md 8.2 g, and the
+// content column reaches 640px only from about 1440px. Words: src/data/figures/rag-pipeline.ts.
+import { RAG_PIPELINE } from '@data/figures/rag-pipeline';
+import { anchor, mainAndSmall, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = RAG_PIPELINE[getPageLocale(Astro.locals.starlightRoute)];
+
+// Columns: indexing x 8–124, a 60-unit gap for the "same model" label, query x 184–352.
+const L = { x: 8, width: 116 } as const;
+const R = { x: 184, width: 168 } as const;
+const GAP = 20;
+const rowHeights = [40, 40, 40, 56, 72, 40, 56] as const; // r1 … r7
+const rowTops = rowHeights.reduce<number[]>((tops, _h, i) => [...tops, i === 0 ? 52 : (tops[i - 1] ?? 0) + (rowHeights[i - 1] ?? 0) + GAP], []);
+const row = (i: number, col: { x: number; width: number }): Box => ({ ...col, y: rowTops[i] ?? 0, height: rowHeights[i] ?? 0 });
+
+const docs = row(0, L);
+const chunk = row(1, L);
+const embedDocs = row(2, L);
+const store = row(3, L);
+const question = row(1, R);
+const embedQuestion = row(2, R);
+const retrieve = row(3, R);
+const prompt = row(4, R);
+const chat = row(5, R);
+const answer = row(6, R);
+const height = answer.y + answer.height + 8;
+
+const lMid = L.x + L.width / 2;
+const rMid = R.x + R.width / 2;
+const gapMid = (L.x + L.width + R.x) / 2;
+const linkY = anchor(embedDocs, 'right')[1];
+---
+
+<FigureFrame id="rag-pipeline" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigText x={lMid} y={18} lines={t.labels.indexTitle} />
+    <FigText x={lMid} y={36} lines={t.labels.indexNote} size="small" />
+    <FigText x={rMid} y={docs.y + 10} lines={t.labels.queryTitle} />
+    <FigText x={rMid} y={docs.y + 28} lines={t.labels.queryNote} size="small" />
+
+    <FigNode {...docs} lines={t.labels.docs} tone="alt" />
+    <FigArrow from={anchor(docs, 'bottom')} to={anchor(chunk, 'top')} />
+    <FigNode {...chunk} lines={t.labels.chunk} tone="alt" />
+    <FigArrow from={anchor(chunk, 'bottom')} to={anchor(embedDocs, 'top')} />
+    <FigNode {...embedDocs} lines={t.labels.embed} tone="alt" />
+    <FigArrow from={anchor(embedDocs, 'bottom')} to={anchor(store, 'top')} />
+    <FigNode {...store} lines={t.labels.store} tone="alt" />
+
+    <FigArrow from={anchor(embedDocs, 'right')} to={anchor(embedQuestion, 'left')} tone="alt" head={false} />
+    <FigText x={gapMid} y={linkY - 21} lines={t.labels.same} size="small" />
+    <FigArrow from={anchor(store, 'right')} to={anchor(retrieve, 'left')} />
+
+    <FigNode {...question} lines={t.labels.question} />
+    <FigArrow from={anchor(question, 'bottom')} to={anchor(embedQuestion, 'top')} />
+    <FigNode {...embedQuestion} lines={t.labels.embed} />
+    <FigArrow from={anchor(embedQuestion, 'bottom')} to={anchor(retrieve, 'top')} />
+    <FigNode {...retrieve} {...mainAndSmall(t.labels.retrieve)} tone="accent" />
+    <FigArrow from={anchor(retrieve, 'bottom')} to={anchor(prompt, 'top')} />
+    <FigNode {...prompt} {...mainAndSmall(t.labels.prompt)} tone="accent" />
+    <FigArrow from={anchor(prompt, 'bottom')} to={anchor(chat, 'top')} />
+    <FigNode {...chat} lines={t.labels.chat} />
+    <FigArrow from={anchor(chat, 'bottom')} to={anchor(answer, 'top')} />
+    <FigNode {...answer} lines={t.labels.answer} />
+  </Fragment>
+</FigureFrame>

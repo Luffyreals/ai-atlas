@@ -1,0 +1,288 @@
+---
+title: Debug mô hình ngôn ngữ
+description: Mô hình huấn luyện êm, không báo lỗi, nhưng kết quả tệ hoặc tốt đáng ngờ. Các phép kiểm nhỏ cho ba pha lập trình, huấn luyện, suy luận, và checklist 9 bước.
+quiz:
+  - question: 'Bạn vừa khởi tạo một mô hình ngôn ngữ có từ vựng $V = 32\,000$ token. Chưa huấn luyện bước nào, loss trên batch đầu là $45$. Nên nghĩ gì?'
+    options:
+      - 'Bình thường: mô hình chưa học gì thì loss cao là đúng'
+      - 'Có lỗi từ trước khi huấn luyện, ví dụ khởi tạo lớp cuối hay thang đo của logit sai, vì mốc mong đợi là $\ln V \approx 10.4$'
+      - 'Tốc độ học quá nhỏ, nên tăng $\eta$'
+      - 'Mô hình đang overfit'
+    answer: 1
+    explanation: 'Mô hình chưa học gì nên cho phân phối gần đều, tức loss gần $\ln 32\,000 \approx 10.4$. Con số $45$ nghĩa là mô hình rất tự tin vào các token sai ngay từ đầu, thường do logit quá lớn. Phương án đầu dễ chọn vì loss cao nghe hợp lý, nhưng mô hình chưa học gì có một mốc rõ ràng là $\ln V$, không phải cao bao nhiêu cũng được. Tốc độ học và overfitting chỉ có nghĩa sau khi đã huấn luyện.'
+  - question: 'Bạn huấn luyện 500 bước trên đúng một batch gồm 2 câu, mỗi câu 20 token, bằng AdamW với $\eta = 3 \times 10^{-3}$. Loss đứng ở $2.1$, không giảm nữa. Kết luận nào hợp lý nhất?'
+    options:
+      - 'Cần thêm dữ liệu huấn luyện'
+      - 'Bình thường, vì 2 câu quá ít để học được gì'
+      - 'Còn lỗi trong code hoặc thiết lập (nhãn, mặt nạ, hàm loss, cách cập nhật), cần tìm trước khi chạy trên dữ liệu thật'
+      - 'Nên giảm số bước để tránh overfitting'
+    answer: 2
+    explanation: 'Một mô hình bình thường phải học thuộc được 2 câu gần như hoàn toàn: đây đúng là mục đích của phép thử. Không làm được nghĩa là có thứ đang chặn việc học, như nhãn sai, tham số không được cập nhật, hay loss tính sai. Thêm dữ liệu chỉ làm bài toán khó hơn. Phương án thứ hai đảo ngược ý của phép thử: ít dữ liệu thì học thuộc càng dễ. Sàn do dữ liệu cũng rất thấp: với 2 câu có $2 \times 19 = 38$ vị trí được tính, chỉ chỗ hai câu rẽ nhánh sau một đoạn đầu chung là không đoán chắc được, nên sàn tối đa là $2\ln 2/38 \approx 0.036$. Loss $2.1$ vì vậy chắc chắn là lỗi.'
+  - question: 'Bạn in giá trị mà `clip_grad_norm_(params, max_norm=1.0)` trả về ở mỗi bước. Nó quanh $1$ suốt nghìn bước đầu, rồi bỗng lên $600$, trong khi loss vẫn là số hữu hạn. Điều nào đúng?'
+    options:
+      - 'Gradient đang bùng nổ: $600$ là chuẩn trước khi cắt, một triệu chứng thật; nên xem lại tốc độ học, warmup hay batch vừa gặp'
+      - 'Clip không hoạt động, vì chuẩn gradient phải luôn $\le 1$'
+      - 'Không sao, vì clip đã cắt rồi nên không cần làm gì'
+      - 'Loss sắp về 0'
+    answer: 0
+    explanation: 'Hàm trả về chuẩn của toàn bộ gradient trước khi cắt. Clip vẫn làm đúng việc của nó: giới hạn độ dài gradient đưa vào bộ tối ưu, ở đây $c = 1$ (với SGD, bước cập nhật vì vậy không dài quá $\eta c$). Nhưng chuẩn nhảy gấp mấy trăm lần là triệu chứng: ở thí nghiệm của bài, chuẩn tăng vọt cùng lúc với loss. Clip chỉ chặn tràn số, không chữa được tốc độ học quá lớn, nên không làm gì là phương án nguy hiểm.'
+  - question: 'Mô hình đã fine-tune trả lời tốt khi bạn hỏi từng câu một. Khi gộp 8 câu hỏi dài ngắn khác nhau thành một lô để sinh cho nhanh, các câu ngắn ra đầu ra vô nghĩa, còn câu dài nhất vẫn ổn. Nguyên nhân nhiều khả năng nhất là gì?'
+    options:
+      - 'Nhiệt độ $T$ quá thấp'
+      - 'Quên `add_generation_prompt=True`'
+      - 'Chưa đặt `max_new_tokens`'
+      - 'Đệm bên phải: câu ngắn phải viết tiếp từ sau các token đệm'
+    answer: 3
+    explanation: 'Chỉ câu ngắn hỏng, câu dài nhất (không cần đệm) vẫn ổn: đó là dấu vết của phần đệm. Mô hình chỉ có decoder viết tiếp từ token cuối của chuỗi, nên khi sinh theo lô phải đệm bên trái. Nhiệt độ hay `add_generation_prompt` sai thì mọi câu cùng hỏng, kể cả khi hỏi từng câu. Thiếu `max_new_tokens` làm đầu ra ngắn, không làm nó vô nghĩa.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import shiftMaskCode from '@code/llm/debugging-language-models/shift-mask.vi.py?raw';
+import overfitBatchCode from '@code/llm/debugging-language-models/overfit-batch.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu vì sao lỗi khi huấn luyện mô hình ngôn ngữ thường **im lặng**: code chạy êm, loss vẫn giảm, chỉ có kết quả là sai.
+- Nhận ra các lỗi hay gặp ở ba pha: lập trình (shape, dịch nhãn (label shift), mặt nạ nhân quả (causal mask), token đặc biệt, phần đệm (padding)), huấn luyện (NaN, tốc độ học, warmup, cắt chuẩn gradient (gradient clipping)), suy luận (chat template, đệm sai phía, lặp từ, rò rỉ dữ liệu kiểm tra (test-set contamination)).
+- Cài đặt được các phép kiểm rẻ: kiểm "nhìn trộm tương lai", so loss khởi đầu với $\ln V$, thử overfit một batch nhỏ, bắt NaN bằng `detect_anomaly`.
+- Dùng được một checklist 9 bước trước khi tốn giờ GPU cho một lần huấn luyện dài.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/), mô hình ngôn ngữ được huấn luyện bằng cách làm nhỏ cross-entropy $\mathcal{L} = -\frac{1}{m}\sum_t \ln p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$, và mô hình đoán đều trên $V$ token có $\mathcal{L} = \ln V$. GPT là chồng khối self-attention có **mặt nạ nhân quả**, nên đầu ra ở vị trí $t$ chỉ được dựa vào các token từ $t$ trở về trước.
+:::
+
+## Trực giác
+
+### Lỗi không kêu
+
+Giả sử bạn chép GPT nhỏ ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/) sang một bộ dữ liệu lớn hơn, sửa vài dòng, rồi chạy. Không có thông báo lỗi nào. Loss giảm từ 4.3 xuống 0.02 chỉ sau vài trăm bước. Bạn mừng, rồi cho mô hình viết thử: ra một chuỗi ký tự vô nghĩa.
+
+Chuyện gì đã xảy ra? Có thể bạn đã xóa nhầm dòng mặt nạ nhân quả. Mọi ma trận vẫn đúng kích thước, nên PyTorch không có lý do gì để báo lỗi. Mô hình chỉ học một mẹo: nhìn trộm token kế tiếp rồi chép lại.
+
+Andrej Karpathy gọi hiện tượng này là "neural net training fails silently": phần lớn thời gian, quá trình huấn luyện vẫn chạy, chỉ âm thầm cho kết quả tệ hơn mức đáng ra. Phần mềm thông thường hỏng thì báo lỗi; mạng nơ-ron hỏng vẫn cho ra một con số loss trông hợp lý. Vì vậy bạn phải **chủ động chứng minh từng giả định** bằng một phép kiểm nhỏ, thay vì chờ lỗi hiện ra.
+
+### Khám bệnh theo tầng
+
+Hãy làm như bác sĩ: nghe triệu chứng, rồi khám từng tầng bằng một phép thử rẻ, thay vì đoán mò rồi sửa lung tung. Với mô hình ngôn ngữ, có ba tầng, theo thứ tự bạn làm việc:
+
+1. **Lập trình:** dữ liệu, nhãn, mặt nạ, tokenizer có đúng như bạn nghĩ không?
+2. **Huấn luyện:** loss có bắt đầu đúng mức, có giảm được, có giữ được hữu hạn không?
+3. **Suy luận và đánh giá:** chuỗi đưa vào lúc dùng có giống lúc huấn luyện không, và điểm đánh giá có đáng tin không?
+
+Bài toán của bài này là: **khi mô hình ngôn ngữ cho kết quả tệ, hoặc tốt một cách đáng ngờ, mà không báo lỗi gì, làm sao tìm ra chỗ sai bằng những phép kiểm nhỏ, chạy trong vài giây?**
+
+## Lý thuyết
+
+### Pha 1: lỗi khi lập trình
+
+**Shape đúng chưa chắc đã đúng.** Lỗi khó thấy nhất là các phép đổi hình như `view` hay `reshape` dùng nhầm chỗ của `transpose` hay `permute`. Hai cách cho cùng số phần tử, nên code chạy, nhưng dữ liệu bị xếp sai chỗ, thậm chí trộn thông tin giữa các mẫu trong batch. Hai thói quen giúp bắt lỗi này: in shape ở từng bước, và khi thử thì chọn **các cỡ khác nhau** cho từng trục. Ô PyTorch của bài dùng batch 4, độ dài $L = 16$, số chiều 32, từ vựng 14. Nếu batch, độ dài và số chiều đều là 8, một phép chuyển vị sai vẫn cho đúng shape và lỗi không lộ ra.
+
+**Lệch nhãn.** Logit ở vị trí $t$ phải đoán token $t + 1$. Với một chuỗi $x_1, \dots, x_L$, loss đúng là:
+
+$$
+\mathcal{L} = -\frac{1}{L - 1}\sum_{t=1}^{L-1} \ln p_{\boldsymbol{\theta}}(x_{t+1} \mid x_{\le t})
+$$
+
+Tổng chỉ chạy tới $L - 1$, vì token cuối không còn gì sau nó để đoán. Nếu quên dịch, số hạng thành $\ln p_{\boldsymbol{\theta}}(x_t \mid x_{\le t})$: token cần đoán nằm ngay trong đầu vào. Một mô hình chỉ biết chép lại đầu vào cũng đạt loss gần 0. Phép kiểm: dựng một "mô hình" chép đầu vào rồi tính loss. Nhãn dịch đúng thì loss của nó phải **cao**, vì token kế tiếp thường khác token hiện tại. Ô NumPy ở mục Ví dụ code làm đúng việc này. Cách ghép `logits[:, :-1]` với `labels[:, 1:]` đã có ở bài [Họ GPT và fine-tune đa nhiệm](/vi/llm/gpt-family-finetuning/).
+
+**Mặt nạ nhân quả thiếu hoặc ngược chiều.** Yêu cầu của mặt nạ viết thành một phát biểu kiểm được: **đổi một token ở vị trí $j > t$ thì đầu ra ở vị trí $t$ không được đổi**. Hãy hình dung việc chấm thi: nếu sửa đáp án câu 10 mà điểm câu 3 cũng đổi, thì có người đã nhìn bài câu sau. Phép kiểm vì vậy rất đơn giản: chạy mô hình trên hai chuỗi chỉ khác nhau ở vị trí $t + 1$, rồi so đầu ra ở các vị trí từ $t$ trở về trước. Có mặt nạ đúng, chênh lệch phải **bằng 0**, không chỉ "nhỏ" (trên GPU có thể lệch cỡ sai số làm tròn, nhưng không phải cỡ 0.1). Karpathy gợi ý một cách tương tự bằng gradient: dùng lan truyền ngược (backpropagation) để kiểm rằng đầu ra ở vị trí $t$ chỉ phụ thuộc vào phần đầu vào được phép nhìn. Nhớ thêm quy ước của PyTorch: với `attn_mask` kiểu `bool` của `nn.MultiheadAttention`, `True` là **cấm** nhìn; `F.scaled_dot_product_attention` dùng quy ước ngược lại (`True` là được nhìn). Chi tiết ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+**Token đặc biệt và phần đệm.** Ba lỗi hay gặp, đều không báo gì:
+
+- **Token đặc biệt thiếu hoặc thừa.** Che mất EOS của đáp án làm mô hình không học cách dừng. Lấy chuỗi đã áp chat template rồi tách token lại với tùy chọn mặc định có thể thêm token bắt đầu (BOS) **lần thứ hai**. Cả hai đã có ở bài [Họ GPT và fine-tune đa nhiệm](/vi/llm/gpt-family-finetuning/).
+- **Phần đệm bị tính vào loss.** **Đệm** (padding) là các token thêm vào để mọi chuỗi trong batch dài bằng nhau. Vị trí đệm phải có nhãn $-100$, giá trị `ignore_index` mặc định của `F.cross_entropy`.
+- **Cả batch không còn nhãn nào.** Khi mọi nhãn là $-100$, ví dụ vì prompt dài đẩy đáp án ra ngoài độ dài tối đa, mẫu số của trung bình bằng 0 và loss là `nan`. Tài liệu PyTorch chỉ nói mẫu số là số nhãn không bị bỏ qua; kết quả `nan` là điều ô PyTorch của bài quan sát được.
+
+### Pha 2: lỗi khi huấn luyện
+
+**Kiểm loss khởi đầu.** Mô hình vừa khởi tạo chưa biết gì, nên đáng ra gán xác suất gần $1/V$ cho mọi token. Loss ở bước 0 vì vậy phải gần:
+
+$$
+\mathcal{L}_{\text{init}} \approx -\ln \frac{1}{V} = \ln V
+$$
+
+Với $V = 50\,257$ (từ vựng của GPT-2, 2019), mốc là $\ln V \approx 10.82$. Phép kiểm này miễn phí: chưa tốn một bước huấn luyện nào. "Xấp xỉ" nghĩa là cùng cỡ, không phải bằng đúng. Ở ô PyTorch, $V = 14$, $\ln V = 2.639$, loss khởi đầu 2.951: logit lúc khởi tạo không hoàn toàn bằng nhau, nên loss cao hơn mốc khoảng 12%, vẫn ổn. Loss khởi đầu 30 khi mốc là 10.8 thì không ổn: mô hình đang rất tự tin vào token sai, thường do khởi tạo lớp cuối hay thang đo của logit. Loss khởi đầu thấp hơn hẳn $\ln V$ cũng đáng ngờ, vì mô hình chưa học gì khó đoán tốt hơn đoán đều: hãy kiểm lại cách tính loss, ví dụ có chia cho cả các vị trí bị bỏ qua không.
+
+**Thử overfit một batch nhỏ.** Lấy 2 tới 4 chuỗi, huấn luyện đi huấn luyện lại trên đúng batch đó. Một mô hình đúng phải học thuộc được chúng, nên loss phải xuống rất thấp. Giống thử xe tại chỗ trước khi chạy đường dài: nếu máy không nổ khi đứng yên, chạy xa cũng vô ích. Không học thuộc nổi vài câu nghĩa là còn lỗi ở nhãn, mặt nạ, hàm loss hay bước cập nhật, chưa đến lượt bàn chuyện dữ liệu hay cỡ mô hình. Phép thử chỉ tốn vài giây trên CPU. Lưu ý: loss chỉ cần xuống **gần 0**, không nhất thiết bằng 0 (ô PyTorch giải thích vì sao).
+
+**NaN và inf.** Một khi loss là `nan`, mọi gradient và mọi tham số sau đó cũng thành `nan`. Nguồn hay gặp: chia cho 0, `log(0)`, `sqrt` tại 0 (đạo hàm vô cùng), `exp` của số quá lớn làm tràn số (overflow), batch toàn nhãn $-100$, và tốc độ học quá lớn làm tham số phình tới tràn số. Hai công cụ:
+
+- Kiểm `torch.isfinite(loss)` ở mỗi bước và dừng ngay, kèm số bước. Biết lỗi xuất hiện ở bước nào là đã khoanh được vùng.
+- `torch.autograd.detect_anomaly()` chỉ ra **phép toán** trả về `nan` trong lượt lan truyền ngược, kèm dòng code của lượt tính xuôi đã tạo ra nó. Tài liệu PyTorch cảnh báo chế độ này làm chương trình chậm, nên đừng bật suốt quá trình huấn luyện: dùng `isfinite` để biết bước hỏng, rồi chỉ bật nó khi chạy lại đoạn đó.
+
+**Tốc độ học quá lớn.** Triệu chứng là loss nhảy lên hàng nghìn, hoặc thành `nan` sau vài bước. Một đồng hồ đo nên theo dõi cùng loss là **chuẩn của gradient**: nó tăng vọt cùng lúc với loss, và vẫn đo được khi bạn đã bật clip (số đo ở phần thử thêm của mục Ví dụ code). Cách chữa đầu tiên là giảm tốc độ học $\eta$, thường mỗi lần chia 3 tới 10 (cách chọn $\eta$ ở bài [Gradient Descent](/vi/ml/gradient-descent/)).
+
+**Cắt chuẩn gradient** (gradient clipping). Gọi $\mathbf{g} = \nabla_{\boldsymbol{\theta}}\mathcal{L}$ là gradient của mọi tham số, ghép thành một vectơ, và $c$ là ngưỡng. Trước khi cập nhật, ta co $\mathbf{g}$ lại:
+
+$$
+\mathbf{g} \leftarrow \mathbf{g} \cdot \min\!\left(1, \frac{c}{\lVert\mathbf{g}\rVert_2}\right)
+$$
+
+Nếu $\lVert\mathbf{g}\rVert_2 \le c$, hệ số là 1 và gradient giữ nguyên. Nếu lớn hơn, hệ số là $c / \lVert\mathbf{g}\rVert_2 < 1$, nên chuẩn mới đúng bằng $c$. **Hướng** của gradient không đổi, chỉ độ dài bị giới hạn. [Pascanu và cộng sự (2012)](https://arxiv.org/abs/1211.5063) đề xuất cách này cho gradient bùng nổ (exploding gradient) ở mạng hồi tiếp (RNN). Trong PyTorch, gọi `torch.nn.utils.clip_grad_norm_(model.parameters(), c)` **sau** `loss.backward()` và **trước** `optimizer.step()`. Hàm sửa gradient tại chỗ và trả về chuẩn **trước khi cắt**: in số này ra là có đồng hồ đo vừa nói ở trên.
+
+**Warmup** (khởi động tốc độ học). Thay vì dùng ngay $\eta$ lớn, ta tăng $\eta$ dần từ gần 0 trong những bước đầu, rồi mới giữ nguyên hoặc giảm dần. Transformer gốc (Vaswani và cộng sự, 2017) dùng lịch:
+
+$$
+\eta_t = d_{\text{model}}^{-0.5} \cdot \min\!\left(t^{-0.5},\ t \cdot s^{-1.5}\right)
+$$
+
+với $t$ là số bước, $s$ là số bước warmup (4 000 trong paper), $d_{\text{model}}$ là số chiều của mô hình. So hai nhánh: $t \cdot s^{-1.5} < t^{-0.5}$ khi và chỉ khi $t^{1.5} < s^{1.5}$, tức $t < s$. Vậy trước bước $s$, nhánh tăng tuyến tính nhỏ hơn và được chọn; sau bước $s$, nhánh giảm theo $1/\sqrt{t}$ được chọn. Hai nhánh gặp nhau đúng ở $t = s$, chỗ $\eta$ lớn nhất: với $d_{\text{model}} = 512$ và $s = 4\,000$, đỉnh là $1/\sqrt{512 \cdot 4\,000} \approx 7 \times 10^{-4}$.
+
+Vì sao cần warmup? Xiong và cộng sự (2020) chỉ ra rằng ở Transformer gốc, chuẩn hóa lớp (layer normalization) đặt **sau** phép cộng của kết nối tắt (residual connection), gọi là Post-LN, gradient của các tham số gần đầu ra rất lớn lúc khởi tạo, nên $\eta$ lớn ngay từ đầu làm huấn luyện mất ổn định. Với chuẩn hóa lớp đặt **trước** attention và MLP (Pre-LN, như GPT-2 và GPT nhỏ ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/)), họ báo có thể bỏ warmup. Vậy warmup là thuốc cho một triệu chứng cụ thể, không phải luật bắt buộc.
+
+### Pha 3: lỗi khi suy luận và đánh giá
+
+**Chat template sai.** Mỗi mô hình chat được fine-tune với một định dạng riêng. Tài liệu Transformers đưa ví dụ hai mô hình fine-tune từ cùng một mô hình nền, một bản dùng `[INST]` và `[/INST]`, bản kia dùng `<|user|>` và `<|assistant|>`, và cảnh báo dùng sai định dạng thì chất lượng tụt rõ. Hai lỗi kèm theo: quên `add_generation_prompt=True` khi sinh, nên mô hình có thể viết tiếp lời người dùng; và đưa câu hỏi vào như chuỗi thường, không qua template. Phép kiểm theo lời khuyên của Karpathy: nhìn dữ liệu **ngay trước khi nó vào mô hình**, tức in chuỗi sau khi áp template và đọc bằng mắt.
+
+**Đệm sai phía khi sinh theo lô.** Mô hình chỉ có decoder (decoder-only) viết tiếp từ token cuối của chuỗi. Nếu đệm bên phải, chuỗi ngắn kết thúc bằng một dãy token đệm, và mô hình phải viết tiếp từ đó, việc nó chưa từng học. Tài liệu Transformers có một ví dụ với Mistral-7B (2023): cùng prompt "1, 2, 3", đệm phải cho `1, 2, 33333333333`, đệm trái cho `1, 2, 3, 4, 5, 6,`. Bài không chạy lại ví dụ này. Quy tắc rút ra: **khi sinh theo lô, đệm bên trái** (`padding_side="left"`).
+
+**Đầu ra cụt hoặc lặp.** Hàm `generate()` của Transformers mặc định trả về tối đa 20 token nếu cấu hình của mô hình không nói khác, và với mô hình decoder-only, nó trả về cả prompt. Câu trả lời "cụt lủn" nhiều khi chỉ vì chưa đặt `max_new_tokens`. Lặp từ cũng chưa chắc là mô hình hỏng: `generate()` mặc định giải mã tham lam (greedy decoding), và [Holtzman và cộng sự (2019)](https://arxiv.org/abs/1904.09751) cho thấy các cách giải mã nhắm vào xác suất cao nhất, như beam search, hay sinh văn bản nhạt và lặp vòng. Trước khi nghi mô hình, hãy đổi cách lấy mẫu: nhiệt độ $T$, top-k, top-p (bài [Sử dụng API văn bản](/vi/llm/text-api/)), hoặc đặt `repetition_penalty` lớn hơn 1 như tài liệu Transformers gợi ý.
+
+**Rò rỉ dữ liệu kiểm tra** (test-set contamination). Nếu mẫu kiểm tra lọt vào dữ liệu huấn luyện, điểm đánh giá đo khả năng **nhớ**, không đo khả năng tổng quát. Paper GPT-3 (Brown và cộng sự, 2020) cho rằng với dữ liệu cỡ internet, chuyện này nhiều khả năng xảy ra thường xuyên, nhưng ảnh hưởng có thể không lớn như lo ngại. Nhóm tác giả đánh dấu mẫu kiểm tra có chuỗi khoảng 13-gram (phụ lục C dùng 8–13 từ) trùng với dữ liệu huấn luyện, rồi so điểm trên phần "sạch" với điểm trên toàn bộ. Họ cũng kể một lỗi lọc trùng làm phần trùng chỉ được xóa một phần, và vì chi phí, họ không huấn luyện lại. Bài học: chia tập huấn luyện và kiểm tra **trước** mọi bước tiền xử lý, kiểm lại việc lọc trùng, và nghi ngờ khi loss kiểm tra thấp bất thường. Còn loss huấn luyện giảm mà loss kiểm tra tăng là overfitting (bài [Overfitting và Underfitting](/vi/ml/overfitting-underfitting/)), không phải lỗi code. Cách đánh giá mô hình kỹ hơn ở bài [Đánh giá mô hình và PEFT](/vi/llm/evaluation-peft/).
+
+:::note[Ghi nhớ]
+Lỗi của mô hình ngôn ngữ thường im lặng, nên mỗi giả định cần một phép kiểm. Hai phép kiểm quan trọng nhất của pha lập trình là "mô hình chép đầu vào phải có loss cao" và "đổi token tương lai, đầu ra phía trước không đổi". Của pha huấn luyện là "loss khởi đầu gần $\ln V$" và "overfit được một batch nhỏ". Clip $\mathbf{g} \leftarrow \mathbf{g} \cdot \min(1, c/\lVert\mathbf{g}\rVert_2)$ chặn tràn số, không thay việc chọn $\eta$. Lỗi khi suy luận thường nằm ở chuỗi đầu vào, không ở trọng số.
+:::
+
+### Giới hạn
+
+- **Các phép kiểm chỉ bắt lỗi rõ.** Qua hết checklist chưa chắc mô hình tốt; chúng chỉ loại các lỗi làm mọi thứ phía sau vô nghĩa. Đo chất lượng thật là việc của bài [Đánh giá mô hình và PEFT](/vi/llm/evaluation-peft/).
+- **Số trong bài thuộc một mô hình nhỏ và một seed** (ô PyTorch và phần thử thêm ở mục Ví dụ code). Hình dạng hiện tượng thì chung, con số thì đổi theo mô hình và dữ liệu.
+- **Lỗi chỉ hiện ở quy mô lớn**, như mất ổn định sau hàng chục nghìn bước hay lỗi khi chia mô hình ra nhiều GPU, nằm ngoài phạm vi bài. Cách chia việc huấn luyện ra nhiều GPU có ở bài [Họ LLaMA: RoPE, huấn luyện song song](/vi/llm/llama-family/).
+
+## Minh họa
+
+Bảng dưới gom các lỗi của bài theo triệu chứng. Hãy đọc từ cột đầu: bạn thấy gì, rồi đi sang phải để biết nên nghi gì và kiểm thế nào.
+
+| Triệu chứng | Nguyên nhân hay gặp | Cách kiểm |
+|---|---|---|
+| Loss huấn luyện xuống gần 0 rất nhanh, văn sinh ra vô nghĩa | Quên dịch nhãn, hoặc thiếu mặt nạ nhân quả | Tính loss của một "mô hình" chép đầu vào; đổi token tương lai rồi so đầu ra phía trước |
+| Loss ở bước 0 khác xa $\ln V$ | Khởi tạo lớp cuối hay thang đo logit sai (cao hơn hẳn); loss tính sai (thấp hơn hẳn) | So loss khởi đầu với $\ln V$ trước khi huấn luyện |
+| Loss không giảm, kể cả trên 2–4 câu | Nhãn sai, tham số không được cập nhật, loss tính sai, $\eta$ quá nhỏ hoặc quá lớn | Overfit một batch nhỏ |
+| Loss thành `nan` ngay từ đầu | Batch toàn nhãn $-100$, `log(0)`, chia cho 0 | Đếm số nhãn khác $-100$; `detect_anomaly` |
+| Chuẩn gradient và loss cùng tăng vọt, có khi thành `nan` | Tốc độ học quá lớn, thiếu warmup | Theo dõi giá trị `clip_grad_norm_` trả về; giảm $\eta$, thêm warmup và clip |
+| Loss huấn luyện giảm, loss kiểm tra tăng | Overfitting | Luôn in cả hai loss; thêm dữ liệu, dừng sớm |
+| Loss kiểm tra thấp bất thường | Rò rỉ dữ liệu kiểm tra | Tìm chuỗi trùng giữa hai tập; chia tập trước khi xử lý |
+| Mô hình viết tiếp lời người dùng, hoặc trả lời lạc giọng | Sai chat template, quên `add_generation_prompt=True`, token đặc biệt bị thêm hai lần | In chuỗi sau khi áp template và đọc bằng mắt |
+| Mô hình không biết dừng | EOS của đáp án bị che khi fine-tune | Đếm vị trí được tính loss; xem nhãn ở cuối đáp án |
+| Sinh theo lô thì câu ngắn hỏng, sinh từng câu thì ổn | Đệm bên phải | Đệm trái khi sinh theo lô |
+| Câu trả lời cụt, hoặc lặp một cụm mãi | Chưa đặt `max_new_tokens`; giải mã tham lam | Đặt `max_new_tokens`; thử $T$, top-p, `repetition_penalty` |
+
+Từ bảng trên, đây là thứ tự kiểm gợi ý trước một lần huấn luyện dài:
+
+1. In shape ở mọi bước, dùng cỡ khác nhau cho từng trục.
+2. In chuỗi token thật sau tokenizer và sau chat template, xem bằng mắt BOS và EOS có đúng chỗ.
+3. Kiểm nhãn: logit $t$ ghép nhãn $t + 1$; phần đệm là $-100$; EOS của đáp án không bị che; mỗi batch còn ít nhất một nhãn khác $-100$.
+4. Kiểm mặt nạ: đổi token tương lai, đầu ra ở các vị trí trước phải giữ nguyên.
+5. So loss khởi đầu với $\ln V$.
+6. Overfit một batch nhỏ.
+7. Theo dõi loss và chuẩn gradient mỗi bước, dừng ngay khi không hữu hạn; dùng clip và warmup khi cần.
+8. Chia tập kiểm tra trước mọi bước xử lý, và luôn nhìn loss kiểm tra.
+9. Khi suy luận: đúng template, `add_generation_prompt=True`, đệm trái khi sinh theo lô, đặt `max_new_tokens`, thử vài cách lấy mẫu.
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026: ô NumPy với Python 3.14 và NumPy 2.4 (bản có trong Pyodide), ô PyTorch với Python 3.14 và PyTorch 2.14 trên CPU. Ô NumPy chạy ngay trên trang. Ô PyTorch chạy trên máy bạn. Hai ô chạy độc lập.
+
+### Kiểm dịch nhãn và mặt nạ nhân quả
+
+Ô dưới đây làm hai phép kiểm của Pha 1 trên chuỗi "trăm năm trong cõi người ta", mỗi ký tự một token. Phần đầu dựng một "mô hình" gian lận: logit bằng 20 ở đúng token đang đọc, bằng 0 ở mọi token khác, rồi tính loss khi không dịch nhãn và khi dịch đúng. Phần sau dựng một đầu attention với trọng số ngẫu nhiên, đổi token ở chỉ số `t + 1 = 10`, rồi đo chênh lệch lớn nhất của đầu ra ở các chỉ số từ 0 tới `t = 9`, khi có và khi không có mặt nạ.
+
+<PythonRunner code={shiftMaskCode} title="Kiểm dịch nhãn và kiểm nhìn trộm tương lai" />
+
+Đọc kết quả:
+
+- **`no shift: 0.0000`**: không dịch nhãn, mô hình chép đầu vào được điểm tuyệt đối mà chẳng học gì. Đây là kiểu loss "đẹp" phải làm bạn nghi ngờ.
+- **`shifted: 20.0000`**: dịch đúng, mô hình chép bị phạt nặng ở mọi vị trí, vì trong chuỗi này không có hai ký tự liền nhau giống nhau. Con số 20 chỉ là hệ quả của logit đỉnh 20 mà ô chọn; điều đáng nhớ là loss **cao**, không phải giá trị 20.
+- **`causal=True: ... 0.00e+00`**: có mặt nạ, đổi token tương lai không làm đổi đầu ra phía trước, đúng 0.
+- **`causal=False: ... 1.04e-01`**: bỏ mặt nạ, đầu ra ở các vị trí trước đổi theo. Độ lớn 0.104 thuộc seed của ô; chỉ cần nó khác 0 là đủ kết luận có rò rỉ.
+
+Với mô hình thật, thay hàm `attend` bằng mô hình của bạn và so logit.
+
+### Overfit một batch và bắt NaN
+
+File dưới đây dựng một mô hình ngôn ngữ rất nhỏ: embedding token và vị trí, một lớp `nn.MultiheadAttention` 4 đầu có mặt nạ `bool`, rồi một lớp tuyến tính ra $V = 14$ logit. Dữ liệu là 4 chuỗi **ngẫu nhiên** dài 16. Không có quy luật nào để học, nên mô hình chỉ có thể học thuộc, đúng điều phép thử cần. File in loss khởi đầu cạnh $\ln V$, huấn luyện 201 bước bằng AdamW trên đúng batch đó, có kiểm `isfinite` và clip với $c = 1$. Cuối file là hai lỗi cố ý: một batch toàn nhãn $-100$, và một phép `sqrt` tại 0 bên trong `detect_anomaly`.
+
+<LocalCode
+  code={overfitBatchCode}
+  title="Loss khởi đầu, overfit một batch, bắt NaN"
+  packages={['torch']}
+  hardware="CPU là đủ, không cần GPU. Khoảng 10 giây trên máy phát triển, có thể lâu hơn trên máy chậm"
+  sampleVaries={false}
+>
+
+```text
+first two tokens: [[4, 3], [4, 2], [11, 12], [4, 5]]
+ln V = 2.639  start loss = 2.951
+step   0  loss 2.9513  grad norm 1.12
+step  50  loss 0.0691  grad norm 0.05
+step 100  loss 0.0569  grad norm 0.01
+step 150  loss 0.0561  grad norm 0.00
+step 200  loss 0.0557  grad norm 0.00
+all labels -100: tensor(nan)
+anomaly: Function 'SqrtBackward0' returned nan values in its 0th output.
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Loss khởi đầu 2.951**, cạnh mốc $\ln V = 2.639$: cùng cỡ, như mục Lý thuyết đã nói.
+- **Overfit:** loss từ 2.951 xuống dưới 0.07 sau 50 bước, rồi đứng ở khoảng 0.056. Mô hình đã học thuộc batch: phần mặt nạ, nhãn và vòng lặp không có lỗi chặn việc học.
+- **Vì sao không về 0?** Dòng đầu cho thấy ba trong bốn chuỗi cùng bắt đầu bằng token 4, rồi rẽ sang 3, 2 và 5. Ở vị trí đầu tiên, mô hình chỉ thấy "4", nên không mô hình nào phân biệt được ba chuỗi đó. Ba vị trí đó nhận cùng một phân phối, nên tổng $-(\ln p_3 + \ln p_2 + \ln p_5)$ nhỏ nhất khi $p_3 = p_2 = p_5 = 1/3$, và bằng $3\ln 3$. Batch có $4 \times 15 = 60$ vị trí được tính, nên loss không thể thấp hơn $3\ln 3 / 60 \approx 0.055$. Vậy 0.056 là gần sát mức sàn: đây là giới hạn của dữ liệu, không phải lỗi.
+- **`grad norm`** là chuẩn trước khi cắt mà `clip_grad_norm_` trả về: 1.12 ở bước đầu, về gần 0 khi mô hình đã thuộc batch.
+- **`all labels -100: tensor(nan)`**: không còn nhãn nào để tính trung bình.
+- **`anomaly`**: `detect_anomaly` chỉ đúng phép `SqrtBackward0`. Đây là lỗi cố ý: đạo hàm của $\sqrt{x}$ tại 0 là vô cùng, nhân với gradient 0 phía sau cho `nan`. PyTorch còn in ra stderr traceback của lượt tính xuôi, trỏ đúng dòng `(torch.sqrt(x) * 0).sum().backward()`. Ở mô hình thật, dòng đó chỉ ra lớp sinh `nan`.
+
+**Thử thêm: tốc độ học quá lớn.** Ở lần chạy thử của bài, đổi bộ tối ưu thành `torch.optim.SGD(model.parameters(), lr=10)`, đổi ngưỡng clip `1.0` thành `float("inf")` (không cắt, nhưng vẫn đo chuẩn) và in ở mọi bước: chuẩn gradient tăng vọt cùng lúc với loss. Bước 1: loss 4.75, chuẩn 4.30. Bước 2: loss 389, chuẩn 575. Bước 3: loss khoảng $5.9 \times 10^{10}$, chuẩn khoảng $1.1 \times 10^{11}$. Rồi dòng kiểm `isfinite` dừng vòng lặp với `loss = nan at step 4`. Giữ ngưỡng `1.0` thì không còn `nan`, nhưng từ bước 50 tới bước 200, loss vẫn dao động từ khoảng 12 tới hơn 200 và không lần nào xuống dưới mức ban đầu 2.95: không học được gì. Trên máy khác, các con số có thể lệch, nhưng hình dạng thì như nhau.
+
+## Lỗi hay gặp
+
+:::caution[Tưởng không báo lỗi là đúng, loss giảm là tốt]
+Thiếu mặt nạ, quên dịch nhãn, đệm sai phía đều không làm đổi shape, nên code chạy êm. Loss giảm nhanh bất thường còn là dấu hiệu xấu: ở ô NumPy, mô hình chép đầu vào đạt loss 0 khi nhãn không được dịch. Hãy chạy các phép kiểm của checklist trước khi tin một đường loss đẹp.
+:::
+
+:::caution[Tưởng clip thay được việc chọn tốc độ học]
+`clip_grad_norm_` chỉ giới hạn độ dài gradient đưa vào bộ tối ưu (với SGD, bước cập nhật vì vậy không dài quá $\eta c$). Với $\eta$ quá lớn, nó chặn được `nan` nhưng mô hình vẫn không học, như phần thử thêm của ô PyTorch. Một hiểu nhầm khác là tưởng giá trị hàm trả về là chuẩn sau khi cắt, rồi kết luận clip "không chạy" khi thấy số lớn hơn ngưỡng. Đó là chuẩn trước khi cắt, và chính vì vậy nó là đồng hồ đo hữu ích.
+:::
+
+:::caution[Đổ lỗi cho mô hình khi chuỗi đầu vào sai]
+Câu trả lời lạc đề, lặp, hay cụt khi dùng mô hình đã huấn luyện thường do chuỗi đưa vào chứ không do trọng số: sai template, đệm phải, thiếu `max_new_tokens`, giải mã tham lam. Với mô hình gọi qua API, nhà cung cấp đã áp template giúp bạn, nhưng `temperature` và `top_p` vẫn do bạn đặt. In chuỗi cuối cùng ra xem trước khi sửa gì khác.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Lỗi khi huấn luyện mô hình ngôn ngữ thường im lặng. Debug là chứng minh từng giả định bằng một phép kiểm nhỏ, theo ba pha: lập trình, huấn luyện, suy luận.
+- Pha lập trình: mô hình chép đầu vào phải có loss cao khi nhãn đã dịch; đổi token tương lai thì đầu ra phía trước phải giữ nguyên, đúng bằng 0; phần đệm có nhãn $-100$, EOS của đáp án không bị che.
+- Pha huấn luyện: loss khởi đầu gần $\ln V$; mô hình phải overfit được một batch nhỏ; dừng ngay khi loss không hữu hạn; theo dõi chuẩn gradient; clip $\mathbf{g} \leftarrow \mathbf{g} \cdot \min(1, c/\lVert\mathbf{g}\rVert_2)$ chỉ chặn tràn số, không thay việc chọn $\eta$; warmup giúp nhất là với Post-LN.
+- Pha suy luận: đúng chat template và `add_generation_prompt=True`, đệm trái khi sinh theo lô, đặt `max_new_tokens`, đổi cách lấy mẫu trước khi trách mô hình, và chia tập kiểm tra trước mọi bước xử lý để tránh rò rỉ.
+
+**Đọc thêm:**
+
+- Karpathy, A. (2019). [*A Recipe for Training Neural Networks*](https://karpathy.github.io/2019/04/25/recipe/), blog cá nhân, mục "Neural net training fails silently" và bước 2. Gốc của các ý loss khởi đầu, overfit một batch, nhìn dữ liệu ngay trước khi vào mô hình, và dùng gradient để kiểm phụ thuộc.
+- PyTorch. [*Automatic differentiation package*](https://docs.pytorch.org/docs/2.14/autograd.html), mục anomaly detection, và [*clip_grad_norm_*](https://docs.pytorch.org/docs/2.14/generated/torch.nn.utils.clip_grad_norm_.html) (PyTorch 2.14), tài liệu chính thức, đọc tháng 10/2026. `detect_anomaly` và giá trị trả về của `clip_grad_norm_`.
+- Hugging Face. [*Text generation*](https://huggingface.co/docs/transformers/v5.20.2/en/llm_tutorial) và [*Chat templates*](https://huggingface.co/docs/transformers/v5.20.2/en/chat_templating) (Transformers 5.20.2), tài liệu chính thức, đọc tháng 10/2026. Mục "Pitfalls": độ dài đầu ra, giải mã, phía đệm, định dạng prompt.
+- Xiong, R., Yang, Y., He, D., và cộng sự (2020). [*On Layer Normalization in the Transformer Architecture*](https://arxiv.org/abs/2002.04745), arXiv:2002.04745, ICML 2020. Vì sao Transformer Post-LN cần warmup, còn Pre-LN có thể bỏ.
+- Brown, T. B., Mann, B., Ryder, N., và cộng sự (2020). [*Language Models are Few-Shot Learners*](https://arxiv.org/abs/2005.14165), arXiv:2005.14165, mục 4. Cách đo rò rỉ dữ liệu kiểm tra bằng 13-gram trùng, và lỗi lọc trùng của chính nhóm tác giả.
+
+<LessonProgress />

@@ -129,6 +129,6 @@ M2 có một bước **chờ bạn duyệt**. Mọi bài sau đều theo templat
 
 ## 7. Cần bạn quyết định
 
-Các quyết định đã chốt (số 1–58, theo đợt có ngày) nằm ở [decisions.md](decisions.md). Số giữ nguyên, nên "quyết định N" trong tài liệu này và ở nơi khác tra ở đó.
+Các quyết định đã chốt (số 1–62, theo đợt có ngày) nằm ở [decisions.md](decisions.md). Số giữ nguyên, nên "quyết định N" trong tài liệu này và ở nơi khác tra ở đó.
 
 Còn mở: tên miền (trước M4).

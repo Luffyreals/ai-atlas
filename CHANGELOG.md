@@ -6,6 +6,14 @@ Mọi thay đổi đáng chú ý của AI Atlas được ghi ở đây. Mỗi m�
 
 ### Thêm mới
 
+- Phần LLM, Phần 5c, bản tiếng Việt, nhánh `llm-lessons` (quyết định 53, 54, 59–61 trong [docs/mvp.md](docs/mvp.md), [báo cáo](docs/progress/2026-10-24-llm.md), [thiết kế](docs/architecture/llm-lessons.md)). Chưa commit, bản en làm sau:
+  - 23 bài trong `src/content/docs/vi/llm/`, 49 file code minh họa `.vi.py` và 49 `.en.py` trong `src/code/llm/`. Mức kiểm chứng theo từng file `.vi.py`: 35 chạy thật, 14 chạy khô (file gọi API; chưa có `.env.llm` nên chưa có "Kết quả mẫu").
+  - `LocalCode`: hiển thị code chạy trên máy người đọc, kèm nhãn và dòng yêu cầu.
+  - VIZ `SamplingViz` (temperature, top-k, top-p) cho bài `text-api` và `build-first-llm`.
+  - 9 hình SVG tĩnh (pipeline RAG, vòng lặp agent, ba bước RLHF, LoRA, MoE, encoder–decoder, multimodal, các kiểu song song, image và container) và phần mở rộng kit hình (`src/lib/figures/layout.ts`, `FigMath`, `FigNode`, `FigArrow`, `FigText`).
+  - Khoảng 280 thuật ngữ mới trong `docs/glossary.md`.
+  - `scripts/requirements-llm.txt`, `scripts/requirements-llm-llamaindex.txt` cho môi trường kiểm chứng.
+  - Test mới: `SamplingViz`, kit hình, kiểm cặp code LLM; e2e thêm `lessons-meta.spec.ts`, `viz-meta.spec.ts`.
 - Spec bản MVP: [docs/mvp.md](docs/mvp.md).
 - README tiếng Anh: [README.en.md](README.en.md).
 - Mục lục tài liệu: [docs/README.md](docs/README.md), quy ước cho `docs/research/` và `docs/progress/`.
@@ -63,6 +71,7 @@ Mọi thay đổi đáng chú ý của AI Atlas được ghi ở đây. Mỗi m�
 
 ### Thay đổi
 
+- CI e2e (phần LLM): job `verify` build một lần và tải `dist/` lên artifact; e2e chạy 2 shard (`E2E (Playwright, shard 1/2)` và `2/2`) với `E2E_PREBUILT=1`, artifact lỗi `playwright-report-1`, `-2`. Test chỉ đọc DOM chuyển sang `*-meta.spec.ts` và chỉ chạy ở project `desktop`. Nếu có branch protection, phải đổi tên check bắt buộc.
 - Tái cấu trúc tài liệu và test (quyết định 58), chỉ dời và tách file:
   - `viz.md` tách thành [docs/architecture/viz/](docs/architecture/viz/README.md);
   - nhật ký quyết định chuyển sang [docs/decisions.md](docs/decisions.md);

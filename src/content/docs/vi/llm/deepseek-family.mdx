@@ -1,0 +1,382 @@
+---
+title: Họ DeepSeek
+description: 'DeepSeek-V3 có 671 tỉ tham số mà mỗi token chỉ dùng 37 tỉ. MoE có expert dùng chung, MLA nén KV cache, cân bằng tải bằng bias, rồi GRPO và R1.'
+quiz:
+  - question: 'Một lớp MoE có 8 expert, mỗi token chọn 2. Bạn chia mỗi expert thành 4 expert nhỏ (chiều ẩn còn một phần tư) và cho mỗi token chọn 8. Điều gì thay đổi?'
+    options:
+      - 'Tính toán mỗi token tăng 4 lần, vì mỗi token chạy 8 expert thay vì 2'
+      - 'Tổng tham số và tính toán mỗi token giữ nguyên; số cách ghép expert tăng từ $\binom{8}{2} = 28$ lên $\binom{32}{8} = 10\,518\,300$'
+      - 'Tổng tham số tăng 4 lần, vì số expert tăng 4 lần'
+      - 'Không có gì đổi, vì 8 expert nhỏ ghép lại đúng bằng 2 expert lớn cũ'
+    answer: 1
+    explanation: 'Mỗi expert nhỏ chỉ bằng một phần tư expert cũ, nên 32 expert nhỏ có cùng tổng tham số với 8 expert cũ, và chạy 8 expert nhỏ tốn như chạy 2 expert cũ. Phương án thứ nhất quên rằng expert đã nhỏ đi. Thứ thay đổi là độ linh hoạt: một token ghép được từ nhiều mảnh chuyên môn hẹp hơn, chứ không bắt buộc là 8 mảnh của đúng 2 expert cũ.'
+  - question: 'Mô hình A dùng GQA với 8 đầu K/V, mỗi đầu $d = 128$ chiều. Mô hình B dùng MLA với $d_c = 512$ và $d^R = 64$. Hai mô hình cùng số lớp và cùng lưu 2 byte mỗi số. KV cache mỗi token của B so với A thế nào?'
+    options:
+      - 'B lớn hơn, vì $d_c = 512$ lớn hơn $d = 128$'
+      - 'Bằng nhau, vì cùng số lớp và cùng số byte mỗi số'
+      - 'B nhỏ hơn khoảng 3.6 lần: mỗi lớp 576 số so với 2 048 số'
+      - 'B nhỏ hơn 93.3%, đúng như paper DeepSeek-V2 báo cáo'
+    answer: 2
+    explanation: 'Mỗi lớp, A lưu K và V của 8 đầu: $2 \cdot 8 \cdot 128 = 2\,048$ số. B chỉ lưu vectơ nén và phần khóa mang RoPE: $512 + 64 = 576$ số. Tỉ lệ $2\,048 / 576 \approx 3.6$. So $d_c$ với $d$ là so một vectơ với một đầu, quên rằng GQA lưu nhiều đầu, mỗi đầu cả K lẫn V. Con số 93.3% là so DeepSeek-V2 với DeepSeek 67B, một mô hình khác, không áp cho mọi cặp mô hình.'
+  - question: 'Trong DeepSeek-V3, expert 5 bị quá tải nên bias $b_5$ giảm đi $\gamma$. Giả sử điểm khớp $s_i$ của token chưa đổi. Một token ở bước sau vẫn chọn đúng hai expert như trước, trong đó có expert 5. Trọng số cổng $g_5$ của token này thế nào?'
+    options:
+      - 'Giữ nguyên, vì cổng tính từ điểm gốc $s_5$; bias chỉ quyết định expert nào được chọn'
+      - 'Giảm đi đúng $\gamma$, vì bias đã giảm $\gamma$'
+      - 'Bằng 0, vì expert quá tải bị khóa tới hết bước sau'
+      - 'Tăng lên, để bù cho các token đã chuyển sang expert khác'
+    answer: 0
+    explanation: 'Bias chỉ cộng vào điểm khi xếp hạng để chọn top-$K$. Trọng số cổng là $s_i$ gốc, chuẩn hóa trên các expert được chọn. Cùng tập expert thì cùng $s_i$, nên $g_5$ không đổi. Phương án thứ hai là nhầm bias cân bằng tải với một số hạng nằm trong đầu ra. Bias có làm giảm số token chọn expert 5, nhưng không đổi cách tính đầu ra của token vẫn chọn nó.'
+  - question: 'Bạn huấn luyện bằng GRPO với $G = 8$. Một câu hỏi quá dễ: cả 8 câu trả lời đều đúng và được thưởng 1. Câu hỏi này đóng góp gì vào lần cập nhật?'
+    options:
+      - 'Rất nhiều, vì cả 8 câu trả lời đều được thưởng nên được củng cố mạnh'
+      - 'Kéo mô hình đi xuống, vì advantage của cả nhóm âm'
+      - 'Chương trình báo lỗi chia cho 0, nên phải bỏ câu hỏi'
+      - 'Gần như không gì: mọi advantage bằng 0, chỉ còn số hạng KL tác động'
+    answer: 3
+    explanation: 'Advantage là phần thưởng trừ trung bình nhóm, chia độ lệch chuẩn nhóm. Cả nhóm cùng điểm thì tử số bằng 0, nên mọi $A_i = 0$ và phần có kẹp trong mục tiêu bằng 0. GRPO chỉ học từ sự khác nhau trong nhóm, nên phần thưởng cao mà ai cũng như ai thì không thành tín hiệu. Mẫu số cũng bằng 0, nên cài đặt thường cộng một số rất nhỏ để tránh lỗi, như ô code của bài.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import MoeFigure from '@components/figures/MoeFigure.astro';
+import moeRoutingCode from '@code/llm/deepseek-family/moe-routing.vi.py?raw';
+import grpoAdvantageCode from '@code/llm/deepseek-family/grpo-advantage.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu **mixture of experts** (MoE, hỗn hợp chuyên gia): **bộ định tuyến** (router) chọn vài **expert** cho mỗi token, và hai ý của DeepSeekMoE là **chia nhỏ expert** (fine-grained expert segmentation) và **expert dùng chung** (shared expert). Phân biệt được tổng tham số với tham số được kích hoạt.
+- Hiểu **MLA** (multi-head latent attention) giảm KV cache bằng cách **nén**, khác attention truy vấn theo nhóm (GQA) giảm bằng cách **dùng chung**, và tính được KV cache mỗi token.
+- Nắm ba cách DeepSeek-V3 làm huấn luyện rẻ hơn: **cân bằng tải** (load balancing) không cần loss phụ, **dự đoán nhiều token** (multi-token prediction, MTP), FP8; và đọc đúng con số "5.576 triệu USD".
+- Tự dẫn được **advantage** của **GRPO** (group relative policy optimization) và hiểu vì sao DeepSeek-R1-Zero học được cách suy luận chỉ từ **phần thưởng theo luật** (rule-based reward).
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Ở bài [Họ LLaMA](/vi/llm/llama-family/), mỗi khối Transformer có một attention và một **mạng truyền thẳng** (feed-forward network, FFN), và GQA thu nhỏ KV cache bằng cách cho nhiều đầu truy vấn dùng chung một bộ K, V. Phần GRPO cuối bài dùng PPO, phạt KL và mô hình tham chiếu $\pi_{\text{ref}}$ của bài [RLHF](/vi/llm/rlhf/).
+:::
+
+## Trực giác
+
+### Bệnh viện có rất nhiều bác sĩ
+
+Tháng 12/2024, DeepSeek công bố báo cáo kỹ thuật của DeepSeek-V3: 671 tỉ tham số, nhưng mỗi token chỉ đi qua 37 tỉ. Làm sao một mô hình "to" mà mỗi lần tính lại "nhỏ"?
+
+Hình dung một bệnh viện. Không bệnh nhân nào khám qua mọi khoa: lễ tân chuyển bạn tới vài bác sĩ hợp nhất. Bệnh viện có hàng trăm bác sĩ, nhưng mỗi ca chỉ tốn công của vài người.
+
+Trong MoE, bệnh nhân là token, lễ tân là router, bác sĩ là expert. DeepSeek thêm hai ý: **nhiều chuyên khoa hẹp** thay vì vài khoa lớn, để ca khám ghép được linh hoạt hơn; và **một khoa tổng quát ai cũng qua**, để các chuyên khoa khỏi tự học lại điều cơ bản.
+
+### Bốn điểm nghẽn
+
+DeepSeek giữ bộ khung Transformer của bài Họ LLaMA. Mỗi paper nhắm vào một điểm nghẽn:
+
+| Điểm nghẽn | Cách của DeepSeek | Paper |
+|---|---|---|
+| Tính toán mỗi token | MoE có chia nhỏ expert và expert dùng chung | DeepSeekMoE, V2, V3 |
+| Bộ nhớ KV cache khi sinh văn bản | MLA | V2, V3 |
+| Chi phí huấn luyện | Cân bằng tải bằng bias, MTP, FP8 | V3 |
+| Dạy mô hình suy luận | GRPO, phần thưởng theo luật | DeepSeekMath, R1 |
+
+Phần lớn các ý này có tiền thân mà chính các paper dẫn nguồn: lớp MoE có router có từ Shazeer và cộng sự (2017), GRPO là biến thể của PPO. Đóng góp của DeepSeek là kết hợp, cải tiến và chạy chúng ở quy mô lớn.
+
+Bài toán của bài này là: **làm sao để mô hình có rất nhiều tham số mà mỗi token chỉ tốn một phần nhỏ tính toán, KV cache nhỏ, huấn luyện rẻ, và làm sao dạy nó suy luận khi chỉ biết đáp án cuối đúng hay sai?**
+
+## Lý thuyết
+
+### MoE: mỗi token chỉ chạy vài expert
+
+Trong khối Transformer thường, sau attention, mỗi token có vectơ $\mathbf{u}$ đi qua một FFN, cộng kết nối tắt: $\mathbf{h} = \mathbf{u} + \mathrm{FFN}(\mathbf{u})$. Lớp MoE thay FFN đó bằng nhiều FFN, mỗi FFN là một expert. Theo cách viết của DeepSeek-V3, có $N_s$ expert dùng chung và $N_r$ expert định tuyến:
+
+$$
+\mathbf{h} = \mathbf{u} + \sum_{i=1}^{N_s} \mathrm{FFN}^{(s)}_i(\mathbf{u}) + \sum_{i=1}^{N_r} g_i\, \mathrm{FFN}^{(r)}_i(\mathbf{u})
+$$
+
+Đọc từng số hạng: $\mathbf{u}$ là kết nối tắt; tổng thứ nhất là các expert dùng chung, **luôn chạy**, không qua router; tổng thứ hai là các expert định tuyến, mỗi expert nhân với **trọng số cổng** (gate) $g_i$.
+
+**Router chấm điểm.** Mỗi expert định tuyến có một vectơ học được $\mathbf{e}_i$, như "hồ sơ chuyên môn" của nó. **Điểm khớp** (affinity) giữa token và expert $i$ là $s_i = \mathrm{softmax}_i(\mathbf{u}^\top \mathbf{e}_i)$ ở DeepSeekMoE và V2: tích vô hướng lớn thì điểm cao.
+
+**Chỉ giữ top-$K_r$.** Cổng chỉ khác 0 ở $K_r$ expert có điểm cao nhất:
+
+$$
+g_i =
+\begin{cases}
+s_i, & s_i \in \mathrm{TopK}\big(\{s_j \mid 1 \le j \le N_r\},\, K_r\big) \\
+0, & \text{otherwise}
+\end{cases}
+$$
+
+$\mathrm{TopK}(\cdot, K_r)$ là tập $K_r$ điểm lớn nhất. Expert có $g_i = 0$ không cần chạy, nên mỗi token chỉ chạy $N_s + K_r$ FFN, dù lớp có $N_s + N_r$ FFN. Số tham số tăng theo $N_r$, còn tính toán mỗi token chỉ tăng theo $K_r$.
+
+Với DeepSeek-V3: $N_s = 1$, $N_r = 256$, $K_r = 8$, tức mỗi token chạy 9 trong 257 expert của mỗi lớp MoE. Cả mô hình có 671 tỉ tham số, mỗi token kích hoạt 37 tỉ, khoảng 5.5% (tự tính). Tỉ lệ này lớn hơn 9/257 chủ yếu vì attention, embedding và ba lớp đầu (không phải MoE) thì token nào cũng dùng (giải thích và tự tính của bài). Nhưng **cả 671 tỉ** tham số vẫn phải nằm trong bộ nhớ, vì token nào cũng có thể chọn bất kỳ expert nào.
+
+**Chia nhỏ expert.** MoE kiểu GShard (Lepikhin và cộng sự, 2020) chọn 2 trong vài expert cỡ FFN thường. DeepSeekMoE (Dai và cộng sự, 2024) cho rằng khi đó mỗi expert phải ôm nhiều loại kiến thức lẫn lộn. Cách sửa: chia mỗi expert thành 4 expert nhỏ (chiều ẩn còn một phần tư) và chọn gấp 4 số expert. Tổng tham số và tính toán **không đổi**, nhưng số cách ghép tăng vọt: 16 expert chọn 2 có $\binom{16}{2} = 120$ cách; 64 expert chọn 8 có $\binom{64}{8} = 4\,426\,165\,368$ cách (ví dụ của paper).
+
+**Expert dùng chung.** Token nào cũng cần một ít kiến thức chung. Không có chỗ riêng cho nó thì nhiều expert cùng học lại phần đó: lãng phí tham số. DeepSeekMoE tách $N_s$ expert cho mọi token đi qua, và bớt số expert định tuyến được chọn đi chừng ấy để tính toán như cũ.
+
+Paper báo cáo bản DeepSeekMoE 16B ngang LLaMA2 7B với khoảng 40% tính toán.
+
+### Cân bằng tải: từ loss phụ tới bias
+
+Router tự học dễ rơi vào **sụp định tuyến** (routing collapse): vài expert được chọn mãi, nên học tốt hơn, nên lại càng được chọn, còn các expert khác gần như không được huấn luyện. Khi expert nằm trên nhiều GPU, GPU giữ expert đông khách thành nút thắt.
+
+**Cách cũ: loss phụ.** DeepSeekMoE và V2 cộng thêm vào hàm mất mát một **loss cân bằng** (auxiliary loss, loss phụ). Nó lớn khi một expert vừa nhận nhiều token vừa được router chuộng, nên giảm nó kéo tải về đều. Vấn đề, theo báo cáo V3: loss phụ quá lớn làm hại chất lượng mô hình. [Wang và cộng sự (2024)](https://arxiv.org/abs/2408.15664), paper gốc của cách làm V3 dùng, giải thích rằng loss phụ lớn đưa vào gradient gây nhiễu cho việc dự đoán.
+
+**Cách của V3: một bias cho mỗi expert.** Mỗi expert có một số $b_i$, chỉ cộng vào điểm **khi chọn** top-$K_r$:
+
+$$
+g'_i =
+\begin{cases}
+s_i, & s_i + b_i \in \mathrm{TopK}\big(\{s_j + b_j \mid 1 \le j \le N_r\},\, K_r\big) \\
+0, & \text{otherwise}
+\end{cases}
+\qquad
+g_i = \frac{g'_i}{\sum_{j=1}^{N_r} g'_j}
+$$
+
+Ba điều cần đọc ra:
+
+1. **Bias chỉ đổi expert nào được chọn.** Trọng số cổng $g'_i$ vẫn là điểm gốc $s_i$. $b_i$ ở đây là một số dùng để xếp hạng, không phải hệ số tự do $b$ của một lớp tuyến tính.
+2. **Cổng được chuẩn hóa** trên các expert đã chọn, nên $K_r$ cổng cộng lại bằng 1. V3 cũng đổi điểm khớp từ softmax sang sigmoid: $s_i = \sigma(\mathbf{u}^\top \mathbf{e}_i)$.
+3. **$b_i$ không học bằng gradient.** Cuối mỗi bước huấn luyện, nhìn tải trên cả lô: expert quá tải thì giảm $b_i$ đi $\gamma$, expert thiếu tải thì tăng $b_i$ thêm $\gamma$. $\gamma$ gọi là tốc độ cập nhật bias (V3 dùng $0.001$).
+
+Như biển chỉ dẫn ở quầy: quầy đông thì hạ biển xuống, quầy vắng thì nâng lên; chỉ đổi người nào vào quầy nào. Hàm mất mát không có số hạng mới, nên gradient chỉ phục vụ việc dự đoán.
+
+V3 vẫn giữ một loss cân bằng **theo từng chuỗi** với hệ số cực nhỏ, $0.0001$, và giới hạn mỗi token chỉ gửi tới tối đa 4 node (máy) để giảm truyền thông.
+
+### MLA: nén KV cache
+
+Bài Họ LLaMA đã tính: KV cache mỗi token là $2 \cdot N_{\text{layer}} \cdot H_{\text{kv}} \cdot d \cdot s$ byte, với $s$ là số byte mỗi số (khác điểm khớp $s_i$ ở trên). GQA giảm $H_{\text{kv}}$, tức cho các đầu **dùng chung** K, V. MLA của DeepSeek-V2 đi đường khác: **nén**.
+
+Gọi $\mathbf{h}_t \in \mathbb{R}^{D}$ là đầu vào attention của token thứ $t$ (khác $\mathbf{h}$ là đầu ra lớp MoE ở trên), với $H$ đầu, mỗi đầu $d$ chiều. MLA chiếu $\mathbf{h}_t$ xuống một **vectơ ẩn** (latent vector) $\mathbf{c}_t$ có $d_c$ chiều, rồi từ đó dựng lại khóa và giá trị của mọi đầu:
+
+$$
+\mathbf{c}_t = \mathbf{W}^{DKV}\mathbf{h}_t, \qquad
+\mathbf{k}_t = \mathbf{W}^{UK}\mathbf{c}_t, \qquad
+\mathbf{v}_t = \mathbf{W}^{UV}\mathbf{c}_t
+$$
+
+$\mathbf{W}^{DKV} \in \mathbb{R}^{d_c \times D}$ là ma trận nén ("D" là down), $\mathbf{W}^{UK}, \mathbf{W}^{UV} \in \mathbb{R}^{Hd \times d_c}$ là hai ma trận mở rộng ("U" là up), và $d_c$ nhỏ hơn nhiều so với $Hd$. Khi sinh văn bản, **chỉ cần lưu $\mathbf{c}_t$**. Nhờ tính kết hợp của phép nhân ma trận, có thể gộp $\mathbf{W}^{UK}$ vào ma trận truy vấn và $\mathbf{W}^{UV}$ vào ma trận đầu ra, nên không cần dựng lại K, V đầy đủ.
+
+**Vướng RoPE.** RoPE xoay khóa theo vị trí. Ma trận xoay đứng giữa truy vấn và $\mathbf{W}^{UK}$ thì không gộp $\mathbf{W}^{UK}$ đi được nữa, vì nhân ma trận không giao hoán. V2 giải bằng **RoPE tách riêng** (decoupled RoPE): thêm một khóa nhỏ $d^R$ chiều chỉ để mang vị trí, dùng chung cho mọi đầu, lưu vào cache cùng $\mathbf{c}_t$. Vậy KV cache mỗi token là:
+
+$$
+(d_c + d^R) \cdot N_{\text{layer}} \cdot s \ \text{byte}
+$$
+
+So với GQA, $2 H_{\text{kv}} d$ được thay bằng $d_c + d^R$. Paper V2 chọn $d_c = 4d$, $d^R = d/2$, nên mỗi lớp lưu $4.5d$ số, bằng GQA với chỉ 2.25 nhóm. Paper cũng báo cáo chất lượng của MLA mạnh hơn MHA trong thí nghiệm của họ.
+
+**Áp vào số của V3** ($H = 128$, $d = 128$, $d_c = 512$, $d^R = 64$, 61 lớp; tự tính):
+
+- MLA: $(512 + 64) \cdot 61 = 35\,136$ số mỗi token. Lưu 2 byte mỗi số thì khoảng 69 KiB, còn nhỏ hơn 128 KiB mỗi token của Llama 3 8B ở bài trước.
+- Nếu dùng MHA thường với cùng 128 đầu: $2 \cdot 128 \cdot 128 \cdot 61 = 1\,998\,848$ số, lớn hơn khoảng 57 lần.
+
+Đó là phép so trên giấy với cùng số đầu. Con số "giảm KV cache 93.3%" trong tóm tắt của V2 là phép so khác: **DeepSeek-V2 so với DeepSeek 67B**, mô hình dày (dense, không MoE) trước đó của họ.
+
+### Huấn luyện rẻ hơn: MTP, FP8 và con số chi phí
+
+**MTP.** Bình thường, mỗi vị trí chỉ học đoán token kế tiếp. V3 thêm một mô-đun MTP (một khối Transformer, dùng chung embedding và lớp đầu ra với mô hình chính) để mỗi vị trí đoán thêm **token sau nữa**. Theo báo cáo, việc này làm tín hiệu huấn luyện dày hơn và có thể giúp mô hình "tính trước" xa hơn. Khi dùng thật, có thể **bỏ** mô-đun MTP, hoặc dùng nó làm bản nháp cho speculative decoding (giải mã suy đoán): báo cáo ghi token thứ hai được chấp nhận 85–90% số lần, tốc độ sinh tăng 1.8 lần.
+
+**FP8.** Phần lớn phép nhân ma trận lớn chạy ở FP8, số thực 8 bit, một số phép nhạy cảm vẫn giữ độ chính xác cao hơn. Để số nhỏ không bị mất, mỗi ô nhỏ của ma trận có hệ số co giãn riêng. Trên hai mô hình nhỏ hơn, báo cáo đo sai số tương đối của loss so với BF16 luôn dưới 0.25%. (Lượng tử hóa nói chung có ở bài [Đánh giá mô hình và PEFT](/vi/llm/evaluation-peft/).)
+
+**Đọc con số chi phí.** Bảng 1 của báo cáo V3:
+
+| Chỉ số | Pre-train | Mở rộng ngữ cảnh | Hậu huấn luyện | Tổng |
+|---|---:|---:|---:|---:|
+| Giờ GPU H800 | 2 664K | 119K | 5K | 2 788K |
+| USD, giả định 2 USD mỗi giờ GPU | 5.328M | 0.238M | 0.01M | 5.576M |
+
+Hai điều phải đi kèm con số này: 2 USD mỗi giờ là **giá thuê giả định**, và báo cáo nói rõ con số **chỉ tính lần huấn luyện chính thức** của V3, **không gồm** chi phí nghiên cứu và các thí nghiệm trước đó. Nó không phải tổng số tiền làm ra DeepSeek-V3.
+
+### GRPO: bỏ critic, so trong nhóm
+
+**Vấn đề của PPO.** **Advantage** $A$ (giữ nguyên tiếng Anh) là phần thưởng cao hơn hay thấp hơn mức kỳ vọng bao nhiêu: dương thì tăng xác suất câu trả lời, âm thì giảm. Ở bài RLHF, PPO cần thêm một **hàm giá trị** (value function), còn gọi là critic, để ước lượng mức kỳ vọng đó. Critic thường là một mô hình cỡ ngang chính sách, nên tốn thêm rất nhiều bộ nhớ và tính toán. DeepSeekMath (Shao và cộng sự, 2024) nêu thêm một lý do: phần thưởng thường chỉ chấm ở token cuối, nên khó học một critic đúng ở từng token.
+
+**Ý của GRPO.** Với mỗi câu hỏi $\mathbf{x}$, lấy mẫu một **nhóm** $G$ câu trả lời $\mathbf{y}_1, \dots, \mathbf{y}_G$ từ chính sách cũ $\pi_{\text{old}}$, chấm được $r_1, \dots, r_G$. Mức kỳ vọng không do critic đoán nữa, mà lấy ngay từ nhóm:
+
+$$
+A_i = \frac{r_i - \mathrm{mean}(r_1, \dots, r_G)}{\mathrm{std}(r_1, \dots, r_G)}
+$$
+
+Như chấm điểm theo lớp: không hỏi "bạn được mấy điểm" mà hỏi "bạn hơn trung bình lớp bao nhiêu độ lệch chuẩn".
+
+**Advantage khi phần thưởng là đúng/sai.** Giả sử $r_i \in \{0, 1\}$ và tỉ lệ câu đúng trong nhóm là $p$, với $0 < p < 1$. Ta dẫn từng bước:
+
+**Bước 1: trung bình.** Trung bình của các số 0 và 1 là tỉ lệ số 1: $\mu = p$.
+
+**Bước 2: độ lệch chuẩn.** Phương sai là trung bình của $r^2$ trừ $\mu^2$. Vì $r \in \{0, 1\}$ nên $r^2 = r$, trung bình của $r^2$ cũng là $p$. Vậy phương sai là $p - p^2 = p(1-p)$, và $\sigma = \sqrt{p(1-p)}$.
+
+**Bước 3: thay vào.** Gọi $A_{+}$ là advantage của câu đúng ($r = 1$), $A_{-}$ là advantage của câu sai ($r = 0$):
+
+$$
+\begin{aligned}
+A_{+} &= \frac{1 - p}{\sqrt{p(1-p)}} = \sqrt{\frac{1-p}{p}} \\
+A_{-} &= \frac{0 - p}{\sqrt{p(1-p)}} = -\sqrt{\frac{p}{1-p}}
+\end{aligned}
+$$
+
+Mỗi dòng rút gọn bằng cách viết tử số thành $\sqrt{1-p}\cdot\sqrt{1-p}$ (dòng đầu) hay $\sqrt{p}\cdot\sqrt{p}$ (dòng sau) rồi giản ước với mẫu. Với $G = 8$ và 3 câu đúng, $p = 3/8$: câu đúng được $\sqrt{5/3} \approx 1.291$, câu sai được $-\sqrt{3/5} \approx -0.775$. **Câu đúng càng hiếm, thưởng càng lớn.** Còn $p = 0$ hay $p = 1$ (cả nhóm cùng sai hay cùng đúng) thì tử số bằng 0 với mọi câu: không có tín hiệu học.
+
+**Mục tiêu.** Theo paper R1, chính sách $\pi_{\boldsymbol{\phi}}$ được cập nhật để **cực đại**:
+
+$$
+\mathcal{J}(\boldsymbol{\phi}) = \mathbb{E}\left[\frac{1}{G}\sum_{i=1}^{G}\Big(\min\big(\rho_i A_i,\ \mathrm{clip}(\rho_i, 1-\epsilon, 1+\epsilon)\, A_i\big) - \beta\, k_i\Big)\right],
+\qquad
+\rho_i = \frac{\pi_{\boldsymbol{\phi}}(\mathbf{y}_i \mid \mathbf{x})}{\pi_{\text{old}}(\mathbf{y}_i \mid \mathbf{x})}
+$$
+
+Kỳ vọng lấy theo câu hỏi $\mathbf{x}$ và nhóm câu trả lời sinh từ $\pi_{\text{old}}$. $\rho_i$ cho biết chính sách mới làm câu $i$ dễ ra hơn chính sách cũ bao nhiêu lần, $\epsilon$ là độ rộng của kẹp, $\beta$ là hệ số phạt KL. Lấy $\min$ để khi $A_i > 0$, $\rho_i$ vượt $1+\epsilon$ không được lợi thêm; khi $A_i < 0$, $\rho_i$ dưới $1-\epsilon$ cũng không được lợi thêm. Phần $\min(\cdot, \mathrm{clip})$ chính là cái kẹp của PPO ở bài RLHF; chỗ khác PPO là $A_i$ lấy từ nhóm. DeepSeekMath viết cùng công thức ở mức từng token, và mọi token của câu $i$ nhận cùng một $A_i$.
+
+**Phạt KL nằm thẳng trong mục tiêu.** Ở RLHF, phạt KL bị trừ vào phần thưởng. GRPO trừ thẳng vào mục tiêu, nên không làm rối phép tính advantage. Số hạng $k_i$ là một **ước lượng** KL từ một mẫu (theo [Schulman, 2020](http://joschu.net/blog/kl-approx.html)):
+
+$$
+k_i = \frac{\pi_{\text{ref}}(\mathbf{y}_i \mid \mathbf{x})}{\pi_{\boldsymbol{\phi}}(\mathbf{y}_i \mid \mathbf{x})} - \ln\frac{\pi_{\text{ref}}(\mathbf{y}_i \mid \mathbf{x})}{\pi_{\boldsymbol{\phi}}(\mathbf{y}_i \mid \mathbf{x})} - 1
+$$
+
+Hai tính chất làm nó dùng được. **Không âm:** đặt $z$ là tỉ số trong phân số, hàm $z - \ln z - 1$ có đạo hàm $1 - 1/z$, âm khi $z < 1$, dương khi $z > 1$, nên nhỏ nhất tại $z = 1$, giá trị nhỏ nhất là $1 - 0 - 1 = 0$. **Không chệch** (chính xác khi mẫu lấy từ chính $\pi_{\boldsymbol{\phi}}$): lấy kỳ vọng theo $\mathbf{y} \sim \pi_{\boldsymbol{\phi}}$, số hạng đầu cho $\sum_{\mathbf{y}} \pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x}) = 1$; số hạng giữa đổi dấu thành $\mathbb{E}\big[\ln\frac{\pi_{\boldsymbol{\phi}}}{\pi_{\text{ref}}}\big] = D_{\mathrm{KL}}(\pi_{\boldsymbol{\phi}} \,\|\, \pi_{\text{ref}})$; trừ 1 thì còn đúng $D_{\mathrm{KL}}$.
+
+So với [DPO](/vi/llm/dpo/): DPO bỏ hẳn vòng học tăng cường, còn GRPO **giữ** học tăng cường nhưng bỏ critic. Hai cách bỏ hai thứ khác nhau.
+
+### DeepSeek-R1: học suy luận từ đúng và sai
+
+**R1-Zero.** Paper R1 lấy DeepSeek-V3-Base (bản mới pre-train) rồi chạy GRPO **ngay**, không qua fine-tune có giám sát (SFT) trước. Mẫu prompt chỉ ép cấu trúc: suy nghĩ trong cặp thẻ `<think>`, rồi mới ghi đáp án. Phần thưởng hoàn toàn **theo luật**:
+
+- **Đúng hay sai.** Bài toán có đáp án xác định phải ghi đáp án theo định dạng quy định để chương trình kiểm được. Bài lập trình thì biên dịch và chạy các ca kiểm thử.
+- **Định dạng.** Có đặt phần suy nghĩ đúng trong cặp thẻ không.
+
+Hai phần cộng với trọng số bằng nhau. Paper nói họ không dùng mô hình phần thưởng thần kinh cho bài suy luận, vì nó dễ bị reward hacking khi RL quy mô lớn. Luật kiểm đáp án khó bị lợi dụng hơn một mô hình phần thưởng học từ dữ liệu (như mô hình "thích câu dài" ở bài RLHF), nhưng chỉ dùng được cho bài **kiểm tra được**.
+
+Kết quả paper báo cáo: pass@1 (tỉ lệ đúng trung bình của một lần trả lời) trên AIME 2024 tăng từ 15.6% lên 77.9% trong quá trình RL; trong lúc đó, mô hình tham chiếu được thay bằng chính sách mới nhất sau mỗi 400 bước. Câu trả lời dài dần, mô hình tự kiểm tra lại và thử cách khác dù không ai dạy cách suy luận; paper gọi khoảnh khắc một phiên bản trung gian tự dừng lại để xem lại lời giải là "aha moment".
+
+**Vì sao còn cần R1.** R1-Zero khó đọc, hay trộn tiếng Anh và tiếng Trung trong một chuỗi suy luận, và yếu ở việc ngoài suy luận như viết hay hỏi đáp mở. DeepSeek-R1 đi qua nhiều giai đoạn:
+
+1. SFT trên **vài nghìn** mẫu "khởi động lạnh" (cold start) có lối suy nghĩ dễ đọc.
+2. RL hướng suy luận, thêm **phần thưởng nhất quán ngôn ngữ**: tỉ lệ từ thuộc ngôn ngữ đích trong chuỗi suy luận.
+3. **Lấy mẫu từ chối** (rejection sampling): sinh nhiều câu trả lời, giữ câu tốt, rồi SFT lần nữa trên cả dữ liệu suy luận lẫn không suy luận.
+4. RL lần hai để mô hình hữu ích và vô hại hơn, có thêm phần thưởng theo sở thích do mô hình phần thưởng chấm.
+
+Paper còn chắt lọc (distill) năng lực sang các mô hình nhỏ dựa trên Qwen và Llama, không phải MoE của R1. Trọng số của V3 và R1 có trên Hugging Face; giấy phép của mã, của trọng số và của mô hình nền (với bản chắt lọc) có thể khác nhau, nên đọc thẻ mô hình trước khi dùng.
+
+### Dòng thời gian
+
+Ngày là ngày nộp bản đầu lên arXiv.
+
+| Ngày | Paper | Điểm mới chính |
+|---|---|---|
+| 11/1/2024 | DeepSeekMoE | Chia nhỏ expert, expert dùng chung |
+| 5/2/2024 | DeepSeekMath | GRPO |
+| 7/5/2024 | DeepSeek-V2 | MLA, định tuyến giới hạn thiết bị |
+| 27/12/2024 | DeepSeek-V3 | Cân bằng tải bằng bias, MTP, huấn luyện FP8 |
+| 22/1/2025 | DeepSeek-R1 | R1-Zero học bằng RL thuần, quy trình nhiều giai đoạn |
+| 2/12/2025 | [DeepSeek-V3.2](https://arxiv.org/abs/2512.02556) | Bài không đi vào nội dung |
+
+Số liệu R1 trong bài lấy từ bản sửa ngày 4/1/2026 của paper (bản đăng trên *Nature*, 2025).
+
+:::note[Ghi nhớ]
+MoE: tham số theo $N_r$, tính toán theo $K_r$, bộ nhớ vẫn phải chứa hết. Bias cân bằng tải của V3 chỉ dùng khi chọn expert. MLA lưu $(d_c + d^R)$ số mỗi lớp. GRPO: $A_i = (r_i - \text{mean})/\text{std}$, cả nhóm cùng điểm thì không học được gì.
+:::
+
+### Giới hạn
+
+- **Bài chỉ đi tới mức ý tưởng.** Song song chuyên gia (expert parallelism), chồng tính toán với truyền thông và chi tiết FP8 nằm ngoài phạm vi; chạy mô hình trên nhiều GPU thuộc bài [Deploy LLM: nhiều GPU, phân tán](/vi/llm/llm-deployment/). Số benchmark là của paper, đo theo cách của tác giả, tại thời điểm công bố.
+- **Phần thưởng theo luật chỉ hợp với bài kiểm tra được.** Viết văn, hội thoại mở vẫn cần mô hình phần thưởng hay người đánh giá (bài [RLHF](/vi/llm/rlhf/)). Chính paper R1 cũng ghi R1 còn kém ở đầu ra có cấu trúc, chưa dùng được công cụ, và có lúc suy nghĩ quá dài với câu hỏi đơn giản.
+
+## Minh họa
+
+Hình dưới vẽ một lớp MoE kiểu DeepSeek với một token. Hãy nhìn hai nhóm expert: nhóm dùng chung luôn sáng, còn nhóm định tuyến chỉ vài ô được router tô sáng.
+
+{/* FIG: mỗi token chạy expert dùng chung và chỉ vài expert định tuyến do router chọn. */}
+<MoeFigure />
+
+Bảng dưới đặt ba mô hình có paper cạnh nhau. Hãy nhìn hàng tỉ lệ kích hoạt: ở ba mô hình này, mô hình càng lớn, phần tham số mỗi token dùng tới càng nhỏ. R1 không có cột riêng vì dùng đúng kiến trúc V3.
+
+| Thông số | DeepSeekMoE 16B (2024) | DeepSeek-V2 (2024) | DeepSeek-V3 (2024) |
+|---|---:|---:|---:|
+| Tổng tham số | 16.4B | 236B | 671B |
+| Kích hoạt mỗi token | 2.8B | 21B | 37B |
+| Tỉ lệ kích hoạt (tự tính) | 17.1% | 8.9% | 5.5% |
+| Số lớp | 28 | 60 | 61 |
+| Expert dùng chung + định tuyến | 2 + 64 | 2 + 160 | 1 + 256 |
+| Expert định tuyến chọn mỗi token | 6 | 6 | 8 |
+| Attention | nhiều đầu (MHA) | MLA | MLA |
+| Token pre-train | 2T | 8.1T | 14.8T |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026, với Python 3.14 và NumPy 2.4 (bản có trong Pyodide). Cả hai ô chạy ngay trên trang, độc lập, không cần mô hình thật.
+
+### Định tuyến top-K và cân bằng tải bằng bias
+
+Ô dưới đây tạo một lô $B = 64$ token và $N_r = 8$ expert định tuyến, mỗi token chọn $K_r = 2$. Điểm khớp là sigmoid của các số ngẫu nhiên (hạt giống 0), riêng expert 0 được cộng thêm 1.0 trước sigmoid để router cố ý "chuộng" nó. Hàm `route` chọn top-$K_r$ theo $s_i + b_i$ nhưng lấy cổng từ $s_i$ gốc, như V3. Sau đó 200 bước chỉnh bias với $\gamma = 0.01$.
+
+Đây là mô phỏng đồ chơi: "quá tải" được hiểu là nhận nhiều hơn trung bình của lô, và điểm khớp giữ nguyên qua mọi bước (huấn luyện thật thì điểm đổi theo mô hình).
+
+<PythonRunner code={moeRoutingCode} title="Định tuyến top-K và cân bằng tải" />
+
+Đọc kết quả:
+
+- **`step 0`**: 128 lượt chọn, chia đều thì mỗi expert nhận 16. Chưa có bias, expert 0 nhận 42 lượt, expert 2 chỉ nhận 6.
+- **`step 199`**: tải còn `[18 16 18 16 15 16 15 14]`, dao động quanh 16 vì bias nhảy từng bước cố định $\gamma$.
+- **`bias`**: expert 0 bị hạ xuống $-0.17$; expert vắng khách được nâng lên, cao nhất là expert 2 với $0.13$.
+- **`gates of token 0`**: $0.454$ và $0.546$, cộng lại bằng 1, tính từ điểm gốc chứ không từ điểm đã cộng bias.
+- **`experts per token: 2 2`**: token nào cũng vẫn đúng 2 expert, nên tính toán mỗi token giữ nguyên.
+
+### Advantage của GRPO trên một nhóm
+
+Ô dưới đây tính advantage cho một nhóm $G = 8$ câu trả lời, phần thưởng 1 nếu đúng, 0 nếu sai. Mẫu số được cộng thêm `eps = 1e-8` để không chia cho 0 (paper không nói tới chi tiết này). `np.std` mặc định chia cho $G$, khớp phép dẫn ở mục Lý thuyết.
+
+<PythonRunner code={grpoAdvantageCode} title="Advantage của GRPO" />
+
+Đọc kết quả:
+
+- **Nhóm có 3 câu đúng**: câu đúng được $1.291$, câu sai được $-0.775$, đúng như $\sqrt{5/3}$ và $-\sqrt{3/5}$ ở mục Lý thuyết. Advantage có trung bình 0.0 và độ lệch chuẩn 1.0.
+- **Câu đúng càng hiếm, thưởng càng lớn**: 1 trên 8 đúng thì câu đúng được $+2.646$ ($\sqrt{7}$); 7 trên 8 đúng thì chỉ được $+0.378$, còn câu sai duy nhất bị $-2.646$.
+- **Cả nhóm sai**: mọi advantage bằng 0, không có tín hiệu học.
+- **Nhân phần thưởng với 10**: advantage không đổi (`True`), vì cả tử lẫn mẫu cùng nhân 10. Chỉ thứ bậc trong nhóm là có nghĩa.
+
+## Lỗi hay gặp
+
+:::caution[Nghĩ mô hình 671 tỉ tham số chạy với bộ nhớ của 37 tỉ]
+37 tỉ là số tham số được **kích hoạt** cho mỗi token, quyết định phần tính toán. Bộ nhớ vẫn phải giữ đủ 671 tỉ, rải trên nhiều GPU, nên còn tốn truyền thông; vì vậy V2 và V3 mới giới hạn số thiết bị, số node mỗi token được gửi tới. Tương tự, "chia nhỏ expert" không phải "thêm expert": tổng tham số giữ nguyên.
+:::
+
+:::caution[Đọc "5.576 triệu USD" là tổng chi phí làm ra DeepSeek-V3]
+Đó là 2.788 triệu giờ GPU H800 nhân với giá thuê **giả định** 2 USD mỗi giờ, chỉ cho **lần huấn luyện chính thức**. Mọi con số so sánh đều cần mốc: "giảm KV cache 93.3%" của V2 là so với DeepSeek 67B, không phải so với MHA nói chung.
+:::
+
+:::caution[Nghĩ GRPO bỏ học tăng cường, hay phần thưởng theo luật dùng được cho mọi việc]
+GRPO vẫn là học tăng cường, vẫn cần phần thưởng cho từng câu trả lời; nó chỉ bỏ critic. Nhóm cùng điểm cho tín hiệu bằng 0, nên câu hỏi phải có độ khó vừa phải. Phần thưởng theo luật chỉ dùng được khi kiểm tra được đáp án. R1-Zero cũng không học "từ con số 0": nó bắt đầu từ DeepSeek-V3-Base đã học 14.8 nghìn tỉ token.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- MoE: mỗi token chạy $N_s$ expert dùng chung và $K_r$ trong $N_r$ expert định tuyến. DeepSeekMoE chia nhỏ expert để ghép linh hoạt hơn và tách expert dùng chung cho kiến thức chung. Tham số theo $N_r$, tính toán theo $K_r$, bộ nhớ vẫn phải chứa hết.
+- V3 cân bằng tải bằng bias $b_i$ chỉ dùng khi chọn top-$K_r$, thay cho loss phụ lớn; thêm MTP và FP8. 5.576 triệu USD là giá thuê giả định cho riêng lần huấn luyện chính thức.
+- MLA chỉ lưu vectơ nén $\mathbf{c}_t$ và một khóa RoPE nhỏ: $(d_c + d^R)$ số mỗi lớp, so với $2 H_{\text{kv}} d$ của GQA.
+- GRPO bỏ critic, lấy mức kỳ vọng từ nhóm. R1-Zero học suy luận dài chỉ từ phần thưởng theo luật; R1 thêm khởi động lạnh và nhiều giai đoạn để dễ đọc, dùng được cho việc khác.
+
+**Đọc thêm:**
+
+- DeepSeek-AI (2025). [*DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning*](https://arxiv.org/abs/2501.12948), arXiv:2501.12948 (bản sửa 4/1/2026; đăng trên *Nature* 645, 633–638, 2025), mục 2. GRPO, phần thưởng theo luật và R1-Zero, đọc trong khoảng 15 phút.
+- Dai, D., Deng, C., Zhao, C., và cộng sự (2024). [*DeepSeekMoE: Towards Ultimate Expert Specialization in Mixture-of-Experts Language Models*](https://arxiv.org/abs/2401.06066), arXiv:2401.06066, hình 2 và mục 3. Ba hình (a), (b), (c) cho thấy từng bước chia nhỏ expert và tách expert dùng chung, với $mN$, $mK$, $K_s$ ứng với $N_s + N_r$, $N_s + K_r$, $N_s$ của bài.
+- DeepSeek-AI (2024). [*DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model*](https://arxiv.org/abs/2405.04434), arXiv:2405.04434, mục 2.1 và bảng 1. MLA, RoPE tách riêng và bảng so KV cache, với $n_h$, $d_h$, $d_h^R$ ứng với $H$, $d$, $d^R$ của bài.
+- DeepSeek-AI (2024). [*DeepSeek-V3 Technical Report*](https://arxiv.org/abs/2412.19437), arXiv:2412.19437, mục 1 (bảng chi phí), 2.1.2, 2.2 và 3.3. Cân bằng tải bằng bias, MTP và FP8.
+- Wang, L., Gao, H., Zhao, C., Sun, X., Dai, D. (2024). [*Auxiliary-Loss-Free Load Balancing Strategy for Mixture-of-Experts*](https://arxiv.org/abs/2408.15664), arXiv:2408.15664. Paper gốc của cách cân bằng tải bằng bias mà V3 dùng.
+- Shao, Z., Wang, P., Zhu, Q., và cộng sự (2024). [*DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models*](https://arxiv.org/abs/2402.03300), arXiv:2402.03300, mục 4.1. Nơi GRPO ra đời, viết mục tiêu ở mức từng token với $q$, $o_i$, $\theta$ ứng với $\mathbf{x}$, $\mathbf{y}_i$, $\boldsymbol{\phi}$ của bài.
+- Shazeer, N., Mirhoseini, A., Maziarz, K., và cộng sự (2017). [*Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer*](https://arxiv.org/abs/1701.06538), arXiv:1701.06538. Lớp MoE thưa có router chọn top-$k$, nguồn gốc của các ý trong bài.
+
+<LessonProgress />

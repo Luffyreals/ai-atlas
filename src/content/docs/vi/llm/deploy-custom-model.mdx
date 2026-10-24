@@ -1,0 +1,407 @@
+---
+title: Deploy mô hình riêng
+description: Đưa mô hình của bạn ra sau một địa chỉ HTTP trên một máy. Tự viết API bằng FastAPI, chạy LLM mở bằng server kiểu OpenAI, đo p50, p95 và đóng gói Docker.
+quiz:
+  - question: 'Bạn đo 40 yêu cầu. 38 yêu cầu mất 20 ms, 2 yêu cầu mất 900 ms. Dùng cách tính của bài (thứ hạng $k = \lceil q \cdot m \rceil$), câu nào đúng?'
+    options:
+      - 'p95 = 900 ms, vì có yêu cầu chậm'
+      - 'p95 = 20 ms, còn trung bình là 64 ms'
+      - 'p95 = 64 ms, bằng trung bình'
+      - 'p50 = 460 ms, nằm giữa hai mức'
+    answer: 1
+    explanation: 'Thứ hạng của p95 là $\lceil 0.95 \cdot 40 \rceil = 38$, và yêu cầu thứ 38 sau khi sắp xếp vẫn là 20 ms. Hai yêu cầu chậm đúng bằng 5% số yêu cầu, nên nằm ngoài p95. Trung bình là $(38 \cdot 20 + 2 \cdot 900)/40 = 64$ ms: trung bình bị kéo lên, còn p95 thì không thấy đuôi này. Muốn thấy nó thì xem p99 hoặc giá trị lớn nhất, và đo nhiều yêu cầu hơn.'
+  - question: 'Trong một file test, bạn viết `client = TestClient(app)` (không có khối `with`) rồi gọi `client.get("/health")` với `app` của bài. Kết quả là gì?'
+    options:
+      - '200 `{"status": "ok"}`, vì `TestClient` tự nạp mô hình'
+      - 'Lỗi kết nối, vì chưa chạy `uvicorn`'
+      - '503, vì `lifespan` không chạy nên `state` vẫn rỗng'
+      - '422, vì yêu cầu không có dữ liệu'
+    answer: 2
+    explanation: '`TestClient` chỉ chạy `lifespan` khi dùng trong khối `with`. Không có `with`, dòng `joblib.load` không bao giờ chạy, `"model" not in state` đúng, nên `/health` trả 503. `TestClient` gọi thẳng ứng dụng trong cùng tiến trình, không cần `uvicorn` hay cổng mạng, nên không có lỗi kết nối. Gọi `/predict` lúc này thì gặp `KeyError`.'
+  - question: 'Bạn đổi dòng cuối của Dockerfile thành dạng chuỗi: `CMD uvicorn app:app --host 0.0.0.0 --port 8000` (không có ngoặc vuông). Container chạy, `bench.py` vẫn chạy được. Rồi bạn `docker stop` container. Log của uvicorn có dòng `Application shutdown complete.` không?'
+    options:
+      - 'Có, vì `docker stop` luôn tắt êm mọi container'
+      - 'Không, vì uvicorn chạy dưới một shell và không nhận được tín hiệu tắt'
+      - 'Có, vì `lifespan` luôn chạy phần sau `yield`, dù tiến trình bị dừng cách nào'
+      - 'Không, vì với dạng chuỗi container đã không khởi động được'
+    answer: 1
+    explanation: 'Với dạng chuỗi, Docker chạy `/bin/sh -c "uvicorn ..."`: tiến trình số 1 (PID 1) của container là shell, uvicorn chỉ là tiến trình con. `docker stop` gửi tín hiệu tắt (SIGTERM) tới PID 1, shell không chuyển nó cho uvicorn, nên hết thời gian chờ Docker giết hẳn container. uvicorn không kịp in `Shutting down` hay `Application shutdown complete.`, và phần sau `yield` không chạy. Với dạng mảng, uvicorn là PID 1, nhận SIGTERM, và log có cả hai dòng. Bài đã thử cả hai. Container dạng chuỗi vẫn khởi động và trả lời bình thường, nên lỗi này chỉ lộ ra lúc tắt.'
+  - question: 'Bạn vừa khởi động `llama-server -m <tệp mô hình>.gguf --port 8080` với một tệp mô hình 8 GB. Vài giây sau, `curl http://localhost:8080/health` trả mã 503. Bạn muốn chạy code của bài Sử dụng API văn bản với server này. Nên làm gì?'
+    options:
+      - 'Đổi `OPENAI_API_KEY`, vì 503 nghĩa là sai key'
+      - 'Viết lại code bằng thư viện riêng của llama.cpp'
+      - 'Tăng `--n-gpu-layers`, vì 503 nghĩa là thiếu GPU'
+      - 'Chờ `/health` trả 200 rồi mới chạy code, vì server đang nạp mô hình'
+    answer: 3
+    explanation: '`llama-server` mở cổng trước rồi mới nạp mô hình; trong lúc nạp, `/health` trả 503 với thông báo "Loading model". Đó là "chưa sẵn sàng", không phải lỗi cấu hình. `/health` không cần key, và sai key là lỗi 401 chứ không phải 503. Code dùng SDK `openai` không cần viết lại: chờ `/health` trả 200, rồi đổi `OPENAI_BASE_URL` và chạy.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import ContainerImageFigure from '@components/figures/ContainerImageFigure.astro';
+import trainCode from '@code/llm/deploy-custom-model/train.vi.py?raw';
+import appCode from '@code/llm/deploy-custom-model/app.vi.py?raw';
+import benchCode from '@code/llm/deploy-custom-model/bench.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu **phục vụ mô hình** (model serving) là gì: một tiến trình chạy liên tục, nạp mô hình một lần, rồi trả lời từng yêu cầu HTTP.
+- Tự viết được API cho một mô hình scikit-learn bằng FastAPI, có `/predict`, `/health`, kiểm tra đầu vào bằng Pydantic, và nạp mô hình một lần bằng `lifespan`.
+- Chạy được một LLM mở bằng server kiểu OpenAI (OpenAI-compatible) có sẵn, và dùng lại code của bài trước chỉ bằng cách đổi biến môi trường.
+- Đo được **độ trễ** (latency) p50, p95 và **thông lượng** (throughput), rồi đóng gói server thành Docker image.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+**Image** là bản đóng gói cố định của ứng dụng: code, thư viện, cả hệ điều hành tối thiểu, dựng từ một **Dockerfile** bằng `docker build`. **Container** là một lần chạy image đó, tách biệt với máy bạn. `docker run -p 8000:8000 <image>` nối cổng 8000 của máy bạn vào cổng 8000 của container.
+:::
+
+## Trực giác
+
+Bạn vừa huấn luyện xong một mô hình phân loại hoa trong notebook. Nó chạy tốt. Rồi một đồng nghiệp làm ứng dụng điện thoại hỏi: "Mình gọi mô hình của bạn thế nào?" Ứng dụng của họ viết bằng Kotlin, không có Python, không có scikit-learn, và chắc chắn không mở notebook của bạn.
+
+Câu trả lời quen thuộc trên web: đặt mô hình **sau một địa chỉ HTTP**, vì ứng dụng nào cũng biết gửi JSON và đọc JSON trả về. Một chương trình nhỏ trên máy bạn nạp mô hình vào bộ nhớ rồi ngồi chờ. Có yêu cầu tới `http://<máy-bạn>:8000/predict` kèm bốn số đo của bông hoa, nó trả lời tên loài hoa.
+
+Với LLM cũng vậy, chỉ là theo chiều ngược lại. Ở bài [Sử dụng API văn bản](/vi/llm/text-api/), code của bạn gọi máy chủ của một nhà cung cấp. Giờ bạn muốn chạy một mô hình mở ngay trên máy mình: dữ liệu không rời khỏi máy, không tính tiền theo token. Tin tốt: có những server dựng sẵn nói đúng "tiếng" của API OpenAI, nên không phải viết lại code. Code client giống phích cắm, còn `OPENAI_BASE_URL` là ổ cắm. Bạn chỉ cắm sang ổ khác.
+
+Dù đi đường nào, server cũng phải trả lời được ba câu hỏi. Mô hình nạp khi nào, mỗi yêu cầu hay một lần? Ai kiểm tra dữ liệu gửi tới? Và làm sao bên ngoài biết server đã sẵn sàng? Hãy hình dung một quán phở: bếp phải ninh xong nồi nước dùng (nạp mô hình) thì mới treo biển "Sẵn sàng". Khách đến sớm hơn thì được báo "chưa bán", chứ không ai múc nước lã ra bát.
+
+**Bài toán: đưa một mô hình ra sau một địa chỉ HTTP trên một máy, sao cho mô hình chỉ nạp một lần, đầu vào sai bị từ chối rõ ràng, bên ngoài hỏi được "sẵn sàng chưa", và bạn biết server nhanh tới đâu.**
+
+## Lý thuyết
+
+### Phục vụ mô hình là gì
+
+Phục vụ mô hình nghĩa là chạy mô hình như một **dịch vụ**: một tiến trình sống lâu, lắng nghe ở một **cổng** (port), nhận yêu cầu và trả kết quả. Mỗi địa chỉ làm một việc gọi là một **endpoint**. Server của bài có hai endpoint:
+
+- `POST /predict`: nhận bốn số đo dạng JSON, trả về tên loài và xác suất của từng loài.
+- `GET /health`: không nhận gì, chỉ trả lời "tôi sẵn sàng" (mã 200) hay "chưa" (mã 503).
+
+Bài này có hai con đường. Mô hình của riêng bạn (scikit-learn, một mạng PyTorch nhỏ) không có sẵn server, nên bạn **tự viết một API** quanh nó. LLM mở thì đã có **server dựng sẵn**: bạn chỉ khởi động nó rồi trỏ client vào.
+
+### Tự viết API bằng FastAPI
+
+**FastAPI** là thư viện Python để viết web API. Bạn viết hàm Python bình thường, gắn một dòng `@app.post("/predict")` lên trên, và FastAPI lo phần HTTP: đọc JSON, gọi hàm, đổi giá trị trả về thành JSON. FastAPI không tự mở cổng. Việc đó do **uvicorn** làm, một server chạy ứng dụng FastAPI: `uvicorn app:app` nghĩa là "trong file `app.py`, lấy biến `app`".
+
+**Kiểm tra đầu vào bằng Pydantic.** Bạn khai báo dữ liệu mong đợi bằng một lớp con của `BaseModel`: tên trường, kiểu, và ràng buộc như `Field(gt=0)` (lớn hơn 0). FastAPI dùng lớp này để kiểm tra đầu vào (input validation) **trước khi** gọi hàm của bạn. Dữ liệu sai bị trả về mã **422** kèm lỗi chi tiết, và hàm `predict` không hề chạy. Ví dụ, gửi chiều rộng cánh hoa là `-1`:
+
+```json
+{"sepal_length": 5.9, "sepal_width": 3.0, "petal_length": 5.1, "petal_width": -1}
+```
+
+Server trả 422 với nội dung (lấy từ lần chạy thật của bài):
+
+```json
+{"detail": [{"type": "greater_than", "loc": ["body", "petal_width"],
+  "msg": "Input should be greater than 0", "input": -1, "ctx": {"gt": 0.0}}]}
+```
+
+`loc` chỉ đúng trường sai, `msg` nói vì sao. Thiếu trường thì cho lỗi `missing`. Nhờ lớp này, FastAPI còn tự sinh trang tài liệu ở `/docs`, nơi bạn bấm thử được từng endpoint.
+
+**Nạp mô hình một lần bằng `lifespan`.** Nạp mô hình từ file tốn thời gian và bộ nhớ: vài mili giây với mô hình hoa của bài, vài phút với một LLM. Nếu nạp trong hàm `predict`, mọi yêu cầu đều trả giá đó. FastAPI cho bạn một hàm `lifespan`, chạy đúng một lần quanh cả vòng đời server:
+
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Chạy một lần khi server khởi động: nạp mô hình vào bộ nhớ.
+    state["model"] = joblib.load("model.joblib")
+    yield  # server nhận yêu cầu trong lúc dừng ở đây
+    state.clear()  # chạy khi server tắt
+```
+
+Phần trước `yield` chạy lúc khởi động, trước khi server nhận yêu cầu nào; phần sau `yield` chạy lúc tắt. Mô hình được cất vào dict `state`, mọi yêu cầu dùng chung. Nạp ngay ở đầu file cũng chạy, nhưng khi đó mọi chương trình `import app` (kể cả test) đều phải nạp mô hình.
+
+Hai hàm endpoint của bài viết bằng `def`, không phải `async def`. Với `def`, FastAPI chạy hàm trong một nhóm luồng riêng, nên một lần `predict_proba` chậm không chặn các yêu cầu khác đang chờ.
+
+### Health check: sống và sẵn sàng
+
+Một **health check** là một yêu cầu nhỏ mà bên ngoài gửi định kỳ để hỏi tình trạng server. Bên ngoài có thể là người vận hành, Docker, hay một **bộ cân bằng tải** (load balancer), tức chương trình chia yêu cầu cho nhiều bản server. Có hai câu hỏi khác nhau:
+
+- **Còn sống không?** Tiến trình còn chạy và còn trả lời HTTP.
+- **Sẵn sàng chưa?** Mô hình đã nạp xong, gửi yêu cầu thật vào sẽ có kết quả.
+
+`/health` của bài trả lời câu thứ hai: chưa có mô hình trong `state` thì trả **503** (Service Unavailable, "tạm thời chưa phục vụ được"), có rồi thì trả 200.
+
+Hai loại server xử lý giai đoạn nạp khác nhau. Với uvicorn, `lifespan` chạy xong rồi server mới mở cổng: bài đã thử một mô hình giả nạp mất 4 giây, và trong lúc đó client không kết nối được chứ không nhận 503. `llama-server` của llama.cpp làm ngược lại: mở cổng ngay, và trong lúc nạp thì `/health` trả 503 với thông báo "Loading model". Vì vậy, client tốt chịu được cả hai: thử lại khi không kết nối được, và chờ khi nhận 503.
+
+### Server có sẵn cho LLM mở
+
+Bạn hoàn toàn có thể bọc một LLM bằng FastAPI như trên. Nhưng phục vụ LLM khó hơn nhiều: sinh từng token và đẩy về theo streaming, gom nhiều yêu cầu chạy cùng lúc trên GPU, quản lý bộ nhớ cho ngữ cảnh dài. Các server dựng sẵn đã làm những việc này, và cùng cung cấp endpoint Chat Completions theo kiểu OpenAI:
+
+- **Ollama.** Dễ nhất cho máy cá nhân. Tải mô hình bằng `ollama pull`, server nghe ở `http://localhost:11434`, phần tương thích OpenAI ở `/v1/`. Chạy trên CPU hoặc GPU (Nvidia, AMD, Apple).
+- **llama.cpp (`llama-server`).** Chạy tệp mô hình định dạng **GGUF**, thường đã được **lượng tử hóa** (quantization: lưu mỗi trọng số bằng ít bit hơn) nên vừa RAM của máy thường. Chạy tốt trên CPU. Tham số `--n-gpu-layers` đẩy một phần hoặc toàn bộ các lớp lên GPU. Có `/health` như ở mục trên, và `--api-key` để đòi key.
+- **vLLM (`vllm serve <tên mô hình>`).** Nhắm tới GPU và nhiều người dùng cùng lúc. Bài chỉ nêu tên; dùng vLLM trên nhiều GPU là việc của bài [Deploy LLM: nhiều GPU, phân tán](/vi/llm/llm-deployment/).
+
+Điểm chung quan trọng nhất: **client không đổi**. Code ở bài [Sử dụng API văn bản](/vi/llm/text-api/) đọc ba biến `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `LLM_MODEL`. Trỏ `OPENAI_BASE_URL` vào server trên máy bạn là xong (lệnh cụ thể ở mục Ví dụ code).
+
+Nhưng "kiểu OpenAI" không có nghĩa là **đủ** mọi tính năng: Ollama chẳng hạn không hỗ trợ `tool_choice`. Code chỉ dùng tham số chung (`model`, `messages`, `temperature`, `stream`) thì chạy khắp nơi; tham số đặc biệt thì kiểm tài liệu của từng server.
+
+### CPU hay GPU
+
+Câu hỏi đầu tiên không phải "nhanh không" mà là **"có vừa bộ nhớ không"**. Mô hình phải nằm gọn trong RAM (chạy CPU) hoặc VRAM (bộ nhớ của GPU). Một ước lượng thô: số tham số nhân số byte mỗi tham số. Mô hình 7 tỉ tham số lưu ở 16 bit (2 byte) cần khoảng 14 GB chỉ cho trọng số; lượng tử hóa xuống 4 bit (nửa byte) còn khoảng 3.5 GB. Lúc chạy còn cần thêm bộ nhớ cho ngữ cảnh, nên hãy chừa dư. Vừa bộ nhớ rồi mới tới tốc độ: CPU đủ cho mô hình nhỏ như mô hình hoa của bài, và cho LLM nhỏ đã lượng tử hóa khi chỉ có vài người dùng; GPU cần khi mô hình lớn hoặc nhiều người gọi cùng lúc. Ollama và llama.cpp tự dùng GPU nếu nhận được; vLLM được thiết kế cho GPU.
+
+### Đo độ trễ và thông lượng
+
+**Độ trễ** là thời gian từ lúc gửi một yêu cầu tới lúc nhận đủ câu trả lời. Gửi $m$ yêu cầu, bạn có $m$ con số. Sắp xếp chúng tăng dần:
+
+$$
+t_{(1)} \le t_{(2)} \le \dots \le t_{(m)}
+$$
+
+Chỉ số $(k)$ trong ngoặc là **thứ hạng** sau khi sắp xếp: $t_{(1)}$ nhanh nhất, $t_{(m)}$ chậm nhất. **Phân vị** (percentile) mức $q$ là giá trị ở thứ hạng $k$, với $k$ là số nguyên nhỏ nhất không nhỏ hơn $q \cdot m$ (ký hiệu $\lceil \cdot \rceil$ là làm tròn lên):
+
+$$
+\text{p}(q) = t_{(k)}, \qquad k = \lceil q \cdot m \rceil
+$$
+
+Đọc công thức bằng lời: ít nhất một tỉ lệ $q$ số yêu cầu nhanh bằng hoặc hơn $\text{p}(q)$. Với $m = 200$ như code của bài, **p50** (trung vị) là $t_{(100)}$, vì $\lceil 0.5 \cdot 200 \rceil = 100$; **p95** là $t_{(190)}$, vì $\lceil 0.95 \cdot 200 \rceil = 190$. Các cách tính khác (như nội suy của `np.percentile`) cho số gần như vậy khi có vài trăm yêu cầu.
+
+Vì sao không chỉ dùng **trung bình** $\bar{t}$? Vì trung bình giấu phần đuôi. Hình dung 100 khách ở quán phở: người thứ 50 chờ 3 phút (p50), người thứ 95 chờ 6 phút (p95). Trung bình 3.5 phút nghe ổn, nhưng năm khách cuối đã chờ quá lâu, và chính họ là người bỏ đi. Người vận hành vì thế đặt mục tiêu theo p95 hoặc p99, không theo trung bình.
+
+**Thông lượng** $R$ là số yêu cầu xong trong một giây. Nếu cả đợt $m$ yêu cầu chạy hết trong $\Delta t$ giây:
+
+$$
+R = \frac{m}{\Delta t}
+$$
+
+Khi một client gửi **lần lượt** từng yêu cầu, tổng thời gian xấp xỉ tổng các độ trễ, tức $\Delta t \approx m \cdot \bar{t}$. Thay vào công thức trên, $m$ ở tử và mẫu triệt tiêu, còn $R \approx 1 / \bar{t}$. Con số này chỉ là tốc độ của một client; muốn biết server chịu được bao nhiêu, phải cho nhiều client gửi **cùng lúc** và xem p95 tăng ra sao.
+
+Khi đo, bỏ qua vài yêu cầu đầu (khởi động lạnh, cold start: bộ đệm còn trống, kết nối mới mở), và đo qua mạng như người dùng thật. Với LLM còn hai số nữa: thời gian tới token đầu tiên (người dùng chờ bao lâu mới thấy chữ) và số token mỗi giây sau đó.
+
+:::note[Ghi nhớ]
+Nạp mô hình một lần (`lifespan`), kiểm tra đầu vào trước khi chạy mô hình (Pydantic, lỗi 422), có `/health` trả 503 khi chưa sẵn sàng. Với LLM mở, dùng server kiểu OpenAI có sẵn và chỉ đổi `OPENAI_BASE_URL`. Đo độ trễ bằng p50 và p95, $\text{p}(q) = t_{(\lceil q \cdot m \rceil)}$, không chỉ bằng trung bình.
+:::
+
+### Giới hạn
+
+- **Một máy, một bản mô hình.** Chia mô hình qua nhiều GPU, chạy nhiều bản sau một bộ cân bằng tải là việc của bài [Deploy LLM: nhiều GPU, phân tán](/vi/llm/llm-deployment/).
+- **Chưa có xác thực, chưa có HTTPS.** Server của bài chỉ để chạy trên máy bạn hoặc trong mạng tin cậy (hộp thứ hai ở mục Lỗi hay gặp).
+- **Đưa lên cloud** (đẩy image lên một dịch vụ, gắn tên miền) thuộc bài [Docker và Cloud](/vi/llm/docker-cloud/). Bài này dừng ở `docker run` trên máy bạn.
+
+## Minh họa
+
+Bảng dưới là các cặp yêu cầu – phản hồi bạn sẽ gặp. Hãy nhìn cột mã: mỗi mã đòi client phản ứng khác nhau. Năm dòng đầu lấy từ server của bài, dòng cuối theo README của llama.cpp.
+
+| Yêu cầu | Mã | Phản hồi | Nghĩa là |
+|---|---:|---|---|
+| `GET /health` (server đã nạp mô hình) | 200 | `{"status": "ok"}` | Sẵn sàng |
+| `POST /predict` với bốn số đo hợp lệ | 200 | `{"label": "virginica", "proba": {...}}` | Có kết quả |
+| `POST /predict` với `petal_width: -1` | 422 | `"msg": "Input should be greater than 0"` | Lỗi của client, sửa dữ liệu rồi gửi lại |
+| `POST /predict` chỉ có `sepal_length` | 422 | ba lỗi `missing`, mỗi trường thiếu một lỗi | Lỗi của client |
+| `GET /predict` (sai phương thức) | 405 | `{"detail": "Method Not Allowed"}` | Endpoint chỉ nhận `POST` |
+| `GET /health` của `llama-server` lúc đang nạp | 503 | `"Loading model"` | Chưa sẵn sàng, chờ rồi thử lại |
+
+Bảng thứ hai đặt bốn cách phục vụ cạnh nhau, để bạn chọn đường cho mô hình của mình.
+
+| Tiêu chí | FastAPI tự viết | Ollama | llama.cpp (`llama-server`) | vLLM |
+|---|---|---|---|---|
+| Phục vụ gì | Mô hình bất kỳ của bạn | LLM mở trong kho của Ollama | LLM ở định dạng GGUF | LLM mở, trọng số Hugging Face |
+| API | Do bạn định nghĩa | Kiểu OpenAI ở `/v1/` | Kiểu OpenAI | Kiểu OpenAI |
+| Phần cứng | Tùy mô hình | CPU hoặc GPU | CPU tốt, đẩy lớp lên GPU | Nhắm tới GPU |
+| Health check | Bạn tự viết | Gửi một yêu cầu nhỏ để thử | `GET /health`, 503 khi nạp | `GET /health` |
+| Hợp với | Mô hình ML nhỏ, logic riêng | Thử LLM trên laptop | Máy không có GPU mạnh | Nhiều người dùng, có GPU |
+
+Khi đóng gói bằng Docker ở mục Ví dụ code, file `app.py` và `model.joblib` trở thành một lớp của image.
+
+{/* FIG: dùng lại hình của bài docker-cloud, với các lớp của Dockerfile bài này. */}
+<ContainerImageFigure stack="api" />
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026, với Python 3.14, `scikit-learn` 1.9.1, `fastapi` 0.162, `uvicorn` 0.54 và `httpx` 0.28. Cả ba chương trình chạy trên máy bạn (chúng mở một server và gọi qua mạng), không cần API key. Đặt ba file vào cùng một thư mục và chạy theo thứ tự.
+
+### Bước 1: huấn luyện và lưu mô hình
+
+Ô này huấn luyện một mô hình **hồi quy logistic** (logistic regression) trên bộ dữ liệu hoa diên vĩ (iris) có sẵn trong scikit-learn, rồi lưu ra `model.joblib`. Điều bài muốn dạy là quy trình, không phải độ chính xác.
+
+<LocalCode
+  code={trainCode}
+  title="Huấn luyện và lưu mô hình"
+  file="train.py"
+  packages={['scikit-learn']}
+  sampleVaries={false}
+>
+
+```text
+Độ chính xác trên tập kiểm tra: 0.978
+Đã lưu model.joblib (scikit-learn 1.9.1)
+Các lớp: setosa, versicolor, virginica
+```
+
+</LocalCode>
+
+Mô hình đoán đúng 44 trên 45 bông hoa của tập kiểm tra (0.978). Nhãn là tên loài dạng chuỗi, nên server trả thẳng tên mà không cần bảng tra. Hãy ghi lại bản scikit-learn ở dòng thứ hai, vì server phải nạp file bằng đúng bản này (hộp thứ ba ở mục Lỗi hay gặp).
+
+### Bước 2: server FastAPI
+
+Lưu code thành `app.py` và chạy bằng uvicorn. `--host 127.0.0.1` nghĩa là chỉ chính máy bạn gọi được server.
+
+<LocalCode
+  code={appCode}
+  title="API cho mô hình: /health và /predict"
+  file="app.py"
+  command="uvicorn app:app --host 127.0.0.1 --port 8000"
+  packages={['fastapi', 'uvicorn', 'scikit-learn']}
+/>
+
+Khi khởi động, uvicorn in `Waiting for application startup.` (phần trước `yield` đang chạy), rồi `Application startup complete.`, rồi mới tới `Uvicorn running on http://127.0.0.1:8000`: cổng chỉ mở khi mô hình đã nạp xong. Mở `http://127.0.0.1:8000/docs` để thử từng endpoint. Nhấn Ctrl+C để tắt.
+
+`predict` trả cả xác suất của từng loài, để ứng dụng tự quyết khi mô hình không chắc. Các số được đổi sang `float` và `str` của Python trước khi trả về, vì kiểu của NumPy không tự đổi thành JSON được.
+
+### Bước 3: gọi thử và đo độ trễ
+
+Để server chạy, mở một cửa sổ dòng lệnh khác và chạy chương trình dưới. Nó gọi `/health`, một yêu cầu hợp lệ, một yêu cầu sai, rồi đo 200 yêu cầu `/predict` gửi lần lượt qua một kết nối giữ mở (`httpx.Client`). Server ở địa chỉ khác thì truyền địa chỉ vào: `python bench.py http://<địa chỉ>:<cổng>`.
+
+<LocalCode
+  code={benchCode}
+  title="Gọi thử server, đo p50, p95 và thông lượng"
+  file="bench.py"
+  packages={['httpx']}
+  sampleVaries={false}
+>
+
+```text
+health: {'status': 'ok'}
+predict: {'label': 'virginica', 'proba': {'setosa': 0.001, 'versicolor': 0.345, 'virginica': 0.653}}
+sai đầu vào: 422 Input should be greater than 0
+p50 = 4.96 ms
+p95 = 5.90 ms
+trung bình = 4.95 ms
+thông lượng = 202 yêu cầu/giây
+```
+
+</LocalCode>
+
+Ba dòng đầu giống hệt nhau ở mọi lần chạy. Mô hình nghiêng về virginica (0.653) nhưng vẫn để 0.345 cho versicolor, vì hai loài này có kích thước chồng lên nhau. Yêu cầu sai bị chặn ở 422 trước khi tới mô hình.
+
+Bốn dòng số đo lấy từ máy phát triển của bài (Windows, server và client cùng máy), nên máy bạn sẽ cho số khác; hãy nhìn quan hệ giữa chúng. p95 chỉ cao hơn p50 khoảng 1 ms: đuôi chậm ngắn. Thông lượng 202 yêu cầu/giây xấp xỉ $1/\bar{t} = 1/0.00495$ giây, đúng như mục Lý thuyết đoán cho một client gửi lần lượt.
+
+### Bước 4: đóng gói bằng Docker
+
+Thêm hai file vào cùng thư mục. File `requirements.txt` ghim **đúng** bản thư viện, nhất là `scikit-learn` phải trùng bản đã in ở Bước 1 (muốn chắc hơn, ghim cả `numpy`, `scipy`, `joblib` theo `pip freeze`, vì chúng cũng ảnh hưởng tới việc nạp file):
+
+```text
+fastapi==0.162.0
+uvicorn==0.54.0
+scikit-learn==1.9.1
+```
+
+Và `Dockerfile`:
+
+```dockerfile
+FROM python:3.14-slim
+WORKDIR /code
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py model.joblib ./
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+Thư viện được cài trước khi chép code, để lần sửa `app.py` sau Docker dùng lại lớp thư viện đã có. Dòng `CMD` có hai chi tiết quan trọng:
+
+- **`--host 0.0.0.0`**: nghe trên mọi địa chỉ mạng của container, vì như bài [Docker và Cloud](/vi/llm/docker-cloud/) đã giải thích, nghe `127.0.0.1` thì bên ngoài container không vào được.
+- **Dạng mảng JSON** (exec form). Với dạng này, uvicorn là tiến trình chính của container và nhận tín hiệu tắt từ `docker stop`, nên phần sau `yield` của `lifespan` được chạy. Bài đã thử viết `CMD` dạng chuỗi thường: uvicorn chạy dưới một shell, không nhận được tín hiệu, và log không có dòng `Application shutdown complete.` (câu hỏi thứ ba ở mục Kiểm tra nhanh).
+
+Dựng image rồi chạy:
+
+```sh
+docker build -t iris-api .
+docker run --rm -p 8000:8000 iris-api
+```
+
+Sau đó `python bench.py` ở Bước 3 chạy y như cũ, vì container nhận yêu cầu ở cùng cổng 8000. Mỗi container chạy một tiến trình uvicorn. uvicorn có `--workers` để chạy nhiều tiến trình, nhưng mỗi worker nạp một bản mô hình riêng: mô hình 2 GB với 4 worker là 8 GB RAM.
+
+### Chạy LLM mở và dùng lại code của bài trước
+
+Phần này không có file mới: bạn khởi động một server, rồi chạy lại ô "Hội thoại hai lượt" của bài [Sử dụng API văn bản](/vi/llm/text-api/). Các lệnh dưới chưa được chạy thử (máy phát triển không có Ollama, llama.cpp hay GPU), chỉ đối chiếu với tài liệu chính thức tháng 10/2026. Chọn **một** server:
+
+```sh
+# Ollama: server chạy nền sau khi cài (hoặc chạy `ollama serve`), nghe ở cổng 11434
+ollama pull <tên mô hình>
+
+# llama.cpp: phục vụ một tệp GGUF; thêm --n-gpu-layers all để đẩy mọi lớp lên GPU
+llama-server -m <tệp mô hình>.gguf --port 8080
+
+# vLLM: cần GPU; ghi rõ cổng
+vllm serve <tên mô hình> --port 8001
+```
+
+Với `llama-server`, chờ `curl http://localhost:8080/health` trả `{"status":"ok"}` rồi mới gửi yêu cầu. Sau đó đặt ba biến môi trường. Ví dụ dưới dùng Ollama:
+
+<Tabs syncKey="os">
+<TabItem label="macOS, Linux (bash)">
+
+```sh
+export OPENAI_BASE_URL="http://localhost:11434/v1/"
+export OPENAI_API_KEY="ollama"
+export LLM_MODEL="<tên mô hình đã pull>"
+```
+
+</TabItem>
+<TabItem label="Windows (PowerShell)">
+
+```powershell
+$env:OPENAI_BASE_URL = "http://localhost:11434/v1/"
+$env:OPENAI_API_KEY = "ollama"
+$env:LLM_MODEL = "<tên mô hình đã pull>"
+```
+
+</TabItem>
+</Tabs>
+
+Với `llama-server`, đổi địa chỉ thành `http://localhost:8080/v1`; với vLLM, `http://localhost:8001/v1` và `LLM_MODEL` là đúng tên đã truyền cho `vllm serve`. Server không đòi key thì `OPENAI_API_KEY` là chuỗi bất kỳ, vì SDK `openai` vẫn bắt buộc có biến này. Không chắc tên mô hình? Cả ba server đều liệt kê mô hình ở `<địa chỉ>/models`, ví dụ `curl http://localhost:11434/v1/models`.
+
+Rồi chạy lại file của ô "Hội thoại hai lượt" ở bài trước, không sửa dòng nào. Lần gọi đầu có thể chậm, vì server còn phải nạp mô hình.
+
+## Lỗi hay gặp
+
+:::caution[Mô hình chưa được nạp: nạp mỗi yêu cầu, hoặc test bỏ `with`]
+Viết `joblib.load` trong hàm `predict` thì mọi yêu cầu đều đọc lại file: chậm, và nhiều yêu cầu cùng lúc giữ nhiều bản trong RAM. Hãy nạp trong `lifespan`. Ngược lại, khi test bằng `TestClient` của FastAPI (cần cài thêm `httpx`), phải dùng `with TestClient(app) as client:`; không có `with` thì `lifespan` không chạy, `/health` trả 503 và `/predict` gặp `KeyError: 'model'`. Số đo qua `TestClient` cũng không phải số của server thật, vì nó không đi qua mạng.
+:::
+
+:::caution[Sai địa chỉ lắng nghe: 127.0.0.1 trong container, 0.0.0.0 ra mạng]
+Trong container phải nghe ở `0.0.0.0`. Nhưng trên máy của bạn, `0.0.0.0` nghĩa là **mọi máy cùng mạng** (quán cà phê, công ty) có thể gọi mô hình của bạn, không cần mật khẩu, trừ khi tường lửa chặn. Khi thử, giữ `--host 127.0.0.1`, hoặc nối cổng của container chỉ vào máy mình: `docker run -p 127.0.0.1:8000:8000 iris-api`. Với `llama-server` thì đặt `--api-key`. Đưa server ra Internet thật cần xác thực và HTTPS, thường đặt sau một **reverse proxy**: server đứng trước (như Nginx), lo HTTPS và quyền truy cập rồi chuyển yêu cầu vào server của bạn.
+:::
+
+:::caution[Nạp file mô hình bằng bản scikit-learn khác, hoặc từ nguồn lạ]
+File `.joblib` (và `.pkl`) lưu đối tượng Python bằng pickle. scikit-learn không hỗ trợ nạp mô hình bằng một bản khác bản đã lưu: có thể chạy, có thể cho kết quả lệch, có thể hỏng hẳn, và scikit-learn báo `InconsistentVersionWarning`. Vì vậy `requirements.txt` ghim đúng bản đã in ở Bước 1. Nặng hơn: nạp một file pickle có thể **chạy code tùy ý** trong đó. Chỉ nạp file do chính bạn tạo hoặc từ nguồn bạn tin.
+:::
+
+:::caution[Đo một lần, hoặc chỉ nhìn trung bình]
+Gọi server một lần rồi kết luận "nhanh" là đo cả khởi động lạnh lẫn may rủi. Gửi đủ nhiều yêu cầu (vài trăm với mô hình nhỏ), bỏ vài yêu cầu đầu, rồi báo p50 và p95.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Phục vụ mô hình là chạy nó như một dịch vụ HTTP: nạp mô hình **một lần** (`lifespan`), kiểm tra đầu vào bằng Pydantic (sai thì 422), có `/health` trả 503 khi chưa sẵn sàng.
+- LLM mở đã có server kiểu OpenAI dựng sẵn (Ollama, `llama-server`, vLLM). Code client giữ nguyên, chỉ đổi ba biến môi trường. Chọn CPU hay GPU sau khi hỏi "mô hình có vừa bộ nhớ không".
+- Đo độ trễ bằng phân vị: $\text{p}(q) = t_{(\lceil q \cdot m \rceil)}$, xem p50 và p95 chứ không chỉ trung bình. Thông lượng $R = m / \Delta t$; một client gửi lần lượt chỉ cho $R \approx 1/\bar{t}$.
+- Đóng gói: ghim bản thư viện trong `requirements.txt`, `CMD` dạng mảng JSON với `--host 0.0.0.0`, rồi `docker run -p`. Nhiều GPU và nhiều bản mô hình là chuyện của bài sau.
+
+**Đọc thêm:**
+
+- FastAPI. [*Lifespan Events*](https://fastapi.tiangolo.com/advanced/events/). Hướng dẫn chính thức về `lifespan`, có ví dụ nạp mô hình ML một lần.
+- FastAPI. [*FastAPI in Containers - Docker*](https://fastapi.tiangolo.com/deployment/docker/). Dockerfile mẫu, vì sao dùng `CMD` dạng mảng, thứ tự chép file, và khi nào dùng nhiều worker. Trang dùng `fastapi run`; bài dùng `uvicorn` trực tiếp.
+- FastAPI. [*Testing Events: lifespan*](https://fastapi.tiangolo.com/advanced/testing-events/). Cách test ứng dụng có `lifespan` bằng `TestClient` trong khối `with`.
+- scikit-learn. [*Model persistence*](https://scikit-learn.org/1.9/model_persistence.html) (bản 1.9). Cách lưu mô hình, rủi ro bảo mật của pickle, và vì sao phải nạp bằng đúng bản đã lưu.
+- ggml-org. [*llama.cpp server README*](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md). Tham số của `llama-server` (`-m`, `--port`, `--host`, `--n-gpu-layers`, `--api-key`) và endpoint `/health`.
+- Ollama. [*OpenAI compatibility*](https://docs.ollama.com/api/openai-compatibility) và [*Hardware support*](https://docs.ollama.com/gpu); vLLM. [*Online serving*](https://docs.vllm.ai/en/stable/serving/online_serving/). Phần nào của API OpenAI được hỗ trợ, GPU nào dùng được, và endpoint `/health` của vLLM.
+
+<LessonProgress />

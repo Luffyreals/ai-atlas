@@ -27,6 +27,9 @@ export const UI_KEYS = {
     'hintIndexError', 'hintKeyError', 'hintAttributeError', 'hintZeroDivisionError',
     'hintModuleNotFoundError', 'hintEOFError', 'hintGeneric',
   ],
+  localCode: [
+    'badge', 'install', 'env', 'optional', 'command', 'hardware', 'sampleOutput', 'sampleNote', 'sampleNoteFixed',
+  ],
   // One namespace per VIZ, named viz<Name> (docs/architecture/viz/README.md, section 2.6).
   vizLinearFit: [
     'caption', 'plotLabel', 'controls', 'wLabel', 'bLabel', 'wValueText', 'bValueText',
@@ -42,6 +45,12 @@ export const UI_KEYS = {
     'caption', 'plotLabel', 'barsLabel', 'barsDesc', 'controls', 'lambdaLabel', 'lambdaValueText',
     'pow10Spoken', 'zeroLambda', 'penalty', 'ridge', 'lasso', 'curve', 'trainMse', 'testMse', 'zeros',
     'featureAxis', 'coefAxis', 'overNote', 'underfit', 'goodFit', 'overfit', 'bestLambda', 'announce',
+  ],
+  vizSampling: [
+    'caption', 'contextLabel', 'tableLabel', 'tokenCol', 'probCol', 'countCol', 'removed', 'controls',
+    'temperatureLabel', 'temperatureValueText', 'topKLabel', 'topKValueText', 'topKOff',
+    'topPLabel', 'topPValueText', 'topPOff', 'off', 'sampleOne', 'sampleMany', 'reset',
+    'kept', 'greedyNote', 'announce', 'announceSample', 'announceMany', 'resetDone',
   ],
   vizGradientDescent: [
     'caption', 'mapLabel', 'mapDesc', 'wAxis', 'bAxis', 'levels', 'path', 'start', 'current', 'best',

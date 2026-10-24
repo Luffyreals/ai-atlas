@@ -39,7 +39,7 @@ const contentLang = getContentLang(route);
 <div class="atlas-runner not-content" lang={locale}>
   {title && <p class="atlas-runner-title" lang={contentLang}>{title}</p>}
   <div class="atlas-runner-static" lang={contentLang} data-runner-static>
-    <Code code={code} lang="python" />
+    <Code code={code} lang="python" title="" />
   </div>
   <PythonRunnerIsland client:visible code={code} stdin={stdin} figureAlt={figureAlt} lang={locale} strings={strings} />
   <noscript><p class="atlas-runner-noscript">{tCommon.needsScript}</p></noscript>

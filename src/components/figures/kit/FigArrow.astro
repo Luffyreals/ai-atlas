@@ -2,28 +2,31 @@
 // A connector of a static figure (docs/architecture/viz/figures.md, sections 8.3–8.4): a polyline from `from` through
 // `via` to `to`, and a head drawn as a polygon at `to` (no <marker>: it needs a page-unique id, and colouring
 // it by the line is not reliable across browsers). The line stops inside the head, so no stroke pokes past
-// the tip. Colours and stroke: figures.css.
-import { ARROW_HEAD, arrowHead, pointBefore, round1, type Pt } from '@lib/figures/geometry';
+// the tip. Colours and stroke: figures.css. Points and head: arrowParts in src/lib/figures/geometry.ts.
+// tone "alt" (docs/architecture/llm-lessons.md, section 2.9.1): a dashed blue line and head, for a link of the
+// second group (a frozen copy, "the same model"), like the dashed border of FigNode tone="alt".
+// head={false}: a plain link with no direction; the line then runs to `to`.
+import { arrowParts, type Pt } from '@lib/figures/geometry';
 
 interface Props {
   from: Pt;
   to: Pt;
   /** Bends, in order. */
   via?: readonly Pt[];
+  tone?: 'plain' | 'alt';
+  /** Draw the head at `to` (default). */
+  head?: boolean;
 }
 
-const { from, to, via = [] } = Astro.props;
-const points: readonly Pt[] = [from, ...via, to];
-const last = points[points.length - 2] ?? from;
-if (Math.hypot(to[0] - last[0], to[1] - last[1]) < ARROW_HEAD) {
-  throw new Error(
-    `<FigArrow> to ${to.join(',')} on "${Astro.locals.starlightRoute.id}": the last segment is shorter than its head (${ARROW_HEAD}).`,
-  );
+const { from, to, via = [], tone = 'plain', head = true } = Astro.props;
+let parts: ReturnType<typeof arrowParts>;
+try {
+  parts = arrowParts([from, ...via, to], head);
+} catch (error) {
+  throw new Error(`<FigArrow> to ${to.join(',')} on "${Astro.locals.starlightRoute.id}": ${error instanceof Error ? error.message : String(error)}`);
 }
-
-const lineEnd = pointBefore(last, to, ARROW_HEAD - 1);
-const line = [...points.slice(0, -1), lineEnd].map(([x, y]) => `${round1(x)},${round1(y)}`).join(' ');
+const dataTone = tone === 'plain' ? undefined : tone;
 ---
 
-<polyline class="atlas-fig-arrow" points={line}></polyline>
-<polygon class="atlas-fig-arrow-head" points={arrowHead(last, to)}></polygon>
+<polyline class="atlas-fig-arrow" data-tone={dataTone} points={parts.line}></polyline>
+{parts.head && <polygon class="atlas-fig-arrow-head" data-tone={dataTone} points={parts.head}></polygon>}

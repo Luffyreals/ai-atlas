@@ -1,0 +1,309 @@
+---
+title: 'Deploy LLM: nhiều GPU, phân tán'
+description: Mô hình 70B không vừa một GPU, nhiều người chat làm đầy bộ nhớ. KV cache, prefill và decode, chia mô hình ra nhiều GPU, continuous batching, PagedAttention.
+quiz:
+  - question: 'Server chạy Llama 3 8B ở BF16: trọng số khoảng 15 GiB, KV cache khoảng 16 GiB khi phục vụ 16 chuỗi dài 8 192 token. Bạn lượng tử hóa trọng số xuống int4, còn KV cache vẫn lưu ở BF16. Với cùng 16 chuỗi đó, câu nào đúng?'
+    options:
+      - 'Tổng bộ nhớ giảm khoảng 4 lần, vì mọi thứ đều nhỏ đi 4 lần'
+      - 'KV cache cũng giảm 4 lần, vì K và V được tính từ trọng số đã lượng tử hóa'
+      - 'Trọng số còn khoảng 3.7 GiB nhưng KV cache vẫn 16 GiB, nên tổng chỉ giảm từ khoảng 31 xuống khoảng 20 GiB'
+      - 'Không đổi gì, vì trước mỗi phép nhân trọng số vẫn được giải lượng tử về 16 bit'
+    answer: 2
+    explanation: 'KV cache tính bằng $2 \cdot N_{\text{layer}} \cdot H_{\text{kv}} \cdot d \cdot s \cdot L \cdot B$, với $s$ là số byte mỗi số của chính cache. Lượng tử hóa trọng số không đổi số nào trong công thức này. K và V đúng là được tính từ trọng số, nhưng cái được lưu là kết quả, ở định dạng của cache. Giải lượng tử trước phép nhân không làm chỗ lưu lớn lại: trọng số vẫn được lưu ở 4 bit. Khi chuỗi dài và nhiều người dùng, KV cache mới là phần lớn.'
+  - question: 'Một chatbot RAG ghép khoảng 20 000 token tài liệu vào mỗi lời nhắc. Người dùng phàn nàn: gõ câu hỏi xong phải chờ lâu mới thấy chữ đầu tiên, nhưng sau đó chữ chạy ra đều và nhanh. Số đo nào cao, và vì sao?'
+    options:
+      - 'TTFT cao: prefill phải xử lý cả 20 000 token lời nhắc (cộng thời gian chờ trong hàng đợi) rồi mới ra token đầu'
+      - 'TPOT cao: decode chậm vì mỗi token mới phải đọc lại toàn bộ trọng số'
+      - 'Cả hai đều thấp, nên lỗi nằm ở mạng của người dùng'
+      - 'TPOT cao, vì KV cache của 20 000 token làm mọi bước decode chậm như nhau'
+    answer: 0
+    explanation: 'Chờ lâu trước chữ đầu là TTFT, gồm thời gian chờ trong hàng đợi và prefill. Prefill phải đi qua cả 20 000 token lời nhắc để điền KV cache, nên lời nhắc dài làm TTFT dài. Sau đó chữ chạy đều và nhanh, tức là TPOT ổn. Chuỗi dài có làm mỗi bước decode tốn thêm một chút, vì attention phải đọc nhiều mục cache hơn, nhưng triệu chứng ở đây là chờ ở đầu, không phải chậm đều.'
+  - question: 'Bạn phục vụ một mô hình 70B ở BF16 (khoảng 131 GiB trọng số). Có 2 máy, mỗi máy 4 GPU 80 GB nối với nhau bằng NVLink; giữa hai máy là mạng chậm hơn nhiều. Theo bài, cách nào hợp lý nhất?'
+    options:
+      - 'Tensor parallel 8 trải trên cả hai máy, để mỗi GPU giữ ít trọng số nhất'
+      - 'Pipeline parallel 8, mỗi GPU giữ một phần các lớp, trải trên cả hai máy'
+      - 'Mỗi GPU giữ một bản đầy đủ của mô hình, rồi chia yêu cầu cho 8 bản'
+      - 'Tensor parallel 4 trong mỗi máy, mỗi máy chạy một bản mô hình; một bộ cân bằng tải chia yêu cầu cho hai bản'
+    answer: 3
+    explanation: 'Bốn GPU của một máy có 320 GB, đủ cho 131 GiB (khoảng 141 GB) trọng số và còn chỗ cho KV cache, nên không cần đi qua mạng chậm. Trong máy dùng tensor parallel vì có NVLink. Máy thứ hai chạy bản thứ hai để phục vụ gấp đôi số người. Tensor parallel qua mạng chậm phải trao đổi ở mọi lớp, mỗi bước sinh token. Pipeline 8 chạy được, nhưng thêm chặng qua mạng mà không cần. Một bản đầy đủ trên mỗi GPU thì không vừa: 141 GB lớn hơn 80 GB.'
+  - question: 'Một lô có 4 yêu cầu: ba yêu cầu cần sinh 20 token, một yêu cầu cần 500 token. So batching tĩnh với continuous batching, câu nào đúng?'
+    options:
+      - 'Continuous batching làm yêu cầu 500 token xong sớm hơn nhiều, vì nó được ưu tiên'
+      - 'Với continuous batching, ba yêu cầu ngắn được trả ngay khi xong, và chỗ của chúng được yêu cầu mới lấp ở bước kế tiếp, thay vì để trống tới khi yêu cầu dài xong'
+      - 'Hai cách như nhau, miễn GPU đủ bộ nhớ cho cả 4 yêu cầu'
+      - 'Continuous batching nối 4 yêu cầu thành một chuỗi dài 560 token rồi sinh một lần'
+    answer: 1
+    explanation: 'Batching tĩnh giữ cả lô tới khi yêu cầu dài nhất xong: từ bước 21 tới bước 500, ba chỗ trong lô bỏ không, và yêu cầu mới phải chờ. Continuous batching lập lịch theo từng bước sinh token, nên lô luôn đầy. Yêu cầu dài vẫn cần đủ 500 bước decode, nó không nhanh hơn. Các yêu cầu cũng không bị nối thành một chuỗi: mỗi chuỗi vẫn có KV cache riêng.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import ParallelismFigure from '@components/figures/ParallelismFigure.astro';
+import memoryCode from '@code/llm/llm-deployment/memory.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Ước lượng được bộ nhớ khi **suy luận** (inference): phần **trọng số** cố định, và phần **KV cache** lớn lên theo độ dài chuỗi và số người dùng.
+- Phân biệt được hai giai đoạn **prefill** và **decode**, cùng hai số đo **độ trễ** (latency) **TTFT** và **TPOT**.
+- Chọn được cách chia mô hình ra nhiều GPU khi phục vụ: **song song tensor** (tensor parallelism) trong một máy, **song song pipeline** (pipeline parallelism) giữa các máy.
+- Hiểu ý chính của **continuous batching** và **PagedAttention**, hai kỹ thuật giúp một GPU phục vụ nhiều người hơn.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Ở bài [Họ LLaMA](/vi/llm/llama-family/), **KV cache** là khóa và giá trị của mọi token đã xử lý, lưu lại để mỗi bước sinh không phải tính lại; GQA làm nó nhỏ đi bằng cách cho vài đầu truy vấn dùng chung một bộ K, V. Bài đó cũng chia việc huấn luyện ra nhiều GPU: **song song tensor** chia ma trận trong một lớp, **song song pipeline** chia các lớp.
+:::
+
+## Trực giác
+
+### Từ một người dùng tới cả công ty
+
+Ở bài [Deploy mô hình riêng](/vi/llm/deploy-custom-model/), bạn chạy một LLM mở trên một máy, thử một mình thì trơn tru. Rồi công ty muốn mở cho 200 nhân viên cùng dùng, với mô hình 70 tỉ tham số. Bạn gặp hai bức tường.
+
+**Bức tường thứ nhất: mô hình không vừa.** 70 tỉ tham số, mỗi tham số 2 byte, là khoảng 140 GB. Nhiều GPU máy chủ cỡ lớn có 80 GB. Mô hình phải được chia ra nhiều GPU.
+
+**Bức tường thứ hai: vừa rồi vẫn hết chỗ.** Ngay cả mô hình nhỏ vừa gọn một GPU, khi vài chục người chat những cuộc dài cùng lúc, bộ nhớ vẫn đầy. Thủ phạm là KV cache.
+
+Hãy hình dung một nhà hàng. **Trọng số là gian bếp:** rộng cố định, có một khách hay một trăm khách cũng vậy. **KV cache là bàn ăn:** mỗi nhóm khách cần một bàn, nối dài thêm khi họ gọi thêm món (thêm token). Bếp phải vừa nhà hàng đã, rồi phần sàn còn lại quyết định bạn tiếp được bao nhiêu nhóm.
+
+### Đọc đề và viết bài
+
+Một câu trả lời đi qua hai giai đoạn. Đầu tiên mô hình **đọc cả lời nhắc**: mọi token đã có sẵn nên được xử lý cùng lúc, như đọc lướt đề bài. Sau đó nó **viết từng token một**, như viết bài bằng tay: chưa viết xong chữ này thì chưa biết chữ sau.
+
+Mỗi bước viết chỉ sinh một token cho mỗi chuỗi, nhưng phải dùng tới **toàn bộ** trọng số. Một cách nghĩ thường gặp (bài báo PagedAttention, mục 2.2, cũng mô tả decode như vậy): lúc này GPU tốn thời gian đọc trọng số từ bộ nhớ nhiều hơn là tính. Khi đó, gom nhiều chuỗi vào cùng một bước rất lợi: đọc trọng số một lần, phục vụ nhiều người. Vì thế server LLM cố gom thật nhiều yêu cầu vào một **lô** (batch), và cần thật nhiều chỗ cho KV cache.
+
+**Bài toán của bài này: một mô hình cần bao nhiêu bộ nhớ khi phục vụ nhiều người, chia nó ra nhiều GPU thế nào khi không vừa, và làm sao xếp các yêu cầu để GPU luôn bận mà người dùng không phải chờ lâu?**
+
+## Lý thuyết
+
+### Bộ nhớ thứ nhất: trọng số
+
+Mô hình có $\Psi$ tham số (cùng ký hiệu với bài Họ LLaMA), mỗi tham số lưu bằng $s$ byte. Phần trọng số chiếm:
+
+$$
+M_{\text{w}} \approx \Psi \cdot s
+$$
+
+Với BF16, $s = 2$; với int8, $s = 1$; với int4, $s = 0.5$. Dấu "xấp xỉ" vì lượng tử hóa (quantization) còn lưu thêm hệ số co giãn, như bài [Đánh giá mô hình và PEFT](/vi/llm/evaluation-peft/) đã nói. Phần này **cố định**: phục vụ một người hay sáu mươi người thì cũng chừng đó.
+
+Đếm từ bảng kiến trúc trong bài báo Llama 3 (Grattafiori và cộng sự, 2024), bản 8B có 8.03 tỉ tham số, bản 70B có 70.55 tỉ (tự tính, ô code ở mục Ví dụ code đếm lại). Ở BF16, đó là 15.0 GiB và 131.4 GiB. Một GiB là $2^{30}$ byte, khoảng 1.074 GB, nên 131.4 GiB là khoảng 141 GB: bản 70B không vừa một GPU 80 GB, kể cả khi chưa có người dùng nào.
+
+Lượng tử hóa thu nhỏ phần này (70B ở int4 còn 32.9 GiB, tự tính), đổi lại chất lượng có thể giảm. Bài báo Llama 3 (mục 6.2) khi chạy bản 405B ở FP8 chỉ lượng tử hóa phần lớn tham số và **kích hoạt** (activation) của các lớp FFN (khoảng 50% thời gian tính khi suy luận), không lượng tử hóa tham số của attention. Họ thấy chất lượng nhạy với một số kiểu lượng tử hóa, nên thêm vài thay đổi, trong đó có để nguyên lớp Transformer đầu và cuối.
+
+### Bộ nhớ thứ hai: KV cache
+
+Ký hiệu như bài Họ LLaMA: $N_{\text{layer}}$ lớp, $H_{\text{kv}}$ đầu K/V, $d$ chiều mỗi đầu, $s$ byte mỗi số; thêm độ dài chuỗi $L$ và số chuỗi đang phục vụ cùng lúc $B$ (batch).
+
+**Bước 1: một token, một lớp.** Vectơ khóa của token này có $H_{\text{kv}} \cdot d$ số (mỗi đầu K/V một vectơ $d$ chiều), vectơ giá trị cũng vậy. Lưu cả hai: $2 \cdot H_{\text{kv}} \cdot d$ số.
+
+**Bước 2: mọi lớp.** Mỗi lớp attention có K, V riêng, nên nhân với $N_{\text{layer}}$. Đổi ra byte thì nhân với $s$. Một token chiếm:
+
+$$
+2 \cdot N_{\text{layer}} \cdot H_{\text{kv}} \cdot d \cdot s \ \text{byte}
+$$
+
+**Bước 3: cả chuỗi, rồi cả lô.** Mỗi token đã xử lý (cả lời nhắc lẫn phần đã sinh) có một mục, nên một chuỗi dài $L$ token cần gấp $L$ lần. Mỗi chuỗi có cache riêng, không dùng chung với chuỗi khác, nên $B$ chuỗi cần gấp $B$ lần:
+
+$$
+M_{\text{KV}} = 2 \cdot N_{\text{layer}} \cdot H_{\text{kv}} \cdot d \cdot s \cdot L \cdot B
+$$
+
+Công thức là tích của các thừa số, nên nó **tăng tuyến tính** theo từng thừa số: $L$ gấp 4 thì cache gấp 4, $B$ gấp 16 thì cache gấp 16.
+
+**Áp vào số thật.** Llama 3 8B có $N_{\text{layer}} = 32$, $H_{\text{kv}} = 8$, $d = 4\,096/32 = 128$. Ở BF16, mỗi token cần $2 \cdot 32 \cdot 8 \cdot 128 \cdot 2 = 131\,072$ byte (128 KiB), như bài Họ LLaMA đã tính. Từ đó (tự tính):
+
+| Llama 3 8B, KV cache ở BF16 | $L$ | $B$ | KV cache | So với trọng số (15.0 GiB) |
+|---|---:|---:|---:|---|
+| Một cuộc chat dài | 8 192 | 1 | 1.0 GiB | nhỏ hơn nhiều |
+| 16 cuộc chat dài | 8 192 | 16 | 16.0 GiB | đã vượt |
+| 16 tài liệu rất dài | 32 768 | 16 | 64.0 GiB | gấp hơn 4 lần |
+
+Số đầu truy vấn không có trong công thức, nên GQA có ích khi triển khai: nếu Llama 3 8B dùng 32 đầu K/V thay vì 8, một chuỗi 8 192 token cần 4.0 GiB thay vì 1.0 GiB, và cùng GPU đó phục vụ được ít người hơn 4 lần.
+
+### Bao nhiêu người dùng cùng lúc?
+
+GPU có $M_{\text{GPU}}$ byte. Trừ phần trọng số, rồi chia phần còn lại cho KV cache của một chuỗi ($B = 1$), ta được số chuỗi tối đa:
+
+$$
+B_{\max} \approx \left\lfloor \frac{M_{\text{GPU}} - M_{\text{w}}}{M_{\text{KV}}(L, B = 1)} \right\rfloor
+$$
+
+Ký hiệu $\lfloor \cdot \rfloor$ là làm tròn xuống, vì không có "nửa người dùng". Với Llama 3 8B ở BF16 trên GPU 80 GB (giả sử dùng được đúng $80 \cdot 10^9$ byte), chuỗi 8 192 token: trọng số chiếm $8.03 \cdot 10^9 \cdot 2 \approx 16.06 \cdot 10^9$ byte (chính là 15.0 GiB), phần trống là $80 - 16.06 \approx 63.9$ GB, chia cho 1 GiB (khoảng 1.074 GB) mỗi chuỗi được khoảng 59.5, tức **59 chuỗi** (tự tính).
+
+Đây là **ước lượng cận trên**: nó bỏ qua kích hoạt tạm thời, phần server tự giữ lại và nhiều thứ khác, nên thực tế ít hơn. Nhưng nó cho thấy điều quan trọng: **trọng số quyết định mô hình có vừa không, KV cache quyết định phục vụ được bao nhiêu người**. vLLM in ra phần thứ hai này khi khởi động: dòng "GPU KV cache size" (tổng số token KV cache chứa được) và "Maximum concurrency" (ước lượng số yêu cầu chạy cùng lúc), theo trang *Parallelism and Scaling* của vLLM.
+
+:::note[Ghi nhớ]
+Bộ nhớ khi suy luận gồm trọng số $M_{\text{w}} \approx \Psi \cdot s$, cố định, và KV cache $M_{\text{KV}} = 2 \cdot N_{\text{layer}} \cdot H_{\text{kv}} \cdot d \cdot s \cdot L \cdot B$, tăng tuyến tính theo độ dài chuỗi $L$ và số chuỗi $B$. Khi chuỗi dài và nhiều người dùng, KV cache có thể lớn hơn cả trọng số.
+:::
+
+### Prefill, decode và hai con số độ trễ
+
+**Prefill** (giai đoạn nạp lời nhắc) xử lý mọi token của lời nhắc cùng lúc, điền KV cache cho chúng ở mọi lớp, rồi cho ra token đầu tiên. **Decode** (giai đoạn sinh) lặp lại: lấy token vừa sinh, tính K, V của nó, thêm một mục vào KV cache ở mỗi lớp, rồi sinh token kế tiếp. Đây chính là vòng lặp sinh của bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/), có thêm cache.
+
+Hai giai đoạn được đo riêng. Trang benchmark của vLLM 0.32 định nghĩa:
+
+- **TTFT** (time to first token, thời gian tới token đầu): từ lúc gửi yêu cầu tới lúc nhận phần đầu tiên của câu trả lời, tức là gồm thời gian chờ trong hàng đợi và prefill. Vì thế lời nhắc dài làm TTFT dài.
+- **TPOT** (time per output token, thời gian mỗi token sinh ra): thời gian trung bình giữa các token sau token đầu, tức nhịp của decode. Câu trả lời có $N$ token, mất tổng cộng $t_{\text{total}}$ giây, thì:
+
+$$
+\text{TPOT} = \frac{t_{\text{total}} - \text{TTFT}}{N - 1}
+$$
+
+Mẫu số là $N - 1$ vì token đầu đã tính vào TTFT. Viết ngược lại, $t_{\text{total}} = \text{TTFT} + (N - 1) \cdot \text{TPOT}$. Ví dụ, TTFT 0.5 giây, TPOT 40 ms, câu trả lời 201 token: tổng là $0.5 + 200 \cdot 0.04 = 8.5$ giây.
+
+Tên gọi chưa thống nhất: bài báo Llama 3 gọi độ trễ của decode là "time-to-incremental-token", và trang của vLLM nhắc rằng mỗi công cụ benchmark đặt tên một kiểu. Khi so số, hãy xem số đo bắt đầu và kết thúc ở đâu.
+
+**Thông lượng và độ trễ kéo nhau.** Thông lượng (throughput) ở đây là tổng số token mỗi giây của cả server. Lô lớn hơn thì thông lượng tăng, nhưng mỗi bước tính cho nhiều chuỗi hơn nên lâu hơn, và mỗi người thấy chữ chạy chậm lại. Hình 24 của bài báo Llama 3 vẽ đường đánh đổi này theo cỡ lô, khi so có và không micro-batching. Chọn điểm nào tùy mục tiêu: phục vụ thật nhiều người, hay trả lời thật nhanh. Như ở bài Deploy mô hình riêng, hãy đo TTFT và TPOT bằng p50, p95.
+
+### Chia mô hình ra nhiều GPU khi suy luận
+
+Khi suy luận không có gradient, không có trạng thái bộ tối ưu, chỉ còn trọng số và KV cache phải chia.
+
+**Song song tensor: trong một máy.** Mỗi GPU giữ một phần ma trận của **mọi** lớp; với attention, mỗi GPU lo một số đầu (chia theo đầu như Megatron-LM; nếu số GPU nhiều hơn $H_{\text{kv}}$, ví dụ mô hình có 8 đầu K/V như Llama 3 mà chia tensor ra 16 GPU, thì đầu K/V thường phải nhân bản, như bài báo Llama 2 nhắc với MQA), nên cũng chỉ giữ KV cache của các đầu đó. Đổi lại, sau mỗi lớp các GPU phải cộng gộp kết quả, ở mọi bước sinh token. Trao đổi dày đặc như vậy cần đường truyền rất nhanh, như NVLink trong một máy.
+
+**Song song pipeline: giữa các máy.** Mỗi GPU (hay mỗi máy) giữ một đoạn các lớp, cùng KV cache của đoạn đó. Giữa hai đoạn kề nhau chỉ chuyền kích hoạt, nên chịu được đường truyền chậm hơn. **Bong bóng** (pipeline bubble), vấn đề lớn khi huấn luyện, theo bài báo Llama 3 (mục 6.1) không còn là vấn đề khi suy luận, vì không có lượt lan truyền ngược buộc phải xả đường ống. Họ chia lô thành micro-batch để các giai đoạn cùng bận: thông lượng tăng, đổi lại độ trễ tăng vì thêm điểm đồng bộ.
+
+**Ví dụ thật: Llama 3 405B.** Theo cùng mục 6.1, bản 405B ở BF16 không vừa một máy 8 GPU H100: $405 \cdot 10^9 \cdot 2 = 810$ GB, trong khi 8 GPU 80 GB có 640 GB (tự tính). Họ chạy trên 16 GPU của hai máy: song song tensor trong mỗi máy nhờ NVLink, song song pipeline giữa hai máy.
+
+**Còn song song dữ liệu (data parallelism)?** Nó không giúp mô hình vừa bộ nhớ, vì GPU nào cũng giữ cả mô hình. Nhưng ở mức dịch vụ, nó là cách mở rộng quen thuộc: chạy nhiều **bản** mô hình (mỗi bản có thể đã chia bằng tensor, pipeline) sau một **bộ cân bằng tải** (load balancer).
+
+Trang *Parallelism and Scaling* của vLLM gợi ý chọn theo thứ tự:
+
+| Tình huống (cho một bản mô hình) | Cách chia |
+|---|---|
+| Vừa một GPU | Không cần chia |
+| Không vừa một GPU, vừa một máy | Song song tensor, số phần bằng số GPU của máy |
+| Không vừa một máy | Song song tensor bằng số GPU mỗi máy, song song pipeline bằng số máy |
+| GPU không có NVLink | Ưu tiên song song pipeline |
+| Số GPU không chia đều được mô hình | Song song pipeline, vì chia theo lớp thì không cần chia đều |
+
+Vừa rồi thì xem số người dùng đồng thời trong log. Chưa đủ thì thêm GPU hoặc thêm bản.
+
+### Continuous batching: lập lịch theo từng bước
+
+**Batching tĩnh** giống chiếc xe buýt chỉ cho khách lên ở bến đầu và chỉ mở cửa ở bến cuối: lô chạy tới khi chuỗi dài nhất xong. Chuỗi ngắn xong từ lâu vẫn chiếm ghế, còn yêu cầu mới phải chờ chuyến sau.
+
+Orca (Yu và cộng sự, OSDI 2022) đề xuất **lập lịch theo từng vòng lặp** (iteration-level scheduling), ngày nay thường gọi là **continuous batching**. Bộ lập lịch chỉ cho mô hình chạy **một bước** sinh token trên lô, rồi quyết định lại. Chuỗi nào xong thì trả kết quả ngay, chỗ trống được yêu cầu mới lấp ở bước kế tiếp. Xe buýt giờ mở cửa ở mọi trạm. Vì các chuỗi trong lô dài ngắn khác nhau, Orca còn đề xuất *selective batching*: chỉ gộp lô cho một số phép tính. Paper báo cáo thông lượng gấp 36.9 lần NVIDIA FasterTransformer ở cùng mức độ trễ, trên GPT-3 175B, với phần cứng và tải của họ.
+
+### PagedAttention: chia KV cache thành trang
+
+Lô lớn cần chỗ cho KV cache. Kwon và cộng sự (2023) chỉ ra chỗ phí: KV cache của mỗi yêu cầu lớn dần khi sinh, không biết trước sẽ dài bao nhiêu, nên các hệ thống trước đó giữ trước một vùng nhớ **liền nhau** đủ cho độ dài tối đa. Câu trả lời thường ngắn hơn nhiều, nên phần giữ trước bỏ không; các vùng to nhỏ khác nhau còn để lại khe hở. Trong đo đạc của paper, các hệ thống đó chỉ dùng 20.4% tới 38.2% bộ nhớ KV cache cho trạng thái của token thật.
+
+Ý tưởng của **PagedAttention** mượn từ cách hệ điều hành quản lý bộ nhớ ảo bằng **phân trang** (paging):
+
+- KV cache của mỗi chuỗi được chia thành các **khối** (block), mỗi khối chứa K, V của một số token cố định.
+- Các khối không cần nằm liền nhau. Mỗi yêu cầu có một **bảng khối** (block table) ghi khối thứ mấy của chuỗi nằm ở chỗ nào trong bộ nhớ.
+- Khối mới chỉ được cấp khi các khối trước đã đầy. Không giữ trước cho độ dài tối đa.
+
+Như nhà hàng thôi giữ trọn bàn 16 ghế cho nhóm 2 người, mà kê thêm ghế khi có người tới. Nhờ bảng khối, các chuỗi còn **dùng chung** được khối, ví dụ khi sinh nhiều câu trả lời cho cùng một lời nhắc. Paper báo cáo gần như không phí bộ nhớ KV cache, và thông lượng gấp 2 tới 4 lần FasterTransformer và Orca ở cùng mức độ trễ. Hệ thống cài đặt ý này là **vLLM**; code của vLLM nay đã khác bản gốc, nên bài chỉ dừng ở ý của paper.
+
+### Speculative decoding (chỉ nhắc)
+
+**Speculative decoding** (giải mã suy đoán; Leviathan và cộng sự, 2022) cho một mô hình nhỏ đoán trước vài token, rồi mô hình lớn kiểm tra chúng song song trong một lượt. Cách lấy mẫu của họ bảo đảm **phân phối đầu ra không đổi** so với chỉ dùng mô hình lớn. Paper báo cáo nhanh 2 tới 3 lần trên T5-XXL.
+
+### Giới hạn
+
+- **Số bộ nhớ là ước lượng**, giả định KV cache lưu ở BF16. Số thật lấy từ log của server.
+- **Kiến trúc khác thì phải đếm lại.** Mixture of experts, hay các cách thu nhỏ KV cache khác GQA, làm đổi các con số; mixture of experts thuộc bài [Họ DeepSeek](/vi/llm/deepseek-family/).
+- **Bài không nói tới** nhiều kỹ thuật phục vụ khác (dùng lại cache cho tiền tố chung, tách prefill và decode ra máy riêng…); xem tài liệu của vLLM, SGLang ở mục Đọc thêm.
+
+## Minh họa
+
+Hình dưới là hình ba kiểu song song của bài Họ LLaMA. Lần này hãy đọc nó cho suy luận: bỏ qua các mũi tên "gradient" và "cộng gradient", rồi nhìn hàng tensor (mỗi lớp bị cắt đôi, trao đổi ở mọi lớp) và hàng pipeline (mỗi GPU một đoạn lớp, chỉ chuyền kích hoạt).
+
+{/* FIG: dùng lại hình của bài llama-family; lời dẫn ở trên bảo bỏ qua các mũi tên gradient. */}
+<ParallelismFigure />
+
+Bảng dưới tóm tắt ba kiểu khi suy luận. Hãy nhìn cột "Trao đổi": nó quyết định kiểu nào hợp với đường truyền nào.
+
+| Kiểu song song | Chia gì | Trao đổi | Dùng khi suy luận |
+|---|---|---|---|
+| Song song dữ liệu | Yêu cầu (mỗi bản giữ cả mô hình) | Không cần | Nhân bản để phục vụ thêm người |
+| Song song tensor | Ma trận trong mỗi lớp | Sau mỗi lớp, ở mọi bước | Trong một máy có NVLink |
+| Song song pipeline | Các lớp | Kích hoạt giữa hai đoạn kề nhau | Giữa các máy, hoặc GPU không có NVLink |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026, với Python 3.14 (bản có trong Pyodide). Ô tính bộ nhớ chạy ngay trên trang. Các lệnh `vllm serve` ở cuối mục cần máy có GPU; bài chưa chạy thử chúng, chỉ đối chiếu với tài liệu chính thức của vLLM.
+
+### Tính bộ nhớ trọng số và KV cache
+
+Ô dưới đây viết hai công thức của mục Lý thuyết thành hai hàm Python thuần. `n_params` đếm tham số từ kiến trúc, với $D$ là số chiều của mô hình (`dim` trong code): bốn ma trận của attention ($\mathbf{W}_Q$, $\mathbf{W}_O$ cỡ $D \times D$; $\mathbf{W}_K$, $\mathbf{W}_V$ cỡ $D \times H_{\text{kv}} d$), ba ma trận của SwiGLU, cộng bảng nhúng và lớp đầu ra (cỡ từ vựng nhân $D$), bỏ qua các vectơ nhỏ của RMSNorm. `kv_bytes` là đúng công thức $M_{\text{KV}}$. Ô in kết quả cho hai mô hình Llama 3, ba cặp $(L, B)$, và hai câu hỏi "nếu thì".
+
+<PythonRunner code={memoryCode} title="Bộ nhớ trọng số và KV cache của Llama 3" />
+
+Đọc kết quả:
+
+- **Số tham số:** 8.03B và 70.55B, khớp tên gọi. Trọng số ở BF16, int8, int4: 15.0 / 7.5 / 3.7 GiB và 131.4 / 65.7 / 32.9 GiB.
+- **KV cache của 8B:** 1.0, 16.0 và 64.0 GiB: $B$ gấp 16 thì cache gấp 16, rồi $L$ gấp 4 thì cache gấp 4.
+- **KV cache của 70B:** 2.5, 40.0 và 160.0 GiB. Mỗi token cần 320 KiB, vì có 80 lớp thay vì 32. Riêng cache ở dòng ba đã lớn hơn một GPU 80 GB: dù trọng số ở int4, cấu hình này vẫn phải chia ra nhiều GPU.
+- **Dòng "32 K/V heads":** 4.0 GiB thay vì 1.0 GiB. GQA làm cache nhỏ đi đúng bằng tỉ lệ $32/8$.
+- **Dòng cuối:** 59 chuỗi, đúng ước lượng ở mục Lý thuyết.
+
+Thử sửa code: đổi `s=2` thành `s=1` trong `kv_bytes` để xem KV cache lưu ở 8 bit, hoặc đổi `80e9` thành dung lượng GPU của bạn.
+
+### Chạy vLLM trên nhiều GPU
+
+Biết cần chia thế nào rồi, bạn chỉ cần báo cho server. Hai lệnh dưới theo ví dụ trên trang *Parallelism and Scaling* của vLLM; `<tên mô hình>` là chỗ giữ chỗ.
+
+```sh
+# Một máy 4 GPU: song song tensor 4 phần
+vllm serve <tên mô hình> --tensor-parallel-size 4 --port 8001
+
+# Hai máy, mỗi máy 8 GPU: tensor 8 trong máy, pipeline 2 giữa hai máy.
+# Cần dựng cụm Ray trước, theo hướng dẫn trên trang của vLLM.
+vllm serve <đường dẫn tới mô hình> \
+    --tensor-parallel-size 8 \
+    --pipeline-parallel-size 2 \
+    --distributed-executor-backend ray
+```
+
+Chia mô hình, continuous batching và quản lý khối KV cache đều nằm phía server. **Phía client không đổi**: vẫn là code của bài [Sử dụng API văn bản](/vi/llm/text-api/), chỉ trỏ `OPENAI_BASE_URL` vào `http://<máy chủ>:<cổng>/v1` và đặt `LLM_MODEL` đúng tên mô hình đã truyền cho `vllm serve`. vLLM (bản 0.32.0) và SGLang (bản 0.5.22) là hai server mã nguồn mở làm việc này, tại thời điểm viết (10/2026); bài chỉ nêu làm ví dụ, không so sánh hai công cụ.
+
+## Lỗi hay gặp
+
+:::caution[Chỉ tính trọng số, quên KV cache]
+"Mô hình 15 GiB, GPU 80 GB, thừa sức" là phép tính cho **một** người dùng. KV cache tỉ lệ thuận với cả $L$ lẫn $B$: 16 chuỗi 32 768 token của Llama 3 8B cần 64 GiB, gấp hơn bốn lần trọng số. Luôn tính cả hai phần với độ dài và số người dùng bạn nhắm tới, chừa dư, rồi kiểm lại bằng log của server.
+:::
+
+:::caution[Dùng song song tensor qua đường truyền chậm, hoặc nhầm với nhân bản]
+Song song tensor trao đổi sau mỗi lớp, ở mọi token sinh ra; chạy nó qua mạng giữa hai máy thì phần lớn thời gian là chờ mạng. Giữa các máy hãy dùng pipeline. Nếu mô hình đã vừa một máy, đừng kéo nó ra hai máy chỉ để "dùng hết GPU": chạy hai bản. Chia **một** bản ra nhiều GPU là để mô hình vừa bộ nhớ; nhân **nhiều** bản là để phục vụ thêm người.
+:::
+
+:::caution[Tin con số "nhanh gấp N lần", hoặc so độ trễ khác định nghĩa]
+36.9 lần của Orca, 2 tới 4 lần của PagedAttention, 2 tới 3 lần của speculative decoding đều là số do tác giả báo cáo, trên mô hình, phần cứng, tải và hệ thống so sánh của riêng họ. Hãy đo trên tải của bạn: TTFT và TPOT ở p50, p95, cùng thông lượng. Khi đọc số của người khác, kiểm xem họ đo từ đâu tới đâu, vì cùng tên có thể khác định nghĩa.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Bộ nhớ khi suy luận có hai phần. Trọng số $M_{\text{w}} \approx \Psi \cdot s$ cố định, quyết định mô hình có vừa không. KV cache $M_{\text{KV}} = 2 \cdot N_{\text{layer}} \cdot H_{\text{kv}} \cdot d \cdot s \cdot L \cdot B$ tăng theo độ dài và số chuỗi, quyết định phục vụ được bao nhiêu người.
+- Prefill đọc cả lời nhắc và quyết định TTFT; decode sinh từng token và quyết định TPOT, với $t_{\text{total}} = \text{TTFT} + (N - 1) \cdot \text{TPOT}$. Lô lớn tăng thông lượng nhưng tăng độ trễ mỗi người.
+- Không vừa một GPU: song song tensor trong một máy (cần NVLink), thêm song song pipeline giữa các máy. Cần phục vụ thêm người: nhân bản mô hình sau bộ cân bằng tải.
+- Continuous batching lập lịch theo từng bước sinh token, nên lô luôn đầy. PagedAttention chia KV cache thành khối cấp theo nhu cầu, nên ít phí bộ nhớ và lô lớn hơn.
+
+**Đọc thêm:**
+
+- vLLM. [*Parallelism and Scaling*](https://docs.vllm.ai/en/v0.32.0/serving/parallelism_scaling/). Cách chọn tensor, pipeline theo số GPU và số máy, các lệnh `vllm serve`, và hai dòng log về KV cache. Trang [*Benchmark CLI*](https://docs.vllm.ai/en/v0.32.0/benchmarking/cli/) (bản 0.32.0) định nghĩa TTFT, TPOT.
+- Kwon, W. và cộng sự (2023). [*Efficient Memory Management for Large Language Model Serving with PagedAttention*](https://arxiv.org/abs/2309.06180), arXiv:2309.06180, SOSP 2023, mục 1–4. Vì sao KV cache bị phí, và cách chia khối, bảng khối.
+- Yu, G.-I., Jeong, J. S., Kim, G.-W., Kim, S., Chun, B.-G. (2022). [*Orca: A Distributed Serving System for Transformer-Based Generative Models*](https://www.usenix.org/conference/osdi22/presentation/yu), OSDI 2022. Gốc của lập lịch theo từng vòng lặp (continuous batching) và selective batching.
+- Grattafiori, A., Dubey, A., Jauhri, A. và cộng sự (2024). [*The Llama 3 Herd of Models*](https://arxiv.org/abs/2407.21783), arXiv:2407.21783, mục 6. Pipeline và micro-batch khi suy luận bản 405B, lượng tử hóa FP8, và đường đánh đổi thông lượng – độ trễ ở hình 24.
+- Leviathan, Y., Kalman, M., Matias, Y. (2022). [*Fast Inference from Transformers via Speculative Decoding*](https://arxiv.org/abs/2211.17192), arXiv:2211.17192, ICML 2023. Bài báo gốc của speculative decoding.
+- Zheng, L. và cộng sự (2023). [*SGLang: Efficient Execution of Structured Language Model Programs*](https://arxiv.org/abs/2312.07104), arXiv:2312.07104. Bài báo của SGLang. Hai server: [vLLM trên PyPI](https://pypi.org/project/vllm/) (0.32.0) và [SGLang trên PyPI](https://pypi.org/project/sglang/) (0.5.22).
+
+<LessonProgress />
