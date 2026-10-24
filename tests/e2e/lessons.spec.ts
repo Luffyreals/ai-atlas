@@ -18,7 +18,7 @@ import { DOCS_DIR, pathOf, readSource, WITH_PAGE } from './lesson-pages';
 // Expectations come from src/data/roadmap.ts (hasPage, isTranslated), so the same tests hold while every
 // lesson is planned and once lessons are published. All URLs end with "/" (trailingSlash 'always').
 
-// --- Static figures (docs/architecture/viz.md, section 8.2 d–h). Both functions run in the page. ---
+// --- Static figures (docs/architecture/viz/figures.md, section 8.2 d–h). Both functions run in the page. ---
 
 const FIGURE_BUDGET = { chars: 10_000, elements: 200 }; // outerHTML of one figure.atlas-figure (section 8.2 g)
 const FIGURE_MIN_TEXT_PX = 12; // every visible text, at 375px and on a desktop (section 8.2 e)

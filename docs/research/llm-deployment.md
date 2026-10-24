@@ -1,6 +1,6 @@
 # Deploy LLM: nhiều GPU, phân tán (Deploying LLMs: Multi-GPU and Distributed Serving)
 
-Bài: `llm/llm-deployment` (chỉ bản vi, khoảng 12 phút). Cần biết trước: `llm/deploy-custom-model`, `llm/evaluation-peft`. Quyết định liên quan trong `docs/mvp.md`: 53 (code minh họa), 54 (không ghi cứng tên model), 56 (độ dài chuỗi là $L$), 57 (ô `PythonRunner` chạy bằng Pyodide thật). Ngày tra: **24/10/2026**. Giáo án gốc: buổi 23 phần LLM, "Deploy trên nhiều GPUs, Deploy phân tán mô hình" (dòng 94).
+Bài: `llm/llm-deployment` (chỉ bản vi, khoảng 12 phút). Cần biết trước: `llm/deploy-custom-model`, `llm/evaluation-peft`. Quyết định liên quan trong `docs/decisions.md`: 53 (code minh họa), 54 (không ghi cứng tên model), 56 (độ dài chuỗi là $L$), 57 (ô `PythonRunner` chạy bằng Pyodide thật). Ngày tra: **24/10/2026**. Giáo án gốc: buổi 23 phần LLM, "Deploy trên nhiều GPUs, Deploy phân tán mô hình" (dòng 94).
 
 Cách tra: đọc trang tóm tắt arXiv/USENIX và tài liệu vLLM; tải PDF Llama 3 và đọc mục 6 bằng `pdftotext`; chạy thật code bằng Pyodide. Ý không có thẻ nguồn là kiến thức chung hoặc tự tính (có ghi).
 

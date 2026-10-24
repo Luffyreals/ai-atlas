@@ -1,8 +1,8 @@
 // CSS helpers for the size and colour rules of the shared stylesheets (viz.css, figures.css).
-// Used by tests/unit/viz-conventions.test.ts and tests/unit/figure-conventions.test.ts.
+// Used by tests/unit/viz/viz-conventions.test.ts and tests/unit/viz/figure-conventions.test.ts.
 
 /**
- * Removes CSS comments, as a minifier does, for the size budget (decision 27 in docs/mvp.md).
+ * Removes CSS comments, as a minifier does, for the size budget (decision 27 in docs/decisions.md).
  * Follows the CSS tokenizer: "/*" inside a quoted string or an unquoted url(...) is not a comment, and a
  * comment left open runs to the end of the file.
  */

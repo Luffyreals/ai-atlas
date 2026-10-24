@@ -1,6 +1,6 @@
 # LangChain và LlamaIndex
 
-Bài: `llm/langchain-llamaindex` (chỉ bản vi, khoảng 11 phút đọc). Cần biết trước: `llm/rag-chatbot`. Bài sau: `llm/agents`. Quyết định liên quan trong `docs/mvp.md`: 53 (SDK OpenAI-compatible, key từ biến môi trường), 54 (code ở `src/code/llm/<bài>/`, hiện bằng `LocalCode`), 56.
+Bài: `llm/langchain-llamaindex` (chỉ bản vi, khoảng 11 phút đọc). Cần biết trước: `llm/rag-chatbot`. Bài sau: `llm/agents`. Quyết định liên quan trong `docs/decisions.md`: 53 (SDK OpenAI-compatible, key từ biến môi trường), 54 (code ở `src/code/llm/<bài>/`, hiện bằng `LocalCode`), 56.
 
 Ngày tra: **24/10/2026**, bằng `curl` tới PyPI, WebFetch tài liệu chính thức, và **cài rồi chạy thử** trong venv tạm (Python 3.14.5). Thẻ nguồn: [PYPI], [LC-OV], [LC-MIG], [LC-RAG], [LI-INST], [LI-START], [RUN]. Ý không có thẻ là kiến thức chung.
 

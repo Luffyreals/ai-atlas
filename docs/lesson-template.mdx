@@ -22,12 +22,12 @@
 #   MSE dùng \frac{1}{m}, khớp scikit-learn: \mathcal{L} = \frac{1}{m}\sum_{i=1}^{m}(\hat{y}^{(i)} - y^{(i)})^2
 #   ma trận thiết kế \mathbf{X}: m hàng, cột toàn số 1 đặt cuối, nên \boldsymbol{\theta} = [\mathbf{w}; b],
 #   tức [w_1, ..., w_n, b]^\top
-#   phần LLM (quyết định 60 trong docs/mvp.md): độ dài chuỗi L, nhiệt độ T
+#   phần LLM (quyết định 60 trong docs/decisions.md): độ dài chuỗi L, nhiệt độ T
 #
 # QUY ƯỚC CHUNG
 # - Thuật ngữ theo docs/glossary.md. Lần đầu xuất hiện thì ghi kèm tiếng Anh: "phần dư (residual)".
 #   Thuật ngữ mới thì thêm vào glossary.
-# - Số kỹ thuật dùng dấu chấm thập phân: w ≈ 0.17, không viết 0,17 (quyết định 22 trong docs/mvp.md).
+# - Số kỹ thuật dùng dấu chấm thập phân: w ≈ 0.17, không viết 0,17 (quyết định 22 trong docs/decisions.md).
 #   Gồm số trong bảng dữ liệu, VIZ, code, và lời văn khi nhắc lại các số đó. Số đời thường trong lời văn
 #   viết bình thường. Số trích từ code phải khớp kết quả chạy thật.
 # - Link nội bộ viết tuyệt đối, có "/" ở cuối: /vi/<phần>/<bài>/. Chỉ link tới bài đã xuất bản.
@@ -76,7 +76,7 @@ import chatCode from '@code/<phần>/<bài>/<tên-3>.vi.py?raw';
 {/* Hướng dẫn: import.
     - Bốn dòng đầu: bài nào cũng có. Component tự gắn client:*, không viết client:* trong MDX.
     - DatasetTable: khi bài dùng một bộ dữ liệu chung. Dữ liệu dùng chung nằm ở src/data/datasets/<id>.ts,
-      đăng ký trong src/data/datasets/index.ts (khuôn ở docs/architecture/viz.md mục 4.1).
+      đăng ký trong src/data/datasets/index.ts (khuôn ở docs/architecture/viz/shared.md mục 4.1).
       Bài không có bộ dữ liệu chung thì xóa dòng này.
     - VIZ: import wrapper @components/viz/<Name>.astro, không có client:*. Chỉ thêm khi component đã có
       (giai đoạn 2 ở mục Minh họa). Trước đó thì xóa dòng này.
@@ -172,9 +172,9 @@ Kết quả chính của mục, viết lại bằng lời.
 
 ## Minh họa
 
-{/* Hướng dẫn: chọn loại hình theo docs/architecture/viz.md mục 2.1.
+{/* Hướng dẫn: chọn loại hình theo docs/architecture/viz/README.md mục 2.1.
     - Người đọc cần đổi một tham số và thấy hệ quả ngay: VIZ tương tác. Một VIZ một ý, tối đa 2 VIZ mỗi bài.
-    - Chỉ cần nhìn (sơ đồ khối, quy trình, phân loại): hình tĩnh, 0 JS, theo docs/architecture/viz.md mục 8.
+    - Chỉ cần nhìn (sơ đồ khối, quy trình, phân loại): hình tĩnh, 0 JS, theo docs/architecture/viz/figures.md mục 8.
       Hình tĩnh đặt ở chỗ nó giúp hiểu nhất (Trực giác, Lý thuyết hay ở đây), tối đa khoảng 3 hình mỗi bài.
       Cũng hai giai đoạn như VIZ, comment bắt đầu bằng "FIG:" (hai khối mẫu FIG ở cuối mục này):
       · Giai đoạn 1 (lesson-writer): comment giữ chỗ nhiều dòng, đặt đúng chỗ hình sẽ hiện, đủ năm dòng
@@ -190,7 +190,7 @@ Kết quả chính của mục, viết lại bằng lời.
     Trước hình: một đoạn nói hình cho thấy gì và mỗi điều khiển làm gì, rồi danh sách "Hãy thử" 3–4 bước,
     mỗi bước có giá trị cụ thể và điều người đọc sẽ thấy. Số trong các bước phải khớp số VIZ hiện ra:
     ở giai đoạn 1 viết theo mô tả, có VIZ rồi thì điền hoặc kiểm lại số.
-    Comment VIZ có hai giai đoạn (viz.md mục 4.10). Giữ đúng một trong hai khối bên dưới:
+    Comment VIZ có hai giai đoạn (viz/linear-fit.md mục 4.10). Giữ đúng một trong hai khối bên dưới:
     - Giai đoạn 1, chưa có component (lesson-writer viết): comment giữ chỗ nhiều dòng, đủ năm dòng
       VIZ, Ý, Tương tác, Dữ liệu, Ký hiệu. Xóa khối giai đoạn 2 và dòng import VIZ.
     - Giai đoạn 2, đã có component (viz-builder thay): xóa comment giữ chỗ, thêm import và thẻ. Giữ ý chính
@@ -238,7 +238,7 @@ Hình cho thấy gì, mỗi điều khiển làm gì. Hãy thử:
       sau (ví dụ np.append), không sửa hai dòng này. Test datasets.test.ts so từng số.
     - Code vẽ hình: thêm figureAlt={['...']}, mỗi hình một câu mô tả đúng hình đó: loại biểu đồ, trên hình
       có gì, xu hướng chính. Code có input(): thêm stdin={'dòng 1\ndòng 2'}.
-    - Chạy thử bằng Python khớp phiên bản Pyodide (venv ghi ở docs/architecture/viz.md mục 2.5) trước khi
+    - Chạy thử bằng Python khớp phiên bản Pyodide (venv ghi ở docs/architecture/viz/README.md mục 2.5) trước khi
       trích số vào bài.
     - Code cần mạng, PyTorch, GPU hoặc thư viện ngoài Pyodide: file .py như trên, hiện bằng LocalCode
       (llm-lessons.md mục 2.1–2.3). Code không phải Python viết thẳng trong MDX.

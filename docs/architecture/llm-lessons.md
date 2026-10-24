@@ -1,11 +1,11 @@
 # Phần LLM (5c): khuôn bài, `LocalCode`, kiểm chứng code và `SamplingViz`
 
 > Phạm vi: 23 bài của phần 5c (`llm/*`), **chỉ bản vi** (quyết định 53, như quyết định 43). Tài liệu chốt cách bài LLM trình bày code mà trang không chạy được, cách kiểm chứng code đó, các quy ước nội dung riêng của phần này, danh sách hình và đặc tả `SamplingViz`.
-> Liên quan: [components.md](components.md) (mẫu wrapper Astro, `PythonRunner` mục 2.3–2.4 và 4.6, hình thức mục 4.9), [viz.md](viz.md) (quy ước VIZ mục 2, FIG mục 8), [roadmap-data.md](roadmap-data.md) (slug 23 bài), [docs/lesson-template.mdx](../lesson-template.mdx).
+> Liên quan: [components.md](components.md) (mẫu wrapper Astro, `PythonRunner` mục 2.3–2.4 và 4.6, hình thức mục 4.9), [viz/README.md](viz/README.md) (quy ước VIZ mục 2, FIG mục 8), [roadmap-data.md](roadmap-data.md) (slug 23 bài), [docs/lesson-template.mdx](../lesson-template.mdx).
 >
 > Viết ngày 24/10/2026. Chỗ ghi "đã kiểm chứng" là đã đọc mã nguồn trong `node_modules`, chạy thật, hoặc đọc log CI cùng ngày, không phải suy đoán.
 
-**Quyết định đầu vào** ([mvp.md](../mvp.md) mục 7):
+**Quyết định đầu vào** ([decisions.md](../decisions.md)):
 
 | # | Quyết định | Áp dụng ở |
 |---|---|---|
@@ -34,7 +34,7 @@
 - Chạy code gọi API hay PyTorch trên trình duyệt. Không có server, không có proxy API.
 - Bản en của 23 bài (sau MVP, quyết định 43). Tài liệu chỉ chừa sẵn chỗ cho bản en (mục 2.4).
 - Notebook Colab/Kaggle (ngoài phạm vi dự án).
-- Thiết kế 9 hình tĩnh chi tiết. Mỗi hình theo [viz.md](viz.md) mục 8; mục 2.9 ở đây chỉ ghi tên, bài dùng và ý chính.
+- Thiết kế 9 hình tĩnh chi tiết. Mỗi hình theo [viz/figures.md](viz/figures.md) mục 8; mục 2.9 ở đây chỉ ghi tên, bài dùng và ý chính.
 - Sửa `docs/mvp.md`, `src/data/roadmap.ts`, `docs/glossary.md` (agent khác đang sửa). Các việc phiên chính phải làm ở những file này ghi trong mục 6.
 
 ## 2. Phương án đã chọn
@@ -168,7 +168,7 @@ Bản sao `.en.py` của bài chưa dịch qua được cả cách so cũ lẫn 
 | `scikit-learn` | 1.9.1 | **Khác** Pyodide 314.0.7 (1.8.0). Chỉ dùng cho code của `LocalCode` |
 
 - Danh sách ghim nằm trong **`scripts/requirements-llm.txt`** (file mới, có commit). Như vậy venv dựng lại được trên máy khác. Bài cần thêm gói (`gradio`, `streamlit`, `langchain`, `llama-index`, `pymongo`, `requests`, `beautifulsoup4`, `transformers`, `peft`…) thì báo trong báo cáo, **phiên chính** thêm vào file này với bản đã chạy thử. Không agent nào khác sửa file này trong lúc chạy song song.
-- Ô `PythonRunner` của bài LLM **bắt buộc** chạy thử bằng venv Pyodide `C:/Users/Dell/.venvs/ai-atlas-py314` như các phần khác ([viz.md](viz.md) mục 2.5), vì NumPy và scikit-learn trong `.venv-llm/` mới hơn bản của Pyodide. `.venv-llm/` chỉ dành cho code của `LocalCode`.
+- Ô `PythonRunner` của bài LLM **bắt buộc** chạy thử bằng venv Pyodide `C:/Users/Dell/.venvs/ai-atlas-py314` như các phần khác ([viz/README.md](viz/README.md) mục 2.5), vì NumPy và scikit-learn trong `.venv-llm/` mới hơn bản của Pyodide. `.venv-llm/` chỉ dành cho code của `LocalCode`.
 - Máy phát triển có Docker CLI 29.8.1. Chưa có Ollama, chưa có MongoDB; MongoDB chạy được trong container nếu Docker daemon đang chạy (kiểm bằng `docker info`).
 
 **Bốn mức kiểm chứng.** Mỗi file `.vi.py` của `LocalCode` và mỗi khối code không phải Python được ghi một mức:
@@ -346,9 +346,9 @@ Theo quyết định 54: **một VIZ tương tác** và **9 hình tĩnh**.
 | `ParallelismFigure` | FIG | `llama-family` (dùng lại được ở `llm-deployment`) | Data, tensor và pipeline parallelism chia ba thứ khác nhau: dữ liệu, ma trận của một lớp, các lớp |
 | `ContainerImageFigure` | FIG | `docker-cloud` (dùng lại được ở `deploy-custom-model`) | Image là bản đóng gói cố định gồm nhiều lớp; container là một lần chạy image đó |
 
-- Chữ của hình ở `src/data/figures/<tên-kebab>.ts` (bỏ đuôi `Figure`), ví dụ `rag-pipeline.ts`. Theo đủ quy ước [viz.md](viz.md) mục 8: bố cục hẹp bắt buộc, ≤ 10 000 ký tự HTML, chữ ≥ 12px ở 375px, 0 JS.
+- Chữ của hình ở `src/data/figures/<tên-kebab>.ts` (bỏ đuôi `Figure`), ví dụ `rag-pipeline.ts`. Theo đủ quy ước [viz/figures.md](viz/figures.md) mục 8: bố cục hẹp bắt buộc, ≤ 10 000 ký tự HTML, chữ ≥ 12px ở 375px, 0 JS.
 - Hình dùng lại ở bài khác: import cùng component, không vẽ lại. Mỗi trang chỉ dùng một hình một lần (id phần tử suy từ id hình).
-- `ParallelismFigure` và `RlhfStagesFigure` là chuỗi ngang dài. Viz-builder thử bố cục rộng trước khi bỏ (bố cục rộng chưa được kiểm trên trang thật, viz.md mục 8.7 rủi ro 6).
+- `ParallelismFigure` và `RlhfStagesFigure` là chuỗi ngang dài. Viz-builder thử bố cục rộng trước khi bỏ (bố cục rộng chưa được kiểm trên trang thật, viz/figures.md mục 8.7 rủi ro 6).
 - Đặc tả `SamplingViz` ở mục 4.6.
 
 #### 2.9.1. Lô FIG A (24/10/2026): `RagPipelineFigure`, `AgentLoopFigure`, `RlhfStagesFigure`
@@ -358,13 +358,13 @@ Theo quyết định 54: **một VIZ tương tác** và **9 hình tĩnh**.
 - Hình: `src/components/figures/{RagPipeline,AgentLoop,RlhfStages}Figure.astro`; chữ vi/en: `src/data/figures/{rag-pipeline,agent-loop,rlhf-stages}.ts`; đăng ký trong `FIGURES`.
 - Bài đã thay comment FIG: `rag-chatbot`, `langchain-llamaindex`, `graph-rag` (cùng `RagPipelineFigure`), `agents`, `rlhf`, `dpo` (cùng `RlhfStagesFigure`). Theo mẫu bài ML: một dòng import, comment một dòng `{/* FIG: … */}` và thẻ.
 - Kit (dùng lại cho lô B và C):
-  - `src/lib/figures/layout.ts`: `Box` (rải thẳng vào `<FigNode {...box} />`), `anchor(box, side, at = 0.5)` (điểm đầu/cuối mũi tên trên một cạnh), `centre(box)`, `spread(from, to, count, gap)` (chia đều một hàng hay một cột khối), `mainAndSmall(label)` (dòng đầu là chữ chính, các dòng sau là chữ phụ, cho file chữ viết khối dạng `[main, small…]`). Test: `tests/unit/figure-layout.test.ts`.
+  - `src/lib/figures/layout.ts`: `Box` (rải thẳng vào `<FigNode {...box} />`), `anchor(box, side, at = 0.5)` (điểm đầu/cuối mũi tên trên một cạnh), `centre(box)`, `spread(from, to, count, gap)` (chia đều một hàng hay một cột khối), `mainAndSmall(label)` (dòng đầu là chữ chính, các dòng sau là chữ phụ, cho file chữ viết khối dạng `[main, small…]`). Test: `tests/unit/viz/figure-layout.test.ts`.
   - `FigArrow`: thêm `tone="alt"` (nét đứt xanh, đầu mũi tên xanh, cùng nghĩa "nhóm thứ hai" với `FigNode tone="alt"`: bản đóng băng, "cùng một mô hình") và `head={false}` (đường nối không hướng). CSS mới trong `figures.css`: `.atlas-fig-arrow[data-tone='alt']`, `.atlas-fig-arrow-head[data-tone='alt']`. Màu `--atlas-fig-alt` trên nền trang đã đo (9,24 / 11,68), không có cặp màu mới. E2E `figureContrast` đo được vì vẫn là `.atlas-fig-arrow` / `.atlas-fig-arrow-head`.
   - **Lưu ý cho lô sau:** `figureContrast` trong `lessons.spec.ts` báo "unmeasured" mọi `line`, `circle`, `rect`, `path`… không thuộc lớp đã biết. Vì vậy không vẽ khung nhóm bằng `rect` rời, không vẽ hình thoi quyết định hay biểu tượng (ổ khóa) bằng `path`: dùng `FigNode` (có thể `tone`), `FigArrow`, `FigText`. Muốn thêm loại nét mới thì phải nhờ `tester` thêm vào danh sách đo.
 
 **Quyết định tự chọn (đổi lại được khi người dùng duyệt):**
 
-- Cả ba hình chỉ có bố cục hẹp. Cột nội dung ở 1280px rộng 632px, dưới ngưỡng 640, nên bố cục rộng chỉ hiện từ khoảng 1440px. `RlhfStagesFigure` (chuỗi ngang dài) đã thử ước tính: SVG hẹp 6 210 ký tự (đo trong `dist`), thêm một SVG rộng cùng các khối thì cả hình khoảng 13 000, vượt ngân sách 10 000 ký tự (viz.md 8.2 g). Bỏ, như `MlWorkflowFigure`.
+- Cả ba hình chỉ có bố cục hẹp. Cột nội dung ở 1280px rộng 632px, dưới ngưỡng 640, nên bố cục rộng chỉ hiện từ khoảng 1440px. `RlhfStagesFigure` (chuỗi ngang dài) đã thử ước tính: SVG hẹp 6 210 ký tự (đo trong `dist`), thêm một SVG rộng cùng các khối thì cả hình khoảng 13 000, vượt ngân sách 10 000 ký tự (viz/figures.md 8.2 g). Bỏ, như `MlWorkflowFigure`.
 - `RagPipelineFigure`: hai hàng của đặc tả xoay thành hai cột (lập chỉ mục bên trái, viền đứt; truy vấn bên phải). Cột truy vấn bắt đầu thấp hơn một hàng để hai khối "Embedding" nằm ngang nhau (nối nét đứt "cùng một mô hình") và "Kho vectơ" nằm cạnh "Tìm top-k". Trọng tâm (`accent`) chỉ ở hai khối mang ý chính: "Tìm top-k" và "Ghép prompt", không tô cả cột.
 - `graph-rag`: không thêm biến thể hình. Biến thể phải đổi 4 nhãn cùng chú thích và mô tả (chú thích có công thức cosine), nặng hơn. Thay vào đó, một câu dẫn trước hình: đọc "Kho vectơ" thành đồ thị, "Tìm top-k (cosine)" thành duyệt đồ thị. `langchain-llamaindex`: thêm câu dẫn mà comment FIG yêu cầu (mỗi khối ứng với một hàng của bảng đối chiếu).
 - `AgentLoopFigure`: vòng lặp vẽ thành hình vuông đọc từ "Mô hình" (`accent`). Kiểm tra trần số bước đặt **sau** khi chạy công cụ (mũi tên từ "Kết quả": "còn lượt" về mô hình, "chạm trần số bước" lên "Dừng"), khớp vòng `for step in range(MAX_STEPS)` của code. "Có gọi công cụ?" là khối chữ nhật, không phải hình thoi (lý do ở lưu ý trên). "Hỏi người dùng" là khối viền đứt nối với khối chạy công cụ bằng nét đứt.
@@ -390,16 +390,16 @@ Theo quyết định 54: **một VIZ tương tác** và **9 hình tĩnh**.
 - Kit, mở rộng cho lô này (dùng lại được cho lô C):
   - `FigMath`: thêm `bold` (ký hiệu đứng, đậm 600, tức `\mathbf` của site cho vectơ và ma trận: $\mathbf{x}$, $\mathbf{W}_0$; Barlow 600 đứng đã nạp) và `before` (ký tự toán đứng trước ký hiệu, ví dụ "×" của "× N", cách `dx = 3`). `checkMathLabel(symbol, sub?, after?, before?)` kiểm cả `before`; tập ký tự của `after`/`before` thêm "×" (U+00D7, có trong tập con latin của Barlow). Kiểu chung `MathLabel` ở `src/lib/figures/geometry.ts`. CSS mới: `.atlas-fig-math-bold { font-weight: 600 }`.
   - `FigNode`: thêm `math?: MathLabel`, một dòng ký hiệu (15 đơn vị) **trên** các dòng chính, vẽ bằng `FigMath` bên trong `g.atlas-fig-node`, nên e2e kiểm nó nằm trong khối và đo tương phản với nền khối. Có `math` thì `lines` được bỏ (ví dụ khối ma trận chỉ ghi $\mathbf{A}$). Vẫn tối đa 3 dòng tính cả dòng ký hiệu. Vị trí dòng tính bằng hàm thuần mới `nodeRows(y, height, sizes)` trong `geometry.ts` (cùng kết quả với cách tính cũ, ba hình ML và lô A không đổi).
-  - `FigNode tone="off"`: viền chấm (`stroke-dasharray: 3 3`) màu `muted`, nền bằng màu trang (`--atlas-fig-bg`), chữ `muted`. Dùng cho phần **không chạy** (expert router không chọn). Cặp màu đã đo ở viz.md 8.2 f: viền và chữ `muted` trên `bg` 6,28 / 6,89. E2E đo được vì vẫn là `.atlas-fig-node > rect`.
+  - `FigNode tone="off"`: viền chấm (`stroke-dasharray: 3 3`) màu `muted`, nền bằng màu trang (`--atlas-fig-bg`), chữ `muted`. Dùng cho phần **không chạy** (expert router không chọn). Cặp màu đã đo ở viz/figures.md 8.2 f: viền và chữ `muted` trên `bg` 6,28 / 6,89. E2E đo được vì vẫn là `.atlas-fig-node > rect`.
   - `src/lib/figures/layout.ts`: `spreadByWeight(from, to, weights, gap)`, chia một hàng khối theo tỉ lệ (hàng token có từ dài ngắn khác nhau).
-  - Test: `tests/unit/figure-kit-llm.test.ts` (`spreadByWeight`, `nodeRows`, `checkMathLabel` với `before` và "×").
+  - Test: `tests/unit/viz/figure-kit-llm.test.ts` (`spreadByWeight`, `nodeRows`, `checkMathLabel` với `before` và "×").
   - Khung "× N lớp" của `EncoderDecoderFigure` là `FigArrow head={false}` khép kín (điểm đầu bằng điểm cuối), không phải `rect` rời, nên `figureContrast` đo được.
 
 **Quyết định tự chọn (đổi lại được khi người dùng duyệt):**
 
 - Cả ba hình chỉ có bố cục hẹp (cùng lý do 2.9.1: cột nội dung 632px ở 1280px).
 - **Ký hiệu toán nằm trong khối** (dòng `math`), chữ giải thích nằm ngoài khi khối hẹp. Ký hiệu khớp bài: $\mathbf{x}$, $\mathbf{h}$, $\mathbf{W}_0$, $\mathbf{A}$, $\mathbf{B}$, $r$ (LoRA); $\mathbf{u}$, $\mathbf{h}$ (MoE); $\mathbf{Q}$, $\mathbf{K}$, $\mathbf{V}$, $N$ (seq2seq). Hệ số $\frac{\alpha}{r}$ không vẽ trong hình (FigMath không có phân số): khối ghi "Nhân hệ số", công thức đầy đủ ở chú thích.
-- `LoraFigure`: cạnh của $\mathbf{W}_0$ (112) bằng chiều rộng của $\mathbf{A}$ và chiều cao của $\mathbf{B}$, nên kích thước khối tự nói $d_{\text{in}}$, $d_{\text{out}}$ và $r$ là cạnh mỏng ($\mathbf{A}$ cao 36, $\mathbf{B}$ rộng 40, vẽ to hơn tỉ lệ thật để đọc được chữ). $\mathbf{W}_0$ viền đứt xanh (`alt`, "bản đóng băng" như 2.9.1), $\mathbf{A}$ và $\mathbf{B}$ là trọng tâm (`accent`). Không vẽ ổ khóa (2.9.1). "Cộng" là khối nhỏ, không phải vòng tròn ⊕ (U+2295 không có trong tập con Barlow, và `circle` rời không được đo). "r chiều" tách thành `FigMath` $r$ và chữ "chiều" (viz.md 11.3).
+- `LoraFigure`: cạnh của $\mathbf{W}_0$ (112) bằng chiều rộng của $\mathbf{A}$ và chiều cao của $\mathbf{B}$, nên kích thước khối tự nói $d_{\text{in}}$, $d_{\text{out}}$ và $r$ là cạnh mỏng ($\mathbf{A}$ cao 36, $\mathbf{B}$ rộng 40, vẽ to hơn tỉ lệ thật để đọc được chữ). $\mathbf{W}_0$ viền đứt xanh (`alt`, "bản đóng băng" như 2.9.1), $\mathbf{A}$ và $\mathbf{B}$ là trọng tâm (`accent`). Không vẽ ổ khóa (2.9.1). "Cộng" là khối nhỏ, không phải vòng tròn ⊕ (U+2295 không có trong tập con Barlow, và `circle` rời không được đo). "r chiều" tách thành `FigMath` $r$ và chữ "chiều" (viz/static-plots.md 11.3).
 - `MoeFigure`: `accent` nghĩa là "chạy cho token này": hai expert được chọn, expert dùng chung, ô chú giải "Được chọn". **Router để thường** (comment FIG ghi router là trọng tâm), để mắt đi tới chỗ expert sáng lên, đúng câu dẫn của bài "nhóm dùng chung luôn sáng, còn nhóm định tuyến chỉ vài ô được router tô sáng". Expert đánh số 0–7 như code; token 0 của ô code thứ nhất chọn expert 2 (cổng 0.454) và 6 (0.546), đã chạy lại `moe-routing.vi.py` ngày 24/10/2026. Kết nối tắt chạy theo lề phải. Ô chú giải là hai khối mang đúng kiểu viền của chúng ("Được chọn" `accent`, "Không chạy" `off`).
 - `EncoderDecoderFigure`: hai cột đọc từ dưới lên như Vaswani và cộng sự (2017). "Đầu ra encoder" đặt ngang hàng "Cross-attention" để hai mũi tên $\mathbf{K}$, $\mathbf{V}$ đi thẳng ngang; vì vậy cột encoder thấp hơn và có khoảng trống phía trên trái. Hàng token hai cột cùng đáy. Nhóm thứ hai là khung đứt xanh của encoder và khối "Đầu ra encoder"; trong decoder chỉ "Cross-attention" là `accent`. Mũi tên "nối vào khi sinh" đứt (`alt`, chỉ ở lúc sinh) chạy theo lề phải về cuối hàng đầu vào. Mỗi hàng token có một mũi tên từ ô giữa lên khối attention, không phải ba. "× N lớp" ở góc trên phải trong khung; vị trí của "× N" dựa trên ước lượng rộng của chữ (6 đơn vị một chữ cái ở cỡ 13, Barlow khoảng 5).
 
@@ -426,7 +426,7 @@ Theo quyết định 54: **một VIZ tương tác** và **9 hình tĩnh**.
   - `FigText xs`: các dòng đứng **cạnh nhau** trên cùng một `y`, dòng thứ i ở `xs[i]`, trong **một** `<text>` (tên các cột: "Lớp 1" … "Lớp 4"), tối đa `MAX_ROW_LABELS = 8`. Vị trí dòng tính bằng hàm thuần `textLinePositions` (chế độ xếp chồng cũ cho cùng kết quả với `lineOffsets`).
   - `FigArrow`: phần tính điểm và đầu mũi tên chuyển thành hàm thuần `arrowParts(points, head)`, kết quả không đổi.
   - **Thu gọn HTML của mọi hình** (để `ParallelismFigure` vừa ngân sách, mục dưới): `dominant-baseline="central"` không còn ghi trên từng `<text>` mà nằm ở `figures.css` (`.atlas-fig-svg text`); `text-anchor` chỉ ghi khi là `start`/`end`, còn `middle` lấy từ `.atlas-fig-svg text:not([text-anchor])`, nên thuộc tính vẫn thắng ở chỗ có ghi; `FigNode` thường (`plain`) không ghi `data-tone`. Hình hiển thị y như cũ (đã soi lại `RegularizationGeometryFigure`, `EncoderDecoderFigure`, `MoeFigure`), mỗi hình cũ nhẹ đi khoảng 15%: `EncoderDecoderFigure` 7 803 → 6 506 ký tự (vi), `MoeFigure` 7 442 → 6 257.
-  - Test: `tests/unit/figure-kit-llm-c.test.ts` (`nodeContentError`, `arrowParts`, `textLinePositions`, hai luật CSS mới, mô tả của biến thể `api`).
+  - Test: `tests/unit/viz/figure-kit-llm-c.test.ts` (`nodeContentError`, `arrowParts`, `textLinePositions`, hai luật CSS mới, mô tả của biến thể `api`).
   - Lô này **không** thêm loại nét nào: khung GPU, khung chuỗi token, lưới ảnh, ngoặc dưới chuỗi và khung container đều là `FigArrow head={false}` (khép kín khi cần), như 2.9.2.
 
 **Quyết định tự chọn (đổi lại được khi người dùng duyệt):**
@@ -679,9 +679,9 @@ Hệ quả cho test hiện có:
 
 ### 4.5. Test
 
-**Unit, `tests/unit/local-code.test.ts`** (môi trường node): `readEnvVars` với khuôn ở mục 2.3 ra đúng `[OPENAI_BASE_URL optional, OPENAI_API_KEY, LLM_MODEL]`; một tên vừa `[...]` vừa `.get(...)` thì là bắt buộc; nháy đơn và nháy kép; khoảng trắng trong ngoặc; `os.getenv` thì ném lỗi; code không đọc biến nào thì ra `[]`. `pipCommand` ghép đúng; tên trơn không nháy, tên có `>=`, `[extra]`, `;`, `,` hay dấu cách được bọc nháy đơn; ném lỗi với tên rỗng, chỉ có khoảng trắng, hoặc chứa `'`, tab, xuống dòng.
+**Unit, `tests/unit/lib/local-code.test.ts`** (môi trường node): `readEnvVars` với khuôn ở mục 2.3 ra đúng `[OPENAI_BASE_URL optional, OPENAI_API_KEY, LLM_MODEL]`; một tên vừa `[...]` vừa `.get(...)` thì là bắt buộc; nháy đơn và nháy kép; khoảng trắng trong ngoặc; `os.getenv` thì ném lỗi; code không đọc biến nào thì ra `[]`. `pipCommand` ghép đúng; tên trơn không nháy, tên có `>=`, `[extra]`, `;`, `,` hay dấu cách được bọc nháy đơn; ném lỗi với tên rỗng, chỉ có khoảng trắng, hoặc chứa `'`, tab, xuống dòng.
 
-**Unit, `tests/unit/code-secrets.test.ts`:** quét mọi file văn bản dưới `src/` và `docs/` (`.py`, `.md`, `.mdx`, `.ts`, `.tsx`, `.astro`, `.json`, `.txt`), cộng `scripts/`.
+**Unit, `tests/unit/content/code-secrets.test.ts`:** quét mọi file văn bản dưới `src/` và `docs/` (`.py`, `.md`, `.mdx`, `.ts`, `.tsx`, `.astro`, `.json`, `.txt`), cộng `scripts/`.
 
 - Mẫu key đã biết (biểu thức chính quy; con số là độ dài tối thiểu phần sau tiền tố): tiền tố `sk-` (OpenAI, Anthropic) + 16 ký tự `[A-Za-z0-9_-]`; `AIza` (Google) + 30; `gsk_` (Groq) + 20; `hf_` (Hugging Face) + 20; `xai-` + 20; `r8_` (Replicate) + 20; `ghp_` hoặc `github_pat_` + 20; `AKIA` + 16 chữ hoa hoặc số (AWS). Chuỗi kết nối `mongodb://` hay `mongodb+srv://` có cả tên người dùng và mật khẩu trước `@`.
 - Gán giá trị cứng: `api_key`, `apikey`, `token`, `secret`, `password` theo sau là `=` hoặc `:` rồi một chuỗi nháy dài ≥ 12 ký tự không chứa `<`, `>`, `{`, `}`, khoảng trắng.
@@ -690,14 +690,14 @@ Hệ quả cho test hiện có:
 - Fixture của test **ghép chuỗi lúc chạy** (`'sk-' + 'x'.repeat(30)`), để chính file test không chứa thứ trông như key (tránh cả GitHub secret scanning).
 - Báo lỗi dạng `<file>:<dòng>: <loại>`, không in lại giá trị.
 
-**Unit, `tests/unit/python-syntax.test.ts`:**
+**Unit, `tests/unit/content/python-syntax.test.ts`:**
 
 - Gom mọi file `.py` dưới `src/code/` (cả phần ML: thêm một lớp an toàn rẻ), và mọi khối ` ```python ` trong `src/content/docs/*/llm/**/*.mdx` (bỏ các khối nằm trong comment MDX, dùng cách tách của `lesson-shape.ts`).
 - Gọi Python **một lần** (`spawnSync`) với `-I`, đưa danh sách qua stdin dạng JSON. Script nhỏ trong test chạy `ast.parse(source, filename, feature_version=(3, 10))` cho từng mục và trả lỗi dạng JSON.
 - Trình thông dịch: biến môi trường `PYTHON` nếu có, rồi `python3`, rồi `python`. Không tìm thấy thì test **fail** với thông báo rõ. CI `ubuntu-latest` có sẵn `python3`; máy phát triển có `C:\Python314`. Không cần gói nào ngoài thư viện chuẩn.
 - `feature_version` của `ast` chỉ là "best-effort" theo tài liệu Python. Đủ để bắt cú pháp quá mới phổ biến, không bảo đảm tuyệt đối. Ví dụ đã thử (Python 3.14.5): `type X = int`, `except*`, `def f[T]()` bị bắt; f-string dùng lại chính dấu nháy của nó trong `{...}` (`f"{d["a"]}"`, chỉ hợp lệ từ 3.12) thì **không**. Vì vậy script của test (L2) kiểm thêm trường hợp này bằng `tokenize` (khi Python có `FSTRING_START`). Bộ tách chuỗi của `code-pairs` cũng dựa vào điều này.
 
-**Unit, `tests/unit/llm-code.test.ts`**, cho mọi `.py` dưới `src/code/llm/`, cả `.vi.py` lẫn `.en.py`:
+**Unit, `tests/unit/content/llm-code.test.ts`**, cho mọi `.py` dưới `src/code/llm/`, cả `.vi.py` lẫn `.en.py`:
 
 1. File có `OpenAI(` thì có `api_key=os.environ["OPENAI_API_KEY"]`, `base_url=os.environ.get("OPENAI_BASE_URL")` và `os.environ["LLM_MODEL"]` (cho phép khoảng trắng và nháy đơn). Theo mục 2.3, file chỉ dùng khả năng khác được đọc `os.environ["<KHẢ_NĂNG>_MODEL"]` thay cho `LLM_MODEL` (ví dụ `generate-image` chỉ đọc `IMAGE_MODEL`). Biến `*_MODEL` không được đọc bằng `.get(...)`, vì `.get` mở đường cho tên model mặc định (mục 2.6). Xét trên code đã bỏ comment.
 2. File import `openai` thì không có `model=` (hay `MODEL = `, `{"model": …}`, không phân biệt hoa thường) theo sau là một chuỗi viết sẵn.
@@ -706,7 +706,7 @@ Hệ quả cho test hiện có:
 5. `.vi.py` và `.en.py` cùng tập tên biến môi trường (`readEnvVars` trên cả hai).
 6. **Phạm vi kiểm chứng:** với mỗi bài `llm/*` có `status.vi = 'published'`, mọi `.vi.py` trong `src/code/llm/<bài>/` có một dòng trong bảng `## Kiểm chứng code` của `docs/research/<bài>.md`, cột "Mức" là một trong `cú pháp`, `chạy khô`, `chạy thật`, `đối chiếu`, cột "Ngày" dạng `YYYY-MM-DD`. File được `LocalCode` dùng có khối kết quả mẫu thì mức phải là `chạy thật` (đọc MDX bằng `lesson-shape.ts`: tên biến import → file; thẻ `<LocalCode code={x}>` có nội dung con).
 
-**Unit, mở rộng `tests/unit/code-pairs.test.ts`:**
+**Unit, mở rộng `tests/unit/content/code-pairs.test.ts`:**
 
 - File dưới `llm/`: so sau khi bỏ comment **và** làm rỗng nội dung chuỗi (mục 2.4, nếu người dùng chọn phương án A). Hàm làm rỗng chuỗi dùng lại bộ tách chuỗi của `stripComments`, có test riêng: chuỗi nháy đơn, nháy kép, ba nháy nhiều dòng, f-string có `{...}`, dấu `\"` bên trong.
 - Mọi phần: bài có `status.en = 'published'` thì `.en.py` của bài (thư mục `src/code/<id bài>/`) không chứa chữ tiếng Việt có dấu (các chữ `ăâđêôơư` hoa và thường, cùng khoảng Unicode U+1EA0–U+1EF9, xét trên văn bản đã chuẩn hóa NFC). Luật xét comment, chuỗi và code. Bắt lỗi quên dịch bản sao.
@@ -732,7 +732,7 @@ Hệ quả cho test hiện có:
 
 ### 4.6. `SamplingViz`
 
-Đủ để `viz-builder` làm ở nhiệm vụ L8, theo mọi quy ước của [viz.md](viz.md) mục 2 và checklist mục 2.12.
+Đủ để `viz-builder` làm ở nhiệm vụ L8, theo mọi quy ước của [viz/README.md](viz/README.md) mục 2 và checklist mục 2.12.
 
 #### 4.6.1. Dữ liệu: `src/data/datasets/next-token.ts`
 
@@ -782,7 +782,7 @@ export function sampleIndex(probs: readonly number[], u: number): number;
 
 - Thứ tự: temperature → top-k → top-p → chuẩn hóa lại. Top-p giữ **tập nhỏ nhất** (theo xác suất giảm dần) có tổng ≥ p, tức giữ cả token làm tổng vượt ngưỡng. Luôn giữ ít nhất 1 token.
 - Thứ tự này là của `transformers` (Hugging Face) theo hiểu biết hiện tại. Một số engine khác, ví dụ llama.cpp, áp temperature sau cùng. **Cần kiểm chứng khi viết `text-api`**; bài ghi rõ VIZ dùng thứ tự nào.
-- Unit `tests/unit/sampling.test.ts`: ví dụ tính tay (2–3 token); so với fixture NumPy `tests/unit/fixtures/sampling-python.ts` ở các bộ (T, k, p) = (1, 10, 1), (0.5, 10, 0.9), (1.5, 3, 1), (1, 10, 0.5), (0, 10, 1), sai số 1e-9; `createRng(1)` cho cùng dãy hai lần; 10 000 lần lấy mẫu có tần suất mỗi token lệch xác suất ≤ 0.02.
+- Unit `tests/unit/viz/sampling.test.ts`: ví dụ tính tay (2–3 token); so với fixture NumPy `tests/unit/fixtures/sampling-python.ts` ở các bộ (T, k, p) = (1, 10, 1), (0.5, 10, 0.9), (1.5, 3, 1), (1, 10, 0.5), (0, 10, 1), sai số 1e-9; `createRng(1)` cho cùng dãy hai lần; 10 000 lần lấy mẫu có tần suất mỗi token lệch xác suất ≤ 0.02.
 
 #### 4.6.3. Điều khiển và hành vi
 
@@ -800,7 +800,7 @@ export function sampleIndex(probs: readonly number[], u: number): number;
 - "Lấy 100 mẫu": lấy 100 lần, cột "Số lần" hiện số lần mỗi token được chọn trong các mẫu từ lần đặt lại gần nhất. Đổi thanh trượt thì **xóa** bộ đếm (bộ đếm chỉ đúng với một phân phối).
 - Hạt giống cố định (ví dụ 2026), nên cùng thao tác cho cùng kết quả: test lặp lại được.
 - $T = 0$: một token có xác suất 1, mọi token khác bị loại; dòng trạng thái hiện `greedyNote`.
-- SSR và trước khi hydrate: bảng ở trạng thái mặc định, điều khiển `disabled`, câu ngữ cảnh chưa có token, cột "Số lần" có trong DOM nhưng `visibility: hidden` (giữ chỗ, chống CLS, viz.md mục 2.8).
+- SSR và trước khi hydrate: bảng ở trạng thái mặc định, điều khiển `disabled`, câu ngữ cảnh chưa có token, cột "Số lần" có trong DOM nhưng `visibility: hidden` (giữ chỗ, chống CLS, viz/README.md mục 2.8).
 
 #### 4.6.4. Bố cục
 
@@ -808,7 +808,7 @@ Từ trên xuống: chú thích (`figcaption`) → câu ngữ cảnh và token v
 
 - **Bảng xác suất là `<table>` HTML thật**, không phải SVG: cột Token, Xác suất (thanh ngang và số), Số lần. Trình đọc màn hình đọc được từng số, nên không cần mô tả SVG riêng. Thanh là `<span>` với `width` tính bằng `%` (inline, hình học), màu qua lớp vai trò của `viz.css`.
 - Token bị loại: thanh rỗng có viền đứt, số hiện "—", và chữ "đã loại" ở cột xác suất (chữ thật, không chỉ màu). Thanh mờ `base` (trước khi cắt) nằm dưới thanh chính để thấy phần bị cắt đi.
-- Số dùng `formatNumber(value, 2)` (viz.md mục 2.6).
+- Số dùng `formatNumber(value, 2)` (viz/README.md mục 2.6).
 - 375px: 10 hàng khoảng 32px, bảng khoảng 340px chiều cao; cả VIZ khoảng 700px. Cột "Token" không xuống dòng (token ngắn).
 - Lớp thêm vào `viz.css` đặt tên theo vai trò (`.atlas-viz-bar`, `.atlas-viz-bar-base`, `[data-removed]`), không theo tên VIZ. `viz.css` hiện **1 732 byte gzip** sau khi bỏ comment (đo ngày 24/10/2026), còn khoảng 830 byte trong ngân sách 2 560, và VIZ bài Gradient Descent cũng đang thêm vào đây (mục 7, rủi ro 6).
 
@@ -834,7 +834,7 @@ Câu ngữ cảnh, token và mô tả là **nội dung**, nằm ở `next-token.
 #### 4.6.7. Ngân sách và test
 
 - JS riêng ≤ 10 KB gzip; `props` trong HTML ≤ 8 KB (24 chuỗi ngắn và 10 token, dự kiến khoảng 3 KB).
-- Test chung `viz.spec.ts` tự áp dụng cho hai bài dùng VIZ. `tests/unit/sampling-viz-island.test.tsx` (`tester`): kéo $T$ về 0 thì một hàng xác suất 1; top-k = 3 thì đúng 7 hàng "đã loại"; "Lấy 100 mẫu" rồi đổi thanh trượt thì cột "Số lần" ẩn; vùng live chỉ đọc sau khi dừng kéo; SSR rồi hydrate không lỗi; không viết cứng chữ. Không viết spec e2e riêng (quyết định 39).
+- Test chung `viz.spec.ts` tự áp dụng cho hai bài dùng VIZ. `tests/unit/components/sampling-viz-island.test.tsx` (`tester`): kéo $T$ về 0 thì một hàng xác suất 1; top-k = 3 thì đúng 7 hàng "đã loại"; "Lấy 100 mẫu" rồi đổi thanh trượt thì cột "Số lần" ẩn; vùng live chỉ đọc sau khi dừng kéo; SSR rồi hydrate không lỗi; không viết cứng chữ. Không viết spec e2e riêng (quyết định 39).
 
 #### 4.6.8. Đã làm (L8, 24/10/2026)
 
@@ -847,9 +847,9 @@ Câu ngữ cảnh, token và mô tả là **nội dung**, nằm ở `next-token.
 | `src/lib/viz/sampling.ts` | `softmaxT`, `samplingDistribution`, `createRng` (mulberry32), `sampleIndex`, kiểu `SamplingConfig` |
 | `src/data/datasets/next-token.ts` | `NEXT_TOKEN` (`lessons`: `llm/text-api`, `llm/build-first-llm`), `NEXT_TOKEN_SAMPLING` (thanh trượt, `seed: 2026`, `many: 100`, số chữ số), registry `TOKEN_DISTRIBUTIONS` cho dấu `# logits:` |
 | `src/data/datasets/types.ts` | Thêm `TokenDistribution` (như mục 4.6.1; `id` là `string`, `tokens` là `Localized<readonly string[]>`) |
-| `tests/unit/sampling.test.ts`, `tests/unit/fixtures/sampling-python.ts` | Ví dụ tính tay; 11 bộ $(T, k, p)$ so với NumPy 2.4.6, sai số 1e-9; quét đủ 21 × 10 × 20 vị trí thanh trượt; `createRng`; 10 000 lần lấy mẫu lệch ≤ 0.02; mọi số "Hãy thử" của hai bài |
-| `tests/unit/sampling-viz-island.test.tsx` | Đủ các ý của mục 4.6.7, thêm: hạt giống cố định cho cùng kết quả, "Đặt lại" đặt lại hạt giống, bản en |
-| `tests/unit/datasets.test.ts` | Luật `# logits: <id>`: dòng code kế tiếp là một mảng `np.array([...])`, từng số `===` logit. Ít nhất một bài đã xuất bản trong `lessons` có `.vi.py` mang dấu (`build-first-llm` chỉ có VIZ, không có ô code dùng logit này) |
+| `tests/unit/viz/sampling.test.ts`, `tests/unit/fixtures/sampling-python.ts` | Ví dụ tính tay; 11 bộ $(T, k, p)$ so với NumPy 2.4.6, sai số 1e-9; quét đủ 21 × 10 × 20 vị trí thanh trượt; `createRng`; 10 000 lần lấy mẫu lệch ≤ 0.02; mọi số "Hãy thử" của hai bài |
+| `tests/unit/components/sampling-viz-island.test.tsx` | Đủ các ý của mục 4.6.7, thêm: hạt giống cố định cho cùng kết quả, "Đặt lại" đặt lại hạt giống, bản en |
+| `tests/unit/content/datasets.test.ts` | Luật `# logits: <id>`: dòng code kế tiếp là một mảng `np.array([...])`, từng số `===` logit. Ít nhất một bài đã xuất bản trong `lessons` có `.vi.py` mang dấu (`build-first-llm` chỉ có VIZ, không có ô code dùng logit này) |
 
 **Quyết định khi làm.**
 
@@ -934,7 +934,7 @@ Mỗi nhiệm vụ của `developer` và `tester` kết thúc bằng `npm run ch
 | L5 | phiên chính | Tạo `scripts/requirements-llm.txt` theo mục 5. Cập nhật `.claude/agents/lesson-writer.md` và `content-reviewer.md` (mục "Việc của phiên chính" bên dưới) | `.venv-llm/Scripts/python.exe -I -c "import openai, torch, numpy, sklearn"` chạy không lỗi |
 | L6 | `developer` | Sửa `docs/lesson-template.mdx` theo mục 2.7 | Template có đủ các dòng ở mục 2.7; không đổi phần chung của các phần khác |
 | L7 | quy trình bài học | **`text-api`** (đợt 0): `summarizer` → `lesson-writer` → `content-reviewer` (kiểm chứng mức `chạy thật`) → sửa → `viz-builder` (L8). Không chờ duyệt (quyết định 60) | Bài qua review, không còn lỗi "Nghiêm trọng" hay "Nên sửa"; bảng kiểm chứng đủ; `npm test`, build, e2e qua |
-| L8 | `viz-builder` | **`SamplingViz`** theo mục 4.6, cùng `next-token.ts`, `sampling.ts`, fixture NumPy, `sampling.test.ts`. Đặt vào `text-api`, sau đó dùng lại ở `build-first-llm` | Checklist [viz.md](viz.md) mục 2.12 đạt. `viz.css` vẫn ≤ 2 560 byte gzip |
+| L8 | `viz-builder` | **`SamplingViz`** theo mục 4.6, cùng `next-token.ts`, `sampling.ts`, fixture NumPy, `sampling.test.ts`. Đặt vào `text-api`, sau đó dùng lại ở `build-first-llm` | Checklist [viz/README.md](viz/README.md) mục 2.12 đạt. `viz.css` vẫn ≤ 2 560 byte gzip |
 | L9 | `tester` | `sampling-viz-island.test.tsx` (mục 4.6.7) | Qua; thử phá thứ tự top-k/top-p thì test fail |
 | L10 | quy trình bài học | **`build-first-llm`** (đợt 1), như L7, có một ô `PythonRunner` NumPy | Như L7 |
 | L11+ | quy trình bài học | Đợt 2–7 theo mục 2.8, mỗi đợt tối đa 4 bài; hình của đợt do `viz-builder` làm lần lượt | Mỗi đợt: build, test, e2e qua; có báo cáo đợt |
@@ -945,7 +945,7 @@ Mỗi nhiệm vụ của `developer` và `tester` kết thúc bằng `npm run ch
 - `.claude/agents/lesson-writer.md`, mục "Code ví dụ": thêm "Phần LLM: theo `docs/architecture/llm-lessons.md` mục 4.8". Mục "Sau khi viết": "Khi chạy song song theo đợt: không sửa `roadmap.ts`, glossary; không chạy lệnh `npm`; báo lại dòng cần đổi và thuật ngữ mới."
 - `.claude/agents/content-reviewer.md`, mục "Code": thêm bốn mức kiểm chứng và lệnh chạy ở mục 2.5, yêu cầu trả bảng kiểm chứng trong báo cáo, và "khi review song song theo đợt thì không chạy `npm run build`/`npm test`".
 - `CLAUDE.md`: thêm `LocalCode` vào danh sách component, `.venv-llm/` và `scripts/requirements-llm.txt` vào phần lệnh hoặc cấu trúc thư mục, mục "Trạng thái hiện tại" khi bắt đầu phần LLM.
-- `docs/mvp.md` mục 7: ghi các câu trả lời của người dùng cho mục 7 bên dưới.
+- `docs/decisions.md`: ghi các câu trả lời của người dùng cho mục 7 bên dưới.
 
 ## 7. Rủi ro và điểm chưa chắc
 
@@ -956,7 +956,7 @@ Mỗi nhiệm vụ của `developer` và `tester` kết thúc bằng `npm run ch
 | 3 | Nhà cung cấp đổi API kiểu OpenAI, đổi gói miễn phí, bỏ model | Code của bài hỏng, bảng của `text-api` sai | Code không có tên model; chỉ một bảng nhà cung cấp có ngày kiểm tra; bảng kiểm chứng có ngày. Rà lại khoảng 6 tháng một lần |
 | 4 | Thư viện đổi nhanh (LangChain, LlamaIndex, Gradio) hỏng code sau vài tháng | Code của 3–4 bài | Ghim bản trong `packages` (mục 2.6) |
 | 5 | Một số gói chưa có wheel cho Python 3.14 | Không chạy thử được trong `.venv-llm/` | Khi gặp, dựng thêm venv Python 3.12 cho bài đó, ghi vào bảng kiểm chứng. Code vẫn phải chạy trên 3.10+ |
-| 6 | Ngân sách `viz.css` (còn khoảng 830 byte) bị VIZ Gradient Descent và `SamplingViz` dùng hết | `viz-conventions.test.ts` fail | Đo lại trước L8. Thiếu chỗ thì gọi `architect` (tách phần hiếm dùng, viz.md mục 2.3) |
+| 6 | Ngân sách `viz.css` (còn khoảng 830 byte) bị VIZ Gradient Descent và `SamplingViz` dùng hết | `viz-conventions.test.ts` fail | Đo lại trước L8. Thiếu chỗ thì gọi `architect` (tách phần hiếm dùng, viz/README.md mục 2.3) |
 | 7 | Không có key, hoặc gói miễn phí bị giới hạn | Bài không có kết quả mẫu; mức chỉ đạt `chạy khô` | Bài vẫn xuất bản được (mục 2.5). Test `llm-code` chỉ đòi `chạy thật` khi có kết quả mẫu |
 | 8 | Groq có thể không có embeddings; tham số `temperature`/`max_tokens` có thể bị một số model từ chối | Code của `rag-chatbot`, `text-api` không chạy với mọi nhà cung cấp | Kiểm chứng khi viết `text-api` (mục 2.6); bài ghi rõ yêu cầu |
 | 9 | Test cú pháp gọi Python từ Vitest: máy không có Python thì `npm test` fail | Người đóng góp mới bị chặn | Thông báo lỗi nói cách cài hoặc đặt biến `PYTHON`. `CLAUDE.md` đã đòi có Python |

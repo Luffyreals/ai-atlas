@@ -9,7 +9,7 @@ updates:
       day: monday
       time: '08:00'
       timezone: Asia/Ho_Chi_Minh
-    # package.json pins exact versions (no ^ or ~), enforced by tests/unit/deps.test.ts.
+    # package.json pins exact versions (no ^ or ~), enforced by tests/unit/content/deps.test.ts.
     # "increase" rewrites each pin to the new exact version instead of widening it into a range.
     versioning-strategy: increase
     open-pull-requests-limit: 5
@@ -31,7 +31,7 @@ updates:
           - '*'
     ignore:
       # rehype-katex 7.0.1 renders with katex ^0.16, and the KaTeX CSS must match the renderer.
-      # tests/unit/deps.test.ts enforces katex 0.16.x. Revisit when rehype-katex moves to a newer katex.
+      # tests/unit/content/deps.test.ts enforces katex 0.16.x. Revisit when rehype-katex moves to a newer katex.
       - dependency-name: 'katex'
         versions: ['>=0.17.0']
       # A new rehype-katex major may bring its own katex and leave the root CSS behind.

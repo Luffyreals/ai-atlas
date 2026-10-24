@@ -1,6 +1,6 @@
 // Structure of a lesson MDX file, to check that the vi and en files of a lesson match (CLAUDE.md,
 // "Quy tắc nội dung": same structure, formulas, code and components; text and comments may differ).
-// Used by tests/unit/lesson-pairs.test.ts and tests/e2e/lessons.spec.ts.
+// Used by tests/unit/content/lesson-pairs.test.ts and tests/e2e/lessons.spec.ts.
 import { parse as parseYaml } from 'yaml';
 
 /** Components of the lesson template (docs/lesson-template.mdx), counted even when a file forgets the import. */
@@ -113,7 +113,7 @@ export function lessonShape(source: string): LessonShape {
 }
 
 /**
- * Static figure tags written in a lesson file (docs/architecture/viz.md, section 8.2 h): tags of the
+ * Static figure tags written in a lesson file (docs/architecture/viz/figures.md, section 8.2 h): tags of the
  * components it imports from @components/figures/ (the kit under figures/kit/ is not for lessons).
  * Same way as vizCount in tests/e2e/viz.spec.ts.
  */

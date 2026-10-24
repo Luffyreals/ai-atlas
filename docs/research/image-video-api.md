@@ -1,6 +1,6 @@
 # API cho hình ảnh và video (Image and Video APIs)
 
-Bài: `llm/image-video-api` (chỉ bản vi, khoảng 10 phút đọc; tiên quyết `llm/text-api`). Quyết định liên quan trong `docs/mvp.md` mục 7: số 53 (SDK OpenAI-compatible, đọc khóa từ biến môi trường), 54 (code ở `src/code/llm/image-video-api/`, bảng nhà cung cấp chỉ ở `text-api`), 54 "phiên chính tự chọn" (video chỉ ở mức khái niệm), 55 (kết quả mẫu chỉ lấy từ lần chạy thật).
+Bài: `llm/image-video-api` (chỉ bản vi, khoảng 10 phút đọc; tiên quyết `llm/text-api`). Quyết định liên quan trong `docs/decisions.md`: số 53 (SDK OpenAI-compatible, đọc khóa từ biến môi trường), 54 (code ở `src/code/llm/image-video-api/`, bảng nhà cung cấp chỉ ở `text-api`), 54 "phiên chính tự chọn" (video chỉ ở mức khái niệm), 55 (kết quả mẫu chỉ lấy từ lần chạy thật).
 
 Ngày tra: **24/10/2026**, bằng WebFetch, WebSearch và mã nguồn `openai-python` trên GitHub. Thẻ nguồn: [OAI-VIS], [OAI-IMG], [OAI-VID], [OAI-SRC], [GEM-OAI], [GEM-IMG], [GROQ-VIS], [OLL-OAI], [C2PA], [OAI-C2PA]. Giá tiền không ghi. Giáo án gốc: buổi 11 phần LLM "Sử dụng API liên quan tới hình ảnh + video" (chỉ tham khảo).
 

@@ -35,5 +35,5 @@ export const NEXT_TOKEN_SAMPLING = {
   digits: { temperature: 1, topP: 2, prob: 2 },
 } as const satisfies SamplingConfig;
 
-/** Registry of the "# logits: <id>" markers in src/code/ (tests/unit/datasets.test.ts). */
+/** Registry of the "# logits: <id>" markers in src/code/ (tests/unit/content/datasets.test.ts). */
 export const TOKEN_DISTRIBUTIONS = { [NEXT_TOKEN.id]: NEXT_TOKEN } as const satisfies Record<string, TokenDistribution>;

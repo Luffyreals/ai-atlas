@@ -1,5 +1,5 @@
 // Numbers from NumPy for SamplingViz (docs/architecture/llm-lessons.md, section 4.6.2).
-// Python 3.14.5 + NumPy 2.4.6 (the versions Pyodide 314.0.7 ships; venv of viz.md section 2.5), 24/10/2026,
+// Python 3.14.5 + NumPy 2.4.6 (the versions Pyodide 314.0.7 ships; venv of viz/README.md section 2.5), 24/10/2026,
 // `python -I fixture.py` run from an empty folder outside the repo. fixture.py:
 //   import numpy as np
 //   z = np.array([3.0, 2.6, 2.0, 1.5, 1.1, 0.6, 0.1, -0.4, -1.0, -1.6])

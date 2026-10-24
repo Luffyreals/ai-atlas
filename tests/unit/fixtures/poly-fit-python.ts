@@ -1,4 +1,4 @@
-// Numbers from scikit-learn for PolyFitViz (docs/architecture/viz.md, sections 9.2.1, 9.2.2, 9.4.1, 9.6 task P1).
+// Numbers from scikit-learn for PolyFitViz (docs/architecture/viz/poly-fit.md, sections 9.2.1, 9.2.2, 9.4.1, 9.6 task P1).
 // Python 3.14.5 + NumPy 2.4.6 + scikit-learn 1.8.0 (the versions Pyodide 314.0.7 ships; venv of section 2.5),
 // 23/10/2026, `python -I fixture.py` run from an empty folder outside the repo. fixture.py:
 //   import numpy as np

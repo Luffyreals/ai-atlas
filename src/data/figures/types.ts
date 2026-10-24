@@ -1,4 +1,4 @@
-// Shapes of the static figures' words (docs/architecture/viz.md, section 8.4). Types only.
+// Shapes of the static figures' words (docs/architecture/viz/figures.md, section 8.4). Types only.
 // Relative imports only: Playwright e2e imports these files too, and it does not know the @data/* alias.
 import type { Locale } from '../roadmap';
 

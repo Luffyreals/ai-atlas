@@ -43,5 +43,5 @@ playwright/.cache/
 # Working files of the design-taste-frontend skill (notes, direction sheet, screenshots)
 .taste-skill/
 
-# Local venv for checking illustrative LLM code (openai, torch CPU); see docs/mvp.md decision 54
+# Local venv for checking illustrative LLM code (openai, torch CPU); see docs/decisions.md decision 54
 .venv-llm/

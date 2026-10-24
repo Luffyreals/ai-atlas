@@ -122,7 +122,7 @@ Với $V = 50\,257$ (từ vựng của GPT-2, 2019), mốc là $\ln V \approx 10
 - Kiểm `torch.isfinite(loss)` ở mỗi bước và dừng ngay, kèm số bước. Biết lỗi xuất hiện ở bước nào là đã khoanh được vùng.
 - `torch.autograd.detect_anomaly()` chỉ ra **phép toán** trả về `nan` trong lượt lan truyền ngược, kèm dòng code của lượt tính xuôi đã tạo ra nó. Tài liệu PyTorch cảnh báo chế độ này làm chương trình chậm, nên đừng bật suốt quá trình huấn luyện: dùng `isfinite` để biết bước hỏng, rồi chỉ bật nó khi chạy lại đoạn đó.
 
-**Tốc độ học quá lớn.** Triệu chứng là loss nhảy lên hàng nghìn, hoặc thành `nan` sau vài bước. Một đồng hồ đo nên theo dõi cùng loss là **chuẩn của gradient**: nó tăng vọt cùng lúc với loss, và vẫn đo được khi bạn đã bật clip (số đo ở phần thử thêm của mục Ví dụ code). Cách chữa đầu tiên là giảm tốc độ học $\eta$, thường mỗi lần chia 3 tới 10 (cách chọn $\eta$ ở bài Gradient Descent{/* LINK: ml/gradient-descent */}).
+**Tốc độ học quá lớn.** Triệu chứng là loss nhảy lên hàng nghìn, hoặc thành `nan` sau vài bước. Một đồng hồ đo nên theo dõi cùng loss là **chuẩn của gradient**: nó tăng vọt cùng lúc với loss, và vẫn đo được khi bạn đã bật clip (số đo ở phần thử thêm của mục Ví dụ code). Cách chữa đầu tiên là giảm tốc độ học $\eta$, thường mỗi lần chia 3 tới 10 (cách chọn $\eta$ ở bài [Gradient Descent](/vi/ml/gradient-descent/)).
 
 **Cắt chuẩn gradient** (gradient clipping). Gọi $\mathbf{g} = \nabla_{\boldsymbol{\theta}}\mathcal{L}$ là gradient của mọi tham số, ghép thành một vectơ, và $c$ là ngưỡng. Trước khi cập nhật, ta co $\mathbf{g}$ lại:
 

@@ -1,6 +1,6 @@
 # Crawl dữ liệu và MongoDB
 
-Bài: `llm/web-crawling-mongodb` (chỉ bản vi, khoảng 10 phút đọc; đợt 2, cần biết trước `python/functions-strings-files`). Quyết định liên quan trong `docs/mvp.md` mục 7: số 53 (code cần mạng là code minh họa, không ghi cứng khóa), 54 (code ở `src/code/llm/web-crawling-mongodb/`, hiện bằng `LocalCode`), 55 (prompt và chuỗi theo ngôn ngữ của bài).
+Bài: `llm/web-crawling-mongodb` (chỉ bản vi, khoảng 10 phút đọc; đợt 2, cần biết trước `python/functions-strings-files`). Quyết định liên quan trong `docs/decisions.md`: số 53 (code cần mạng là code minh họa, không ghi cứng khóa), 54 (code ở `src/code/llm/web-crawling-mongodb/`, hiện bằng `LocalCode`), 55 (prompt và chuỗi theo ngôn ngữ của bài).
 
 Ngày tra: **24/10/2026**, bằng WebFetch, WebSearch và `curl` tới PyPI. Thẻ nguồn: [PYPI], [RFC], [RP], [GOOG], [REQ], [BS4], [MDB-MODEL], [MDB-INS], [MDB-UPD], [MDB-IDX], [HIQ], [VN-PDPL]. Ý không có thẻ là kiến thức chung hoặc gợi ý của `summarizer`.
 

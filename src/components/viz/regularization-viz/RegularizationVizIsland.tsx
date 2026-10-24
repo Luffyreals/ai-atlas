@@ -1,4 +1,4 @@
-// RegularizationViz (docs/architecture/viz.md, sections 10.4.4–10.4.5). One idea: as λ grows the coefficients
+// RegularizationViz (docs/architecture/viz/regularization.md, sections 10.4.4–10.4.5). One idea: as λ grows the coefficients
 // shrink and the degree-15 curve calms down; too small a λ overfits, too large a λ underfits, a middle λ gives the
 // lowest test MSE; Lasso also sets many coefficients to exactly 0, Ridge does not.
 // A slider picks one of the λ levels, two buttons pick Ridge or Lasso; the main plot redraws the curve, a bar

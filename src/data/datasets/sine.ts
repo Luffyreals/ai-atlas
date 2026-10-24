@@ -1,4 +1,4 @@
-// src/data/datasets/sine.ts — the one copy of the overfitting data (decisions 38, 44; viz.md section 9.2.1).
+// src/data/datasets/sine.ts — the one copy of the overfitting data (decisions 38, 44; viz/poly-fit.md section 9.2.1).
 // Made with NumPy 2.4.6: rng = np.random.default_rng(236); x = (np.arange(24) + rng.uniform(0.15, 0.85, 24)) / 24;
 // y = np.sin(2 * np.pi * x) + rng.normal(0, 0.2, 24); both rounded to 2 decimals; every third point
 // (i % 3 == 1, by increasing x) is a test point. The rounded numbers below ARE the data: no code regenerates them.
@@ -62,7 +62,7 @@ export const SINE_TRUTH = {
 } as const;
 
 /**
- * PolyFitViz on SINE_TRAIN / SINE_TEST (viz.md, sections 9.2.4, 9.4.3; tests/unit/poly-fit-sine.test.ts checks it).
+ * PolyFitViz on SINE_TRAIN / SINE_TEST (viz/poly-fit.md, sections 9.2.4, 9.4.3; tests/unit/viz/poly-fit-sine.test.ts checks it).
  * - Starts at degree 1 (underfitting); the slider tops out at 15 = training points − 1, the highest degree with
  *   a unique least-squares fit, where the curve passes through every training point.
  * - yDomain [−2, 2] holds every point (−1.18 to 1.06); the degree-8 curve stays inside, degree 9 leaves it (−3.0).
@@ -88,8 +88,8 @@ export const SINE_POLY_FIT: PolyFitConfig = {
 };
 
 /**
- * RegularizationViz on SINE_TRAIN / SINE_TEST (viz.md, sections 10.2.2, 10.2.6, 10.4.3; decision 48;
- * tests/unit/regularization-sine.test.ts checks it).
+ * RegularizationViz on SINE_TRAIN / SINE_TEST (viz/regularization.md, sections 10.2.2, 10.2.6, 10.4.3; decision 48;
+ * tests/unit/viz/regularization-sine.test.ts checks it).
  * - 17 levels: λ = 0 (the degree-15 fit of PolyFitViz), then 10⁻¹⁴ … 10, one per power of ten. The 15 features
  *   are nearly the same column, so a tiny λ already tames the fit: the grid goes down to 10⁻¹⁴ so that both Ridge
  *   and Lasso pass through overfit, good and underfit. The slider moves over the index, the label shows λ.

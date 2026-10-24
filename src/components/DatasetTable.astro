@@ -1,5 +1,5 @@
 ---
-// A shared lesson dataset as a table (docs/architecture/viz.md, sections 2.5, 3, 4.10). 0 JS, no CSS of its own:
+// A shared lesson dataset as a table (docs/architecture/viz/, sections 2.5, 3, 4.10). 0 JS, no CSS of its own:
 // the plain <table> picks up Starlight's Markdown table style, like a `|---:|` table written in the lesson.
 // Numbers use formatNumber (decimal point, decision 22), with the column's fixed decimals.
 // The caption names the table and says the numbers are made up. Browsers centre a caption; the one inline
@@ -24,7 +24,7 @@ if (!data) {
   );
 }
 
-// A column without a unit (e.g. the sine data, x and y) shows its name alone, not "x ()" (viz.md, section 9.4.1).
+// A column without a unit (e.g. the sine data, x and y) shows its name alone, not "x ()" (viz/poly-fit.md, section 9.4.1).
 const header = (column: DatasetColumn) =>
   column.unit[locale] === '' ? column.name[locale] : `${column.name[locale]} (${column.unit[locale]})`;
 ---
