@@ -6,7 +6,7 @@
 // dashed second-group links run down the outer lanes into their frozen copies in step 3. Step 3 is a loop:
 // policy (accent) → answer → RM scores it → PPO → policy; the reference model feeds the KL penalty.
 // Narrow layout only: tried first (llm-lessons.md 2.9), a wide one with the same 9 boxes would double the SVG (6 210 characters),
-// past the HTML budget of viz.md 8.2 g (10 000), and the content column reaches 640px only from about
+// past the HTML budget of viz/figures.md 8.2 g (10 000), and the content column reaches 640px only from about
 // 1440px. Words: src/data/figures/rlhf-stages.ts.
 import { RLHF_STAGES } from '@data/figures/rlhf-stages';
 import { anchor, mainAndSmall, type Box } from '@lib/figures/layout';

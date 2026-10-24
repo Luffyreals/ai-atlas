@@ -1,6 +1,6 @@
 # Đánh giá mô hình và PEFT: LoRA, quantization, distillation, pruning (Model Evaluation and PEFT)
 
-Bài: `llm/evaluation-peft` (chỉ bản vi, được dài tới khoảng 15 phút đọc, quyết định 54 trong `docs/mvp.md`). Bài cần biết trước: `llm/gpt-family-finetuning`. Bài sau dùng nó làm tiền đề: `llm/llm-deployment`. Giáo án (buổi 17, phần LLM) nêu: đánh giá chất lượng mô hình, PEFT, LoRA, lượng tử hóa, chắt lọc tri thức, tỉa tham số, thực hành thư viện Unsloth.
+Bài: `llm/evaluation-peft` (chỉ bản vi, được dài tới khoảng 15 phút đọc, quyết định 54 trong `docs/decisions.md`). Bài cần biết trước: `llm/gpt-family-finetuning`. Bài sau dùng nó làm tiền đề: `llm/llm-deployment`. Giáo án (buổi 17, phần LLM) nêu: đánh giá chất lượng mô hình, PEFT, LoRA, lượng tử hóa, chắt lọc tri thức, tỉa tham số, thực hành thư viện Unsloth.
 
 Ngày tra: **24/10/2026**. Cách tra: WebFetch trang arXiv của 9 paper (tên, tác giả, ngày nộp, hội nghị nếu trang nêu); tải PDF của Hu 2021, Hinton 2015, Dettmers 2023, Brown 2020, Dettmers 2022 rồi trích chữ bằng `pdftotext` (đã đọc đúng các đoạn nêu trong "Ý chính", chưa đọc cả bài); WebFetch trang GitHub của Unsloth và trang chủ tài liệu PEFT; lấy phiên bản gói bằng `pip index versions`; chạy thật Python trong scratchpad. Ý không có thẻ nguồn là kiến thức chung hoặc suy ra từ công thức.
 

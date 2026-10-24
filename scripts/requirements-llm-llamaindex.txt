@@ -1,4 +1,4 @@
-# Separate venv for the LlamaIndex cell of llm/langchain-llamaindex (docs/mvp.md decision 61).
+# Separate venv for the LlamaIndex cell of llm/langchain-llamaindex (docs/decisions.md decision 61).
 # llama-index-llms-openai requires openai<3, so it cannot share .venv-llm (openai 3.37.0).
 llama-index-core==0.14.25
 llama-index-llms-openai-like==0.8.1

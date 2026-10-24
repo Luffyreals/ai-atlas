@@ -1,4 +1,4 @@
-// A curve in data space, clipped to the plot box (docs/architecture/viz.md, sections 2.4, 9.2.2, 9.4.4).
+// A curve in data space, clipped to the plot box (docs/architecture/viz/, sections 2.4, 9.2.2, 9.4.4).
 // The nested <svg> fills the plot and maps viewBox 0 0 100 100 onto it without keeping the aspect ratio, so
 // toPolyline's percent coordinates land where pct(toPercentX/Y(…)) marks do. overflow="hidden" lets the browser
 // cut the curve at the plot's edge (never clamp y: that would draw flat runs along the edge), and

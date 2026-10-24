@@ -1,6 +1,6 @@
 # Agents
 
-Bài: `llm/agents` (chỉ bản vi, khoảng 12 phút đọc). Cần biết trước: `llm/langchain-llamaindex`. Quyết định liên quan trong `docs/mvp.md`: 53 (SDK OpenAI-compatible, key từ biến môi trường), 54 (code ở `src/code/llm/agents/`, hiện bằng `LocalCode`), 56 (ký hiệu $L$, $T$). Hình: `AgentLoopFigure` (`llm-lessons.md` mục 2.9). Giáo án gốc: Buổi 9, "Agents and related problems" (chỉ tham khảo).
+Bài: `llm/agents` (chỉ bản vi, khoảng 12 phút đọc). Cần biết trước: `llm/langchain-llamaindex`. Quyết định liên quan trong `docs/decisions.md`: 53 (SDK OpenAI-compatible, key từ biến môi trường), 54 (code ở `src/code/llm/agents/`, hiện bằng `LocalCode`), 56 (ký hiệu $L$, $T$). Hình: `AgentLoopFigure` (`llm-lessons.md` mục 2.9). Giáo án gốc: Buổi 9, "Agents and related problems" (chỉ tham khảo).
 
 Ngày tra: **24/10/2026**, bằng WebFetch, đọc docstring trong mã nguồn `openai` 3.37.0 (`.venv-llm`), và chạy thử code với máy chủ giả. Thẻ nguồn: [REACT], [TOOLFORMER], [OAI-FC], [OAI-SRC], [GEM-OAI], [GROQ-TOOL], [OLL-OAI], [OLL-TOOL], [ANTH], [OWASP], [MCP], [RUN]. Ý không có thẻ là kiến thức chung hoặc suy ra. Giá và hạn mức không ghi.
 

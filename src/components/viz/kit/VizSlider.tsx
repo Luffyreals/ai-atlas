@@ -1,4 +1,4 @@
-// One slider of a VIZ (docs/architecture/viz.md, sections 2.7, 4.3): a visible label (KaTeX allowed), the value
+// One slider of a VIZ (docs/architecture/viz/, sections 2.7, 4.3): a visible label (KaTeX allowed), the value
 // next to it, and a native range input below, so arrows, PageUp/PageDown and Home/End come from the browser.
 import type { ChangeEvent } from 'react';
 import { snapToStep, type SliderSpec } from '../../../lib/viz/linear-fit';

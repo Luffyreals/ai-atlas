@@ -2,7 +2,7 @@
 // Notation follows the lessons llm/text-api and llm/build-first-llm: logits z_i, temperature T, top-k k,
 // top-p threshold p. Order (the lessons' illustration): softmax at T -> top-k -> top-p -> renormalise.
 // Top-p looks at the distribution left after top-k, renormalised, as Hugging Face transformers does (its top-p
-// warper takes a softmax of the logits top-k has already masked). tests/unit/sampling.test.ts compares every
+// warper takes a softmax of the logits top-k has already masked). tests/unit/viz/sampling.test.ts compares every
 // step with NumPy (tests/unit/fixtures/sampling-python.ts).
 // Relative imports only: Playwright e2e may import this file.
 import type { SliderSpec } from './linear-fit';

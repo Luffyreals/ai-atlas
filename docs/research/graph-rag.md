@@ -1,6 +1,6 @@
 # Graph RAG
 
-Bài: `llm/graph-rag` (chỉ bản vi, khoảng 12 phút đọc, đợt 4). Cần biết trước theo `roadmap.ts`: `llm/rag-chatbot`. Quyết định liên quan trong `docs/mvp.md`: 53 (code gọi API là code minh họa), 54 (GCN ở `graph-rag` chỉ nhắc tên; dùng lại `RagPipelineFigure`), 55 (biến môi trường, `.vi.py`), 56 (viết hết rồi duyệt một lần).
+Bài: `llm/graph-rag` (chỉ bản vi, khoảng 12 phút đọc, đợt 4). Cần biết trước theo `roadmap.ts`: `llm/rag-chatbot`. Quyết định liên quan trong `docs/decisions.md`: 53 (code gọi API là code minh họa), 54 (GCN ở `graph-rag` chỉ nhắc tên; dùng lại `RagPipelineFigure`), 55 (biến môi trường, `.vi.py`), 56 (viết hết rồi duyệt một lần).
 
 Ngày tra: **24/10/2026**, bằng WebFetch trang arXiv, PyPI, Docker Hub, tài liệu Neo4j, Pyodide, Microsoft GraphRAG. Thẻ nguồn: [E24], [KW17], [NEO-PY], [NEO-DK], [CYP], [PYO], [MS-GR]. Ý không có thẻ là kiến thức chung hoặc gợi ý của `summarizer`. Code của bài đã chạy (xem "Kiểm chứng code"); các dòng "Chưa xác minh" về `networkx`, Neo4j và cú pháp Cypher đã giải quyết.
 

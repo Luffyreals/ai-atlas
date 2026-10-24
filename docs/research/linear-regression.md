@@ -1,6 +1,6 @@
 # Hồi quy tuyến tính
 
-Bài: `ml/linear-regression` (bài mẫu M2). Quyết định đã chốt trong `docs/mvp.md` mục 7, số 18–21: dẫn đầy đủ một đặc trưng, dạng ma trận chỉ nêu phương trình chuẩn; bảng căn hộ tự tạo (diện tích m² → giá thuê); VIZ `LinearFitViz` hai thanh trượt $w$, $b$; 3 ô code, 4 câu quiz.
+Bài: `ml/linear-regression` (bài mẫu M2). Quyết định đã chốt trong `docs/decisions.md`, số 18–21: dẫn đầy đủ một đặc trưng, dạng ma trận chỉ nêu phương trình chuẩn; bảng căn hộ tự tạo (diện tích m² → giá thuê); VIZ `LinearFitViz` hai thanh trượt $w$, $b$; 3 ô code, 4 câu quiz.
 
 Ngày kiểm tra tất cả nguồn: **23/10/2026**. Mọi con số trong mục "Số đã chạy thử" do `summarizer` tự chạy, không lấy từ sách.
 
@@ -171,9 +171,9 @@ Chỉ đề xuất, **chưa sửa** `docs/glossary.md`. Cột "Cách dùng" theo
 | Phần dư | Residual | Dịch | Machine Learning | $e_i=y_i-\hat{y}_i$. Khác "sai số" (error, $\varepsilon$) là phần ta không quan sát được. |
 | Bình phương tối thiểu | Least squares | Dịch | Machine Learning | Cũng gặp "bình phương nhỏ nhất"; chọn một và giữ. |
 | Bình phương tối thiểu thông thường (OLS) | Ordinary Least Squares (OLS) | Dịch, viết tắt OLS | Machine Learning | Tên trong tài liệu scikit-learn; dùng khi nói về `LinearRegression`. |
-| Phương trình chuẩn | Normal equation | Dịch, lần đầu kèm "normal equation" | Machine Learning | Giáo án gốc giữ "Normal Equation"; `docs/mvp.md` đã dùng "phương trình chuẩn". |
+| Phương trình chuẩn | Normal equation | Dịch, lần đầu kèm "normal equation" | Machine Learning | Giáo án gốc giữ "Normal Equation"; `docs/decisions.md` đã dùng "phương trình chuẩn". |
 | Ma trận thiết kế | Design matrix | Dịch | Toán | Mỗi hàng một mẫu, mỗi cột một đặc trưng, thêm cột toàn 1 cho hệ số tự do. MML cũng gọi "feature matrix". |
-| Điểm ngoại lai | Outlier | Dịch | Dữ liệu và mô hình | `docs/mvp.md` đã dùng "điểm ngoại lai". Tách khỏi "nhiễu". |
+| Điểm ngoại lai | Outlier | Dịch | Dữ liệu và mô hình | `docs/decisions.md` đã dùng "điểm ngoại lai". Tách khỏi "nhiễu". |
 | Nhiễu | Noise | Dịch | Dữ liệu và mô hình | Biến động ngẫu nhiên trong dữ liệu, không phải điểm bất thường. |
 | Sai số bình phương trung bình (MSE) | Mean squared error (MSE) | Dịch, viết tắt MSE | Machine Learning | Bài dùng $\frac1m$; ghi chú biến thể $\frac1{2m}$. |
 | Hệ số tự do | Bias (term) / intercept | Dịch, lần đầu ghi "bias, còn gọi là intercept" | Machine Learning | **Sửa dòng đã có** thay vì thêm mới. scikit-learn gọi `intercept_`, ISL gọi intercept; mạng nơ-ron gọi bias. |

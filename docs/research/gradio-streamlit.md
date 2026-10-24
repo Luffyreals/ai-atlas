@@ -1,6 +1,6 @@
 # Làm giao diện với Gradio/Streamlit
 
-Bài: `llm/gradio-streamlit` (chỉ bản vi, khoảng 10 phút đọc, đợt 2). Cần biết trước: `llm/text-api`. Quyết định liên quan trong `docs/mvp.md` mục 7: số 53 (SDK OpenAI-compatible, key đọc từ biến môi trường, code gọi API là code minh họa) và số 54 (code ở `src/code/llm/gradio-streamlit/`, hiện bằng `LocalCode`, không chọn nhà cung cấp mặc định).
+Bài: `llm/gradio-streamlit` (chỉ bản vi, khoảng 10 phút đọc, đợt 2). Cần biết trước: `llm/text-api`. Quyết định liên quan trong `docs/decisions.md`: số 53 (SDK OpenAI-compatible, key đọc từ biến môi trường, code gọi API là code minh họa) và số 54 (code ở `src/code/llm/gradio-streamlit/`, hiện bằng `LocalCode`, không chọn nhà cung cấp mặc định).
 
 Ngày tra: **24/10/2026**, bằng WebFetch, `curl` tới PyPI và mã nguồn Gradio trên GitHub. Thẻ nguồn: [PYPI-G], [PYPI-S], [G-CI], [G-GUIDE], [G-SRC], [G-CHG], [S-CHAT], [S-WS], [S-INPUT], [S-MSG], [S-STATE]. Ý không có thẻ là kiến thức chung hoặc suy ra. Chưa chạy thử code nào trong phiên này.
 

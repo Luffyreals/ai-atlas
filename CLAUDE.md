@@ -18,7 +18,7 @@ AI Atlas là website wiki **song ngữ Việt – Anh**, công khai và miễn p
   - Gom câu hỏi lại, tối đa 4 câu mỗi lượt. Mỗi câu 2–4 lựa chọn, phương án đề xuất đặt đầu tiên và ghi "(Recommended)".
   - Mục "Câu hỏi cho người dùng" trong báo cáo của sub agent cũng được gom lại và hỏi theo cách này. Không để câu hỏi nằm lẫn trong đoạn văn.
   - Chỉ tự chọn phương án mặc định khi lựa chọn không chặn việc gì và dễ đổi lại về sau. Khi tự chọn thì nói rõ đã chọn gì.
-  - Ghi quyết định vào tài liệu liên quan (`docs/mvp.md` mục 7, `docs/architecture/`, `PLAN.md` mục 8).
+  - Ghi quyết định vào tài liệu liên quan (`docs/decisions.md`, `docs/architecture/`, `PLAN.md` mục 8).
 
 ## Trạng thái hiện tại
 
@@ -36,11 +36,13 @@ Trang demo: `/vi/dev/components/` và `/en/dev/components/` (không vào sitemap
 
 Nhận diện và trang chủ thiết kế bằng skill `design-taste-frontend`: bảng màu "walnut and tan", font Barlow, logo con đường rẽ ba, trang chủ dạng tấm bản đồ atlas. Xem `docs/architecture/homepage.md`.
 
-Mốc M2 (bài mẫu) xong: bài `ml/linear-regression` có bản vi (người dùng đã duyệt, là bài mẫu) và bản en, VIZ `LinearFitViz` (thiết kế ở `docs/architecture/viz.md`), bảng dữ liệu `DatasetTable`, SEO cho trang fallback (`src/lib/seo.ts`, `src/routeData.ts`), nút "Bắt đầu học" ở trang chủ. Template đã chốt theo bài này.
+Mốc M2 (bài mẫu) xong: bài `ml/linear-regression` có bản vi (người dùng đã duyệt, là bài mẫu) và bản en, VIZ `LinearFitViz` (thiết kế ở `docs/architecture/viz/linear-fit.md`), bảng dữ liệu `DatasetTable`, SEO cho trang fallback (`src/lib/seo.ts`, `src/routeData.ts`), nút "Bắt đầu học" ở trang chủ. Template đã chốt theo bài này.
 
-Mốc M3 (đang làm): 4 bài ML còn lại, **chỉ bản vi**, bản en làm sau MVP (`docs/mvp.md` quyết định 43). Đã xong bản vi (người dùng đã duyệt) của `ml/ml-overview` (2 hình SVG tĩnh, `docs/architecture/viz.md` mục 8) `ml/overfitting-underfitting` (VIZ `PolyFitViz`, bộ dữ liệu `sine`, viz.md mục 9) và `ml/regularization` (VIZ `RegularizationViz`, viz.md mục 10; đồ thị tĩnh L1/L2, viz.md mục 11). Ba VIZ dùng chung `src/components/viz/kit/` (`Swatch`) và `src/lib/viz/axis.ts`. Bài kế tiếp: `ml/gradient-descent`.
+Mốc M3 (xong bản vi, chờ duyệt trên PR #1): 4 bài ML còn lại, **chỉ bản vi**, bản en làm sau MVP (`docs/decisions.md` quyết định 43). Đã xong bản vi (người dùng đã duyệt) của `ml/ml-overview` (2 hình SVG tĩnh, `docs/architecture/viz/figures.md`) `ml/overfitting-underfitting` (VIZ `PolyFitViz`, bộ dữ liệu `sine`, `viz/poly-fit.md`) và `ml/regularization` (VIZ `RegularizationViz`, `viz/regularization.md`; đồ thị tĩnh L1/L2, `viz/static-plots.md`). Bản vi `ml/gradient-descent` có VIZ `GradientDescentViz` (`viz/gradient-descent.md`, chuẩn hóa min-max), làm hết quy trình rồi đẩy thẳng vào PR #1 (quyết định 56). Các VIZ dùng chung `src/components/viz/kit/` (`Swatch`, `CrossMark`) và `src/lib/viz/axis.ts`.
 
-Phần LLM (Phần 5c, làm song song ở nhánh `llm-lessons`, worktree `ai-atlas-llm`): xong bản vi của cả 23 bài, **chờ người dùng duyệt**, bản en làm sau (`docs/mvp.md` quyết định 53, 54, 59–61; thiết kế `docs/architecture/llm-lessons.md`). Code minh họa không chạy trên trang dùng component `LocalCode` (SDK `openai`, đổi `base_url`, key đọc từ biến môi trường, không bao giờ ghi key vào code); kiểm chứng bằng `.venv-llm` (`scripts/requirements-llm.txt`) và file `.env.llm` do người dùng tự tạo. Có VIZ `SamplingViz` và 9 hình tĩnh LLM (kit FIG mở rộng, `src/lib/figures/layout.ts`).
+Mỗi phiên Claude làm trong một worktree riêng (người dùng quyết ngày 24/10/2026), không làm chung thư mục `ai-atlas`. Bước tiếp theo: M4 (ra mắt), song song với phần LLM do phiên khác làm.
+
+Phần LLM (Phần 5c, làm song song ở nhánh `llm-lessons`, worktree `ai-atlas-llm`): xong bản vi của cả 23 bài, **chờ người dùng duyệt**, bản en làm sau (`docs/decisions.md` quyết định 53, 54, 59–61; thiết kế `docs/architecture/llm-lessons.md`). Code minh họa không chạy trên trang dùng component `LocalCode` (SDK `openai`, đổi `base_url`, key đọc từ biến môi trường, không bao giờ ghi key vào code); kiểm chứng bằng `.venv-llm` (`scripts/requirements-llm.txt`) và file `.env.llm` do người dùng tự tạo. Có VIZ `SamplingViz` và 9 hình tĩnh LLM (kit FIG mở rộng, `src/lib/figures/layout.ts`).
 
 ## Công nghệ
 
@@ -66,10 +68,12 @@ src/data/home.ts, home-pictures.ts     # Chữ và ảnh (kèm nguồn) của tr
 src/styles/custom.css                  # Token màu (--sl-color-*, --atlas-*) và font
 docs/lesson-template.mdx               # Template bài học chuẩn
 docs/glossary.md                       # Bảng thuật ngữ Việt – Anh
-docs/architecture/                     # Tài liệu thiết kế kỹ thuật (architect)
+docs/decisions.md                      # Nhật ký quyết định đã chốt, đánh số
+docs/architecture/                     # Tài liệu thiết kế kỹ thuật (architect); VIZ và hình tĩnh ở viz/
 docs/research/                         # Tóm tắt tài liệu tham khảo cho từng bài (summarizer)
 docs/progress/                         # Báo cáo tiến độ (summarizer)
-tests/unit/  tests/e2e/                # Test (tester)
+tests/unit/{lib,viz,components,content}/  # Unit test (tester); fixtures/ dùng chung
+tests/e2e/                             # E2E: kiểm tra chung ở gốc, riêng bài mẫu ở sample-lesson/
 ```
 
 Tên thư mục phần: `python`, `math`, `ml`, `dl`, `nlp`, `cv`, `llm`. Tên file bài: tiếng Anh, kebab-case, ví dụ `linear-regression.mdx`.

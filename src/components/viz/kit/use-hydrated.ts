@@ -1,4 +1,4 @@
-// docs/architecture/viz.md, section 2.8: controls stay disabled in the build HTML and enable right after hydration.
+// docs/architecture/viz/README.md, section 2.8: controls stay disabled in the build HTML and enable right after hydration.
 import { useSyncExternalStore } from 'react';
 
 const subscribe = () => () => {};

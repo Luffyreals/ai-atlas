@@ -1,6 +1,6 @@
 # Sử dụng API văn bản (Text API)
 
-Bài: `llm/text-api` (chỉ bản vi, khoảng 10 phút đọc). Quyết định liên quan trong `docs/mvp.md` mục 7: số 53 (code gọi API là code minh họa, dùng SDK OpenAI-compatible, đọc khóa từ biến môi trường) và số 54 (code ở `src/code/llm/text-api/`, VIZ `SamplingViz` dùng ở bài này và `build-first-llm`, bảng nhà cung cấp ghi "kiểm tra lần cuối 10/2026").
+Bài: `llm/text-api` (chỉ bản vi, khoảng 10 phút đọc). Quyết định liên quan trong `docs/decisions.md`: số 53 (code gọi API là code minh họa, dùng SDK OpenAI-compatible, đọc khóa từ biến môi trường) và số 54 (code ở `src/code/llm/text-api/`, VIZ `SamplingViz` dùng ở bài này và `build-first-llm`, bảng nhà cung cấp ghi "kiểm tra lần cuối 10/2026").
 
 Ngày tra: **24/10/2026**, bằng WebFetch, `curl` tới PyPI và mã nguồn trên GitHub. Thẻ nguồn: [PYPI], [OAI-README], [OAI-SRC], [OAI-TEXT], [OAI-ERR], [GEM-OAI], [GEM-RL], [GEM-MOD], [GROQ-OAI], [GROQ-MOD], [OLL-OAI], [H20], [F18], [HVD15]. Ý không có thẻ là kiến thức chung hoặc suy ra từ công thức. Giá tiền không ghi (theo yêu cầu).
 

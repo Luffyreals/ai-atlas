@@ -1,6 +1,6 @@
 # Docker và Cloud
 
-Bài: `llm/docker-cloud` (chỉ bản vi, khoảng 12 phút đọc, đợt 3). Cần biết trước: `llm/gradio-streamlit`. Bài kế tiếp dùng lại hình `ContainerImageFigure`: `llm/deploy-custom-model`. Quyết định liên quan trong `docs/mvp.md` mục 7: 53 (key đọc từ biến môi trường), 54 (`Dockerfile` viết thẳng trong MDX bằng khối ` ```dockerfile `, mức kiểm chứng "đối chiếu"), 55, 56.
+Bài: `llm/docker-cloud` (chỉ bản vi, khoảng 12 phút đọc, đợt 3). Cần biết trước: `llm/gradio-streamlit`. Bài kế tiếp dùng lại hình `ContainerImageFigure`: `llm/deploy-custom-model`. Quyết định liên quan trong `docs/decisions.md`: 53 (key đọc từ biến môi trường), 54 (`Dockerfile` viết thẳng trong MDX bằng khối ` ```dockerfile `, mức kiểm chứng "đối chiếu"), 55, 56.
 
 Ngày tra: **24/10/2026**, bằng WebFetch. Thẻ nguồn: [D-REF], [D-BP], [D-SEC], [D-RUN], [D-PY], [G-DOCK], [S-DOCK], [CR]. Ý không có thẻ là kiến thức chung hoặc suy ra.
 

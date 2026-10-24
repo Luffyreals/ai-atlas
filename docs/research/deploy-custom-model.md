@@ -1,6 +1,6 @@
 # Deploy mô hình riêng (Deploy Your Own Model)
 
-Bài: `llm/deploy-custom-model` (chỉ bản vi, khoảng 12 phút). Cần biết trước: `llm/docker-cloud`. Bài sau: `llm/llm-deployment` (nhiều GPU, phân tán). Quyết định liên quan trong `docs/mvp.md`: 53 (code minh họa, SDK OpenAI-compatible), 54 (không chọn nhà cung cấp mặc định, tên model không ghi cứng), 55 (kết quả mẫu chỉ lấy từ lần chạy thật). Ngày tra: **24/10/2026**.
+Bài: `llm/deploy-custom-model` (chỉ bản vi, khoảng 12 phút). Cần biết trước: `llm/docker-cloud`. Bài sau: `llm/llm-deployment` (nhiều GPU, phân tán). Quyết định liên quan trong `docs/decisions.md`: 53 (code minh họa, SDK OpenAI-compatible), 54 (không chọn nhà cung cấp mặc định, tên model không ghi cứng), 55 (kết quả mẫu chỉ lấy từ lần chạy thật). Ngày tra: **24/10/2026**.
 
 Phạm vi: phục vụ một model nhỏ trên **một máy**. (a) Tự viết API bằng FastAPI quanh model scikit-learn hoặc PyTorch nhỏ. (b) Dùng server OpenAI-compatible có sẵn cho LLM mở, để code `text-api` chạy lại bằng cách đổi `base_url`. Giáo án gốc: "Buổi 5, Deploy riêng mô hình với Docker + Cloud" (dòng 76); buổi 23 (dòng 94, nhiều GPU) thuộc `llm-deployment`.
 

@@ -78,9 +78,9 @@ Không tách `LESSONS` theo từng phần thành nhiều file. 78 dòng dữ li�
 src/data/roadmap.ts         # kiểu + PARTS + LESSONS
 src/lib/roadmap.ts          # hàm tiện ích, validateRoadmap, findCycle
 src/lib/sidebar.ts          # buildSidebar
-tests/unit/roadmap.test.ts        # dữ liệu hợp lệ, số bài, slug, vòng lặp
-tests/unit/roadmap-files.test.ts  # trạng thái khớp file thật, title khớp frontmatter
-tests/unit/sidebar.test.ts        # buildSidebar
+tests/unit/lib/roadmap.test.ts        # dữ liệu hợp lệ, số bài, slug, vòng lặp
+tests/unit/content/roadmap-files.test.ts  # trạng thái khớp file thật, title khớp frontmatter
+tests/unit/lib/sidebar.test.ts        # buildSidebar
 ```
 
 ## 4. Giao diện
@@ -376,7 +376,7 @@ Gợi ý `shortTitle` cho tiêu đề dài, dùng ở sidebar (developer thêm �
 
 ## 6. Test bắt buộc
 
-### 6.1. `tests/unit/roadmap.test.ts` (dữ liệu)
+### 6.1. `tests/unit/lib/roadmap.test.ts` (dữ liệu)
 
 1. `validateRoadmap(PARTS, LESSONS)` trả `[]`.
 2. Có đúng 7 phần theo thứ tự `PART_IDS`, và số bài từng phần là `python 7, math 3, ml 14, dl 8, nlp 13, cv 10, llm 23`, tổng 78. Khi thêm bài theo kế hoạch, sửa số trong test có chủ đích.
@@ -387,7 +387,7 @@ Gợi ý `shortTitle` cho tiêu đề dài, dùng ở sidebar (developer thêm �
 7. `findCycle`: đồ thị A→B→C→A trả đường đi có đủ 3 id và lặp lại id đầu ở cuối; dữ liệu thật trả `null`.
 8. `getPrerequisites`, `getDependents`, `getLessonUrl('ml/linear-regression', 'en') === '/en/ml/linear-regression/'`, `getRouteLessonId('vi/ml/linear-regression') === 'ml/linear-regression'`, `getRouteLessonId('vi/index') === undefined`.
 
-### 6.2. `tests/unit/roadmap-files.test.ts` (khớp file thật)
+### 6.2. `tests/unit/content/roadmap-files.test.ts` (khớp file thật)
 
 Đọc file bằng `node:fs` từ `src/content/docs/`.
 
@@ -396,7 +396,7 @@ Gợi ý `shortTitle` cho tiêu đề dài, dùng ở sidebar (developer thêm �
 3. Với bài có file: dòng `title:` trong frontmatter bằng đúng `title[locale]` trong `roadmap.ts`.
 4. Không có file trong thư mục phần lạ (chỉ 7 tên thư mục phần cộng `dev/`).
 
-### 6.3. `tests/unit/sidebar.test.ts`
+### 6.3. `tests/unit/lib/sidebar.test.ts`
 
 1. Dữ liệu thật (`LESSONS`): `buildSidebar()` có đúng các bài có `status.vi === 'published'`, theo thứ tự lộ trình, nhãn là `shortTitle ?? title` (vi làm nhãn, en trong `translations`); mỗi phần có bài là một nhóm, theo thứ tự phần, không nhóm nào rỗng. Kỳ vọng tính từ `LESSONS`, nên test vẫn đúng khi xuất bản thêm bài. Khi mọi bài đều `planned` (fixture), `buildSidebar()` trả `[]`.
 2. Fixture có 2 bài published trong `ml`: một nhóm "Học máy" với `translations.en === 'Machine Learning'`, đúng 2 mục theo thứ tự lộ trình, mỗi mục có `slug` không tiền tố ngôn ngữ và có `translations.en`.

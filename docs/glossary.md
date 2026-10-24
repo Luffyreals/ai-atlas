@@ -52,14 +52,18 @@ Dùng thống nhất cho toàn bộ AI Atlas. Gặp thuật ngữ mới thì th�
 | Tiếng Việt | Tiếng Anh | Cách dùng |
 |---|---|---|
 | Advantage | Advantage | Giữ. Trong học tăng cường: phần thưởng của một hành động (câu trả lời) hơn hay kém mức kỳ vọng bao nhiêu |
+| Batch, mini-batch | Batch, mini-batch | Giữ. Nhóm mẫu dùng để tính gradient trong một bước. Batch gradient descent dùng cả $m$ mẫu, mini-batch dùng $B$ mẫu |
 | Bình phương tối thiểu | Least squares | Dịch. Không dùng "bình phương nhỏ nhất" |
 | Bình phương tối thiểu thông thường | Ordinary least squares (OLS) | Dịch, viết tắt OLS. Tên scikit-learn dùng cho `LinearRegression` |
 | Cây quyết định | Decision tree | Dịch |
 | Chính sách | Policy | Dịch. Trong học tăng cường: cách tác nhân chọn hành động. Với LLM, chính sách là chính mô hình ngôn ngữ; ký hiệu $\pi_{\boldsymbol{\phi}}$ trong các bài RLHF, DPO |
+| Chuẩn hóa đặc trưng | Feature scaling; feature standardization (z-score) | Dịch. Đưa các đặc trưng về cùng thang đo, tham số tính trên tập train. Hay gặp nhất là z-score: trung bình 0, độ lệch chuẩn 1, $z_j = (x_j - \mu_j)/\sigma_j$ (`StandardScaler`). Cách khác: chuẩn hóa min-max. Khác regularization |
+| Chuẩn hóa min-max | Min-max scaling | Dịch. Đưa đặc trưng về đoạn $[0, 1]$: $(x - \min)/(\max - \min)$, với min, max lấy trên tập train (`MinMaxScaler`). Bài Gradient Descent viết $\tilde{x}$, $\tilde{w}$, $\tilde{b}$ |
 | Co (hệ số) | Shrinkage | Dịch. Regularization kéo độ lớn các hệ số về gần 0 |
 | Coordinate descent | Coordinate descent | Giữ. Thuật toán lặp, mỗi lần cập nhật một hệ số; scikit-learn dùng cho Lasso và Elastic Net |
 | Cộng tuyến | Collinearity | Dịch. Các đặc trưng phụ thuộc tuyến tính, hoặc gần như vậy, ví dụ diện tích theo m² và theo ft² |
 | Cross-entropy | Cross-entropy | Giữ, có thể ghi "entropy chéo". Hàm mất mát cho phân loại và mô hình ngôn ngữ: trung bình của $-\ln$ xác suất mà mô hình gán cho nhãn (token) đúng |
+| Cực tiểu toàn cục / cục bộ | Global / local minimum | Dịch. Điểm thấp nhất của cả hàm / điểm thấp nhất trong một vùng lân cận. Hàm lồi chỉ có cực tiểu toàn cục |
 | Dừng sớm | Early stopping | Dịch. Giữ lại mô hình ở bước có loss nhỏ nhất trên tập kiểm định (không phải tập kiểm tra), thay vì huấn luyện tới bước cuối |
 | Điểm đòn bẩy cao | High-leverage point | Dịch. Điểm có đặc trưng nằm xa phần còn lại, có thể kéo mạnh đường hồi quy |
 | Điểm trung bình | Mean point | Dịch. Điểm $(\bar{x}, \bar{y})$. Đường bình phương tối thiểu (có hệ số tự do) luôn đi qua điểm này |
@@ -67,9 +71,12 @@ Dùng thống nhất cho toàn bộ AI Atlas. Gặp thuật ngữ mới thì th�
 | Độ chính xác | Accuracy | Dịch. Tỉ lệ mẫu (câu trả lời) được dự đoán đúng. Không nhầm với precision |
 | Độ dốc | Slope | Dịch. Trong hồi quy: chỉ gọi $w$ là độ dốc khi có một đặc trưng. Nhiều đặc trưng thì gọi "trọng số" |
 | Độ thưa | Sparsity | Dịch. Tỉ lệ phần tử bằng đúng 0 trong một vectơ hay ma trận (xem "thưa") |
+| Đường cong mất mát | Loss curve | Dịch. Đồ thị mất mát theo số bước hoặc số epoch khi huấn luyện |
 | Elastic Net | Elastic Net | Giữ. Phạt cả L1 lẫn L2: $\mathcal{L} + \lambda_1\lVert\mathbf{w}\rVert_1 + \lambda_2\lVert\mathbf{w}\rVert_2^2$ |
+| Epoch | Epoch | Giữ. Một lượt đi qua toàn bộ tập train. Với mini-batch cỡ $B$, một epoch có $m/B$ bước |
 | Fold | Fold | Giữ. Một trong $k$ phần của dữ liệu khi kiểm định chéo |
-| Gradient descent | Gradient descent | Giữ |
+| Gradient descent | Gradient descent | Giữ, viết tắt GD. Lần đầu có thể ghi "hạ gradient". Cập nhật $\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \eta\nabla\mathcal{L}(\boldsymbol{\theta})$ |
+| Gradient descent ngẫu nhiên | Stochastic gradient descent (SGD) | Giữ "SGD". Mỗi bước dùng một mẫu chọn ngẫu nhiên |
 | Hàm giá trị | Value function | Dịch. Trong học tăng cường: ước lượng phần thưởng kỳ vọng từ một trạng thái. PPO cần thêm mô hình này, còn gọi là critic |
 | Hàm mất mát | Loss function | Dịch |
 | Hàm mục tiêu | Objective function | Dịch. Hàm được làm nhỏ khi huấn luyện, ví dụ hàm mất mát cộng khoản phạt ($J$ trong bài Regularization) |
@@ -79,9 +86,11 @@ Dùng thống nhất cho toàn bộ AI Atlas. Gặp thuật ngữ mới thì th�
 | Hồi quy đa thức | Polynomial regression | Dịch. Hồi quy tuyến tính trên các đặc trưng $x, x^2, \dots, x^d$ |
 | Hồi quy Logistic | Logistic regression | Dịch |
 | Hồi quy tuyến tính | Linear regression | Dịch |
+| Hội tụ / phân kỳ | Convergence / divergence | Dịch. Thuật toán lặp tiến dần tới nghiệm / càng lúc càng xa nghiệm |
 | K-Nearest Neighbors (KNN) | K-nearest neighbors (KNN) | Giữ, viết tắt KNN. Lần đầu có thể giải thích "k láng giềng gần nhất" |
 | Kiểm định chéo | Cross-validation | Dịch. Tách train/kiểm định nhiều lần rồi lấy trung bình điểm |
 | Lasso | Lasso | Giữ. Hồi quy tuyến tính có phạt L1, $\lambda\lVert\mathbf{w}\rVert_1$ |
+| Lịch tốc độ học | Learning rate schedule | Dịch. Cách thay đổi $\eta$ theo số bước, thường là giảm dần (ví dụ `invscaling` của scikit-learn) |
 | Môi trường | Environment | Dịch. Trong học tăng cường: nơi tác nhân hành động và nhận phần thưởng |
 | Ngoại suy | Extrapolation | Dịch. Dự đoán ở ngoài khoảng giá trị của dữ liệu huấn luyện |
 | Overfitting / Underfitting | Overfitting / Underfitting | Giữ. Lần đầu có thể ghi "quá khớp" / "thiếu khớp" |
@@ -97,12 +106,14 @@ Dùng thống nhất cho toàn bộ AI Atlas. Gặp thuật ngữ mới thì th�
 | Sự đánh đổi bias–variance | Bias–variance trade-off | Dịch, kèm tiếng Anh. Tăng độ linh hoạt làm độ chệch giảm, variance tăng |
 | Tác nhân | Agent | Dịch. Trong học tăng cường: bên chọn hành động và học từ phần thưởng. Khác "agent" của ứng dụng LLM (nhóm Ứng dụng LLM: RAG và agent) |
 | Thưa (mô hình, vectơ) | Sparse | Dịch. Có nhiều hệ số bằng đúng 0 |
+| Tiêu chí dừng | Stopping criterion | Dịch. Điều kiện để dừng thuật toán lặp: số bước tối đa, gradient đủ nhỏ, mất mát hết giảm |
 | Tổ hợp mô hình | Ensemble | Dịch, lần đầu kèm "ensemble". Huấn luyện nhiều mô hình rồi gộp dự đoán của chúng (lấy trung bình, bỏ phiếu), thường tốt hơn từng mô hình riêng |
 | Tốc độ học | Learning rate | Dịch |
 | Tổng quát hóa | Generalization | Dịch. Khả năng làm tốt trên dữ liệu chưa thấy khi huấn luyện. Ước lượng bằng điểm trên tập kiểm tra |
 | Trọng số | Weight | Dịch |
 | Variance (của mô hình) | Variance | Giữ trong cụm bias–variance: mức mô hình học được thay đổi khi đổi bộ dữ liệu huấn luyện. Nghĩa thống kê chung thì dịch "phương sai" (nhóm Toán) |
 | Weight decay | Weight decay | Giữ. Tên hay dùng cho phạt L2 trên trọng số, nhất là trong mạng nơ-ron |
+| Xấp xỉ ngẫu nhiên | Stochastic approximation | Dịch. Phương pháp của Robbins và Monro (1951): tìm nghiệm khi chỉ quan sát được giá trị có nhiễu. Tiền thân của SGD |
 
 ## Deep Learning
 
@@ -433,6 +444,7 @@ Truy xuất tài liệu, đồ thị tri thức, agent và công cụ.
 | Chuẩn L1, chuẩn L2 | L1 norm, L2 norm | Dịch. $\lVert\mathbf{w}\rVert_1 = \sum_j \lvert w_j\rvert$; chuẩn L2 cũng là "chuẩn 2" (2-norm) ở dòng trên, tức độ dài vectơ |
 | Chuyển vị | Transpose | Dịch |
 | Đạo hàm | Derivative | Dịch |
+| Đạo hàm bậc hai | Second derivative | Dịch. Đạo hàm của đạo hàm, cho biết đồ thị cong cỡ nào. Nhiều biến thì gom thành ma trận Hessian |
 | Đạo hàm riêng | Partial derivative | Dịch |
 | Đa thức | Polynomial | Dịch |
 | Định thức | Determinant | Dịch |
@@ -441,6 +453,10 @@ Truy xuất tài liệu, đồ thị tri thức, agent và công cụ.
 | Độ lệch KL | Kullback–Leibler divergence | Dịch, giữ "KL". $D_{\mathrm{KL}}(p \parallel q) = \sum_x p(x)\ln\frac{p(x)}{q(x)}$: không âm, bằng 0 khi hai phân phối trùng nhau, không đối xứng. Khác "độ lệch so với trung bình" |
 | Độ tương tự cosine | Cosine similarity | Dịch. $\cos(\mathbf{u}, \mathbf{v}) = \mathbf{u}^\top\mathbf{v} / (\lVert\mathbf{u}\rVert\,\lVert\mathbf{v}\rVert)$, từ $-1$ tới $1$ |
 | Độc lập tuyến tính | Linearly independent | Dịch |
+| Độ cong | Curvature | Dịch. Với hàm một biến là đạo hàm bậc hai. Ký hiệu $L$ trong ngưỡng $\eta < 2/L$ của gradient descent |
+| Đường mức | Contour line | Dịch. Tập các điểm có cùng giá trị hàm, ví dụ cùng MSE trên mặt phẳng $(w, b)$ |
+| Gradient | Gradient | Giữ. Vectơ các đạo hàm riêng, ký hiệu $\nabla\mathcal{L}$. Chỉ hướng đi lên dốc nhất |
+| Hàm lồi | Convex function | Dịch. Đồ thị hình cái bát, mọi đáy cục bộ đều là đáy toàn cục. MSE của hồi quy tuyến tính là hàm lồi |
 | Hạng (của ma trận) | Rank | Dịch |
 | Hằng số chuẩn hóa | Normalizing constant, partition function | Dịch, có thể ghi "hàm phân hoạch" (partition function). Số chia để tổng xác suất bằng 1, ví dụ $Z(\mathbf{x})$ trong DPO |
 | Hình chiếu vuông góc | Orthogonal projection | Dịch |
@@ -448,6 +464,7 @@ Truy xuất tài liệu, đồ thị tri thức, agent và công cụ.
 | Likelihood | Likelihood | Giữ. Xác suất mô hình gán cho dữ liệu quan sát được, xem như hàm của tham số $\boldsymbol{\theta}$ |
 | Ma trận | Matrix | Dịch |
 | Ma trận đơn vị | Identity matrix | Dịch. Ký hiệu $\mathbf{I}$: số 1 trên đường chéo, 0 ở mọi chỗ khác |
+| Ma trận Hessian | Hessian matrix | Giữ "Hessian". Ma trận các đạo hàm riêng bậc hai. Với MSE là $\frac{2}{m}\mathbf{X}^\top\mathbf{X}$ |
 | Ma trận khả nghịch / suy biến | Invertible / singular matrix | Dịch |
 | Ma trận nghịch đảo | Inverse matrix | Dịch |
 | Ma trận thiết kế | Design matrix | Dịch. Mỗi hàng một mẫu, mỗi cột một đặc trưng, thêm cột toàn số 1 cho hệ số tự do |
@@ -459,7 +476,10 @@ Truy xuất tài liệu, đồ thị tri thức, agent và công cụ.
 | Phương sai | Variance | Dịch |
 | Quy tắc hàm hợp | Chain rule | Dịch. Đạo hàm của hàm hợp. Khác "quy tắc nhân xác suất" |
 | Quy tắc nhân xác suất | Chain rule of probability | Dịch. $p(x_1, \dots, x_m) = \prod_{t=1}^{m} p(x_t \mid x_{<t})$. Khác "quy tắc hàm hợp" của giải tích |
-| Số điều kiện | Condition number | Dịch |
+| Số điều kiện | Condition number | Dịch. Ký hiệu $\kappa$. Với Hessian của hàm bậc hai: $\kappa = L/\mu$, tỉ số độ cong lớn nhất và nhỏ nhất; $\kappa$ lớn thì bát dẹt, gradient descent chậm |
 | Tỉ số odds | Odds ratio | Dịch "tỉ số", giữ "odds". Odds của xác suất $p$ là $p/(1-p)$; tỉ số odds chia odds của hai trường hợp (dùng trong ORPO) |
 | Tích vô hướng | Dot product | Dịch |
+| Tiếp tuyến | Tangent line | Dịch. Đường thẳng chạm đồ thị tại một điểm, có độ dốc bằng đạo hàm tại đó |
+| Trị riêng | Eigenvalue | Dịch |
 | Vectơ | Vector | Dịch |
+| Vectơ riêng | Eigenvector | Dịch. Hướng mà ma trận chỉ co giãn, không xoay: $\mathbf{H}\mathbf{v} = \lambda\mathbf{v}$ |

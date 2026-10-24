@@ -1,6 +1,6 @@
 # RAG và chatbot hiện đại
 
-Bài: `llm/rag-chatbot` (chỉ bản vi, khoảng 13 phút đọc, đợt 3). Cần biết trước theo `roadmap.ts`: `llm/prompt-engineering`, `nlp/information-retrieval`. Quyết định liên quan trong `docs/mvp.md`: 53 (code gọi API là code minh họa, SDK OpenAI-compatible), 54 (VIZ chỉ có `SamplingViz`; bài này dùng hình tĩnh `RagPipelineFigure`), 55 (biến môi trường, `.vi.py`), 56 (viết hết 23 bài rồi duyệt một lần). Theo `llm-lessons.md` mục 2.7, bài này được "Nhắc nhanh" dài tới một đoạn (truy xuất, embedding, cosine) vì `nlp/information-retrieval` chưa xuất bản.
+Bài: `llm/rag-chatbot` (chỉ bản vi, khoảng 13 phút đọc, đợt 3). Cần biết trước theo `roadmap.ts`: `llm/prompt-engineering`, `nlp/information-retrieval`. Quyết định liên quan trong `docs/decisions.md`: 53 (code gọi API là code minh họa, SDK OpenAI-compatible), 54 (VIZ chỉ có `SamplingViz`; bài này dùng hình tĩnh `RagPipelineFigure`), 55 (biến môi trường, `.vi.py`), 56 (viết hết 23 bài rồi duyệt một lần). Theo `llm-lessons.md` mục 2.7, bài này được "Nhắc nhanh" dài tới một đoạn (truy xuất, embedding, cosine) vì `nlp/information-retrieval` chưa xuất bản.
 
 Ngày tra: **24/10/2026**, bằng WebFetch/WebSearch trang arXiv và tài liệu nhà cung cấp, và chạy Python thật cho ô TF-IDF. Thẻ nguồn: [L20], [K20], [RZ09], [OAI-EMB], [GEM-OAI], [GROQ-OAI], [OLL-OAI], [ES23], [SH23], [MB23], [L23], [SR]. Ý không có thẻ là kiến thức chung hoặc gợi ý của `summarizer`. Không ghi giá.
 
@@ -125,7 +125,7 @@ Slug lấy từ `src/data/roadmap.ts` (đã mở phiên này).
 
 ## Gợi ý khuôn bài và ô code
 
-- **Ô `PythonRunner` (chạy trên trang):** truy xuất TF-IDF bằng scikit-learn trên 5 đoạn văn tiếng Việt như trên. Ngắn (khoảng 20 dòng), chạy dưới 2 giây trên Pyodide (chưa đo trong Pyodide thật; dùng venv Pyodide ở trên là đủ theo `viz.md` mục 2.5), `print` bằng tiếng Anh ngắn hoặc chỉ số theo mục 2.4. Hai câu hỏi (trúng và trượt) làm cầu nối sang embedding.
+- **Ô `PythonRunner` (chạy trên trang):** truy xuất TF-IDF bằng scikit-learn trên 5 đoạn văn tiếng Việt như trên. Ngắn (khoảng 20 dòng), chạy dưới 2 giây trên Pyodide (chưa đo trong Pyodide thật; dùng venv Pyodide ở trên là đủ theo `viz/README.md` mục 2.5), `print` bằng tiếng Anh ngắn hoặc chỉ số theo mục 2.4. Hai câu hỏi (trúng và trượt) làm cầu nối sang embedding.
 - **Ô `LocalCode` (chạy trên máy):** `embeddings.create` rồi cosine bằng NumPy rồi `chat.completions.create` với prompt kèm ngữ cảnh và trích nguồn; biến `EMBEDDING_MODEL` thêm vào ba biến cố định. Một chương trình tự chạy, ≤ 60 dòng, ≤ 79 ký tự mỗi dòng. Gói `openai`, `numpy`. **Cần mức "chạy thật" nếu có kết quả mẫu**; khi chưa có key embeddings thì chỉ "chạy khô" và không đưa kết quả mẫu. Gợi ý nhỏ cho reviewer: nếu nhà cung cấp chat của người dùng không có embeddings, cần hai bộ biến (khác `OPENAI_BASE_URL` giữa chat và embedding), việc này `llm-lessons.md` mục 2.3 chưa nói; hỏi phiên chính.
 - Mục "Minh họa": `RagPipelineFigure` (bắt buộc có mục theo mục 2.7).
 - Semantic router và reflection: mô tả bằng lời và bảng; nếu muốn có code, một đoạn ngắn trong MDX (≤ 8 dòng).

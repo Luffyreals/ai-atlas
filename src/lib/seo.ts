@@ -1,4 +1,4 @@
-// Search engine rules for pages shown in a language they have no file in (decision 30 in docs/mvp.md):
+// Search engine rules for pages shown in a language they have no file in (decision 30 in docs/decisions.md):
 // Starlight's fallback pages, e.g. /en/ml/linear-regression/ showing the vi lesson while it has no en file.
 // Such a page stays reachable but is noindex, out of the sitemap, and no page names it as an hreflang
 // alternate. It is also out of the Pagefind search index (decision 33). All of this lifts by itself once the file exists and roadmap.ts says status.en = 'published'.

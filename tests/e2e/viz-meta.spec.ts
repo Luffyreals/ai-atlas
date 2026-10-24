@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 import { CONTROLS, hydrateAll, PAGES, SCHEMES } from './viz-pages';
 
-// VIZ checks that do not depend on the project's viewport (docs/architecture/viz.md, sections 2.7–2.9, 2.12):
+// VIZ checks that do not depend on the project's viewport (docs/architecture/viz/README.md, sections 2.7–2.9, 2.12):
 // island attributes, JS and props budget (they read the DOM, the HTML and dist/), and the 375px check, which
 // sets its own viewport and so gives the same result in both projects. Desktop only (playwright.config.ts:
 // the mobile project ignores *-meta.spec.ts; docs/architecture/llm-lessons.md section 2.10, E1). The other

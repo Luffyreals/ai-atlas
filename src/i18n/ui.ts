@@ -30,7 +30,7 @@ export const UI_KEYS = {
   localCode: [
     'badge', 'install', 'env', 'optional', 'command', 'hardware', 'sampleOutput', 'sampleNote', 'sampleNoteFixed',
   ],
-  // One namespace per VIZ, named viz<Name> (docs/architecture/viz.md, section 2.6).
+  // One namespace per VIZ, named viz<Name> (docs/architecture/viz/README.md, section 2.6).
   vizLinearFit: [
     'caption', 'plotLabel', 'controls', 'wLabel', 'bLabel', 'wValueText', 'bValueText',
     'yourLine', 'bestLine', 'residual', 'mseValue', 'showBest', 'nearBest', 'bestNote',
@@ -51,6 +51,13 @@ export const UI_KEYS = {
     'temperatureLabel', 'temperatureValueText', 'topKLabel', 'topKValueText', 'topKOff',
     'topPLabel', 'topPValueText', 'topPOff', 'off', 'sampleOne', 'sampleMany', 'reset',
     'kept', 'greedyNote', 'announce', 'announceSample', 'announceMany', 'resetDone',
+  ],
+  vizGradientDescent: [
+    'caption', 'mapLabel', 'mapDesc', 'wAxis', 'bAxis', 'levels', 'path', 'start', 'current', 'best',
+    'controls', 'etaLabel', 'etaValueText', 'step', 'reset', 'run', 'stop', 'stepsDone', 'mse', 'params',
+    'original', 'lineFormula', 'stepAxis', 'mseAxis', 'chartLabel', 'chartDesc', 'bestLine', 'hint', 'reached', 'notYet',
+    'slowNote', 'zigzagNote', 'diverged', 'announceStep', 'announceEta', 'running', 'stopped', 'atEnd',
+    'resetDone',
   ],
 } as const satisfies Record<string, readonly string[]>;
 

@@ -2,7 +2,7 @@ import { expect, test, type ConsoleMessage, type Locator, type Page } from '@pla
 import { installContrast, type Contrast } from './helpers';
 import { CONTROLS, hydrate, hydrateAll, PAGES, SCHEMES } from './viz-pages';
 
-// Checks shared by every VIZ (docs/architecture/viz.md, sections 2.7–2.9, 2.12; task V5 in section 6), on every
+// Checks shared by every VIZ (docs/architecture/viz/, sections 2.7–2.9, 2.12; task V5 in section 6), on every
 // lesson page whose file uses one: /vi/<id>/ when status.vi is 'published', and /en/<id>/ (the fallback page
 // shows the vi file with en strings). A new VIZ is covered here without a test of its own.
 // The checks that do not depend on the project's viewport (island attributes, the 375px check, JS and props
@@ -26,6 +26,8 @@ function collectErrors(page: Page): string[] {
  * States a contrast test walks through, so marks that only some states draw are measured too: every toggle
  * pressed in turn (Ridge then Lasso: the last one wins), then every slider at its end (RegularizationViz
  * draws its "exactly 0" rings only with Lasso at a λ above 0; at λ = 0 it draws bars and triangles).
+ * A Run button (GradientDescentViz) is pressed too: its animation is still going while 'toggles on' is
+ * measured (step dots appear as it goes; their colour is also measured on the key swatch); no button is ever disabled, so no click waits on it (section 12.2.7).
  */
 const CONTRAST_STATES = ['as loaded', 'toggles on', 'sliders at the end'] as const;
 type ContrastState = (typeof CONTRAST_STATES)[number];
@@ -102,6 +104,9 @@ function measureContrast(root: Element): {
       ['line.atlas-viz-cursor', 'stroke'],
       ['line.atlas-viz-bar', 'stroke'], // a coefficient bar and its 2px stub (section 10.4.5)
       ['circle.atlas-viz-zero', 'stroke'], // a coefficient exactly 0: a hollow ring on the zero line
+      ['polyline.atlas-viz-level', 'stroke'], // a contour line of the MSE (section 12.4.6)
+      ['polyline.atlas-viz-path', 'stroke'], // the gradient descent path, one point at step 0
+      ['circle.atlas-viz-step', 'fill'], // a dot per step of the path
     ] as const) {
       for (const el of plot.querySelectorAll(selector)) {
         measured.add(el);
@@ -285,6 +290,7 @@ for (const { path } of PAGES) {
             ['polygon.atlas-viz-ring', 'stroke'],
             ['line.atlas-viz-bar', 'stroke'],
             ['circle.atlas-viz-zero', 'stroke'],
+            ['polyline.atlas-viz-path', 'stroke'],
           ] as const;
           // Undo the previous state's breaks first, so each state is checked on its own. The attribute holds
           // the inline style the element had (an HTML bar has its width there).

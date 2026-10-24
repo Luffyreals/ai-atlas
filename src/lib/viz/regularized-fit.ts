@@ -1,8 +1,8 @@
-// Penalized polynomial fit for RegularizationViz (docs/architecture/viz.md, sections 10.2, 10.4.2). Pure: no DOM,
+// Penalized polynomial fit for RegularizationViz (docs/architecture/viz/regularization.md, sections 10.2, 10.4.2). Pure: no DOM,
 // no React. Notation follows the lesson ml/regularization: λ, w_k of the standardized feature z_k, b not penalized,
 // MSE with 1/m. Ridge is solved here; Lasso comes precomputed (exact) from scripts/sine-lasso-path.py.
 // Only + − × ÷, Math.sqrt, Math.abs (section 9.2.2), so build and browser agree bit for bit. Powers come from
-// repeated multiplication, as PolynomialFeatures makes them. tests/unit/regularized-fit.test.ts scans this file.
+// repeated multiplication, as PolynomialFeatures makes them. tests/unit/viz/regularized-fit.test.ts scans this file.
 // Relative imports only: Playwright e2e may import this file.
 import type { CoefRow } from '../../data/datasets/sine-lasso-path';
 import type { Row } from '../../data/datasets/types';
