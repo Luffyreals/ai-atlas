@@ -72,6 +72,7 @@ Mọi thay đổi đáng chú ý của AI Atlas được ghi ở đây. Mỗi m�
 ### Thay đổi
 
 - Gọn thư mục gốc (quyết định 63): `CONTRIBUTING.md`, `SECURITY.md` vào `.github/`; `PLAN.md`, `CHANGELOG.md`, `README.en.md`, `LICENSE-CONTENT.md` vào `docs/`; giáo án gốc thành `docs/reference/giao-an-ai.md`; `CLAUDE.md` vào `.claude/`. Link nội bộ đã sửa theo.
+- CI e2e chia 3 shard, giới hạn mỗi job 30 phút (quyết định 63): với 2 shard, shard chậm chạm giới hạn 20 phút.
 - CI e2e (phần LLM): job `verify` build một lần và tải `dist/` lên artifact; e2e chạy 2 shard (`E2E (Playwright, shard 1/2)` và `2/2`) với `E2E_PREBUILT=1`, artifact lỗi `playwright-report-1`, `-2`. Test chỉ đọc DOM chuyển sang `*-meta.spec.ts` và chỉ chạy ở project `desktop`. Nếu có branch protection, phải đổi tên check bắt buộc.
 - Tái cấu trúc tài liệu và test (quyết định 58), chỉ dời và tách file:
   - `viz.md` tách thành [docs/architecture/viz/](architecture/viz/README.md);
