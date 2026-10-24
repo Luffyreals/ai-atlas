@@ -1,4 +1,4 @@
-// Data units → percent of the plot box (docs/architecture/viz.md, sections 2.4, 4.2). Pure.
+// Data units → percent of the plot box (docs/architecture/viz/, sections 2.4, 4.2). Pure.
 // The SVG of a VIZ has no viewBox: every coordinate is a percentage, so it scales without scaling strokes or text.
 import type { Line } from './linear-fit';
 

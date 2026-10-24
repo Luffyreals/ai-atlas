@@ -36,7 +36,7 @@ function readSource(locale: Locale, id: string): string {
 }
 
 /**
- * Decision 30 (docs/mvp.md): hreflang names only the languages the lesson has a file in, plus x-default
+ * Decision 30 (docs/decisions.md): hreflang names only the languages the lesson has a file in, plus x-default
  * (the vi page). Sorted [hreflang, path] pairs, so a duplicate link shows up too.
  */
 function expectedAlternates(lesson: Lesson): [string, string][] {
@@ -47,7 +47,7 @@ function expectedAlternates(lesson: Lesson): [string, string][] {
   return [...pairs, ['x-default', pathOf('vi', lesson.id)] as [string, string]].sort();
 }
 
-// --- Static figures (docs/architecture/viz.md, section 8.2 d–h). Both functions run in the page. ---
+// --- Static figures (docs/architecture/viz/figures.md, section 8.2 d–h). Both functions run in the page. ---
 
 const FIGURE_BUDGET = { chars: 10_000, elements: 200 }; // outerHTML of one figure.atlas-figure (section 8.2 g)
 const FIGURE_MIN_TEXT_PX = 12; // every visible text, at 375px and on a desktop (section 8.2 e)

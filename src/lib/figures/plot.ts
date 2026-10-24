@@ -1,4 +1,4 @@
-// Schematic plots of static figures (docs/architecture/viz.md, section 11.4.1): data coordinates (y up) to
+// Schematic plots of static figures (docs/architecture/viz/static-plots.md, section 11.4.1): data coordinates (y up) to
 // viewBox units (y down), with one scale for both axes so a circle stays round. Pure functions, no DOM.
 // Relative imports only: Playwright e2e may import this file too, and it does not know the @lib/* alias.
 import { round1, type Pt } from './geometry';

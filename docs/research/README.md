@@ -15,7 +15,7 @@ Mỗi bài học có thể có một file tóm tắt tài liệu ở đây, giú
 # <Tên bài>
 
 ## Nguồn
-- Tác giả (Năm). [*Tên tài liệu*](https://...). Link gắn vào tên tài liệu, không dùng chữ "Link" (quyết định 31 trong docs/mvp.md). File PDF thì ghi "(PDF)" ngay sau link.
+- Tác giả (Năm). [*Tên tài liệu*](https://...). Link gắn vào tên tài liệu, không dùng chữ "Link" (quyết định 31 trong docs/decisions.md). File PDF thì ghi "(PDF)" ngay sau link.
 
 ## Ý chính
 - 5–10 gạch đầu dòng

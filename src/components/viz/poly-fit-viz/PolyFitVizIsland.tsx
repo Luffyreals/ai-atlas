@@ -1,4 +1,4 @@
-// PolyFitViz (docs/architecture/viz.md, sections 9.4.5–9.4.6). One idea: as the degree rises, training MSE
+// PolyFitViz (docs/architecture/viz/poly-fit.md, sections 9.4.5–9.4.6). One idea: as the degree rises, training MSE
 // always falls, while test MSE falls and then rises again, so a middle degree predicts new data best.
 // A slider sets the degree d of the polynomial fitted to the training points; the main plot redraws the curve,
 // the error chart below moves its cursor along the two MSE curves, and a status line names the zone.

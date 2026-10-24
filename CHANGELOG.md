@@ -28,17 +28,17 @@ Mọi thay đổi đáng chú ý của AI Atlas được ghi ở đây. Mỗi m�
   - Test: unit 88 lên 244 (Vitest + jsdom), e2e 47 lên 111, thêm e2e `@network` (`npm run test:e2e:network`).
 - Mốc M2, bài mẫu ([báo cáo](docs/progress/2026-10-23-m2.md)):
   - Bài Hồi quy tuyến tính, bản vi và en (`ml/linear-regression`), 3 ô code, 4 câu quiz.
-  - VIZ `LinearFitViz` (hai thanh trượt $w$, $b$, phần dư, MSE, "Hiện đường tốt nhất"), kit VIZ dùng chung, [viz.md](docs/architecture/viz.md).
+  - VIZ `LinearFitViz` (hai thanh trượt $w$, $b$, phần dư, MSE, "Hiện đường tốt nhất"), kit VIZ dùng chung, [viz/](docs/architecture/viz/README.md).
   - `DatasetTable` và bảng căn hộ `src/data/datasets/apartments.ts` dùng chung cho bài, VIZ và code.
   - Tên truy cập cho công thức riêng dòng (`rehype-katex-a11y`).
   - SEO cho trang fallback: `noindex`, ra khỏi sitemap, bỏ `hreflang` tới bản chưa có, ra khỏi tìm kiếm Pagefind.
   - Nút "Bắt đầu học" ở hero trang chủ, link trong thư ngỏ.
-- Mốc M3 (đang làm), bản tiếng Việt; bản en làm sau MVP (quyết định 43 trong [docs/mvp.md](docs/mvp.md)):
+- Mốc M3 (đang làm), bản tiếng Việt; bản en làm sau MVP (quyết định 43 trong [docs/decisions.md](docs/decisions.md)):
   - Bài Tổng quan về Học máy (`ml/ml-overview`): ba nhóm học máy, quy trình học có giám sát, tách train/test, 2 hình SVG tĩnh.
   - Bài Overfitting và Underfitting (`ml/overfitting-underfitting`): hồi quy đa thức, sai số train/test theo bậc, bias–variance, kiểm định chéo. VIZ `PolyFitViz`.
   - Bài Ridge, Lasso, Elastic Net (`ml/regularization`): hàm mục tiêu, nghiệm Ridge, vì sao L1 cho hệ số bằng 0, chọn λ. VIZ `RegularizationViz` và đồ thị tĩnh L1/L2.
   - Bài Gradient Descent (`ml/gradient-descent`): quy tắc cập nhật, tốc độ học và ngưỡng $2/L$, chuẩn hóa đặc trưng, tiêu chí dừng, SGD và mini-batch. VIZ `GradientDescentViz`: đường mức, đường đi, nút Bước / Chạy / Đặt lại, 5 mức $\eta$.
-  - Kit hình SVG tĩnh `src/components/figures/`, vẽ được cả sơ đồ khối lẫn đồ thị tĩnh (`docs/architecture/viz.md` mục 8, 11).
+  - Kit hình SVG tĩnh `src/components/figures/`, vẽ được cả sơ đồ khối lẫn đồ thị tĩnh (`docs/architecture/viz/figures.md` mục 8, `static-plots.md` mục 11).
   - Bộ dữ liệu `sine` (16 train, 8 test) dùng chung cho hai bài; đường đi Lasso tính sẵn bằng `scripts/sine-lasso-path.py`.
   - Kit VIZ dùng chung: `Swatch`, `axisText()`, `PlotCurve`, `AtPoint`.
   - Nút "Bắt đầu học" và thư ngỏ dẫn tới bài đầu tiên đã có ở từng ngôn ngữ.

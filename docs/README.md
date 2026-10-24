@@ -7,10 +7,11 @@ Thư mục này chứa tài liệu cho **người viết bài** và **người p
 | File / thư mục | Nội dung | Ai viết |
 |---|---|---|
 | [mvp.md](mvp.md) | Spec bản MVP: phạm vi, tiêu chí hoàn thành, các mốc | Bạn + Claude |
+| [decisions.md](decisions.md) | Các quyết định đã chốt, đánh số theo đợt có ngày (trước đây là mvp.md mục 7) | Bạn + Claude |
 | [lesson-template.mdx](lesson-template.mdx) | Template chuẩn cho mọi bài học (9 mục) | Chốt ở mốc M2 |
 | [glossary.md](glossary.md) | Bảng thuật ngữ Việt – Anh | `lesson-writer` bổ sung khi gặp thuật ngữ mới |
 | [architecture/README.md](architecture/README.md) | Tổng quan kiến trúc một trang: luồng build và phục vụ, mô hình nội dung, các lớp kiểm tra. Bắt đầu từ đây nếu bạn mới vào dự án | `architect` |
-| [architecture/](architecture/README.md#8-tài-liệu-thiết-kế-chi-tiết) | Thiết kế kỹ thuật chi tiết: [bộ khung](architecture/scaffold.md), [dữ liệu lộ trình](architecture/roadmap-data.md), [component](architecture/components.md) | `architect` |
+| [architecture/](architecture/README.md#8-tài-liệu-thiết-kế-chi-tiết) | Thiết kế kỹ thuật chi tiết: [bộ khung](architecture/scaffold.md), [dữ liệu lộ trình](architecture/roadmap-data.md), [component](architecture/components.md), [trang chủ](architecture/homepage.md), [minh họa VIZ và hình tĩnh](architecture/viz/README.md) | `architect` |
 | [research/](research/README.md) | Tóm tắt tài liệu tham khảo cho từng bài | `summarizer` |
 | [progress/](progress/README.md) | Báo cáo tiến độ theo ngày | `summarizer` |
 

@@ -1,4 +1,4 @@
-// LinearFitViz (docs/architecture/viz.md, sections 4.5–4.7). One idea: the best line is the line with the
+// LinearFitViz (docs/architecture/viz/linear-fit.md, sections 4.5–4.7). One idea: the best line is the line with the
 // smallest MSE. Two sliders set w and b of ŷ = wx + b; the plot redraws the line, one vertical residual per
 // point and the MSE at once. "Show the best line" lays the least-squares line and its MSE over it.
 // Every string, symbol and number arrives through props (LinearFitViz.astro), so the first render in the

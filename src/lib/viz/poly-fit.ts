@@ -1,8 +1,8 @@
-// Polynomial fit for PolyFitViz (docs/architecture/viz.md, sections 9.2.2, 9.4.2). Pure: no DOM, no React.
+// Polynomial fit for PolyFitViz (docs/architecture/viz/poly-fit.md, sections 9.2.2, 9.4.2). Pure: no DOM, no React.
 // Notation follows the lesson ml/overfitting-underfitting: degree d, MSE with 1/m, training and test sets.
 // Only + − × ÷, Math.sqrt, Math.abs (section 9.2.2): IEEE 754 rounds these correctly, so the numbers are the
 // same bit for bit at build time (Node) and in every browser, and the prerendered HTML matches the hydrated one.
-// Powers come from repeated multiplication. tests/unit/poly-fit.test.ts scans this file to keep the rule.
+// Powers come from repeated multiplication. tests/unit/viz/poly-fit.test.ts scans this file to keep the rule.
 // Relative imports only: Playwright e2e may import this file.
 import type { Row } from '../../data/datasets/types';
 import { formatNumber } from './format';

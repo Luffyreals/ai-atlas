@@ -1,4 +1,4 @@
-// docs/architecture/viz.md, section 2.7: a live region speaks once the reader stops dragging, not on every step.
+// docs/architecture/viz/README.md, section 2.7: a live region speaks once the reader stops dragging, not on every step.
 import { useEffect, useRef, useState } from 'react';
 
 export const SETTLE_MS = 600;

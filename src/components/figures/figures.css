@@ -1,9 +1,9 @@
 /*
- * Every static figure (docs/architecture/viz.md, section 8.2 e–g). The only CSS file under
+ * Every static figure (docs/architecture/viz/figures.md, section 8.2 e–g). The only CSS file under
  * src/components/figures/, loaded on every page through Starlight's customCss, just before viz.css.
- * Colours exist here only: role variables on .atlas-figure point at theme tokens, measured in viz.md 4.9.
+ * Colours exist here only: role variables on .atlas-figure point at theme tokens, measured in viz/linear-fit.md 4.9.
  * Geometry and font sizes are SVG attributes written by the kit. Budget: 1 KB gzip
- * (tests/unit/figure-conventions.test.ts).
+ * (tests/unit/viz/figure-conventions.test.ts).
  */
 .atlas-figure {
   --atlas-fig-ink: var(--sl-color-white);
@@ -72,7 +72,7 @@
   fill: var(--atlas-fig-muted);
 }
 
-/* Muted on accent-low is not a measured pair; ink is (viz.md 4.9). */
+/* Muted on accent-low is not a measured pair; ink is (viz/linear-fit.md 4.9). */
 .atlas-fig-node[data-tone='accent'] .atlas-fig-text-sm {
   fill: var(--atlas-fig-ink);
 }
@@ -88,7 +88,7 @@
   fill: var(--atlas-fig-muted);
 }
 
-/* Schematic plots (viz.md 11.4.3): a shaded region with a 2px border, level curves, dots, math labels. */
+/* Schematic plots (viz/static-plots.md 11.4.3): a shaded region with a 2px border, level curves, dots, math labels. */
 .atlas-fig-region {
   fill: var(--atlas-fig-node);
   stroke: var(--atlas-fig-accent);
