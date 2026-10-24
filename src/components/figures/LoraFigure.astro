@@ -1,0 +1,68 @@
+---
+// llm/evaluation-peft, "LoRA: cập nhật hạng thấp" (after step 3): LoRA keeps the original matrix and learns only
+// two thin ones whose product is a branch added to the output, h = W0 x + (α/r) B A x. The input sits at the
+// bottom and splits up into two branches. Left, the original matrix W0 (dashed: frozen, the second group) is a
+// large square. Right, the focus: A, flat (r × d_in), then the narrow point "r dimensions", then B, tall and
+// narrow (d_out × r), then the scale factor. W0 is as wide as A and as tall as B, so the sizes say d_in and
+// d_out once, and r shows as the thin side. The branches meet at "add", then the output.
+// No padlock: loose shapes are not measured by e2e (llm-lessons.md 2.9.1); "frozen" is written in the box.
+// Narrow layout only. Words: src/data/figures/lora.ts; symbols with FigMath, as the lesson writes them.
+import { LORA } from '@data/figures/lora';
+import { anchor, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigMath from './kit/FigMath.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = LORA[getPageLocale(Astro.locals.starlightRoute)];
+
+// D: the side of W0, standing for d_in = d_out. The left branch is centred on x 68, the right one on x 214;
+// "add", the output and the input sit midway, on x 141. The right edge (x 280–352) holds the notes of A and B.
+const D = 112;
+const LEFT = 68;
+const RIGHT = 214;
+const MID = (LEFT + RIGHT) / 2;
+const THIN = 40; // the r side of B, drawn thick enough for its letter
+
+const output: Box = { x: MID - 60, y: 8, width: 120, height: 56 };
+const add: Box = { x: MID - 28, y: 88, width: 56, height: 36 };
+const scale: Box = { x: RIGHT - D / 2, y: 148, width: D, height: 36 };
+const b: Box = { x: RIGHT - THIN / 2, y: 208, width: THIN, height: 120 };
+const base: Box = { x: LEFT - D / 2, y: b.y + b.height - D, width: D, height: D };
+const a: Box = { x: RIGHT - D / 2, y: 364, width: D, height: 36 };
+const input: Box = { x: MID - 60, y: 436, width: 120, height: 56 };
+const height = input.y + input.height + 8;
+
+const fork = 418; // y where the input splits
+const addY = anchor(add, 'left')[1];
+const waist = (a.y + b.y + b.height) / 2;
+---
+
+<FigureFrame id="lora" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigNode {...output} math={{ symbol: 'h', bold: true }} lines={t.labels.output} />
+    <FigArrow from={anchor(add, 'top')} to={anchor(output, 'bottom')} />
+    <FigNode {...add} lines={t.labels.add} />
+
+    <FigNode {...base} math={{ symbol: 'W', sub: '0', bold: true }} lines={t.labels.base} small={t.labels.frozen} tone="alt" />
+    <FigArrow from={anchor(base, 'top')} via={[[LEFT, addY]]} to={anchor(add, 'left')} />
+
+    <FigNode {...scale} lines={t.labels.scale} />
+    <FigArrow from={anchor(scale, 'top')} via={[[RIGHT, addY]]} to={anchor(add, 'right')} />
+    <FigArrow from={anchor(b, 'top')} to={anchor(scale, 'bottom')} />
+    <FigNode {...b} math={{ symbol: 'B', bold: true }} tone="accent" />
+    <FigText x={b.x + b.width + 10} y={b.y + b.height / 2} lines={t.labels.bNote} size="small" anchor="start" />
+
+    <FigArrow from={anchor(a, 'top')} to={anchor(b, 'bottom')} />
+    <FigMath x={RIGHT + 8} y={waist} symbol="r" size="small" anchor="start" />
+    <FigText x={RIGHT + 18} y={waist} lines={t.labels.rank} size="small" anchor="start" />
+    <FigNode {...a} math={{ symbol: 'A', bold: true }} tone="accent" />
+    <FigText x={a.x + a.width + 10} y={a.y + a.height / 2} lines={t.labels.aNote} size="small" anchor="start" />
+
+    <FigArrow from={anchor(input, 'top')} via={[[MID, fork], [LEFT, fork]]} to={anchor(base, 'bottom')} />
+    <FigArrow from={anchor(input, 'top')} via={[[MID, fork], [RIGHT, fork]]} to={anchor(a, 'bottom')} />
+    <FigNode {...input} math={{ symbol: 'x', bold: true }} lines={t.labels.input} />
+  </Fragment>
+</FigureFrame>

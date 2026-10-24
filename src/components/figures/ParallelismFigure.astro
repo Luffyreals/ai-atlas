@@ -1,0 +1,136 @@
+---
+// llm/llama-family, "Minh họa" (reused as is in llm/llm-deployment): data, tensor and pipeline parallelism
+// split three different things: the batch, the matrices inside a layer, the layers. Three panels, the same
+// 4-layer model and 2 GPUs in each. A GPU is a strip (plain frame, a closed polyline with no head) holding the
+// model's 4 layers as bare bars, one column per layer, named once per panel in one row above the columns; the
+// input stands left. Accent marks what is split: the two half batches (data), the half of every layer each
+// GPU holds (tensor, the other half dotted, "off"), the layers each GPU holds (pipeline, the rest left empty).
+// What moves is dashed (second group): the full batch, the micro-batches and the exchanges in the gap between
+// the strips. Summing (all-reduce) is a link with no head: one for the gradients, one per layer for the
+// results; activations go forward and gradients back between layers 2 and 3 as two parallel arrows. The
+// micro-batches queue left of GPU 1, number 1 next to it. Narrow layout only, within the HTML budget (2.9.3).
+// Words: src/data/figures/parallelism.ts.
+import { PARALLELISM } from '@data/figures/parallelism';
+import type { Pt } from '@lib/figures/geometry';
+import { spread, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = PARALLELISM[getPageLocale(Astro.locals.starlightRoute)];
+const l = t.labels;
+
+// Across: the input x 8–92, the GPU strip x 110–352 with its name at 118 and 4 layer columns at x 160–344.
+const INPUT = { x: 8, right: 92 } as const;
+const STRIP = { x: 110, right: 352, height: 40 } as const;
+const NAME_X = 118;
+const columns = spread(160, 344, 4, 8);
+const BAR = { inset: 8, height: 24 } as const;
+const HALF = (columns.size - 2) / 2;
+// Down, in a panel: title, column names, GPU 1, the exchange gap, GPU 2.
+const PANEL = { title: 9, names: 28, strip1: 38, gap: 32 } as const;
+const PANEL_HEIGHT = PANEL.strip1 + 2 * STRIP.height + PANEL.gap;
+const PANEL_GAP = 16;
+const tops = [4, 4 + PANEL_HEIGHT + PANEL_GAP, 4 + 2 * (PANEL_HEIGHT + PANEL_GAP)] as const;
+const height = tops[2] + PANEL_HEIGHT + 6;
+
+const layerNames = [l.layer1, l.layer2, l.layer3, l.layer4] as string[];
+const centreOf = (i: number) => (columns.starts[i] ?? 0) + columns.size / 2;
+
+interface Panel {
+  top: number;
+  s1: number; // top of GPU 1's strip
+  s2: number; // top of GPU 2's strip
+  gapMid: number;
+}
+const panel = (top: number): Panel => {
+  const s1 = top + PANEL.strip1;
+  return { top, s1, s2: s1 + STRIP.height + PANEL.gap, gapMid: s1 + STRIP.height + PANEL.gap / 2 };
+};
+const [pData, pTensor, pPipe] = tops.map(panel) as [Panel, Panel, Panel];
+/** One row of column names per panel; the pipeline row starts with the micro-batch queue's name. */
+const names = (p: Panel) =>
+  p === pPipe
+    ? { xs: [(INPUT.x + INPUT.right) / 2, ...[0, 1, 2, 3].map(centreOf)], lines: [l.microBatches as string, ...layerNames] }
+    : { xs: [0, 1, 2, 3].map(centreOf), lines: layerNames };
+
+/** A GPU strip's frame: a closed polyline with no head (llm-lessons.md 2.9.2). */
+const frame = (y: number) => ({
+  from: [STRIP.x, y] as Pt,
+  via: [[STRIP.right, y], [STRIP.right, y + STRIP.height], [STRIP.x, y + STRIP.height]] as Pt[],
+  to: [STRIP.x, y] as Pt,
+});
+const mid = (y: number) => y + STRIP.height / 2;
+/** Layer i's bar in the strip at y; `half` 0 or 1 takes its left or right half. */
+const bar = (i: number, y: number, half?: 0 | 1): Box => ({
+  x: (columns.starts[i] ?? 0) + (half === 1 ? HALF + 2 : 0),
+  y: y + BAR.inset,
+  width: half === undefined ? columns.size : HALF,
+  height: BAR.height,
+});
+const input = (y: number, width = INPUT.right - INPUT.x): Box => ({ x: INPUT.x, y: y + 2, width, height: STRIP.height - 4 });
+const toStrip = (y: number) => ({ from: [INPUT.right, mid(y)] as Pt, to: [STRIP.x, mid(y)] as Pt });
+
+// Tensor: the full batch stands between the two strips and feeds both.
+const fullBatch: Box = { x: INPUT.x, y: pTensor.gapMid - 28, width: 72, height: 56 };
+const feedX = INPUT.right;
+// Pipeline: 4 micro-batches queue left of GPU 1, micro-batch 1 next to it; activations and gradients run
+// between layer 2 (GPU 1) and layer 3 (GPU 2) as two parallel slanted arrows.
+const queue = spread(INPUT.x, INPUT.right, 4, 3);
+const [c2, c3] = [centreOf(1), centreOf(2)];
+const s1Bottom = pPipe.s1 + STRIP.height;
+---
+
+<FigureFrame id="parallelism" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    {
+      [
+        { p: pData, title: l.dataTitle },
+        { p: pTensor, title: l.tensorTitle },
+        { p: pPipe, title: l.pipelineTitle },
+      ].map(({ p, title }) => (
+        <>
+          <FigText x={INPUT.x} y={p.top + PANEL.title} lines={title} anchor="start" />
+          <FigText {...names(p)} y={p.top + PANEL.names} size="small" />
+          <FigArrow {...frame(p.s1)} head={false} />
+          <FigText x={NAME_X} y={mid(p.s1)} lines={l.gpu1} size="small" anchor="start" />
+          <FigArrow {...frame(p.s2)} head={false} />
+          <FigText x={NAME_X} y={mid(p.s2)} lines={l.gpu2} size="small" anchor="start" />
+        </>
+      ))
+    }
+
+    {/* Data: each GPU holds the whole model and gets its own half of the batch. */}
+    <FigNode {...input(pData.s1)} lines={l.halfA} tone="accent" />
+    <FigArrow {...toStrip(pData.s1)} />
+    <FigNode {...input(pData.s2)} lines={l.halfB} tone="accent" />
+    <FigArrow {...toStrip(pData.s2)} />
+    {[0, 1, 2, 3].map((i) => <FigNode {...bar(i, pData.s1)} bare />)}
+    {[0, 1, 2, 3].map((i) => <FigNode {...bar(i, pData.s2)} bare />)}
+    <FigArrow from={[252, pData.s1 + STRIP.height]} to={[252, pData.s2]} tone="alt" head={false} />
+    <FigText x={260} y={pData.gapMid} lines={l.sumGradients} size="small" anchor="start" />
+
+    {/* Tensor: the same batch to both; GPU 1 holds the left half of every layer, GPU 2 the right half. */}
+    <FigNode {...fullBatch} lines={l.fullBatch} tone="alt" />
+    <FigArrow from={[fullBatch.x + fullBatch.width, pTensor.gapMid - 14]} via={[[feedX, pTensor.gapMid - 14], [feedX, mid(pTensor.s1)]]} to={[STRIP.x, mid(pTensor.s1)]} />
+    <FigArrow from={[fullBatch.x + fullBatch.width, pTensor.gapMid + 14]} via={[[feedX, pTensor.gapMid + 14], [feedX, mid(pTensor.s2)]]} to={[STRIP.x, mid(pTensor.s2)]} />
+    {[0, 1, 2, 3].map((i) => <FigNode {...bar(i, pTensor.s1, 0)} bare tone="accent" />)}
+    {[0, 1, 2, 3].map((i) => <FigNode {...bar(i, pTensor.s1, 1)} bare tone="off" />)}
+    {[0, 1, 2, 3].map((i) => <FigNode {...bar(i, pTensor.s2, 0)} bare tone="off" />)}
+    {[0, 1, 2, 3].map((i) => <FigNode {...bar(i, pTensor.s2, 1)} bare tone="accent" />)}
+    {[0, 1, 2, 3].map((i) => <FigArrow from={[centreOf(i), pTensor.s1 + STRIP.height]} to={[centreOf(i), pTensor.s2]} tone="alt" head={false} />)}
+    <FigText x={centreOf(0) - 8} y={pTensor.gapMid} lines={l.sumResults} size="small" anchor="end" />
+
+    {/* Pipeline: GPU 1 holds layers 1–2, GPU 2 layers 3–4; micro-batches queue into GPU 1. */}
+    {queue.starts.map((x, i) => <FigNode x={x} y={pPipe.s1 + 2} width={queue.size} height={STRIP.height - 4} lines={String(4 - i)} tone="alt" />)}
+    <FigArrow {...toStrip(pPipe.s1)} />
+    {[0, 1].map((i) => <FigNode {...bar(i, pPipe.s1)} bare tone="accent" />)}
+    {[2, 3].map((i) => <FigNode {...bar(i, pPipe.s2)} bare tone="accent" />)}
+    <FigArrow from={[c2 - 6, s1Bottom]} to={[c3 - 18, pPipe.s2]} tone="alt" />
+    <FigText x={c2 - 4} y={pPipe.gapMid} lines={l.activations} size="small" anchor="end" />
+    <FigArrow from={[c3 + 6, pPipe.s2]} to={[c2 + 18, s1Bottom]} tone="alt" />
+    <FigText x={c3 + 4} y={pPipe.gapMid} lines={l.gradients} size="small" anchor="start" />
+  </Fragment>
+</FigureFrame>

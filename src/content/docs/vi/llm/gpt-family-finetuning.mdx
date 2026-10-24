@@ -1,0 +1,324 @@
+---
+title: Họ GPT và fine-tune đa nhiệm
+description: Mô hình chỉ biết viết tiếp, làm sao để nó nghe lời? GPT-1, GPT-2, GPT-3, instruction tuning, định dạng dữ liệu, chat template và loss chỉ trên câu trả lời.
+quiz:
+  - question: 'Việc nào dưới đây làm thay đổi tham số của mô hình?'
+    options:
+      - 'Thêm `TL;DR:` sau một bài báo để GPT-2 viết tóm tắt'
+      - 'Đặt 32 cặp ví dụ dịch vào prompt của GPT-3 (few-shot)'
+      - 'Huấn luyện tiếp mô hình trên hàng chục tập dữ liệu viết thành lời chỉ dẫn, như FLAN'
+      - 'Viết system prompt dài và kỹ hơn'
+    answer: 2
+    explanation: 'FLAN chạy gradient descent trên dữ liệu có nhãn, nên trọng số đổi, và cái học được còn lại ở mọi lần gọi sau. Ba cách còn lại chỉ đổi văn bản đầu vào. Few-shot dễ chọn nhầm nhất vì có chữ học trong ngữ cảnh, nhưng GPT-3 không cập nhật tham số nào: mở một prompt mới không có ví dụ là mô hình quay về như cũ.'
+  - question: 'Một mẫu SFT có prompt 30 token, đáp án 9 token, rồi một token EOS. Nó được đệm tới 50 token. Nhãn của prompt và phần đệm là $-100$. Sau khi dịch một vị trí, có bao nhiêu vị trí được tính loss?'
+    options: ['9', '10', '40', '49']
+    answer: 1
+    explanation: 'Chỉ 9 token đáp án và EOS có nhãn khác $-100$, tức 10 vị trí. Dịch một vị trí chỉ bỏ nhãn của token đầu tiên, mà token đó thuộc prompt, nên không mất vị trí nào được tính. Chọn 9 là quên EOS. Mà EOS phải được tính, nếu không mô hình không học cách dừng. 49 là tổng số vị trí sau khi dịch, kể cả prompt và phần đệm.'
+  - question: 'Bạn dùng EOS làm token đệm, rồi tạo nhãn bằng `labels = ids.masked_fill(ids == eos_id, -100)`. Sau khi fine-tune, điều gì nhiều khả năng xảy ra?'
+    options:
+      - 'Loss thành `nan` ngay bước đầu'
+      - 'Mô hình học thuộc prompt'
+      - 'Không có gì khác, vì phần đệm vẫn bị che đúng'
+      - 'Mô hình trả lời đúng nhưng không biết dừng, viết tiếp tới khi hết giới hạn độ dài'
+    answer: 3
+    explanation: 'Phép so `ids == eos_id` không phân biệt token đệm với EOS thật ở cuối đáp án, nên EOS thật cũng bị che. Mô hình không bao giờ được chấm ở bước phải sinh EOS, nên không học cách dừng. Phần đệm đúng là bị che, nên phương án không có gì khác nghe hợp lý, nhưng phép so che thừa. Loss chỉ thành `nan` khi mọi nhãn trong batch đều là $-100$.'
+  - question: 'Bộ dữ liệu tóm tắt có bài báo dài khoảng 950 token và bản tóm tắt khoảng 50 token. Bạn tính loss trên cả chuỗi, không che phần prompt. Nhận xét nào đúng?'
+    options:
+      - 'Loss trung bình chủ yếu đo mô hình đoán bài báo giỏi tới đâu: phần tóm tắt chỉ chiếm khoảng 5% số vị trí'
+      - 'Mô hình không còn đọc được bài báo khi sinh tóm tắt'
+      - 'Loss thành `nan` vì có quá nhiều nhãn'
+      - 'Không khác gì, vì cross-entropy lấy trung bình nên độ dài không ảnh hưởng'
+    answer: 0
+    explanation: 'Loss là trung bình trên mọi vị trí được tính, nên 950 vị trí của bài báo lấn át 50 vị trí của bản tóm tắt. Phần lớn tín hiệu học dồn vào việc đoán lại bài báo, thứ đã có sẵn khi dùng thật. Phương án thứ hai là hiểu nhầm hay gặp: nhãn $-100$ chỉ bỏ vị trí khỏi loss, bài báo vẫn nằm trong đầu vào và attention vẫn nhìn được nó.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import labelMaskCode from '@code/llm/gpt-family-finetuning/label-mask.vi.py?raw';
+import maskedLossCode from '@code/llm/gpt-family-finetuning/masked-loss.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Kể lại được con đường từ GPT-1 tới GPT-3: fine-tune riêng từng tác vụ, rồi nhắc tác vụ bằng văn bản (zero-shot, không ví dụ), rồi học trong ngữ cảnh (in-context learning). Phân biệt được cách nào đổi tham số, cách nào không.
+- Hiểu **instruction tuning** (fine-tune theo chỉ dẫn): fine-tune có giám sát (supervised fine-tuning, SFT) trên nhiều tác vụ viết thành lời, như FLAN, T0 và bước đầu của InstructGPT.
+- Đưa được năm tác vụ QA, sinh code, tóm tắt, truy hồi, dịch về cùng một dạng cặp văn bản vào, văn bản ra, và hiểu **chat template** dùng để làm gì.
+- Tự dẫn được loss SFT chỉ tính trên phần trả lời. Đọc hiểu và viết được cách cài đặt nó bằng nhãn $-100$ trong PyTorch.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/), mô hình ngôn ngữ cho xác suất $p(x_t \mid x_{<t})$ của token kế tiếp, và huấn luyện là làm nhỏ cross-entropy $\mathcal{L} = -\frac{1}{L}\sum_{t=1}^{L} \ln p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$. GPT là Transformer chỉ có decoder (decoder-only), có mặt nạ nhân quả, nên một lần chạy qua chuỗi cho một dự đoán ở mỗi vị trí: đầu ra ở vị trí $t$ đoán token $t + 1$. Bài [Sử dụng API văn bản](/vi/llm/text-api/) đã dùng danh sách `messages` với ba vai trò `system`, `user`, `assistant`.
+:::
+
+## Trực giác
+
+### Biết viết tiếp, chưa biết nghe lời
+
+Giả sử bạn có một GPT đã pre-train trên rất nhiều trang web, như GPT nhỏ ở bài trước nhưng lớn hơn rất nhiều. Bạn gõ:
+
+> Dịch sang tiếng Anh: Chào buổi sáng.
+
+Mô hình chỉ biết một việc: viết tiếp sao cho giống văn bản nó từng đọc. Trên mạng, một dòng như thế thường nằm trong một bài tập có nhiều dòng giống nhau. Nên việc viết tiếp bằng "Dịch sang tiếng Anh: Hẹn gặp lại." cũng hợp lý không kém việc trả lời "Good morning.". Mô hình không sai. Nó chỉ đang làm đúng việc được dạy: viết tiếp văn bản, không phải trả lời người hỏi.
+
+Từ 2018 tới 2022, các nhóm nghiên cứu thử ba cách để mô hình làm đúng việc mình muốn. Hình dung một người thợ đã đọc rất nhiều sách:
+
+- **Dạy riêng từng nghề** (GPT-1, 2018). Mỗi tác vụ, bạn kèm người thợ trên vài nghìn ví dụ có đáp án. Kết quả là mỗi tác vụ một bản mô hình riêng.
+- **Dặn bằng lời, hoặc làm mẫu vài lần** (GPT-2, 2019 và GPT-3, 2020). Không dạy thêm gì. Bạn viết yêu cầu, có thể kèm vài ví dụ, ngay trong văn bản đưa vào, rồi để mô hình viết tiếp.
+- **Tập cho quen nghe lời dặn** (FLAN, T0, InstructGPT, 2021–2022). Dạy thêm một lần, trên hàng chục loại việc, mỗi loại dặn theo nhiều cách khác nhau. Lần sau gặp một lời dặn lạ, người thợ vẫn hiểu phải làm gì.
+
+Cách thứ ba là bước đầu tiên khi huấn luyện InstructGPT và nhiều mô hình chat ra đời sau đó. Nó cần hai thứ mà bài này sẽ làm rõ: dữ liệu viết thế nào, và khi huấn luyện thì chấm điểm phần nào.
+
+Bài toán của bài này là: **từ một mô hình chỉ biết viết tiếp văn bản, làm sao có một mô hình làm theo yêu cầu viết bằng lời, cho nhiều loại tác vụ, kể cả loại nó chưa gặp khi huấn luyện? Và khi huấn luyện, phần nào của chuỗi được tính loss?**
+
+## Lý thuyết
+
+### GPT-1: pre-train, rồi fine-tune từng tác vụ
+
+GPT-1 (Radford và cộng sự, 2018) có hai giai đoạn. Giai đoạn một là pre-train bằng dự đoán token kế tiếp trên BooksCorpus, hơn 7 000 cuốn sách. Kiến trúc cùng kiểu với GPT ở bài trước, nhưng lớn hơn: 12 khối, $D = 768$, ngữ cảnh 512 token. Giai đoạn hai là **fine-tune có giám sát** trên từng tác vụ, ví dụ phân loại hay suy diễn ngôn ngữ. Với mỗi tác vụ, họ thêm một lớp tuyến tính và softmax trên biểu diễn ở token cuối, để cho xác suất của nhãn $y$.
+
+Viết thành hàm mất mát, với đầu vào $\mathbf{x} = (x_1, \dots, x_L)$ và nhãn $y$:
+
+$$
+\mathcal{L}_{\text{task}} = -\sum_{(\mathbf{x}, y)} \ln p(y \mid x_1, \dots, x_L)
+$$
+
+Điểm đáng chú ý là họ cộng thêm một **mục tiêu phụ** (auxiliary objective): loss mô hình ngôn ngữ $\mathcal{L}_{\text{LM}}$, tính trên chính văn bản đầu vào của tập fine-tune:
+
+$$
+\mathcal{L}_{\text{GPT-1}} = \mathcal{L}_{\text{task}} + \lambda\, \mathcal{L}_{\text{LM}}, \qquad \lambda = 0.5
+$$
+
+Paper viết công thức này dưới dạng log-likelihood cần làm lớn nhất ($L_3 = L_2 + \lambda L_1$). Ở đây đổi dấu để có hàm mất mát cần làm nhỏ nhất, như ở bài trước. Tác giả báo mục tiêu phụ giúp tổng quát hóa tốt hơn và hội tụ nhanh hơn. Thí nghiệm bỏ nó đi cho thấy nó có ích ở tập dữ liệu lớn, còn ở tập nhỏ thì không.
+
+Chi tiết thứ hai là cách GPT-1 đưa đầu vào có cấu trúc vào mô hình. Thay vì làm kiến trúc riêng cho mỗi tác vụ, họ xếp mọi thứ thành **một chuỗi token**, có token bắt đầu, token kết thúc và một token phân cách ở giữa. Với suy diễn ngôn ngữ, chuỗi là tiền đề, token phân cách, giả thuyết. Với hỏi đáp trắc nghiệm, mỗi đáp án được ghép với ngữ cảnh và câu hỏi thành một chuỗi riêng. Ý "mọi tác vụ thành một chuỗi" này sẽ quay lại ở FLAN và chat template.
+
+GPT-1 cải thiện kết quả tốt nhất lúc đó trên 9 trong 12 tập dữ liệu. Nhưng mỗi tác vụ cần dữ liệu có nhãn riêng, một lớp đầu ra riêng và một bản mô hình đã fine-tune riêng.
+
+### GPT-2: ghi tác vụ ngay trong văn bản
+
+GPT-2 (Radford và cộng sự, 2019) đặt câu hỏi: có cần fine-tune không? Học một tác vụ là ước lượng $p(\text{output} \mid \text{input})$. Một hệ thống làm được nhiều tác vụ thì phải biết đang làm tác vụ nào, tức ước lượng
+
+$$
+p(\text{output} \mid \text{input}, \text{task})
+$$
+
+Điều kiện "tác vụ" không cần một kiến trúc riêng. Tác vụ, đầu vào và đầu ra đều là văn bản, nên có thể viết cả ba thành một chuỗi. Chính paper đưa ví dụ: một mẫu dịch là chuỗi (dịch sang tiếng Pháp, câu tiếng Anh, câu tiếng Pháp). Một mô hình ngôn ngữ đủ lớn, đọc đủ nhiều, có thể đã gặp những chuỗi như vậy trong văn bản tự nhiên.
+
+Họ huấn luyện mô hình lớn nhất 1.5 tỉ tham số trên WebText, khoảng 40 GB văn bản, rồi đo ở chế độ **zero-shot**: không cập nhật tham số nào, chỉ viết tác vụ vào đầu vào. Vài cách nhắc tác vụ trong paper:
+
+- **Tóm tắt:** thêm `TL;DR:` sau bài báo rồi cho mô hình viết tiếp. Bỏ gợi ý này thì điểm tụt 6.4 điểm. Vậy một chuỗi chữ ngắn đã đủ gọi ra hành vi "tóm tắt".
+- **Dịch:** đặt vài cặp "câu tiếng Anh = câu tiếng Pháp" vào ngữ cảnh, rồi "câu tiếng Anh =" và để mô hình viết tiếp.
+- **Hỏi đáp:** đặt vài cặp hỏi đáp vào ngữ cảnh để mô hình bắt chước kiểu trả lời ngắn.
+
+Paper GPT-2 vẫn gọi hai cách này là zero-shot vì không cập nhật tham số. GPT-3 về sau tách riêng: có ví dụ trong ngữ cảnh thì gọi là one-shot hay few-shot.
+
+Kết quả đáng chú ý ở mô hình ngôn ngữ: tốt nhất lúc đó trên 7 trong 8 tập. Nhưng các tác vụ khác thì còn yếu, và chính tác giả nói rõ. Tóm tắt chỉ vừa nhỉnh hơn việc chọn ngẫu nhiên 3 câu trong bài theo điểm ROUGE. Dịch Anh sang Pháp được 5 BLEU. Hỏi đáp trả lời đúng 4.1% câu hỏi của Natural Questions. Tác giả viết rằng hiệu năng zero-shot của GPT-2 "còn xa" mức dùng được trong thực tế. Chỉ nhắc bằng lời là chưa đủ.
+
+### GPT-3: học trong ngữ cảnh
+
+GPT-3 (Brown và cộng sự, 2020) giữ ý tưởng của GPT-2 nhưng tăng cỡ lên 175 tỉ tham số, ngữ cảnh 2048 token. Paper đo ba thiết lập, **cả ba đều không cập nhật tham số**:
+
+- **Zero-shot:** chỉ có lời mô tả tác vụ, ví dụ "Dịch tiếng Anh sang tiếng Pháp:" rồi "cheese =>".
+- **One-shot:** thêm đúng một ví dụ, như "sea otter => loutre de mer", trước dòng cần dịch.
+- **Few-shot:** thêm vài ví dụ, thường 10 tới 100, tùy ngữ cảnh chứa được bao nhiêu.
+
+Paper gọi khả năng làm theo các ví dụ trong ngữ cảnh là **học trong ngữ cảnh**. Bài [Prompt Engineering](/vi/llm/prompt-engineering/) đã dùng nó để viết prompt few-shot. Ở đây chỉ cần nhớ điểm khác với fine-tune: fine-tune đổi tham số, nên cái học được còn lại ở mọi lần gọi sau. Học trong ngữ cảnh không đổi gì trong mô hình. Prompt sau không có ví dụ thì mô hình quay về như cũ. Paper cũng nói họ **không** fine-tune GPT-3, và coi đó là hướng cho sau này.
+
+### Instruction tuning: SFT trên nhiều tác vụ
+
+GPT-3 cho thấy mô hình lớn làm được nhiều việc nếu prompt viết khéo. Bước tiếp theo đảo lại câu hỏi: thay vì chiều theo mô hình bằng prompt, hãy dạy mô hình hiểu lời dặn. Cách làm là fine-tune có giám sát, như GPT-1, nhưng trên **nhiều tác vụ cùng lúc, mỗi tác vụ viết thành lời chỉ dẫn** bằng nhiều cách. Gọi chung là **instruction tuning**. Mục tiêu không phải giỏi một tác vụ, mà là làm tốt cả những tác vụ chưa gặp khi huấn luyện.
+
+**FLAN** (Wei và cộng sự, 2021) lấy một mô hình decoder-only 137 tỉ tham số đã pre-train, rồi fine-tune trên 62 tập dữ liệu NLP, chia thành 12 cụm theo loại tác vụ. Mỗi tập có 10 mẫu lời chỉ dẫn viết tay, vài mẫu còn đảo ngược tác vụ (ví dụ thay vì phân loại cảm xúc của bài đánh giá phim, yêu cầu viết một bài đánh giá phim). Cách đo "chưa gặp" rất chặt: muốn đo trên suy diễn ngôn ngữ thì bỏ **cả cụm** suy diễn ngôn ngữ ra khỏi dữ liệu huấn luyện. Kết quả: trên tác vụ chưa gặp, FLAN zero-shot hơn GPT-3 175 tỉ zero-shot ở 20 trong 25 tập. Paper cũng nêu hai giới hạn. Instruction tuning giúp ít với tác vụ vốn đã có dạng "viết tiếp câu", như suy luận thường thức. Và với mô hình nhỏ, khoảng 8 tỉ tham số trở xuống, nó còn làm kết quả trên tác vụ chưa gặp tệ đi. Tác giả đoán là vì mô hình nhỏ dùng hết dung lượng cho các tác vụ huấn luyện.
+
+**T0** (Sanh và cộng sự, 2021, ICLR 2022) làm cùng ý với thiết kế khác: mô hình encoder-decoder T5 11 tỉ tham số, huấn luyện trên hỗn hợp nhiều tập có giám sát, mỗi tập viết lại bằng nhiều mẫu prompt lấy từ kho công khai P3. Tóm tắt của paper nêu T0 thường hơn những mô hình lớn gấp tới 16 lần trên một số tập chuẩn. Hai paper đo theo cách khác nhau, nên đừng so số giữa chúng. Điểm chung mới là bài học: **nhiều tác vụ, mỗi tác vụ nhiều cách diễn đạt, tất cả là cặp văn bản vào, văn bản ra**.
+
+**InstructGPT** (Ouyang và cộng sự, 2022) đi thêm một bước. Bước đầu tiên của họ là SFT: fine-tune GPT-3 trên **lời trình diễn** (demonstration), tức câu trả lời mẫu do người gán nhãn viết, cho khoảng 13 nghìn prompt lấy từ API và do chính người gán nhãn viết. Prompt từ API phần lớn là việc mở: theo Bảng 1 của paper (thống kê trên bộ prompt API), sinh nội dung chiếm 45.6%, hỏi đáp mở 12.4%, brainstorming 11.2%, trong khi phân loại chỉ 3.5% và hỏi đáp đóng 2.6%. Một chi tiết đáng nhớ: họ huấn luyện 16 epoch, loss trên tập kiểm định bắt đầu tăng sau epoch đầu, nhưng huấn luyện thêm vẫn làm điểm đánh giá của người tốt lên. Họ chọn mô hình cuối theo điểm của một mô hình phần thưởng, không theo loss. Đây là quan sát trong thiết lập của họ, không phải luật chung, nhưng nó nhắc rằng loss kiểm định (bài [Overfitting và Underfitting](/vi/ml/overfitting-underfitting/)) chưa chắc đo đúng điều bạn quan tâm. Hai bước sau của InstructGPT, mô hình phần thưởng và học tăng cường, thuộc bài [RLHF](/vi/llm/rlhf/).
+
+Về mặt toán, cả ba đều dùng chung một hàm mất mát với fine-tune một tác vụ. Chỗ khác nằm ở **dữ liệu**: trộn nhiều tác vụ và nhiều cách diễn đạt vào cùng một lần huấn luyện.
+
+### Định dạng dữ liệu: mọi tác vụ thành cặp văn bản
+
+Để trộn được nhiều tác vụ, mọi mẫu phải cùng một dạng: một **prompt** (đầu vào, có lời chỉ dẫn) và một **completion** (đầu ra mong muốn). Bảng dưới đưa năm tác vụ về dạng đó. Đây là cách minh họa của bài. Riêng dòng truy hồi, bài tự đặt ra để cho thấy một tác vụ phân loại cũng viết được thành văn bản; truy hồi theo nghĩa tìm tài liệu bằng embedding là chuyện của bài [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/).
+
+| Tác vụ | Prompt | Completion |
+|---|---|---|
+| Hỏi đáp (QA) | Đọc đoạn sau rồi trả lời. Đoạn: "Hà Nội là thủ đô của Việt Nam…" Câu hỏi: Thủ đô của Việt Nam là gì? | Hà Nội. |
+| Sinh code | Viết hàm Python trả về bình phương của x. | `def sq(x): return x * x` |
+| Tóm tắt | Tóm tắt trong một câu: "Trời mưa to nên trận bóng chiều nay bị hoãn…" | Trận bóng bị hoãn vì mưa. |
+| Truy hồi | Đoạn văn sau có trả lời được câu hỏi "Khi nào trận bóng diễn ra?" không? Đoạn: "…" Trả lời có hoặc không. | không |
+| Dịch | Dịch sang tiếng Anh: Chào buổi sáng. | Good morning. |
+
+Hai điều cần thêm khi làm dữ liệu thật. Một là viết **nhiều mẫu lời chỉ dẫn** cho mỗi tác vụ, như 10 mẫu mỗi tập của FLAN, để mô hình học ý của lời dặn chứ không học thuộc một câu cố định. Hai là chọn **cấu trúc lưu**. Thư viện TRL của Hugging Face nhận cặp `{"prompt": ..., "completion": ...}`, hoặc dạng hội thoại là một danh sách `messages` như ở API chat:
+
+```json
+{
+  "messages": [
+    {"role": "system", "content": "Trả lời ngắn."},
+    {"role": "user", "content": "Dịch sang tiếng Anh: Chào buổi sáng."},
+    {"role": "assistant", "content": "Good morning."}
+  ]
+}
+```
+
+### Chat template: biến hội thoại thành một chuỗi token
+
+Mô hình chỉ đọc **một** dãy token. Danh sách `messages` phải được ghép thành một chuỗi, có các **token điều khiển** đánh dấu ai đang nói. Quy tắc ghép đó gọi là **chat template**. Template đồ chơi của bài viết mỗi lượt thành `<|vai trò|> nội dung <|end|>`:
+
+```text
+<|system|> Trả lời ngắn. <|end|> <|user|> Dịch sang tiếng Anh: Chào buổi sáng. <|end|> <|assistant|> Good morning. <|end|>
+```
+
+Ba điều cần nhớ:
+
+- **Mỗi mô hình có template riêng.** Tài liệu Transformers đưa ví dụ hai bản fine-tune từ cùng một mô hình nền, một bản dùng `[INST] … [/INST]`, bản kia dùng `<|user|>` và `<|assistant|>`. Dùng template của mô hình này cho mô hình kia thì chất lượng tụt rõ. Trong thư viện `transformers`, hàm `apply_chat_template` của tokenizer làm việc ghép này theo đúng template của mô hình.
+- **Khi sinh thì mở sẵn lượt của assistant, khi huấn luyện thì không.** Lúc dùng, chuỗi đưa vào kết thúc bằng `<|assistant|>` để mô hình viết câu trả lời, thay vì viết tiếp lời người dùng. Trong `apply_chat_template`, đó là tham số `add_generation_prompt=True`. Lúc huấn luyện, chuỗi đã chứa sẵn cả câu trả lời, nên không thêm.
+- **Token kết thúc lượt là cách mô hình biết dừng.** Nếu mô hình chưa từng học sinh `<|end|>` (hay token **EOS**, end-of-sequence, tùy template), nó sẽ viết mãi.
+
+### Chỉ tính loss trên phần trả lời
+
+Một mẫu SFT là prompt $\mathbf{x}$ ghép với đáp án $\mathbf{y}$ thành một chuỗi $\mathbf{s} = (s_1, \dots, s_L)$. Ta muốn mô hình học $p(\mathbf{y} \mid \mathbf{x})$: đọc prompt, viết đáp án. Prompt thì lúc dùng thật luôn có sẵn, do người dùng gõ.
+
+Vậy có nên tính loss ở các vị trí thuộc prompt không? TRL mặc định là **không** với dữ liệu dạng prompt-completion. Lý do sau đây là lập luận của bài, tài liệu TRL chỉ nêu mặc định. Thứ nhất, đoán lại lời người dùng không phải việc ta cần. Thứ hai, prompt thường dài hơn đáp án nhiều: một bài báo 950 token kèm bản tóm tắt 50 token thì đáp án chỉ chiếm khoảng 5% số vị trí, và loss trung bình gần như chỉ đo việc đoán bài báo. Đây là một lựa chọn thiết kế, không phải luật: GPT-1 cố ý cộng loss trên văn bản đầu vào và thấy có lợi ở tập lớn, và TRL cũng cho bật tính loss trên cả chuỗi. Riêng dạng `messages` thì ngược lại: TRL mặc định tính loss trên cả chuỗi. Muốn chỉ chấm lời assistant thì đặt `assistant_only_loss=True`, và template phải có cặp từ khóa `{% generation %}` và `{% endgeneration %}` bao quanh lời của assistant.
+
+Gọi $\mathcal{A}$ là tập các vị trí thuộc đáp án, kể cả token kết thúc. Loss SFT là:
+
+$$
+\mathcal{L}_{\text{SFT}}(\boldsymbol{\theta}) = -\frac{1}{|\mathcal{A}|} \sum_{t \in \mathcal{A}} \ln p_{\boldsymbol{\theta}}(s_t \mid s_{<t})
+$$
+
+Đọc từng phần:
+
+- **$\ln p_{\boldsymbol{\theta}}(s_t \mid s_{<t})$** đúng là số hạng của loss pre-train ở bài trước. Mô hình vẫn đọc cả chuỗi, kể cả prompt, nên $s_{<t}$ chứa toàn bộ prompt.
+- **$\sum_{t \in \mathcal{A}}$** chỉ khác pre-train ở chỗ tổng chạy trên các vị trí của đáp án, không phải mọi vị trí.
+- **Chia $|\mathcal{A}|$**, số vị trí được tính, để loss là trung bình trên token đáp án, không phụ thuộc prompt dài hay ngắn. Với một batch, $\mathcal{A}$ gồm mọi vị trí đáp án của mọi mẫu, nên mẫu có đáp án dài đóng góp nhiều hơn. Tài liệu TRL viết công thức dạng tổng, còn log của trình huấn luyện ghi trung bình trên các token không bị che. Bài chọn dạng trung bình.
+
+**Cài đặt bằng nhãn $-100$.** Trong PyTorch, ta tạo mảng `labels` cùng cỡ với chuỗi token. Ở vị trí thuộc đáp án, nhãn là chính token đó. Ở vị trí thuộc prompt và phần **đệm** (padding, token thêm vào cuối để các chuỗi trong một batch dài bằng nhau), nhãn là $-100$. Hàm `F.cross_entropy` có tham số `ignore_index`, mặc định là $-100$: vị trí có nhãn này bị bỏ khỏi cả tổng lẫn mẫu số (với `reduction='mean'`, mặc định), đúng như $\mathcal{L}_{\text{SFT}}$. Còn một bước nữa, giống bài trước: **dịch một vị trí**, vì logit ở vị trí $t$ đoán token ở vị trí $t + 1$. Ba dòng này lấy từ ô PyTorch ở mục Ví dụ code:
+
+```python
+z = logits[:, :-1].reshape(-1, V)
+y = labels[:, 1:].reshape(-1)
+keep = y != -100
+```
+
+`logits[:, :-1]` bỏ logit ở vị trí cuối (không còn token nào sau nó để đoán), `labels[:, 1:]` bỏ nhãn đầu tiên (không có vị trí nào trước nó). Sau đó `F.cross_entropy(z, y)` cho đúng $\mathcal{L}_{\text{SFT}}$, với $\mathcal{A}$ là mọi vị trí đáp án của cả batch.
+
+Đừng nhầm nhãn $-100$ với mặt nạ nhân quả ở bài trước. Mặt nạ nhân quả che **đầu vào của attention**: vị trí $t$ không được nhìn về sau. Nhãn $-100$ che **đầu ra của loss**: vị trí đó vẫn được đọc, chỉ không bị chấm điểm. Giống chấm bài kiểm tra: học sinh đọc đề, nhưng chỉ phần học sinh viết mới được chấm.
+
+:::note[Ghi nhớ]
+GPT-1 fine-tune riêng từng tác vụ. GPT-2 và GPT-3 ghi tác vụ, có thể kèm ví dụ, vào đầu vào, không đổi tham số. Instruction tuning (FLAN, T0, bước SFT của InstructGPT) fine-tune trên nhiều tác vụ viết thành lời chỉ dẫn, để làm được cả tác vụ chưa gặp. Dữ liệu là cặp prompt và completion, ghép thành một chuỗi bằng chat template. Loss SFT là cross-entropy chỉ trên vị trí của đáp án: nhãn của prompt và phần đệm là $-100$, giữ nhãn của token kết thúc, và dịch một vị trí.
+:::
+
+### Giới hạn
+
+- **SFT chỉ bắt chước đáp án mẫu.** Nó không cho mô hình biết câu trả lời nào tốt hơn câu nào, chỉ đẩy xác suất về phía câu trả lời mẫu. Thêm tín hiệu ưa thích của người là việc của bài [RLHF](/vi/llm/rlhf/).
+- **Instruction tuning dạy cách làm theo yêu cầu, không chắc thêm được kiến thức.** FLAN giúp ít với tác vụ dạng viết tiếp câu, và còn làm hại mô hình nhỏ. Đừng kỳ vọng một lần SFT biến mô hình yếu thành mạnh.
+- **Fine-tune toàn bộ tham số tốn bộ nhớ GPU.** Cách chỉ học một phần nhỏ tham số, như LoRA, ở bài [Đánh giá mô hình và PEFT](/vi/llm/evaluation-peft/).
+
+## Minh họa
+
+Bảng dưới đặt bốn cách làm cạnh nhau. Hãy nhìn cột thứ hai: chỉ dòng đầu và dòng cuối là có cập nhật tham số. Dòng cuối dạy một lần cho nhiều tác vụ, còn dòng đầu dạy lại cho mỗi tác vụ. Hai dòng giữa không dạy gì thêm, chỉ đổi văn bản đầu vào.
+
+| Cách làm | Cập nhật tham số cho tác vụ? | Dữ liệu có nhãn | Cách báo cho mô hình biết tác vụ |
+|---|---|---|---|
+| GPT-1 (2018): fine-tune từng tác vụ | Có, mỗi tác vụ một bản mô hình | Hàng nghìn tới hàng trăm nghìn mẫu cho mỗi tác vụ | Lớp đầu ra riêng, đầu vào xếp thành chuỗi có token phân cách |
+| GPT-2 (2019): zero-shot | Không | Không cần (dịch, hỏi đáp có kèm vài cặp ví dụ) | Gợi ý bằng chữ trong đầu vào, như `TL;DR:` |
+| GPT-3 (2020): one-shot, few-shot | Không | Vài ví dụ, đặt trong ngữ cảnh | Lời mô tả và ví dụ trong ngữ cảnh |
+| FLAN, T0, bước SFT của InstructGPT (2021–2022) | Có, một lần cho nhiều tác vụ | Nhiều tập dữ liệu, viết bằng nhiều mẫu lời chỉ dẫn; hoặc câu trả lời mẫu do người viết | Lời chỉ dẫn bằng ngôn ngữ tự nhiên, kể cả cho tác vụ chưa gặp |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026: ô chat template với Python 3.14 và NumPy 2.4 (bản có trong Pyodide), ô loss có mask với Python 3.14 và PyTorch 2.14 trên CPU. Ô đầu chạy ngay trên trang. Ô thứ hai cần PyTorch nên chạy trên máy bạn. Hai ô chạy độc lập.
+
+### Chat template đồ chơi và nhãn −100
+
+Ô dưới đây dựng template đồ chơi của mục Lý thuyết. Hàm `render` ghép `messages` thành danh sách token (tách theo khoảng trắng cho dễ đọc) và đánh dấu token nào thuộc lời của assistant. Ô in chuỗi dùng khi sinh, rồi in từng vị trí khi huấn luyện: token đang đọc, và nhãn mà vị trí đó phải đoán.
+
+<PythonRunner code={labelMaskCode} title="Chat template đồ chơi và nhãn -100" />
+
+Đọc kết quả:
+
+- **Dòng đầu** là chuỗi đưa vào khi sinh: chỉ có `system` và `user`, kết thúc bằng `<|assistant|>` nhờ `add_generation_prompt=True`. Mô hình sẽ viết tiếp từ đó.
+- **Bảng** là chuỗi khi huấn luyện, đã dịch một vị trí. Mọi vị trí đọc `system` và `user` có nhãn $-100$. Vị trí đọc `<|assistant|>` phải đoán "Đó", rồi "là", "Paris.", và cuối cùng là `<|end|>`.
+- **`scored: 4 / 17`**: chỉ 4 trong 17 vị trí được tính loss. Vị trí cuối cùng được chấm là vị trí phải sinh `<|end|>`, nên mô hình học được lúc nào dừng.
+
+### Loss có mask trên một batch ba tác vụ
+
+Ô này làm đúng việc của một bước SFT trên một batch nhỏ, bằng PyTorch. Ba cặp phỏng theo bảng định dạng dữ liệu: dịch, tóm tắt, sinh code. Mỗi byte UTF-8 là một token, thêm một token EOS, nên $V = 257$. Mỗi chuỗi là prompt, một dấu xuống dòng, đáp án, rồi EOS. Chuỗi ngắn được đệm bằng EOS cho dài bằng chuỗi dài nhất. Mô hình là một lớp embedding và một lớp tuyến tính, **chưa huấn luyện**: ô chỉ kiểm cách tính loss, không huấn luyện gì.
+
+<LocalCode
+  code={maskedLossCode}
+  title="Loss chỉ trên phần trả lời, batch ba tác vụ"
+  packages={['torch']}
+  hardware="CPU là đủ, chạy trong vài giây"
+  sampleVaries={false}
+>
+
+```text
+shape: (3, 103)
+counted per row: [14, 34, 28]
+counted: 76 / 306
+loss: 5.7787, by hand: 5.7787, ln V: 5.5491
+mask by pad id: 73 counted
+all -100: nan
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **`shape: (3, 103)`**: 3 chuỗi, cùng dài 103 token sau khi đệm. Chuỗi dài nhất là cặp tóm tắt: 69 byte prompt (kể cả dấu xuống dòng) và 34 token đáp án.
+- **`counted per row: [14, 34, 28]`**: mỗi hàng được tính đúng số byte của đáp án cộng 1 cho EOS. "Good morning." có 13 byte. "Trận bóng bị hoãn vì mưa." có 25 ký tự nhưng 33 byte, vì mỗi chữ có dấu chiếm 2 hoặc 3 byte. Đoạn code có 27 byte.
+- **`counted: 76 / 306`**: sau khi dịch một vị trí, batch có $3 \times 102 = 306$ vị trí, nhưng chỉ 76, khoảng 25%, được tính loss. Phần còn lại là prompt và phần đệm.
+- **`loss` bằng `by hand`**: `ignore_index` cho đúng kết quả của việc tự lọc các vị trí có nhãn $-100$ rồi lấy trung bình trên cả 76 vị trí của batch, nên hàng tóm tắt (34 vị trí) nặng hơn hàng dịch (14 vị trí). Loss gần $\ln V = 5.5491$ vì mô hình chưa học gì và gần như đoán đều. Đừng đọc gì thêm từ con số loss này: nó không cho biết che prompt tốt hơn hay kém hơn. Muốn biết thì phải huấn luyện thật và đánh giá câu trả lời.
+- **`mask by pad id: 73`**: nếu che theo giá trị token (`ids == EOS`) thay vì theo vị trí, cả 3 EOS thật của đáp án cũng bị che, còn 73 thay vì 76. Hộp thứ hai ở mục Lỗi hay gặp nói hậu quả.
+- **`all -100: nan`**: khi mọi nhãn trong batch là $-100$, mẫu số bằng 0 và loss là `nan`.
+
+## Lỗi hay gặp
+
+:::caution[Quên dịch một vị trí]
+Nếu ghép `logits` và `labels` ở cùng chỉ số, vị trí $t$ phải đoán chính token $t$ mà nó đang đọc. Mô hình học cách chép lại đầu vào, loss xuống gần 0 rất nhanh, nhưng khi sinh văn bản thì vô dụng. Code vẫn chạy êm vì kích thước không đổi. Luôn ghép `logits[:, :-1]` với `labels[:, 1:]`. Một số thư viện tự dịch bên trong hàm loss của mô hình. Khi đó, bạn truyền `labels` chưa dịch, và đừng dịch thêm lần nữa: đọc tài liệu của đúng hàm bạn gọi.
+:::
+
+:::caution[Che mất token kết thúc]
+Mô hình chỉ học cách dừng nếu vị trí phải sinh EOS (hay token kết thúc lượt) được tính loss. Lỗi hay gặp nhất là dùng EOS làm token đệm, rồi che mọi vị trí có `ids == eos_id`: EOS thật ở cuối đáp án bị che cùng phần đệm, như dòng `mask by pad id` ở ô PyTorch. Mô hình fine-tune xong trả lời đúng nhưng không biết dừng. Hãy che theo **vị trí** (độ dài prompt và độ dài thật của chuỗi), không theo giá trị token. Một cách sửa khác là dùng token đệm riêng, khác EOS. Lỗi họ hàng là cắt chuỗi theo độ dài tối đa làm mất hết phần đáp án. TRL mặc định `max_length=1024` và cắt phần cuối, đúng chỗ đáp án nằm, nên prompt dài dễ đẩy đáp án ra ngoài. Khi đó mọi nhãn của mẫu là $-100$ và mẫu đó không đóng góp gì; nếu cả batch như vậy thì loss ra `nan`. Kiểm số vị trí được tính trước khi huấn luyện.
+:::
+
+:::caution[Sai chat template]
+Mỗi mô hình được fine-tune với một template riêng. Tự ghép chuỗi bằng một định dạng khác, dùng template của mô hình khác, hay quên `add_generation_prompt=True` khi sinh đều làm câu trả lời tệ đi, mà không có lỗi nào được báo. Lỗi thứ hai là thêm token đặc biệt hai lần: template đã có sẵn token bắt đầu, nếu bạn lấy chuỗi đã ghép rồi tách token với tùy chọn mặc định, tokenizer có thể thêm token bắt đầu lần nữa. Dùng `apply_chat_template` của chính mô hình, và in chuỗi đã ghép ra xem một lần.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- GPT-1 (2018) pre-train rồi fine-tune riêng từng tác vụ, kèm mục tiêu phụ là loss mô hình ngôn ngữ. GPT-2 (2019) viết tác vụ vào đầu vào, mô hình hóa $p(\text{output} \mid \text{input}, \text{task})$, nhưng zero-shot còn yếu. GPT-3 (2020) học trong ngữ cảnh từ vài ví dụ, không đổi tham số.
+- Instruction tuning fine-tune một lần trên nhiều tác vụ, mỗi tác vụ nhiều cách diễn đạt (FLAN, T0), hoặc trên câu trả lời mẫu do người viết (bước SFT của InstructGPT), để mô hình làm theo cả lời dặn chưa gặp. Nó không thêm kiến thức và có thể làm hại mô hình nhỏ.
+- Mọi tác vụ thành cặp prompt và completion. Chat template ghép hội thoại thành một chuỗi có token điều khiển, riêng cho từng mô hình. Khi sinh thì mở sẵn lượt của assistant.
+- Loss SFT $\mathcal{L}_{\text{SFT}} = -\frac{1}{|\mathcal{A}|}\sum_{t \in \mathcal{A}} \ln p_{\boldsymbol{\theta}}(s_t \mid s_{<t})$ chỉ tính trên đáp án: nhãn của prompt và phần đệm là $-100$, giữ nhãn của token kết thúc, dịch một vị trí.
+
+**Đọc thêm:**
+
+- Radford, A., Narasimhan, K., Salimans, T., Sutskever, I. (2018). [*Improving Language Understanding by Generative Pre-Training*](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf) (PDF), báo cáo kỹ thuật của OpenAI, mục 3. GPT-1: fine-tune có mục tiêu phụ, và cách xếp đầu vào có cấu trúc thành một chuỗi.
+- Radford, A., Wu, J., Child, R., Luan, D., Amodei, D., Sutskever, I. (2019). [*Language Models are Unsupervised Multitask Learners*](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) (PDF), báo cáo kỹ thuật của OpenAI, mục 2 và 3.5–3.8. GPT-2: ý $p(\text{output} \mid \text{input}, \text{task})$, cách nhắc tóm tắt, dịch, hỏi đáp bằng chữ, và các giới hạn tác giả tự nêu.
+- Brown, T. B., Mann, B., Ryder, N., và cộng sự (2020). [*Language Models are Few-Shot Learners*](https://arxiv.org/abs/2005.14165), arXiv:2005.14165, mục 2. GPT-3: ba thiết lập zero-shot, one-shot, few-shot, so với fine-tune.
+- Wei, J., Bosma, M., Zhao, V. Y., và cộng sự (2021). [*Finetuned Language Models Are Zero-Shot Learners*](https://arxiv.org/abs/2109.01652), arXiv:2109.01652. FLAN: instruction tuning, cách bỏ cả cụm tác vụ khi đo, và các giới hạn.
+- Sanh, V., Webson, A., Raffel, C., Bach, S. H., và cộng sự (2021). [*Multitask Prompted Training Enables Zero-Shot Task Generalization*](https://arxiv.org/abs/2110.08207), arXiv:2110.08207, ICLR 2022. T0 và kho prompt P3.
+- Ouyang, L., Wu, J., Jiang, X., và cộng sự (2022). [*Training language models to follow instructions with human feedback*](https://arxiv.org/abs/2203.02155), arXiv:2203.02155, mục 3. InstructGPT: dữ liệu SFT, Bảng 1, và quan sát về loss kiểm định. Phần còn lại dành cho bài RLHF.
+- Hugging Face. [*Chat templates*](https://huggingface.co/docs/transformers/v5.20.2/en/chat_templating) (Transformers 5.20.2) và [*SFT Trainer*](https://huggingface.co/docs/trl/v1.16.0/en/sft_trainer) (TRL 1.16.0), tài liệu chính thức, đọc tháng 10/2026. `apply_chat_template`, `add_generation_prompt`, các dạng bộ dữ liệu và các tùy chọn tính loss chỉ trên phần trả lời.
+
+<LessonProgress />

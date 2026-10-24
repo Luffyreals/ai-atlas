@@ -40,6 +40,8 @@ Mốc M2 (bài mẫu) xong: bài `ml/linear-regression` có bản vi (người d
 
 Mốc M3 (đang làm): 4 bài ML còn lại, **chỉ bản vi**, bản en làm sau MVP (`docs/mvp.md` quyết định 43). Đã xong bản vi (người dùng đã duyệt) của `ml/ml-overview` (2 hình SVG tĩnh, `docs/architecture/viz.md` mục 8) `ml/overfitting-underfitting` (VIZ `PolyFitViz`, bộ dữ liệu `sine`, viz.md mục 9) và `ml/regularization` (VIZ `RegularizationViz`, viz.md mục 10; đồ thị tĩnh L1/L2, viz.md mục 11). Ba VIZ dùng chung `src/components/viz/kit/` (`Swatch`) và `src/lib/viz/axis.ts`. Bài kế tiếp: `ml/gradient-descent`.
 
+Phần LLM (Phần 5c, làm song song ở nhánh `llm-lessons`, worktree `ai-atlas-llm`): xong bản vi của cả 23 bài, **chờ người dùng duyệt**, bản en làm sau (`docs/mvp.md` quyết định 53, 54, 59–61; thiết kế `docs/architecture/llm-lessons.md`). Code minh họa không chạy trên trang dùng component `LocalCode` (SDK `openai`, đổi `base_url`, key đọc từ biến môi trường, không bao giờ ghi key vào code); kiểm chứng bằng `.venv-llm` (`scripts/requirements-llm.txt`) và file `.env.llm` do người dùng tự tạo. Có VIZ `SamplingViz` và 9 hình tĩnh LLM (kit FIG mở rộng, `src/lib/figures/layout.ts`).
+
 ## Công nghệ
 
 Astro + Starlight (có i18n), MDX, React (Astro islands), KaTeX (remark-math + rehype-katex), Pyodide trong Web Worker, Pagefind, Cloudflare Pages, tên miền riêng.

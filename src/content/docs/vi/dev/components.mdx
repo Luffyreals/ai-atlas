@@ -32,6 +32,7 @@ quiz:
 ---
 
 import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
 import Prerequisites from '@components/Prerequisites.astro';
 import PythonRunner from '@components/PythonRunner.astro';
 import Quiz from '@components/Quiz.astro';
@@ -41,6 +42,8 @@ import plotCode from '@code/dev/plot.vi.py?raw';
 import errorCode from '@code/dev/error.vi.py?raw';
 import slowCode from '@code/dev/slow.vi.py?raw';
 import inputCode from '@code/dev/input.vi.py?raw';
+import localChatCode from '@code/dev/local-chat.vi.py?raw';
+import localAppCode from '@code/dev/local-app.vi.py?raw';
 
 Trang này chỉ để kiểm tra hiển thị công thức và component. Nó không thuộc lộ trình.
 
@@ -130,3 +133,18 @@ Vòng lặp không tự dừng. Sau 10 giây có gợi ý bấm Dừng:
 Đọc dữ liệu nhập bằng `input()`. Bạn sửa được hai dòng trong ô dữ liệu nhập:
 
 <PythonRunner code={inputCode} stdin={'Lan\n20'} />
+
+## Code chạy trên máy bạn
+
+Hai ô dưới đây không chạy trên trang: bạn sao chép code rồi chạy trên máy mình. Danh sách biến môi trường đọc thẳng từ code. Ô thứ hai có tên file, lệnh chạy và phần cứng riêng, và dòng đầu của nó là comment `# app.py`.
+
+<LocalCode code={localChatCode} title="Gọi một mô hình chat" packages={['openai']} />
+
+<LocalCode
+  code={localAppCode}
+  title="Một ứng dụng Streamlit"
+  file="app.py"
+  command="streamlit run app.py"
+  packages={['streamlit']}
+  hardware="Máy tính bình thường, không cần GPU"
+/>

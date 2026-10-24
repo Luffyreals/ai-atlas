@@ -21,3 +21,16 @@ export interface XYDataset {
   y: DatasetColumn;
   rows: readonly Row[]; // table order; the Python arrays list the same numbers in the same order
 }
+
+/**
+ * Logits of one next-token step, for SamplingViz (docs/architecture/llm-lessons.md, section 4.6.1). Not x/y data,
+ * so not in DATASETS (that registry feeds DatasetTable). The lesson code copies `logits` under "# logits: <id>".
+ */
+export interface TokenDistribution {
+  id: string; // the "# logits: <id>" marker in src/code/
+  lessons: readonly LessonId[]; // lessons that show it; those with code must carry the marker
+  context: Localized; // the text before the next token, e.g. { vi: 'Hôm nay trời rất', en: 'The weather today is very' }
+  tokens: Localized<readonly string[]>; // same length as logits, most likely first
+  logits: readonly number[]; // fixed, shared by both locales, so the numbers match the Python cell
+  description: Localized; // 1–2 sentences for screen readers
+}

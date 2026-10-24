@@ -251,6 +251,11 @@ ai-atlas/
 - [ ] Machine Learning (14 bài)
 - [ ] Deep Learning (8 bài)
 - [ ] NLP, CV, LLM (46 bài)
+  - [x] LLM (Phần 5c, 23 bài): xong bản vi, **chờ người dùng duyệt**; bản en làm sau ([quyết định 53](docs/mvp.md))
+
+> **Trạng thái phần LLM (24/10/2026, nhánh `llm-lessons`, worktree `ai-atlas-llm`, chưa commit):** 23 bài vi theo biến thể template LLM ([quyết định 53, 54, 59–61](docs/mvp.md), thiết kế [docs/architecture/llm-lessons.md](docs/architecture/llm-lessons.md)). Có component `LocalCode` (code minh họa chạy trên máy người đọc), VIZ `SamplingViz` (bài `text-api`, `build-first-llm`), 9 hình tĩnh trên 14 bài, e2e chia 2 shard trong CI, khoảng 280 thuật ngữ mới trong glossary. Cổng kiểm tra: `npm run check` 0 lỗi 0 cảnh báo, `npm test` 1307/1307, `npm run build` 0 `[WARN]`, `npm run test:e2e` 1029 qua (201 bỏ qua có điều kiện), 0 lỗi. Báo cáo: [docs/progress/2026-10-24-llm.md](docs/progress/2026-10-24-llm.md).
+>
+> **Còn tồn:** người dùng duyệt 23 bài và các câu hỏi về hình; file `.env.llm` chưa có nên ô gọi API mới chạy khô, chưa có kết quả mẫu; link `ml/gradient-descent` trong bài `debugging-language-models` chờ gộp nhánh Gradient Descent; bản en 23 bài.
 
 Mỗi phần viết xong bản tiếng Việt thì deploy luôn, rồi dịch sang tiếng Anh. Website dùng được ngay, không cần đợi xong hết.
 

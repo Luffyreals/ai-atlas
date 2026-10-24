@@ -343,7 +343,7 @@ describe('vi and en files of the same page', () => {
   it(`${DEMO} (control): the parser sees its real structure, and vi and en match`, () => {
     const shape = lessonShape(read('vi', DEMO));
     expect(shape.components).toMatchObject({ Prerequisites: 2, PythonRunner: 5, Quiz: 2, LessonProgress: 1, RoadmapMap: 1 });
-    expect(shape.imports).toHaveLength(10);
+    expect(shape.imports).toHaveLength(13);
     expect(shape.quiz).toHaveLength(3);
     expect(shape.displayMath).toBe(1);
     expect(compareLessonPair(read('vi', DEMO), read('en', DEMO))).toEqual([]);

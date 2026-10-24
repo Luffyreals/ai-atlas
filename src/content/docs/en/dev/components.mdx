@@ -32,6 +32,7 @@ quiz:
 ---
 
 import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
 import Prerequisites from '@components/Prerequisites.astro';
 import PythonRunner from '@components/PythonRunner.astro';
 import Quiz from '@components/Quiz.astro';
@@ -41,6 +42,8 @@ import plotCode from '@code/dev/plot.en.py?raw';
 import errorCode from '@code/dev/error.en.py?raw';
 import slowCode from '@code/dev/slow.en.py?raw';
 import inputCode from '@code/dev/input.en.py?raw';
+import localChatCode from '@code/dev/local-chat.en.py?raw';
+import localAppCode from '@code/dev/local-app.en.py?raw';
 
 This page only checks how formulas and components render. It is not part of the roadmap.
 
@@ -130,3 +133,18 @@ The loop never stops on its own. After 10 seconds, a hint suggests pressing Stop
 Reading input with `input()`. You can edit the two lines in the input box:
 
 <PythonRunner code={inputCode} stdin={'Lan\n20'} />
+
+## Code that runs on your machine
+
+The two blocks below do not run on the page: you copy the code and run it on your own machine. The list of environment variables is read straight from the code. The second block has its own file name, run command and hardware, and its first line is the comment `# app.py`.
+
+<LocalCode code={localChatCode} title="Call a chat model" packages={['openai']} />
+
+<LocalCode
+  code={localAppCode}
+  title="A Streamlit app"
+  file="app.py"
+  command="streamlit run app.py"
+  packages={['streamlit']}
+  hardware="An ordinary computer, no GPU needed"
+/>

@@ -1,12 +1,13 @@
 // Shared lesson datasets (docs/architecture/viz.md, sections 2.5, 4.1, 6 task V0):
 // - every dataset in DATASETS is well formed;
-// - the lesson code under src/code/ carries the same numbers, right under "# dataset: <id>".
+// - the lesson code under src/code/ carries the same numbers, right under "# dataset: <id>" (and "# logits: <id>").
 // The .py reader is a pure function over a string, tested first on in-memory sources.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { DATASETS } from '../../src/data/datasets/index';
+import { TOKEN_DISTRIBUTIONS } from '../../src/data/datasets/next-token';
 import type { Row, XYDataset } from '../../src/data/datasets/types';
 import { LOCALES, type Localized } from '../../src/data/roadmap';
 import { getLesson } from '../../src/lib/roadmap';
@@ -286,4 +287,96 @@ describe('src/code/ carries the dataset numbers', () => {
       ).not.toEqual([]);
     });
   }
+});
+
+// --- "# logits: <id>" (docs/architecture/llm-lessons.md, section 4.6.1): the same kind of marker for the logits
+// of a TokenDistribution, which is not x/y data and so not in DATASETS. The next code line is one array.
+
+const LOGITS_MARKER_LIKE = /^\s*#\s*logits\s*:/i;
+const LOGITS_MARKER = /^\s*# logits: (\S+)$/;
+
+/** Checks the line under every "# logits: <id>" marker of one Python source. */
+function checkPythonLogits(
+  file: string,
+  source: string,
+  registry: Readonly<Record<string, { logits: readonly number[] }>>,
+): PythonCheck {
+  const lines = source.replace(/\r\n?/g, '\n').split('\n');
+  const markers: string[] = [];
+  const errors: string[] = [];
+  const at = (index: number, message: string) => errors.push(`${file}:${index + 1}: ${message}`);
+  lines.forEach((line, index) => {
+    if (!LOGITS_MARKER_LIKE.test(line)) return;
+    const id = LOGITS_MARKER.exec(line.trimEnd())?.[1];
+    if (!id) return at(index, `write the marker exactly as "# logits: <id>"; found "${line.trim()}"`);
+    const entry = Object.hasOwn(registry, id) ? registry[id] : undefined;
+    if (!entry) {
+      return at(index, `"# logits: ${id}" names unknown logits (known: ${Object.keys(registry).join(', ') || 'none'})`);
+    }
+    markers.push(id);
+    const text = lines[index + 1] ?? '';
+    const match = ARRAY_LINE.exec(text);
+    if (!match) return at(index + 1, `expected "<name> = np.array([...])" on one line, numbers only; found "${text.trim()}"`);
+    const items = (match[2] ?? '').split(',').map((item) => item.trim());
+    const bad = items.filter((item) => !NUMBER.test(item));
+    if (bad.length > 0) return at(index + 1, `not a plain number: ${bad.map((item) => `"${item}"`).join(', ')}`);
+    if (items.length !== entry.logits.length) {
+      return at(index + 1, `${items.length} numbers, "${id}" has ${entry.logits.length} logits`);
+    }
+    items.forEach((item, i) => {
+      if (Number(item) !== entry.logits[i]) at(index + 1, `[${i}] is ${item}, "${id}" has ${String(entry.logits[i])}`);
+    });
+  });
+  return { markers, errors };
+}
+
+describe('checkPythonLogits (in-memory sources)', () => {
+  const REGISTRY = { demo: { logits: [3, 2.5, -1] } };
+  const GOOD = ['import numpy as np', '# logits: demo', 'z = np.array([3.0, 2.5, -1])  # most likely first'];
+  const check = (lines: string[]) => checkPythonLogits('demo.vi.py', lines.join('\n'), REGISTRY);
+
+  it('accepts the same numbers in the same order on the next line', () => {
+    expect(check(GOOD)).toEqual({ markers: ['demo'], errors: [] });
+  });
+
+  it('reports a number off, a missing number, a split line, an unknown id or a sloppy marker', () => {
+    expect(check([GOOD[0]!, GOOD[1]!, 'z = np.array([3.0, 2.6, -1])']).errors).toEqual([
+      'demo.vi.py:3: [1] is 2.6, "demo" has 2.5',
+    ]);
+    expect(check([GOOD[0]!, GOOD[1]!, 'z = np.array([3.0, 2.5])']).errors).toEqual([
+      'demo.vi.py:3: 2 numbers, "demo" has 3 logits',
+    ]);
+    expect(check([GOOD[0]!, GOOD[1]!, 'z = np.array([3.0,', '2.5, -1])']).errors[0]).toMatch(/^demo\.vi\.py:3: expected/);
+    expect(check([GOOD[0]!, '# logits: other', GOOD[2]!]).errors[0]).toMatch(/^demo\.vi\.py:2: "# logits: other" names unknown/);
+    expect(check([GOOD[0]!, '#logits: demo', GOOD[2]!]).errors[0]).toMatch(/^demo\.vi\.py:2: write the marker exactly/);
+  });
+});
+
+describe('src/code/ carries the next-token logits', () => {
+  const results = listPythonFiles().map((file) => ({
+    file,
+    ...checkPythonLogits(`src/code/${file}`, readFileSync(join(CODE_DIR, file), 'utf8'), TOKEN_DISTRIBUTIONS),
+  }));
+
+  it.each(results.filter((r) => r.markers.length > 0 || r.errors.length > 0).map((r) => [r.file, r] as const))(
+    '%s',
+    (_file, result) => {
+      expect(result.errors).toEqual([]);
+    },
+  );
+
+  // Not every lesson that shows the logits has code for them (build-first-llm only shows SamplingViz), so at
+  // least one published lesson of `lessons` must carry the marker in a .vi.py.
+  it.each(Object.values(TOKEN_DISTRIBUTIONS).map((d) => [d.id, d] as const))(
+    '%s: a published lesson of its list has a .vi.py with the marker',
+    (id, distribution) => {
+      for (const lessonId of distribution.lessons) expect(getLesson(lessonId), lessonId).toBeDefined();
+      const published = distribution.lessons.filter((lessonId) => getLesson(lessonId)?.status.vi === 'published');
+      if (published.length === 0) return;
+      const carriers = results.filter(
+        (r) => r.file.endsWith('.vi.py') && r.markers.includes(id) && published.some((l) => r.file.startsWith(`${l}/`)),
+      );
+      expect(carriers.map((r) => r.file)).not.toEqual([]);
+    },
+  );
 });

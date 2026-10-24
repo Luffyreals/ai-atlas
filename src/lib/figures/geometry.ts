@@ -76,14 +76,28 @@ export function arrowHead(from: Pt, to: Pt, size: number = ARROW_HEAD): string {
 const MATH_SYMBOL = /^[A-Za-z\u0391-\u03A1\u03A3-\u03A9\u03B1-\u03C1\u03C3-\u03C9]$/u;
 /** 1–2 digits or Latin letters. */
 const MATH_SUB = /^[A-Za-z0-9]{1,2}$/;
-/** Digits, spaces and a few math signs: no words can hide here (viz.md section 11.3). */
-const MATH_AFTER = /^[0-9 =+\u2212\-.,<>\u2264\u2265()]+$/u;
+/** Digits, spaces and a few math signs (\u00d7 for "\u00d7 N", llm-lessons.md 2.9.2): no words can hide here (viz.md 11.3). */
+const MATH_AFTER = /^[0-9 =+\u2212\-.,<>\u2264\u2265()\u00d7]+$/u;
+
+/**
+ * A short math label: the props of FigMath, and the `math` row of FigNode (viz.md 11.3, llm-lessons.md 2.9.2).
+ * `bold`: upright bold, the site's \mathbf for vectors and matrices (x, W); otherwise the symbol is italic.
+ * `before` and `after`: math characters only, upright, before and after the symbol.
+ */
+export interface MathLabel {
+  symbol: string;
+  sub?: string;
+  after?: string;
+  before?: string;
+  bold?: boolean;
+}
 
 /**
  * Throws unless a FigMath label is math, not words: `symbol` one Latin or Greek letter, `sub` 1–2 digits or
- * Latin letters, `after` only digits, spaces and = + − - . , < > ≤ ≥ ( ). Words belong in src/data/figures/.
+ * Latin letters, `after` and `before` only digits, spaces and = + − - . , < > ≤ ≥ ( ) ×. Words belong in
+ * src/data/figures/.
  */
-export function checkMathLabel(symbol: string, sub?: string, after?: string): void {
+export function checkMathLabel(symbol: string, sub?: string, after?: string, before?: string): void {
   if (!MATH_SYMBOL.test(symbol)) {
     throw new Error(`checkMathLabel: symbol must be one Latin or Greek letter, got "${symbol}".`);
   }
@@ -91,6 +105,84 @@ export function checkMathLabel(symbol: string, sub?: string, after?: string): vo
     throw new Error(`checkMathLabel: sub must be 1–2 digits or Latin letters, got "${sub}".`);
   }
   if (after !== undefined && (!after.trim() || !MATH_AFTER.test(after))) {
-    throw new Error(`checkMathLabel: after may hold only digits, spaces and = + − - . , < > ≤ ≥ ( ), got "${after}".`);
+    throw new Error(`checkMathLabel: after may hold only digits, spaces and = + − - . , < > ≤ ≥ ( ) ×, got "${after}".`);
   }
+  if (before !== undefined && (!before.trim() || !MATH_AFTER.test(before))) {
+    throw new Error(`checkMathLabel: before may hold only digits, spaces and = + − - . , < > ≤ ≥ ( ) ×, got "${before}".`);
+  }
+}
+
+/**
+ * Text rows of a box, stacked and centred in it: the centre y of each row, in order, and the least box height
+ * that holds them with NODE_PADDING above and below. `sizes` are the rows' font sizes (FigNode: a math row,
+ * then main lines, then small lines).
+ */
+export function nodeRows(y: number, height: number, sizes: readonly number[]): { centres: number[]; minHeight: number } {
+  if (sizes.length === 0) throw new Error('nodeRows: needs at least one row.');
+  const textHeight = sizes.reduce((sum, size) => sum + size * LINE_HEIGHT, 0);
+  const middle = y + height / 2;
+  return {
+    centres: stackOffsets(sizes).map((offset) => round1(middle + offset)),
+    minHeight: round1(textHeight + 2 * NODE_PADDING),
+  };
+}
+
+/**
+ * What a FigNode holds, checked before it is drawn (llm-lessons.md 2.9.3): null when fine, else the fault. A
+ * box needs a main line or a math row; small lines need a main line; at most MAX_NODE_LINES rows; no empty
+ * line. A `bare` box (a layer bar, a cell) holds no words at all: no lines, small lines or math row.
+ */
+export function nodeContentError(
+  main: readonly string[],
+  small: readonly string[],
+  hasMath: boolean,
+  bare: boolean,
+): string | null {
+  if (bare) {
+    return main.length > 0 || small.length > 0 || hasMath ? 'a bare box takes no lines, small lines or math row.' : null;
+  }
+  if (main.length === 0 && !hasMath) return 'needs a main line or a math row.';
+  if (main.length === 0 && small.length > 0) return 'small lines need a main line above them.';
+  const rows = main.length + small.length + (hasMath ? 1 : 0);
+  if (rows > MAX_NODE_LINES) return `at most ${MAX_NODE_LINES} lines, got ${rows}.`;
+  if ([...main, ...small].some((line) => !line.trim())) return 'has an empty line.';
+  return null;
+}
+
+/**
+ * A connector through `points` (from, bends, to): the polyline's points and its head, as SVG attributes
+ * (FigArrow, llm-lessons.md 2.9.3). The head sits on the last segment, at `to`, and the line stops 1 unit
+ * inside it, so no stroke pokes past the tip. Throws when the last segment is shorter than the head. With
+ * head = false the line runs to `to` and there is no head.
+ */
+export function arrowParts(points: readonly Pt[], head: boolean): { line: string; head: string | null } {
+  if (points.length < 2) throw new Error('arrowParts: needs at least two points.');
+  const to = points[points.length - 1]!;
+  const last = points[points.length - 2]!;
+  if (head && Math.hypot(to[0] - last[0], to[1] - last[1]) < ARROW_HEAD) {
+    throw new Error(`arrowParts: the last segment ${last.join(',')} → ${to.join(',')} is shorter than its head (${ARROW_HEAD}).`);
+  }
+  const lineEnd = head ? pointBefore(last, to, ARROW_HEAD - 1) : to;
+  return {
+    line: [...points.slice(0, -1), lineEnd].map(([x, y]) => `${round1(x)},${round1(y)}`).join(' '),
+    head: head ? arrowHead(last, to) : null,
+  };
+}
+
+/** Most labels in one FigText row (llm-lessons.md 2.9.3): the names over a row of columns. */
+export const MAX_ROW_LABELS = 8;
+
+/**
+ * Where FigText draws each of `count` lines: stacked and centred on y at x (at most MAX_NODE_LINES lines), or,
+ * given `xs`, side by side on y, line i at xs[i] (at most MAX_ROW_LABELS): one <text> for the names over a
+ * row of columns instead of one each (llm-lessons.md 2.9.3). Throws on a count the mode does not allow.
+ */
+export function textLinePositions(x: number, y: number, count: number, fontSize: number, xs?: readonly number[]): Pt[] {
+  if (xs !== undefined) {
+    if (xs.length !== count) throw new Error(`textLinePositions: ${count} lines need ${count} xs, got ${xs.length}.`);
+    if (count < 1 || count > MAX_ROW_LABELS) throw new Error(`textLinePositions: a row takes 1–${MAX_ROW_LABELS} lines, got ${count}.`);
+    return xs.map((at) => [round1(at), round1(y)]);
+  }
+  if (count < 1 || count > MAX_NODE_LINES) throw new Error(`textLinePositions: needs 1–${MAX_NODE_LINES} lines, got ${count}.`);
+  return lineOffsets(count, fontSize).map((offset) => [round1(x), round1(y + offset)]);
 }

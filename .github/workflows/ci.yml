@@ -1,4 +1,5 @@
-# CI: type check, unit tests and build (verify), then end-to-end tests (e2e).
+# CI: type check, unit tests and build (verify), then end-to-end tests (e2e) in 2 shards that reuse
+# the dist/ built by verify (docs/architecture/llm-lessons.md section 2.10, E3).
 # Runs the same commands as the "Lệnh" table in CLAUDE.md.
 name: CI
 
@@ -70,11 +71,26 @@ jobs:
             exit 1
           fi
 
+      # Build once: the e2e shards download this dist/ and only run `astro preview`.
+      # dist/ has no dotfiles (checked 10/2026), so include-hidden-files stays at its default (false).
+      - name: Upload dist
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          retention-days: 3
+          if-no-files-found: error
+
   e2e:
-    name: E2E (Playwright)
+    name: E2E (Playwright, shard ${{ matrix.shard }}/2)
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      # One failing shard must not cancel the other: each shard reports its own failures.
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -94,17 +110,27 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps --only-shell chromium
 
-      # playwright.config.ts builds the site and starts `astro preview` itself.
+      - name: Download dist
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+
+      # E2E_PREBUILT=1: playwright.config.ts skips the build and only starts `astro preview` on dist/.
+      # fullyParallel in the config splits the shards test by test, not file by file.
       - name: E2E tests
-        run: npm run test:e2e -- --forbid-only --reporter=list,html --trace=retain-on-failure
+        run: >-
+          npm run test:e2e -- --shard=${{ matrix.shard }}/2 --forbid-only
+          --reporter=list,html --trace=retain-on-failure
         env:
           CI: true
+          E2E_PREBUILT: 1
 
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: |
             playwright-report/
             test-results/

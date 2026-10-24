@@ -194,10 +194,85 @@
   stroke-width: 7px;
 }
 
-/* A coefficient bar, in the colour of the fit it belongs to; also its 2px stub, so a tiny w_k still shows. */
+/* A coefficient bar, in the colour of the fit it belongs to; also its 2px stub, so a tiny w_k still shows.
+   The same role as an HTML bar in a table row (a span: background, its width set inline). */
 .atlas-viz-bar {
   stroke: var(--atlas-viz-primary);
   stroke-width: 10px;
+  background: var(--atlas-viz-primary);
+}
+
+/* A table of numbers, one bar per row (SamplingViz): HTML, so a screen reader reads every number.
+   The bar cell takes the room left; the other cells keep their text on one line. */
+.atlas-viz-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.atlas-viz-table :is(th, td) {
+  padding: 4px 12px 4px 0;
+  text-align: start;
+  white-space: nowrap;
+}
+
+.atlas-viz-table thead th {
+  font-size: var(--sl-text-sm);
+  color: var(--atlas-viz-muted);
+}
+
+.atlas-viz-table td:nth-child(2) {
+  width: 100%;
+}
+
+.atlas-viz-table :is(th, td):last-child {
+  padding-inline-end: 0;
+  text-align: end;
+}
+
+/* A bar on the plot background; under it, the faint bar of the value before a cut. */
+.atlas-viz-meter {
+  position: relative;
+  display: block;
+  height: 12px;
+  background: var(--atlas-viz-plot-bg);
+}
+
+.atlas-viz-meter > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+}
+
+.atlas-viz-bar-base {
+  background: var(--atlas-viz-grid);
+}
+
+/* A row cut away: muted words ("removed" is written out, not only shown by colour), a hollow dashed bar. */
+.atlas-viz [data-removed] {
+  color: var(--atlas-viz-muted);
+}
+
+.atlas-viz [data-removed] .atlas-viz-bar-base {
+  border: 1px dashed var(--atlas-viz-muted);
+  background: none;
+}
+
+/* A sentence with a slot at its end for the token just drawn (underlined, empty until then). */
+.atlas-viz-context {
+  display: grid;
+  gap: 4px;
+}
+
+.atlas-viz-context > p {
+  margin: 0;
+  font-size: var(--sl-text-lg);
+}
+
+.atlas-viz-slot {
+  display: inline-block;
+  min-width: 4ch;
+  border-bottom: 2px solid var(--atlas-viz-primary);
+  color: var(--sl-color-white);
 }
 
 /* A coefficient exactly 0: a hollow ring in ink on the zero line (not blue, so it is no test point). */

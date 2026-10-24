@@ -1,7 +1,7 @@
 # Tổng quan kiến trúc
 
 > Một trang cho người mới vào dự án: website được build và phục vụ thế nào, dữ liệu nằm ở đâu, lỗi bị bắt ở lớp nào.
-> Lý do chi tiết của từng quyết định nằm ở năm tài liệu thiết kế, xem [mục 8](#8-tài-liệu-thiết-kế-chi-tiết).
+> Lý do chi tiết của từng quyết định nằm ở sáu tài liệu thiết kế, xem [mục 8](#8-tài-liệu-thiết-kế-chi-tiết).
 
 ## 1. Tóm tắt
 
@@ -183,3 +183,4 @@ Quy trình đầy đủ cho người đóng góp: [CONTRIBUTING.md](../../CONTRI
 | [components.md](components.md) | Mốc M1: `Prerequisites`, `Quiz`, `LessonProgress`, `PythonRunner` và tiến độ trên `RoadmapMap`. Quiz trong frontmatter, Pyodide (hàng đợi, Dừng, giới hạn output), lưu tiến độ, hình thức và tương phản, bảng chuỗi i18n, sitemap, thứ tự task M1 |
 | [homepage.md](homepage.md) | Nhận diện (màu, font, logo) và cấu trúc trang chủ |
 | [viz.md](viz.md) | Mốc M2: quy ước chung cho mọi minh họa tương tác (VIZ) của 78 bài (file, một `viz.css` dùng chung, dữ liệu dùng chung với bảng và code Python, chuỗi i18n và định dạng số, trợ năng, SSR và CLS, ngân sách, test). Đặc tả `LinearFitViz` của bài Hồi quy tuyến tính, bảng tương phản, thứ tự task V0–V8 |
+| [llm-lessons.md](llm-lessons.md) | Phần LLM (23 bài, bản vi): component `LocalCode` cho code chạy trên máy người đọc, quy ước file code và biến môi trường (`OPENAI_BASE_URL`, `OPENAI_API_KEY`, `LLM_MODEL`), test quét key và kiểm cú pháp, kiểm chứng code bằng `.venv-llm/`, chính sách thông tin dễ lỗi thời, biến thể template, quy trình viết song song theo đợt, 9 hình tĩnh và đặc tả `SamplingViz`, kế hoạch giữ CI e2e dưới 20 phút, thứ tự task L0–L11 |

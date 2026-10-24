@@ -1,0 +1,377 @@
+---
+title: 'Họ LLaMA: RoPE, huấn luyện song song'
+description: Vì sao LLaMA-13B vượt GPT-3? RMSNorm, SwiGLU, RoPE xoay truy vấn và khóa, GQA thu nhỏ KV cache, rồi chia việc huấn luyện ra hàng nghìn GPU.
+quiz:
+  - question: 'Một mô hình dùng RoPE. Token "mèo" ở vị trí 10 có truy vấn $\mathbf{q}$, token "con" ở vị trí 9 có khóa $\mathbf{k}$. Bạn chèn thêm 100 token vào đầu văn bản, nên hai token chuyển sang vị trí 110 và 109. Ở lớp attention đầu tiên, điểm của cặp này (sau khi xoay) thay đổi thế nào?'
+    options:
+      - 'Nhỏ đi, vì RoPE làm điểm giảm dần khi vị trí lớn lên'
+      - 'Đổi, vì mỗi vị trí bị xoay một góc khác nên cả hai vectơ đều đã khác'
+      - 'Không đổi, vì $\mathbf{q}$, $\mathbf{k}$ chưa xoay vẫn như cũ và độ lệch vị trí vẫn là 1'
+      - 'Bằng đúng $\mathbf{q}^\top\mathbf{k}$ chưa xoay, vì hai token đứng sát nhau'
+    answer: 2
+    explanation: 'Embedding đầu vào không chứa vị trí, nên ở lớp đầu $\mathbf{q}$ và $\mathbf{k}$ chưa xoay không đổi khi chèn thêm token. Sau khi xoay, điểm bằng $\mathbf{q}^\top \mathbf{R}((n-m)\theta)\mathbf{k}$, chỉ phụ thuộc $n - m = -1$ ở cả hai trường hợp. Hai vectơ đã xoay đúng là khác trước, nhưng chúng cùng xoay thêm một góc nên phần lệch nhau giữ nguyên. Tính chất suy giảm của RoPE nói về khoảng cách $|m - n|$, không nói về vị trí tuyệt đối. Điểm chỉ bằng $\mathbf{q}^\top\mathbf{k}$ khi $m = n$.'
+  - question: 'Một mô hình có 32 đầu truy vấn và dùng attention nhiều đầu thường (32 đầu K/V). Bạn đổi sang GQA với 8 đầu K/V, giữ nguyên mọi thứ khác. Điều nào đúng?'
+    options:
+      - 'KV cache khi sinh văn bản nhỏ đi 4 lần, và mô hình vẫn có 32 đầu truy vấn'
+      - 'Chỉ còn 8 đầu truy vấn, nên attention nhanh gấp 4 lần'
+      - 'Tổng số tham số của mô hình giảm khoảng 4 lần'
+      - 'KV cache không đổi, vì vẫn phải lưu K và V của mọi token'
+    answer: 0
+    explanation: 'KV cache tỉ lệ với số đầu K/V: từ 32 xuống 8 là nhỏ đi 4 lần. Số đầu truy vấn giữ nguyên 32: cứ 4 đầu truy vấn dùng chung một đầu K/V. Tham số chỉ giảm ở hai ma trận chiếu K và V, còn ma trận truy vấn, ma trận đầu ra và cả FFN giữ nguyên, nên tổng giảm ít. Vẫn phải lưu K, V của mọi token, nhưng phần lưu cho mỗi token nhỏ đi.'
+  - question: 'Mô hình 70 tỉ tham số, lưu ở BF16 (2 byte mỗi số), cần khoảng 140 GB chỉ cho trọng số. Mỗi GPU có 80 GB. Cách nào dưới đây, nếu dùng một mình, không giúp chứa được trọng số?'
+    options:
+      - 'Song song tensor: chia ma trận của mỗi lớp ra từ 2 GPU trở lên'
+      - 'Song song pipeline: chia các lớp ra từ 2 GPU trở lên'
+      - 'FSDP (ZeRO stage 3): chia tham số giữa các GPU'
+      - 'Song song dữ liệu thường trên 8 GPU'
+    answer: 3
+    explanation: 'Trong song song dữ liệu thường, GPU nào cũng giữ một bản đầy đủ của mô hình, nên mỗi GPU vẫn cần 140 GB. Thêm GPU chỉ giúp xử lý nhiều dữ liệu hơn cùng lúc. Nghe "8 GPU" dễ tưởng là có 640 GB, nhưng bộ nhớ không cộng lại khi mọi GPU giữ cùng một thứ. Ba cách còn lại đều chia chính trọng số, nên mỗi GPU chỉ giữ một phần.'
+  - question: 'Một pipeline có 4 giai đoạn, mỗi lô chia thành 4 micro-batch. Tỉ lệ thời gian rảnh là $3/7 \approx 43\%$. Giữ nguyên cỡ lô nhưng chia thành 16 micro-batch nhỏ hơn. Tỉ lệ rảnh thành bao nhiêu?'
+    options:
+      - 'Vẫn $3/7$, vì số giai đoạn không đổi'
+      - '$3/19 \approx 16\%$'
+      - '$0$, vì micro-batch nối đuôi nhau nên GPU nào cũng luôn có việc'
+      - '$3/4 = 75\%$, vì micro-batch nhỏ hơn nên GPU rảnh nhiều hơn'
+    answer: 1
+    explanation: 'Tỉ lệ rảnh là $(P-1)/(M+P-1)$, với $P = 4$, $M = 16$: $3/19$. Phần rảnh chỉ nằm ở đầu và cuối, luôn dài $P - 1 = 3$ lượt, còn phần bận dài theo $M$. Số giai đoạn không đổi thật, nhưng phần bận dài ra so với phần rảnh. Rảnh không về 0 được: giai đoạn cuối vẫn phải chờ micro-batch đầu tiên đi qua ba giai đoạn trước.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import ParallelismFigure from '@components/figures/ParallelismFigure.astro';
+import ropeCode from '@code/llm/llama-family/rope-relative.vi.py?raw';
+import partsCode from '@code/llm/llama-family/llama-parts.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Kể được bốn chỗ họ Llama khác GPT của bài trước, và lý do: **RMSNorm**, **SwiGLU**, **RoPE** (rotary position embedding, mã hóa vị trí xoay) có từ LLaMA 1, **GQA** (grouped-query attention, attention truy vấn theo nhóm) thêm từ Llama 2.
+- Tự dẫn được vì sao với RoPE, điểm attention giữa vị trí $m$ và $n$ chỉ phụ thuộc vị trí qua độ lệch $m - n$, và kiểm lại bằng NumPy.
+- Tính được cỡ **KV cache** và hiểu vì sao GQA làm nó nhỏ đi.
+- Phân biệt được **song song dữ liệu** (data parallelism), **song song tensor** (tensor parallelism), **song song pipeline** (pipeline parallelism) và ZeRO/FSDP.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/), GPT là chồng khối Transformer chỉ có decoder: mỗi khối làm $\mathbf{H} \leftarrow \mathbf{H} + \mathrm{Attn}(\mathrm{LN}(\mathbf{H}))$ rồi $\mathbf{H} \leftarrow \mathbf{H} + \mathrm{MLP}(\mathrm{LN}(\mathbf{H}))$, và vectơ vị trí được cộng vào embedding một lần ở đầu vào. Mỗi token là một vectơ $D$ chiều; mỗi trong $H$ đầu attention tính truy vấn $\mathbf{q}$, khóa $\mathbf{k}$, giá trị $\mathbf{v}$ có $d = D/H$ chiều, và chấm điểm cặp vị trí bằng tích vô hướng $\mathbf{q}^\top\mathbf{k}/\sqrt{d}$.
+:::
+
+## Trực giác
+
+### Cùng bộ khung, thay vài linh kiện
+
+Năm 2023, Meta công bố LLaMA (Touvron và cộng sự, 2023). Theo bài báo, bản 13 tỉ tham số vượt GPT-3 (175 tỉ) trên phần lớn các benchmark được thử, dù nhỏ hơn trên 10 lần, và chạy được trên một GPU.
+
+Bí quyết không nằm ở một kiến trúc mới. LLaMA vẫn là GPT của bài trước, chỉ thay ba linh kiện bằng những loại đã được thử tốt ở các bài báo khác (từ Llama 2 thêm linh kiện thứ tư là GQA), rồi cho mô hình học **lâu hơn trên nhiều dữ liệu hơn** mức thường dùng. Lập luận của nhóm tác giả: chi phí mỗi lần dùng tính theo cỡ mô hình, nên một mô hình nhỏ học lâu thì lợi về lâu dài.
+
+| Linh kiện | GPT ở bài trước | Họ Llama |
+|---|---|---|
+| Chuẩn hóa | Chuẩn hóa lớp (LayerNorm) | RMSNorm: bỏ bước trừ trung bình |
+| Mạng truyền thẳng | GELU, 2 ma trận, chiều ẩn $4D$ | SwiGLU, 3 ma trận, chiều ẩn khoảng $\tfrac{2}{3} \cdot 4D$ |
+| Vị trí | Vectơ vị trí cộng vào embedding ở đầu vào | RoPE: xoay $\mathbf{q}$ và $\mathbf{k}$ trong attention, ở mọi lớp |
+| Attention | Mỗi đầu một bộ K, V | GQA (từ Llama 2): vài đầu truy vấn dùng chung một bộ K, V |
+
+Bài báo đầu viết "LLaMA", các thế hệ sau viết "Llama".
+
+### Vị trí: nhãn cố định hay độ lệch?
+
+Trong câu "con mèo đuổi con chuột", "mèo" đứng trước "đuổi" một token, dù câu nằm ở đầu văn bản hay sau 1 000 token khác. Điều quan trọng là **độ lệch** giữa hai vị trí. Nhưng GPT ở bài trước cộng vào mỗi vị trí một vectơ riêng, nên cặp vị trí (3, 2) và cặp (1003, 1002) là hai đầu vào khác hẳn nhau, và mô hình phải tự học rằng chúng "giống nhau".
+
+RoPE đưa điều đó vào ngay phép tính. Hình dung mỗi cặp chiều của truy vấn và khóa là một mặt đồng hồ. Token ở vị trí $m$ có kim quay $m$ nấc, nên hai token cách nhau 2 vị trí luôn lệch nhau đúng 2 nấc, ở đâu cũng vậy. Mỗi cặp chiều quay một tốc độ, như kim giây, kim phút, kim giờ: kim nhanh phân biệt các token gần nhau, kim chậm phân biệt các token xa nhau.
+
+### Một GPU không đủ
+
+Bản 65 tỉ tham số của LLaMA được huấn luyện trên 2 048 GPU A100 80 GB, khoảng 380 token mỗi giây trên mỗi GPU, và 1.4 nghìn tỉ token mất khoảng 21 ngày. Khi huấn luyện, mỗi tham số cần khoảng 16 byte (mục Lý thuyết sẽ đếm), tức khoảng 1 040 GB cho 65 tỉ tham số (tự tính): bằng bộ nhớ của khoảng 13 GPU 80 GB, chưa kể kích hoạt (activation: giá trị trung gian của các lớp, phải giữ lại cho lan truyền ngược).
+
+Phải chia việc, như một bếp nấu 100 suất ăn: mở nhiều bếp giống nhau; cho hai đầu bếp cùng làm một món; hoặc làm dây chuyền sơ chế, nấu, bày đĩa. Đó là ba kiểu song song của bài.
+
+Bài toán của bài này là: **LLaMA thay những gì trong GPT và vì sao, nhất là cách RoPE làm phần vị trí trong điểm attention chỉ phụ thuộc độ lệch $m - n$? Và khi mô hình lớn hơn bộ nhớ của một GPU, có những cách nào để chia việc huấn luyện ra nhiều GPU?**
+
+## Lý thuyết
+
+### Khối Transformer của LLaMA
+
+Một khối của LLaMA làm hai bước, mỗi bước có kết nối tắt như GPT:
+
+$$
+\begin{aligned}
+\mathbf{H} &\leftarrow \mathbf{H} + \mathrm{Attn}_{\mathrm{RoPE}}\big(\mathrm{RMSNorm}(\mathbf{H})\big) \\
+\mathbf{H} &\leftarrow \mathbf{H} + \mathrm{FFN}_{\mathrm{SwiGLU}}\big(\mathrm{RMSNorm}(\mathbf{H})\big)
+\end{aligned}
+$$
+
+Chuẩn hóa đặt **trước** mỗi khối con (pre-norm) như GPT-2; bài báo LLaMA nói chọn vậy để huấn luyện ổn định hơn. Đầu vào là embedding của token, không cộng vectơ vị trí.
+
+### RMSNorm: chỉ chia, không trừ
+
+Chuẩn hóa lớp trừ trung bình các thành phần của $\mathbf{x} \in \mathbb{R}^D$, chia cho độ lệch chuẩn, rồi co giãn và dịch bằng hai vectơ học được. Zhang và Sennrich (2019) đặt giả thuyết: phần có ích là việc **chia**, còn việc trừ trung bình thì không cần. Bỏ phép trừ trung bình và cả vectơ dịch, ta có RMSNorm:
+
+$$
+\mathrm{RMS}(\mathbf{x}) = \sqrt{\frac{1}{D}\sum_{i=1}^{D} x_i^2 + \epsilon},
+\qquad
+\mathrm{RMSNorm}(\mathbf{x})_i = \frac{x_i}{\mathrm{RMS}(\mathbf{x})}\, g_i
+$$
+
+$\mathrm{RMS}$ là căn của trung bình bình phương (root mean square), $\epsilon$ là số rất nhỏ để không chia cho 0, $\mathbf{g} \in \mathbb{R}^D$ là hệ số co giãn học được.
+
+**Vì sao vẫn ổn định?** Thay $\mathbf{x}$ bằng $c\,\mathbf{x}$ với hằng $c > 0$, bỏ qua $\epsilon$:
+
+$$
+\mathrm{RMS}(c\,\mathbf{x}) = \sqrt{\frac{1}{D}\sum_{i=1}^{D} c^2 x_i^2} = \sqrt{c^2}\,\sqrt{\frac{1}{D}\sum_{i=1}^{D} x_i^2} = c\,\mathrm{RMS}(\mathbf{x})
+$$
+
+Đẳng thức đầu đưa $c^2$ ra ngoài tổng, đẳng thức sau dùng $\sqrt{c^2} = c$ vì $c > 0$. Vậy $\frac{c\,x_i}{c\,\mathrm{RMS}(\mathbf{x})} = \frac{x_i}{\mathrm{RMS}(\mathbf{x})}$: đầu vào to hay nhỏ bao nhiêu lần, đầu ra vẫn vậy. Trước khi nhân $\mathbf{g}$, vectơ ra luôn có RMS bằng 1. Ít phép tính hơn nên nhanh hơn.
+
+### SwiGLU: thêm một cái cổng
+
+Mạng truyền thẳng (feed-forward network, FFN; chính là khối MLP ở bài trước) của GPT có hai ma trận, $\mathbf{W}_1 \in \mathbb{R}^{D \times 4D}$ và $\mathbf{W}_2 \in \mathbb{R}^{4D \times D}$: $\mathrm{FFN}(\mathbf{x}) = \mathrm{GELU}(\mathbf{x}\mathbf{W}_1)\,\mathbf{W}_2$, với $\mathbf{x}$ là vectơ hàng. SwiGLU (Shazeer, 2020) thêm một nhánh và nhân hai nhánh từng phần tử ($\odot$):
+
+$$
+\mathrm{FFN}_{\mathrm{SwiGLU}}(\mathbf{x}) = \big(\mathrm{Swish}(\mathbf{x}\mathbf{W}_1) \odot \mathbf{x}\mathbf{W}_3\big)\,\mathbf{W}_2,
+\qquad
+\mathrm{Swish}(u) = u\,\sigma(u)
+$$
+
+Ở đây $\mathbf{W}_1, \mathbf{W}_3 \in \mathbb{R}^{D \times d_{\text{ff}}}$, $\mathbf{W}_2 \in \mathbb{R}^{d_{\text{ff}} \times D}$, $\sigma$ là hàm sigmoid. Nhánh qua Swish là một cái **cổng** (gate): ở mỗi thành phần, nó quyết định nhánh tuyến tính $\mathbf{x}\mathbf{W}_3$ được đi qua nhiều hay ít.
+
+**Vì sao chiều ẩn là $\tfrac{2}{3} \cdot 4D$?** Ba ma trận thì nhiều tham số hơn hai. Muốn giữ số tham số như cũ, cho hai bên bằng nhau:
+
+$$
+\underbrace{2 \cdot D \cdot 4D}_{\text{FFN}} = \underbrace{3 \cdot D \cdot d_{\text{ff}}}_{\text{SwiGLU}}
+\;\Longrightarrow\;
+d_{\text{ff}} = \frac{8D}{3} = \frac{2}{3} \cdot 4D
+$$
+
+Llama 3 không theo đúng quy tắc này: bản 8B có $D = 4\,096$ và chiều ẩn 14 336, khoảng $3.5D$ (tự tính). Trong thí nghiệm của Shazeer, SwiGLU thuộc nhóm cho perplexity tốt nhất; tác giả nói thẳng là không giải thích được vì sao, chỉ ghi nhận kết quả.
+
+### RoPE: xoay thay vì cộng
+
+**Cách cũ.** GPT cộng vectơ vị trí vào embedding trước khi tính truy vấn và khóa. Khai triển tích vô hướng, có những số hạng trộn nội dung với riêng vị trí $m$ hay riêng $n$, nên điểm phụ thuộc cả vị trí tuyệt đối (ô NumPy ở mục Ví dụ code cho thấy bằng số).
+
+**Ý của RoPE** (Su và cộng sự, 2021). Embedding không mang vị trí. Tính $\mathbf{q}$, $\mathbf{k}$ từ nội dung như thường, rồi **xoay** $\mathbf{q}$ một góc tỉ lệ với vị trí $m$ của nó, xoay $\mathbf{k}$ một góc tỉ lệ với vị trí $n$ của nó. Trong bài này $m$, $n$ là vị trí token (theo RoFormer), không phải số mẫu và số đặc trưng như quy ước chung của site.
+
+**Trường hợp hai chiều.** Ma trận xoay một góc $\alpha$ là:
+
+$$
+\mathbf{R}(\alpha) = \begin{pmatrix} \cos\alpha & -\sin\alpha \\ \sin\alpha & \cos\alpha \end{pmatrix}
+$$
+
+Nó quay vectơ hai chiều ngược chiều kim đồng hồ một góc $\alpha$, độ dài giữ nguyên. Ta cần hai tính chất:
+
+1. **$\mathbf{R}(\alpha)^\top = \mathbf{R}(-\alpha)$.** Chuyển vị đổi chỗ hai ô $\sin$. Vì $\cos(-\alpha) = \cos\alpha$ và $\sin(-\alpha) = -\sin\alpha$, ma trận thu được đúng là $\mathbf{R}(-\alpha)$: phép xoay ngược lại.
+2. **$\mathbf{R}(\alpha)\,\mathbf{R}(\beta) = \mathbf{R}(\alpha + \beta)$.** Xoay $\beta$ rồi xoay tiếp $\alpha$ bằng xoay một lần $\alpha + \beta$. Ô trên trái của tích là $\cos\alpha\cos\beta - \sin\alpha\sin\beta = \cos(\alpha + \beta)$, theo công thức cộng góc; ba ô còn lại tương tự.
+
+Gọi $\theta$ là góc xoay cho mỗi vị trí. Truy vấn ở vị trí $m$ thành $\mathbf{R}(m\theta)\mathbf{q}$, khóa ở vị trí $n$ thành $\mathbf{R}(n\theta)\mathbf{k}$. Điểm của cặp này là:
+
+$$
+\begin{aligned}
+\big(\mathbf{R}(m\theta)\,\mathbf{q}\big)^\top \big(\mathbf{R}(n\theta)\,\mathbf{k}\big)
+&= \mathbf{q}^\top \mathbf{R}(m\theta)^\top \mathbf{R}(n\theta)\,\mathbf{k} \\
+&= \mathbf{q}^\top \mathbf{R}(-m\theta)\, \mathbf{R}(n\theta)\,\mathbf{k} \\
+&= \mathbf{q}^\top \mathbf{R}\big((n - m)\theta\big)\,\mathbf{k}
+\end{aligned}
+$$
+
+Dòng đầu dùng quy tắc chuyển vị của tích, $(\mathbf{A}\mathbf{b})^\top = \mathbf{b}^\top\mathbf{A}^\top$. Dòng hai dùng tính chất 1. Dòng ba dùng tính chất 2 với $\alpha = -m\theta$, $\beta = n\theta$.
+
+Kết quả phụ thuộc nội dung ($\mathbf{q}$, $\mathbf{k}$) và **chỉ phụ thuộc vị trí qua $n - m$**. Dịch cả hai vị trí thêm cùng một đoạn $c$ thì $(n + c) - (m + c) = n - m$, điểm không đổi. Thứ tự vẫn có nghĩa: cặp $(m, n) = (5, 2)$ cho $\mathbf{R}(-3\theta)$, cặp $(2, 5)$ cho $\mathbf{R}(3\theta)$, hai điểm thường khác nhau.
+
+**Trường hợp $d$ chiều.** Mỗi đầu attention có $d$ chiều, $d$ chẵn. Ghép các chiều thành $d/2$ cặp liền kề $(x_1, x_2), (x_3, x_4), \dots$; cặp thứ $i$ xoay một góc $m\theta_i$ với:
+
+$$
+\theta_i = 10\,000^{-2(i-1)/d}, \qquad i = 1, \dots, d/2
+$$
+
+Tích vô hướng là tổng điểm của $d/2$ cặp. Theo phép dẫn trên, điểm của mỗi cặp chỉ phụ thuộc vị trí qua $n - m$, nên tổng cũng vậy.
+
+Đây là các kim đồng hồ. Cặp đầu có $\theta_1 = 1$ radian mỗi token, quay một vòng sau khoảng 6 token (tự tính). Với $d = 128$, cỡ một đầu của Llama 3 8B ($4\,096 / 32$), cặp cuối có $\theta_{64} = 10\,000^{-126/128} \approx 1.15 \times 10^{-4}$, quay một vòng sau khoảng 54 nghìn token (tự tính).
+
+**Cài đặt.** Không cần dựng ma trận. Với mỗi cặp và góc $\varphi = m\theta_i$:
+
+$$
+x'_{2i-1} = x_{2i-1}\cos\varphi - x_{2i}\sin\varphi,
+\qquad
+x'_{2i} = x_{2i-1}\sin\varphi + x_{2i}\cos\varphi
+$$
+
+Python đếm chỉ số từ 0, nên cặp là `x[0::2]` và `x[1::2]`. Một số thư viện ghép chiều $j$ với chiều $j + d/2$ (nửa đầu với nửa sau): chỉ là xếp lại thứ tự các chiều, cùng một ý.
+
+RoPE áp lên $\mathbf{q}$ và $\mathbf{k}$ ở **mọi lớp**, không áp lên $\mathbf{v}$: điểm attention là tích $\mathbf{q}^\top\mathbf{k}$ nên mới cần độ lệch vị trí, còn $\mathbf{v}$ chỉ là nội dung được lấy ra. Bài báo RoFormer còn đưa ra một **cận trên** của độ lớn điểm và cho thấy nó giảm dần khi $|m - n|$ tăng. Đó chỉ là cận, không bảo đảm cho từng cặp.
+
+### GQA: dùng chung khóa và giá trị
+
+**KV cache.** Khi sinh văn bản, mỗi bước cần khóa và giá trị của mọi token trước đó, ở mọi lớp. Nhờ mặt nạ nhân quả, chúng không đổi khi có token mới, nên ta tính một lần rồi lưu lại: đó là **KV cache**. Cỡ của nó cho mỗi token:
+
+$$
+2 \cdot N_{\text{layer}} \cdot H_{\text{kv}} \cdot d \cdot s
+$$
+
+Hệ số 2 vì có cả K lẫn V; $N_{\text{layer}}$ là số lớp, $H_{\text{kv}}$ là số đầu K/V, $d$ là số chiều mỗi đầu, $s$ là số byte mỗi số. Llama 3 8B có $N_{\text{layer}} = 32$, $H_{\text{kv}} = 8$, $d = 4\,096/32 = 128$ (tự tính), lưu ở BF16 nên $s = 2$: mỗi token cần $2 \cdot 32 \cdot 8 \cdot 128 \cdot 2 = 131\,072$ byte (128 KiB), một chuỗi 8 192 token cần đúng 1 GiB (tự tính). Nếu mỗi đầu truy vấn có bộ K, V riêng ($H_{\text{kv}} = 32$) thì là 4 GiB, và còn nhân với số chuỗi đang phục vụ.
+
+**Ba cách chia đầu.** Attention nhiều đầu (multi-head attention, MHA) có $H_{\text{kv}} = H$. Multi-query attention (MQA; Shazeer, 2019) dùng một bộ K, V cho mọi đầu: cache nhỏ nhất, nhưng có thể giảm chất lượng. **GQA** (Ainslie và cộng sự, 2023) nằm giữa: chia $H$ đầu truy vấn thành $H_{\text{kv}}$ nhóm, mỗi nhóm chung một bộ K, V. Llama 3 8B có 32 đầu truy vấn, 8 đầu K/V, nên cứ 4 đầu truy vấn chung một bộ. Bài báo GQA báo cáo chất lượng gần MHA, tốc độ gần MQA. Số đầu truy vấn giữ nguyên, và tham số giảm không nhiều: chỉ hai ma trận chiếu K, V nhỏ đi.
+
+### Ba thế hệ Llama
+
+Bảng chỉ ghi số có trong ba bài báo. Số của Llama 3 là của đợt Llama 3.1, như bài báo ghi.
+
+| Thông số | Llama 1 (2023) | Llama 2 (2023) | Llama 3 (2024) |
+|---|---|---|---|
+| Cỡ (tham số) | 6.7B, 13.0B, 32.5B, 65.2B (gọi tắt 7B, 13B, 33B, 65B) | 7B, 13B, 70B (bản 34B không phát hành) | 8B, 70B, 405B |
+| Token huấn luyện | 1.0T (hai cỡ nhỏ), 1.4T (hai cỡ lớn) | 2.0T | 15.6T (bản 405B) |
+| Ngữ cảnh | 2 048 (theo bài báo Llama 2) | 4 096 | 8K khi pre-train, mở rộng tới 128K |
+| Vị trí | RoPE ở mọi lớp | RoPE | RoPE, cơ số 500 000 |
+| Attention | Nhiều đầu | GQA ở 34B, 70B | GQA, 8 đầu K/V ở mọi cỡ |
+
+Cả ba dùng RMSNorm và SwiGLU. Bài báo Llama 3 tự nhận kiến trúc "không khác nhiều" so với trước; tiến bộ đến chủ yếu từ chất lượng, độ đa dạng của dữ liệu và quy mô huấn luyện. Số token tăng khoảng 7.8 lần so với Llama 2 (tự tính). Dữ liệu là chủ đề của bài [Chuẩn bị dữ liệu pre-train](/vi/llm/pretraining-data/).
+
+Trọng số Llama 2 và Llama 3 đi kèm giấy phép riêng của Meta, không phải giấy phép mã nguồn mở thông dụng như MIT hay Apache 2.0: đọc giấy phép gốc trước khi dùng.
+
+### Huấn luyện song song
+
+**Bộ nhớ đi đâu?** Khi huấn luyện bằng Adam với độ chính xác hỗn hợp (mixed precision), bài báo ZeRO (Rajbhandari và cộng sự, 2020) đếm cho mỗi tham số: 2 byte cho tham số FP16, 2 byte cho gradient, 12 byte cho trạng thái của bộ tối ưu (optimizer state: bản sao FP32 của tham số, momentum, phương sai). Tổng 16 byte. Mô hình $\Psi$ tham số cần $16\Psi$ byte, chưa kể kích hoạt; với $\Psi = 7.5$ tỉ, đó là 120 GB.
+
+**Song song dữ liệu.** Mỗi GPU giữ **cả mô hình**, xử lý một phần khác nhau của lô. Sau lượt lan truyền ngược, các GPU cộng gộp gradient (phép **all-reduce**) nên cùng cập nhật giống hệt nhau. Nhanh hơn, nhưng không giảm bộ nhớ trên mỗi GPU.
+
+**Song song tensor.** Megatron-LM (Shoeybi và cộng sự, 2019) chia **ma trận trong một lớp**. Lấy khối MLP (tức FFN) $\mathbf{Y} = \mathrm{GELU}(\mathbf{X}\mathbf{A})\,\mathbf{B}$ trên hai GPU:
+
+1. Chia $\mathbf{A}$ theo cột, $\mathbf{A} = [\mathbf{A}_1, \mathbf{A}_2]$, nên $\mathbf{X}\mathbf{A} = [\mathbf{X}\mathbf{A}_1, \mathbf{X}\mathbf{A}_2]$: mỗi GPU tính một nửa số cột.
+2. GELU tác động từng phần tử, nên $\mathrm{GELU}(\mathbf{X}\mathbf{A}) = [\mathbf{Z}_1, \mathbf{Z}_2]$ với $\mathbf{Z}_j = \mathrm{GELU}(\mathbf{X}\mathbf{A}_j)$. Chưa cần trao đổi gì.
+3. Chia $\mathbf{B}$ theo hàng thành $\mathbf{B}_1$ (nửa trên) và $\mathbf{B}_2$ (nửa dưới). Theo quy tắc nhân ma trận khối, $\mathbf{Y} = \mathbf{Z}_1\mathbf{B}_1 + \mathbf{Z}_2\mathbf{B}_2$. Mỗi GPU tính một số hạng, rồi một phép all-reduce cộng lại.
+
+Với SwiGLU, chia $\mathbf{W}_1$ và $\mathbf{W}_3$ theo cùng cách chia cột, $\mathbf{W}_2$ theo hàng. Với attention, mỗi GPU lo một số đầu. Lớp nào cũng phải trao đổi, nên cần đường truyền rất nhanh, thường là các GPU trong cùng một máy.
+
+**Song song pipeline.** Chia mô hình theo **chiều sâu**: GPU 1 giữ các lớp đầu, GPU 2 các lớp tiếp theo… Mỗi phần là một **giai đoạn** (stage). Đưa cả lô vào một lần thì GPU 2 phải chờ GPU 1, nên GPipe (Huang và cộng sự, 2019) cắt lô thành $M$ **micro-batch** nối đuôi nhau: giai đoạn 1 chuyển micro-batch 1 đi rồi làm ngay micro-batch 2.
+
+Vẫn còn **bong bóng** (pipeline bubble): lúc đầu các giai đoạn sau chờ, lúc cuối các giai đoạn đầu chờ. Đếm theo lượt, mỗi lượt là lúc một giai đoạn xử lý một micro-batch, với $P$ giai đoạn. Micro-batch cuối vào giai đoạn 1 ở lượt $M$, tới giai đoạn $P$ ở lượt $M + P - 1$. Vậy chiều xuôi kéo dài $M + P - 1$ lượt, mỗi giai đoạn bận $M$ lượt, rảnh $P - 1$ lượt:
+
+$$
+\text{bubble} = \frac{P - 1}{M + P - 1}
+$$
+
+Chiều ngược cũng vậy. Với $P = 4$: $M = 4$ cho $3/7 \approx 43\%$, $M = 16$ cho $3/19 \approx 16\%$ (tự tính). GPipe ghi bong bóng không đáng kể khi $M \ge 4P$. Giữa hai giai đoạn chỉ chuyền kích hoạt, nên pipeline chịu được đường truyền chậm hơn tensor.
+
+**ZeRO và FSDP.** Song song dữ liệu lãng phí: $N_d$ GPU giữ $N_d$ bản giống hệt nhau. ZeRO **chia** chúng ra theo ba mức, gọi là stage 1, 2, 3. Ví dụ trong bài báo, $\Psi = 7.5$ tỉ, $N_d = 64$:
+
+| Cách chia | Byte mỗi GPU | Ví dụ |
+|---|---|---|
+| Song song dữ liệu thường | $(2 + 2 + 12)\Psi$ | 120 GB |
+| ZeRO stage 1: chia trạng thái bộ tối ưu | $\left(2 + 2 + \tfrac{12}{N_d}\right)\Psi$ | 31.4 GB |
+| ZeRO stage 2: chia thêm gradient | $\left(2 + \tfrac{2 + 12}{N_d}\right)\Psi$ | 16.6 GB |
+| ZeRO stage 3: chia thêm tham số | $\tfrac{(2 + 2 + 12)\Psi}{N_d}$ | 1.9 GB |
+
+Ở stage 3, GPU cần tham số của lớp nào thì gom các mảnh từ GPU khác, dùng xong thì bỏ; theo bài báo, lưu lượng trao đổi gấp khoảng 1.5 lần song song dữ liệu thường. Mỗi GPU vẫn xử lý dữ liệu riêng, nên đây vẫn là song song dữ liệu. **FSDP** (Fully Sharded Data Parallel) là cách PyTorch cài đặt ý này.
+
+**Ghép lại: Llama 3.** Bản 405B dùng bốn kiểu cùng lúc: tensor, **context** (chia chuỗi đầu vào thành nhiều đoạn, cho ngữ cảnh rất dài), pipeline và dữ liệu (FSDP), lồng từ trong ra ngoài theo thứ tự đó. Tensor nằm trong cùng, trên các GPU có đường truyền nhanh nhất; FSDP ở ngoài cùng vì chịu được độ trễ lớn nhất.
+
+:::note[Ghi nhớ]
+RoPE xoay $\mathbf{q}$ và $\mathbf{k}$ theo vị trí, nên điểm $\mathbf{q}^\top \mathbf{R}((n - m)\theta)\,\mathbf{k}$ chỉ thấy vị trí qua độ lệch. GQA thu nhỏ KV cache. Song song dữ liệu chia lô, tensor chia ma trận trong lớp, pipeline chia các lớp, ZeRO/FSDP chia trạng thái.
+:::
+
+### Giới hạn
+
+**Song song chỉ ở mức khái niệm**, và hai ô code chỉ kiểm tính chất toán trên vectơ nhỏ. Chạy mô hình lớn trên nhiều GPU khi phục vụ người dùng thuộc bài [Deploy LLM: nhiều GPU, phân tán](/vi/llm/llm-deployment/); mixture of experts thuộc bài [Họ DeepSeek](/vi/llm/deepseek-family/).
+
+## Minh họa
+
+Hình dưới đặt ba kiểu song song cạnh nhau, trên cùng một mô hình 4 lớp và 2 GPU. Hãy nhìn phần tô đậm ở mỗi hàng: thứ bị chia là lô dữ liệu, ma trận trong một lớp, hay các lớp.
+
+{/* FIG: song song dữ liệu, tensor và pipeline chia ba thứ khác nhau: lô dữ liệu, ma trận trong một lớp, các lớp. */}
+<ParallelismFigure />
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026: ô RoPE với Python 3.14 và NumPy 2.4 (bản có trong Pyodide), ô PyTorch với Python 3.14 và PyTorch 2.14 trên CPU. Ô RoPE chạy ngay trên trang, ô PyTorch chạy trên máy bạn.
+
+### RoPE bằng NumPy
+
+Ô dưới đây cài RoPE với $d = 8$ (4 cặp), lấy ngẫu nhiên $\mathbf{q}$, $\mathbf{k}$ (hạt giống 0), rồi tính điểm ở nhiều cặp vị trí $(m, n)$ theo hai cách: xoay bằng RoPE (cột `rotate`) và cộng vectơ vị trí sin/cos (cột `add`). Ô `add` cộng thẳng vectơ vị trí vào $\mathbf{q}$, $\mathbf{k}$ cho gọn; Transformer gốc cộng vào embedding, nhưng ý vẫn vậy.
+
+<PythonRunner code={ropeCode} title="RoPE: điểm chỉ phụ thuộc độ lệch vị trí" />
+
+Đọc kết quả:
+
+- **Không có vị trí:** $\mathbf{q}^\top\mathbf{k} = -1.467987$.
+- **Cột `rotate`:** ba dòng đầu cùng $m - n = 3$ ở vị trí 5, 105 và 1005 đều cho $-1.586475$. Độ lệch 2 cho $-1.763129$. Cặp $(2, 5)$ có độ lệch $-3$ cho $-1.628434$: thứ tự trước sau vẫn có nghĩa.
+- **Cột `add`:** cùng ba cặp có $m - n = 3$ mà điểm nhảy giữa $1.176863$, $-0.574756$ và $1.312702$: điểm phụ thuộc cả vị trí tuyệt đối.
+- **Hai dòng cuối:** độ dài của $\mathbf{q}$ trước và sau khi xoay đều là $1.862653$.
+
+"Bằng nhau" ở đây là bằng tới 6 chữ số được in ra; khi so số thực trong code, dùng `np.isclose` thay vì `==`.
+
+### RMSNorm, SwiGLU và RoPE bằng PyTorch
+
+File dưới đây viết ba linh kiện bằng PyTorch rồi kiểm: RMSNorm đưa RMS về 1 và bỏ qua việc nhân đầu vào với 3; SwiGLU có đúng số tham số của FFN thường; và với cùng một $\mathbf{q}$, một $\mathbf{k}$ đặt ở 5 vị trí, ma trận điểm (hàng $m$, cột $n$) có mỗi đường chéo cùng một số. Hàm `rope` nhận tensor dạng `(batch, L, số đầu, d)` như truy vấn và khóa trong attention. Cách cài PyTorch bản CPU có ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+<LocalCode
+  code={partsCode}
+  title="Ba linh kiện của khối LLaMA"
+  packages={['torch']}
+  hardware="CPU là đủ. Dưới 10 giây trên máy phát triển, phần lớn là thời gian nạp PyTorch"
+  sampleVaries={false}
+>
+
+```text
+RMS after norm: [1.0, 1.0, 1.0, 1.0, 1.0]
+norm(3x) == norm(x): True
+params: FFN 4D = 18432, SwiGLU 2/3*4D = 18432
+  0.82   0.87  -0.13  -1.17  -1.19
+ -0.31   0.82   0.87  -0.13  -1.17
+ -1.54  -0.31   0.82   0.87  -0.13
+ -1.79  -1.54  -0.31   0.82   0.87
+ -0.85  -1.79  -1.54  -0.31   0.82
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **RMSNorm:** đầu vào đã nhân 7, vậy mà RMS sau chuẩn hóa của cả 5 token đều là 1.0 ($\mathbf{g}$ lúc đầu toàn số 1). Nhân thêm 3 thì đầu ra không đổi (`True`).
+- **SwiGLU:** với $D = 48$, FFN thường có $2 \cdot 48 \cdot 192 = 18\,432$ tham số; SwiGLU có chiều ẩn 128 và $3 \cdot 48 \cdot 128 = 18\,432$ tham số.
+- **RoPE:** đường chéo chính ($m = n$) toàn là 0.82, chính là $\mathbf{q}^\top\mathbf{k}$ chưa xoay. Đường ngay dưới ($m - n = 1$) toàn là $-0.31$, đường kế tiếp toàn là $-1.54$. Ma trận không đối xứng: ngay trên đường chéo ($m - n = -1$) là 0.87. Với mặt nạ nhân quả, mô hình chỉ dùng nửa dưới ($n \le m$).
+
+## Lỗi hay gặp
+
+:::caution[Nghĩ RoPE cộng vị trí vào embedding, hoặc xoay cả giá trị]
+RoPE không đụng tới embedding đầu vào. Nó xoay $\mathbf{q}$ và $\mathbf{k}$ trong attention, ở mọi lớp, và để nguyên $\mathbf{v}$. Điểm cũng không "chỉ phụ thuộc khoảng cách": nó vẫn phụ thuộc nội dung của $\mathbf{q}$, $\mathbf{k}$, chỉ phần vị trí là tương đối. Tự cài thì số chiều mỗi đầu phải chẵn, và cách ghép cặp phải khớp với cách trọng số đã được huấn luyện.
+:::
+
+:::caution[Nghĩ RoPE cho ngữ cảnh dài bao nhiêu cũng được]
+Công thức tính được góc cho vị trí bất kỳ, nhưng mô hình chỉ quen với các độ lệch đã gặp khi huấn luyện; chuỗi dài hơn nhiều thì không có gì bảo đảm chất lượng. Llama 3 đặt cơ số 500 000 ngay từ đầu, vậy mà vẫn phải huấn luyện thêm sáu bước để đi từ 8K lên 128K token.
+:::
+
+:::caution[Nghĩ thêm GPU thì mô hình vừa bộ nhớ và chạy nhanh tương ứng]
+Song song dữ liệu thường không làm mô hình vừa bộ nhớ, vì GPU nào cũng giữ cả mô hình; phải chia chính mô hình (tensor, pipeline) hoặc chia trạng thái (ZeRO/FSDP). Gấp đôi số GPU cũng không cho tốc độ gấp đôi: theo bảng 4 của bài báo Llama 3, khi nhân đôi từ 8 192 lên 16 384 GPU thì sức tính mỗi GPU giảm từ 430 xuống 400 TFLOPs, tức tổng chỉ nhanh khoảng 1.86 lần (tự tính). Ngay ở 8 192 GPU, hơn một nửa sức tính lý thuyết đã không được dùng (trao đổi dữ liệu, bong bóng, phép tính không chạy hết công suất…).
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Họ Llama là GPT với bốn thay đổi: LLaMA 1 có RMSNorm, SwiGLU (chiều ẩn khoảng $\tfrac{2}{3} \cdot 4D$) và RoPE; GQA thêm từ Llama 2. Từ Llama 1 tới Llama 3, kiến trúc gần như giữ nguyên; tiến bộ đến chủ yếu từ dữ liệu và quy mô.
+- RoPE xoay cặp chiều thứ $i$ của $\mathbf{q}$, $\mathbf{k}$ một góc $m\theta_i$. Vì $\mathbf{R}(m\theta)^\top \mathbf{R}(n\theta) = \mathbf{R}((n - m)\theta)$, điểm chỉ phụ thuộc vị trí qua độ lệch.
+- KV cache mỗi token là $2 \cdot N_{\text{layer}} \cdot H_{\text{kv}} \cdot d \cdot s$ byte. GQA giảm $H_{\text{kv}}$ mà giữ số đầu truy vấn: Llama 3 8B cần 1 GiB cho 8 192 token thay vì 4 GiB.
+- Song song dữ liệu chia lô, tensor chia ma trận trong lớp (cần đường truyền nhanh), pipeline chia các lớp (bong bóng $\frac{P-1}{M+P-1}$), ZeRO/FSDP chia trạng thái của song song dữ liệu.
+
+**Đọc thêm:**
+
+- Su, J., Lu, Y., Pan, S., Murtadha, A., Wen, B., Liu, Y. (2021). [*RoFormer: Enhanced Transformer with Rotary Position Embedding*](https://arxiv.org/abs/2104.09864), arXiv:2104.09864, mục 3.1 tới 3.4. Gốc của RoPE và phép dẫn tính chất tương đối.
+- Touvron, H. và cộng sự (2023). [*LLaMA: Open and Efficient Foundation Language Models*](https://arxiv.org/abs/2302.13971), arXiv:2302.13971, mục 2; và Touvron, H. và cộng sự (2023). [*Llama 2: Open Foundation and Fine-Tuned Chat Models*](https://arxiv.org/abs/2307.09288), arXiv:2307.09288, mục 2 và phụ lục A.2.1. Mục 2.2 của LLaMA ngắn, đủ ba thay đổi kiến trúc; GQA nằm ở phụ lục A.2.1 của Llama 2.
+- Grattafiori, A., Dubey, A., Jauhri, A. và cộng sự (2024). [*The Llama 3 Herd of Models*](https://arxiv.org/abs/2407.21783), arXiv:2407.21783, mục 3.2 và 3.3. Kiến trúc và bốn kiểu song song.
+- Zhang, B., Sennrich, R. (2019). [*Root Mean Square Layer Normalization*](https://arxiv.org/abs/1910.07467), arXiv:1910.07467; Shazeer, N. (2020). [*GLU Variants Improve Transformer*](https://arxiv.org/abs/2002.05202), arXiv:2002.05202; Ainslie, J. và cộng sự (2023). [*GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints*](https://arxiv.org/abs/2305.13245), arXiv:2305.13245. Ba bài báo gốc của RMSNorm, SwiGLU và GQA.
+- Shazeer, N. (2019). [*Fast Transformer Decoding: One Write-Head is All You Need*](https://arxiv.org/abs/1911.02150), arXiv:1911.02150. Bài báo gốc của MQA.
+- Shoeybi, M. và cộng sự (2019). [*Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism*](https://arxiv.org/abs/1909.08053), arXiv:1909.08053, mục 3; Huang, Y. và cộng sự (2019). [*GPipe: Easy Scaling with Micro-Batch Pipeline Parallelism*](https://arxiv.org/abs/1811.06965), arXiv:1811.06965 (tên bản v5), mục 2; Rajbhandari, S., Rasley, J., Ruwase, O., He, Y. (2020). [*ZeRO: Memory Optimizations Toward Training Trillion Parameter Models*](https://arxiv.org/abs/1910.02054), arXiv:1910.02054, mục 5. GPipe viết $K$ cho số giai đoạn, chỗ bài này viết $P$.
+
+<LessonProgress />

@@ -1,62 +1,14 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { gzipSync } from 'node:zlib';
-import { fileURLToPath } from 'node:url';
 import { expect, test, type ConsoleMessage, type Locator, type Page } from '@playwright/test';
-import { LESSONS, LOCALES, type Locale } from '../../src/data/roadmap';
-import { isTranslated } from '../../src/lib/roadmap';
-import { lessonShape } from '../unit/fixtures/lesson-shape';
 import { installContrast, type Contrast } from './helpers';
+import { CONTROLS, hydrate, hydrateAll, PAGES, SCHEMES } from './viz-pages';
 
 // Checks shared by every VIZ (docs/architecture/viz.md, sections 2.7–2.9, 2.12; task V5 in section 6), on every
 // lesson page whose file uses one: /vi/<id>/ when status.vi is 'published', and /en/<id>/ (the fallback page
 // shows the vi file with en strings). A new VIZ is covered here without a test of its own.
+// The checks that do not depend on the project's viewport (island attributes, the 375px check, JS and props
+// budget) are in viz-meta.spec.ts, desktop only (docs/architecture/llm-lessons.md section 2.10, E1).
 // All URLs end with "/" (trailingSlash 'always').
 
-const DOCS_DIR = fileURLToPath(new URL('../../src/content/docs/', import.meta.url));
-const ASTRO_DIR = fileURLToPath(new URL('../../dist/_astro/', import.meta.url));
-const SCHEMES = ['light', 'dark'] as const;
-const JS_BUDGET = 10 * 1024; // own JS of one VIZ island, gzip (section 2.9)
-const PROPS_BUDGET = 8 * 1024; // the props attribute of its astro-island, as written in the HTML
-const CONTROLS = 'input, button, select, textarea, a[href], [tabindex]:not([tabindex="-1"])';
-
-function readSource(locale: Locale, id: string): string {
-  const file = ['.mdx', '.md'].map((ext) => join(DOCS_DIR, locale, id + ext)).find((path) => existsSync(path));
-  if (!file) throw new Error(`no file for ${locale}/${id}`);
-  return readFileSync(file, 'utf8');
-}
-
-/** VIZ tags written in a lesson file: components imported from @components/viz/. */
-function vizCount(source: string): number {
-  const shape = lessonShape(source);
-  const names = shape.imports.flatMap((statement) => {
-    const match = /^import (\w+) from '@components\/viz\/[\w/-]+\.astro'$/.exec(statement);
-    return match?.[1] ? [match[1]] : [];
-  });
-  return names.reduce((sum, name) => sum + (shape.components[name] ?? 0), 0);
-}
-
-const PAGES = LESSONS.filter((lesson) => lesson.status.vi === 'published').flatMap((lesson) =>
-  LOCALES.map((locale) => {
-    const source = readSource(isTranslated(lesson, locale) ? locale : 'vi', lesson.id);
-    return { path: `/${locale}/${lesson.id}/`, locale, count: vizCount(source) };
-  }),
-).filter((page) => page.count > 0);
-
-/** Every VIZ of the page, scrolled to, hydrated, and its controls enabled (they are disabled until then). */
-async function hydrateAll(page: Page): Promise<Locator[]> {
-  const blocks = await page.locator('.atlas-viz').all();
-  for (const viz of blocks) await hydrate(viz);
-  return blocks;
-}
-
-async function hydrate(viz: Locator): Promise<void> {
-  await viz.scrollIntoViewIfNeeded();
-  await expect(viz.locator('astro-island')).toHaveCount(1);
-  await expect(viz.locator('astro-island:not([ssr])')).toHaveCount(1);
-  // Astro drops `ssr` when it calls hydrateRoot; React commits a little later. Enabled controls mean it did.
-  await expect(viz.locator(':is(input, button, select, textarea):disabled')).toHaveCount(0);
-}
 
 /** Console errors and uncaught exceptions, from the moment this is called. */
 function collectErrors(page: Page): string[] {
@@ -66,40 +18,6 @@ function collectErrors(page: Page): string[] {
   });
   page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
   return errors;
-}
-
-// --- JS budget (section 2.9): the island file plus the chunks only it imports statically. ---
-
-function staticImports(file: string): string[] {
-  const code = readFileSync(join(ASTRO_DIR, file), 'utf8');
-  // import{a as b}from"./x.js" and import"./x.js"; import("./x.js") loads later, so it is not counted.
-  return [...code.matchAll(/(?:\bfrom\s*|\bimport\s*)["']\.\/([^"'/]+\.js)["']/g)].map((match) => match[1] ?? '');
-}
-
-function closure(file: string): Set<string> {
-  const seen = new Set<string>();
-  const todo = [file];
-  while (todo.length > 0) {
-    const next = todo.pop()!;
-    if (seen.has(next)) continue;
-    seen.add(next);
-    todo.push(...staticImports(next));
-  }
-  return seen;
-}
-
-/** Files counted as the island's own JS, and their gzip size. */
-function ownJs(islandFile: string, rendererFile: string): { files: string[]; gzip: number } {
-  const all = readdirSync(ASTRO_DIR).filter((file) => file.endsWith('.js'));
-  const shared = new Set<string>([...closure(rendererFile)]);
-  for (const other of all.filter((file) => /^[A-Z]\w*Island\.[\w-]+\.js$/.test(file) && file !== islandFile)) {
-    for (const file of closure(other)) shared.add(file);
-  }
-  // React itself is the renderer's, whoever imports it (section 2.9).
-  for (const file of all.filter((name) => /^(?:client|jsx-runtime|react)\.[\w-]+\.js$/.test(name))) shared.add(file);
-  const files = [...closure(islandFile)].filter((file) => !shared.has(file));
-  const gzip = files.reduce((sum, file) => sum + gzipSync(readFileSync(join(ASTRO_DIR, file))).length, 0);
-  return { files, gzip };
 }
 
 // --- Contrast (WCAG 2.x): the core (rgba, backgroundOf, luminance, pair) is in helpers.ts. Runs in the page. ---
@@ -120,6 +38,34 @@ async function enterState(page: Page, viz: Locator, state: ContrastState): Promi
       await slider.focus();
       await page.keyboard.press('End');
     }
+  }
+}
+
+/**
+ * A table VIZ: its bars are HTML spans in a `.atlas-viz-meter` cell of a table row, not marks on an SVG plot
+ * (SamplingViz, docs/architecture/llm-lessons.md section 4.6.8). Detected by the DOM, not by the lesson.
+ */
+const METER = '.atlas-viz-meter';
+
+/**
+ * Enters each state a contrast test measures, and yields its name once there. Every VIZ: CONTRAST_STATES, as
+ * before. A table VIZ then also gets each slider at its start in turn, the others left at their end: only a
+ * cut draws a removed row, and its dashed outline needs a value before the cut above 0 (SamplingViz: with
+ * every slider at its end, k and p cut nothing; at T = 0 the removed rows have no faint bar at all; k = 1 or
+ * p = 0.05 at T = 2 cut 9 rows that keep their faint bar, so it turns into the dashed outline).
+ */
+async function* contrastStates(page: Page, viz: Locator): AsyncGenerator<string> {
+  for (const state of CONTRAST_STATES) {
+    await enterState(page, viz, state);
+    yield state;
+  }
+  if ((await viz.locator(METER).count()) === 0) return;
+  for (const [i, slider] of (await viz.getByRole('slider').all()).entries()) {
+    await slider.focus();
+    await page.keyboard.press('Home');
+    yield `slider ${i} at its start`;
+    await slider.focus();
+    await page.keyboard.press('End');
   }
 }
 
@@ -170,6 +116,29 @@ function measureContrast(root: Element): {
     }
   }
 
+  // A table VIZ: the bar of each row against the meter behind it, 3:1 like a mark on a plot. The solid bar by
+  // its fill; a removed row's faint bar is a hollow dashed outline, measured by its border. Not measured on
+  // purpose: a kept row's faint bar (the value before the cut), since the solid bar on top is at least as
+  // wide (renormalising only raises a kept value) and hides it.
+  for (const [n, meter] of [...root.querySelectorAll('.atlas-viz-meter')].entries()) {
+    const meterBg = backgroundOf(meter);
+    const removed = meter.closest('[data-removed]') !== null;
+    for (const el of meter.querySelectorAll('*')) {
+      const tag = `meter ${n} ${el.tagName.toLowerCase()}.${el.getAttribute('class')?.trim().replace(/\s+/g, '.')}`;
+      const style = getComputedStyle(el);
+      if (el.matches('span.atlas-viz-bar')) {
+        marks.push(pair(`${tag} background-color`, style.backgroundColor, meterBg));
+      } else if (el.matches('span.atlas-viz-bar-base') && removed) {
+        if (style.borderTopStyle !== 'dashed' || parseFloat(style.borderTopWidth) < 1) {
+          unmeasured.push(`${tag} (removed row): no dashed outline, but ${style.borderTopStyle} ${style.borderTopWidth}`);
+        }
+        marks.push(pair(`${tag} border-color (removed row)`, style.borderTopColor, meterBg));
+      } else if (!el.matches('span.atlas-viz-bar-base')) {
+        unmeasured.push(`${tag}`);
+      }
+    }
+  }
+
   // Swatches of the key and the readouts against the block (section 4.9, second table): 3:1 like any mark.
   // A filled point is measured by its fill; a ring, a zero ring, a triangle and every line by their stroke
   // (the inside of a ring is the plot background on purpose, sections 9.4.7 and 10.4.6).
@@ -202,29 +171,8 @@ if (PAGES.length === 0) {
   test.skip('VIZ: no published lesson uses a VIZ yet', () => {});
 }
 
-for (const { path, locale, count } of PAGES) {
+for (const { path } of PAGES) {
   test.describe(`VIZ on ${path}`, () => {
-    test('every VIZ written in the file is on the page, as one client:visible island', async ({ page }) => {
-      await page.goto(path);
-      await expect(page.locator('.atlas-viz')).toHaveCount(count);
-      const islands = await page.locator('.atlas-viz').evaluateAll((blocks) =>
-        blocks.map((block) => {
-          const island = block.querySelector('astro-island');
-          return {
-            islands: block.querySelectorAll('astro-island').length,
-            client: island?.getAttribute('client'),
-            notContent: block.classList.contains('not-content'),
-            pagefindIgnore: block.hasAttribute('data-pagefind-ignore'),
-            // The VIZ speaks the page's language, even on a fallback page showing the vi file (decision 43).
-            lang: block.getAttribute('lang'),
-          };
-        }),
-      );
-      for (const island of islands) {
-        expect(island).toEqual({ islands: 1, client: 'visible', notContent: true, pagefindIgnore: true, lang: locale });
-      }
-    });
-
     test('(1) a VIZ more than 1.5 screens down waits: still ssr, no request for its code; scrolled to, it hydrates', async ({
       page,
     }) => {
@@ -282,37 +230,18 @@ for (const { path, locale, count } of PAGES) {
     });
 
     for (const scheme of SCHEMES) {
-      test(`(3) at 375px in ${scheme} mode: no sideways scroll, every control at least 44px tall`, async ({ page }) => {
-        await page.setViewportSize({ width: 375, height: 800 });
-        await page.emulateMedia({ colorScheme: scheme });
-        await page.goto(path);
-        await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
-        const width = () => page.evaluate(() => document.documentElement.scrollWidth);
-        for (const viz of await hydrateAll(page)) {
-          const controls = await viz.locator(CONTROLS).all();
-          expect(controls.length).toBeGreaterThan(0);
-          for (const control of controls) {
-            const box = await control.boundingBox();
-            expect(box?.height ?? 0, await control.evaluate((el) => el.outerHTML.slice(0, 80))).toBeGreaterThanOrEqual(44);
-            expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(375);
-          }
-          expect(await width()).toBeLessThanOrEqual(375);
-          // Every toggle on: the parts it shows were kept in place, so nothing gets wider.
-          for (const button of await viz.getByRole('button').all()) await button.click();
-          expect(await width()).toBeLessThanOrEqual(375);
-          const right = await viz.evaluate((el) => el.getBoundingClientRect().right);
-          expect(right).toBeLessThanOrEqual(375);
-        }
-      });
 
       test(`(4) contrast in ${scheme} mode: marks ≥ 3 on the plot, swatches ≥ 3, text ≥ 4.5`, async ({ page }) => {
         await page.emulateMedia({ colorScheme: scheme });
         await page.goto(path);
         await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
         for (const viz of await hydrateAll(page)) {
-          // Measure in every state of CONTRAST_STATES, so parts hidden at first are measured too.
-          for (const pass of CONTRAST_STATES) {
-            await enterState(page, viz, pass);
+          // A table VIZ must have shown a removed row's dashed outline in one of its states, or that part of
+          // the check measured nothing.
+          const table = (await viz.locator(METER).count()) > 0;
+          let outlines = 0;
+          // Measure in every state of contrastStates, so parts hidden at first are measured too.
+          for await (const pass of contrastStates(page, viz)) {
             await page.mouse.move(0, 0); // no hover style on a button
             await installContrast(page);
             const { marks, swatches, text, unmeasured } = await viz.evaluate(measureContrast);
@@ -329,7 +258,9 @@ for (const { path, locale, count } of PAGES) {
             expect(marks.filter((m) => m.ratio < 3), `${pass}: marks below 3:1`).toEqual([]);
             expect(swatches.filter((m) => m.ratio < 3), `${pass}: swatches below 3:1`).toEqual([]);
             expect(text.filter((m) => m.ratio < 4.5), `${pass}: text below 4.5:1`).toEqual([]);
+            outlines += marks.filter((m) => m.what.includes('(removed row)')).length;
           }
+          if (table) expect(outlines, 'dashed outlines of removed rows measured').toBeGreaterThan(0);
         }
       });
     }
@@ -338,12 +269,14 @@ for (const { path, locale, count } of PAGES) {
       await page.goto(path);
       const viz = page.locator('.atlas-viz').first();
       await hydrate(viz);
+      const table = (await viz.locator(METER).count()) > 0;
       let brokenInPlots = 0;
+      const brokenInTable = new Set<string>();
       // In each state (a zero ring is only drawn in the last one), one mark of each of these kinds that the
       // VIZ has, on its plots and in its swatches, made the colour of what is behind it (a ring by its
       // stroke: its inside is that colour already). The inline style stays until React redraws the mark.
-      for (const state of CONTRAST_STATES) {
-        await enterState(page, viz, state);
+      // A table VIZ: one solid bar and one dashed outline of a removed row, made the colour of their meter.
+      for await (const state of contrastStates(page, viz)) {
         await page.mouse.move(0, 0);
         const broken = await viz.evaluate((root) => {
           const kinds = [
@@ -353,12 +286,15 @@ for (const { path, locale, count } of PAGES) {
             ['line.atlas-viz-bar', 'stroke'],
             ['circle.atlas-viz-zero', 'stroke'],
           ] as const;
-          // Undo the previous state's breaks first, so each state is checked on its own.
+          // Undo the previous state's breaks first, so each state is checked on its own. The attribute holds
+          // the inline style the element had (an HTML bar has its width there).
           for (const el of root.querySelectorAll('[data-atlas-broken]')) {
-            el.removeAttribute('style');
+            const style = el.getAttribute('data-atlas-broken') ?? '';
+            if (style) el.setAttribute('style', style);
+            else el.removeAttribute('style');
             el.removeAttribute('data-atlas-broken');
           }
-          const out: { where: 'plot' | 'swatch'; what: string }[] = [];
+          const out: { where: 'plot' | 'swatch' | 'meter'; what: string }[] = [];
           for (const [where, scope, behind] of [
             ['plot', '.atlas-viz-plot', '.atlas-viz-plot'],
             ['swatch', 'svg.atlas-viz-swatch', '.atlas-viz'],
@@ -372,14 +308,29 @@ for (const { path, locale, count } of PAGES) {
               out.push({ where, what: `${selector} ${property}` });
             }
           }
+          for (const [selector, property, what] of [
+            ['.atlas-viz-meter > span.atlas-viz-bar', 'background-color', 'span.atlas-viz-bar background-color'],
+            [
+              '[data-removed] .atlas-viz-meter > span.atlas-viz-bar-base',
+              'border-color',
+              'span.atlas-viz-bar-base border-color (removed row)',
+            ],
+          ] as const) {
+            const el = root.querySelector<HTMLElement>(selector);
+            if (!el) continue;
+            el.setAttribute('data-atlas-broken', el.getAttribute('style') ?? '');
+            el.style.setProperty(property, getComputedStyle(el.closest('.atlas-viz-meter') as Element).backgroundColor);
+            out.push({ where: 'meter', what });
+          }
           (root.querySelector('figcaption') as HTMLElement).style.color = getComputedStyle(root).backgroundColor;
           return out;
         });
-        brokenInPlots += broken.filter((b) => b.where === 'plot').length;
+        brokenInPlots += broken.filter((b) => b.where !== 'swatch').length;
+        for (const b of broken) if (b.where === 'meter') brokenInTable.add(b.what);
         await installContrast(page);
         const result = await viz.evaluate(measureContrast);
         for (const { where, what } of broken) {
-          const list = where === 'plot' ? result.marks : result.swatches;
+          const list = where === 'swatch' ? result.swatches : result.marks;
           expect(list.some((m) => m.what.includes(what) && m.ratio < 1.1), `${state}, ${where}: ${what} seen as too faint`).toBe(
             true,
           );
@@ -387,6 +338,12 @@ for (const { path, locale, count } of PAGES) {
         expect(result.text.some((m) => m.ratio < 1.1), `${state}: the faint caption seen`).toBe(true);
       }
       expect(brokenInPlots, 'a mark kind to break').toBeGreaterThan(0);
+      if (table) {
+        expect([...brokenInTable].sort(), 'both kinds of HTML bar broken in some state').toEqual([
+          'span.atlas-viz-bar background-color',
+          'span.atlas-viz-bar-base border-color (removed row)',
+        ]);
+      }
     });
 
     test('(5) Tab goes through every control in DOM order, each with the focus ring, then leaves the VIZ', async ({
@@ -456,33 +413,5 @@ for (const { path, locale, count } of PAGES) {
       expect(errors).toEqual([]);
     });
 
-    test('(7) each VIZ island: own JS ≤ 10 KB gzip, props attribute ≤ 8 KB', async ({ page, request }) => {
-      await page.goto(path);
-      const islands = await page.locator('.atlas-viz astro-island').evaluateAll((list) =>
-        list.map((island) => ({
-          uid: island.getAttribute('uid') ?? '',
-          component: island.getAttribute('component-url') ?? '',
-          renderer: island.getAttribute('renderer-url') ?? '',
-        })),
-      );
-      expect(islands).toHaveLength(count);
-      const html = await (await request.get(path)).text();
-      for (const island of islands) {
-        const file = island.component.replace(/^\/_astro\//, '');
-        const renderer = island.renderer.replace(/^\/_astro\//, '');
-        expect(existsSync(join(ASTRO_DIR, file)), `dist/_astro/${file}`).toBe(true);
-        const own = ownJs(file, renderer);
-        expect(own.files).toContain(file);
-        test.info().annotations.push({ type: 'own JS', description: `${file}: ${own.files.join(', ')} = ${own.gzip} B gzip` });
-        expect(own.gzip, `${own.files.join(' + ')}`).toBeLessThanOrEqual(JS_BUDGET);
-
-        // The attribute as written in the HTML (entities included), found by the island's uid.
-        const tag = new RegExp(`<astro-island[^>]*\\buid="${island.uid}"[^>]*>`).exec(html)?.[0] ?? '';
-        const props = /\bprops="([^"]*)"/.exec(tag)?.[1];
-        expect(props, `props of island ${island.uid}`).toBeDefined();
-        test.info().annotations.push({ type: 'props', description: `${file}: ${props?.length} characters` });
-        expect(props?.length ?? Infinity).toBeLessThanOrEqual(PROPS_BUDGET);
-      }
-    });
   });
 }

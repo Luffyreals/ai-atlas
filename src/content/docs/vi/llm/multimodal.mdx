@@ -1,0 +1,325 @@
+---
+title: Multimodal
+description: LLM chỉ đọc dãy vectơ, vậy sao nó trả lời được về ảnh? Cắt ảnh thành patch, projector kiểu LLaVA, cross-attention của Llama 3.2 và token chung của Chameleon.
+quiz:
+  - question: 'Một mô hình kiểu LLaVA dùng ảnh $336 \times 336$, patch $14 \times 14$, nên mỗi ảnh có 576 token ảnh trong chuỗi. Bạn thay bằng bộ mã hóa nhận ảnh $672 \times 672$, vẫn patch $14 \times 14$. Điều nào đúng?'
+    options:
+      - 'Số token ảnh gấp đôi (1 152), vì cạnh ảnh dài gấp đôi'
+      - 'Số token ảnh gấp 4 (2 304), và số cặp vị trí mà self-attention phải chấm điểm giữa các token ảnh gấp 16'
+      - 'Số token ảnh vẫn là 576, vì projector luôn nén về đúng số chiều của LLM'
+      - 'Số token ảnh gấp 4, nhưng chi phí attention cũng chỉ gấp 4'
+    answer: 1
+    explanation: '$N = (H/P)(W/P)$: cả chiều cao lẫn chiều rộng đều gấp đôi, nên $N = 48 \cdot 48 = 2\,304$, gấp 4. Self-attention chấm điểm mọi cặp vị trí, số cặp tỉ lệ với $L^2$, nên phần giữa các token ảnh gấp $4^2 = 16$. Projector đổi số chiều của mỗi token, không đổi số token.'
+  - question: 'Bạn có một bộ mã hóa ảnh lấy từ CLIP và một LLM chỉ đọc chữ, cả hai đã huấn luyện xong, cùng vài trăm nghìn cặp ảnh và chú thích. Làm theo giai đoạn 1 của LLaVA, bạn cập nhật phần nào?'
+    options:
+      - 'Cả LLM, để nó học đọc vectơ của ảnh'
+      - 'Bộ mã hóa ảnh, để nó tự xuất ra vectơ có số chiều của LLM'
+      - 'Cả ba phần, để ảnh và chữ khớp nhau tốt nhất'
+      - 'Chỉ projector, hai phần kia đóng băng'
+    answer: 3
+    explanation: 'Hai phần kia đã giỏi việc của mình: bộ mã hóa đã cho đặc trưng có nghĩa, LLM đã biết dùng ngôn ngữ. Giai đoạn 1 chỉ cần học "phiên dịch" đặc trưng ảnh sang không gian embedding của LLM, việc mà một projector nhỏ học nhanh. LLM chỉ được cập nhật ở giai đoạn 2. Bộ mã hóa ảnh của LLaVA đóng băng ở cả hai giai đoạn.'
+  - question: 'Một nhóm muốn thêm khả năng đọc ảnh cho LLM của họ, với hai yêu cầu: điểm trên các bài kiểm tra chỉ có chữ không được đổi, và token ảnh không được chiếm chỗ trong cửa sổ ngữ cảnh. Cách nào đáp ứng cả hai?'
+    options:
+      - 'Thêm các lớp cross-attention nhìn sang đặc trưng ảnh, giữ nguyên LLM, như báo cáo Llama 3 và bản phát hành Llama 3.2 Vision'
+      - 'Nối token ảnh vào chuỗi rồi fine-tune cả LLM, như giai đoạn 2 của LLaVA'
+      - 'Nối token ảnh vào chuỗi, đóng băng LLM, chỉ học projector'
+      - 'Huấn luyện từ đầu một mô hình token chung như Chameleon'
+    answer: 0
+    explanation: 'Cross-attention đưa thông tin ảnh vào qua khóa và giá trị, nên chuỗi chữ không dài thêm; LLM không đổi nên điểm chỉ có chữ giữ nguyên. Phương án nối chuỗi và đóng băng LLM giữ được yêu cầu đầu, nhưng vẫn tốn $N$ vị trí mỗi ảnh. Fine-tune cả LLM có thể làm đổi khả năng đọc chữ. Chameleon cũng đặt token ảnh vào chuỗi.'
+  - question: 'Ảnh một bàn cờ có nhiều patch trắng giống hệt nhau ở nhiều chỗ. Trong ViT, sau phép chiếu $\mathbf{x}_i \mathbf{E}$, các patch này có cùng một vectơ. Điều gì giúp mô hình biết mỗi patch nằm ở đâu?'
+    options:
+      - 'Mỗi vị trí có ma trận $\mathbf{E}$ riêng'
+      - 'Projector của LLM sắp xếp lại các token theo không gian'
+      - 'Embedding vị trí $\mathbf{p}_i$ cộng vào vectơ của từng patch'
+      - 'Không cần gì: self-attention tự biết thứ tự của các token'
+    answer: 2
+    explanation: 'Mọi patch dùng chung một $\mathbf{E}$, nên hai patch giống nhau cho cùng một vectơ, như ô NumPy trong bài đã kiểm. ViT cộng một embedding vị trí học được vào từng vectơ để phân biệt chúng. Self-attention tự nó không biết thứ tự: đảo các token thì kết quả cũng chỉ đảo theo. Projector chỉ đổi số chiều từng token.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import MultimodalFigure from '@components/figures/MultimodalFigure.astro';
+import patchifyCode from '@code/llm/multimodal/patchify.vi.py?raw';
+import projectorCode from '@code/llm/multimodal/projector.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu cách Vision Transformer biến ảnh thành dãy token: cắt thành **patch** (ô ảnh), chiếu tuyến tính, thêm vị trí. Tính được số token ảnh $N = (H/P)(W/P)$.
+- Mô tả được mẫu chung của LLM **đa phương thức** (multimodal): **bộ mã hóa ảnh** (vision encoder) → **lớp chiếu** (projector) → LLM, và hai giai đoạn huấn luyện của LLaVA: phần nào **đóng băng** (freeze, giữ nguyên trọng số), phần nào học.
+- So sánh được ba cách ghép ảnh với LLM: nối vào chuỗi (LLaVA), **cross-attention** (Llama 3.2 Vision), token chung từ đầu (Chameleon).
+- Cài được phép cắt patch bằng NumPy, patch embedding và projector bằng PyTorch, rồi kiểm số token.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Các bài Vision Transformer, CLIP và LLaVA chưa xuất bản, nên nhắc ở đây phần bài này dùng. **Vision Transformer** (ViT) cắt ảnh thành các ô vuông nhỏ gọi là **patch**, đổi mỗi ô thành một vectơ, rồi cho cả dãy vào Transformer như một câu nhiều token. **CLIP** huấn luyện một bộ mã hóa ảnh và một bộ mã hóa chữ bằng **học đối chiếu** (contrastive learning): trong một lô cặp (ảnh, chú thích), kéo vectơ của cặp đúng lại gần nhau, đẩy các cặp ghép sai ra xa, nên đặc trưng ảnh của CLIP mang nghĩa gần với chữ. Ở phía LLM, như bài [Họ LLaMA](/vi/llm/llama-family/), mỗi token chữ thành một embedding $D$ chiều, và mô hình chỉ làm việc trên dãy vectơ đó. Vậy muốn LLM "thấy" ảnh, ta biến ảnh thành một dãy vectơ cũng $D$ chiều rồi đặt vào chuỗi: đó là ý của LLaVA.
+:::
+
+## Trực giác
+
+### LLM chỉ đọc dãy vectơ
+
+Ở bài [API cho hình ảnh và video](/vi/llm/image-video-api/), bạn gửi một tấm ảnh kèm câu hỏi, và mô hình trả lời đại ý "có một hình vuông đỏ ở giữa". Bài đó nói nhà cung cấp biến ảnh thành token ảnh. Bài này mở chiếc hộp đó.
+
+Mỗi loại dữ liệu (chữ, ảnh, âm thanh, video) gọi là một **phương thức** (modality); mô hình nhận nhiều phương thức gọi là mô hình đa phương thức.
+
+Điểm mấu chốt: khối Transformer không quan tâm vectơ đến từ đâu. Nó nhận một dãy vectơ cùng số chiều và trả ra một dãy vectơ. Nếu làm ra được một dãy vectơ "kể" nội dung tấm ảnh, Transformer xử lý được ngay.
+
+Hình dung một bức tranh ghép. Cắt ảnh thành lưới ô vuông, đọc các ô từ trái sang phải, từ trên xuống dưới, như đọc chữ trên trang sách. Mỗi ô là một "từ", tấm ảnh thành một "câu": ảnh $224 \times 224$ cắt ô $16 \times 16$ cho câu dài 196 từ. Đó chính là ViT.
+
+### Hai việc, và một người phiên dịch
+
+Thứ nhất, vectơ của các ô phải **có nghĩa**: ô có con mèo thì vectơ phải mang ý "mèo", không chỉ là màu điểm ảnh. Đó là việc của bộ mã hóa ảnh, thường lấy từ CLIP.
+
+Thứ hai, bộ mã hóa ảnh và LLM được huấn luyện riêng, nên "nói hai thứ tiếng": vectơ ảnh có $D_v$ chiều theo cách hiểu của bộ mã hóa, embedding chữ có $D$ chiều theo cách hiểu của LLM. Cần một **người phiên dịch** nhỏ đứng giữa: projector.
+
+Còn đưa ảnh cho LLM thế nào? Hãy nghĩ tới cách đưa ảnh cho người đọc sách:
+
+- **Dán ảnh vào sách**, xen giữa các trang chữ: ảnh chiếm trang. Đây là cách nối chuỗi của LLaVA.
+- **Đặt ảnh ở bàn bên cạnh**, cứ vài đoạn người đọc liếc sang: sách không dày thêm, nhưng cần thêm "mắt" để liếc. Đây là cross-attention của Llama 3.2 Vision.
+- **Viết lại ảnh bằng chính bảng chữ cái của sách**, để một người vừa đọc vừa viết được cả hai. Đây là Chameleon.
+
+Bài toán của bài này là: **làm sao biến một tấm ảnh thành dãy vectơ cùng "ngôn ngữ" với embedding của LLM, ghép dãy đó vào đâu, và huấn luyện phần nào để LLM trả lời được về ảnh mà không quên cách đọc chữ?**
+
+## Lý thuyết
+
+### Ký hiệu
+
+Ảnh có chiều cao $H$, chiều rộng $W$ (tính bằng điểm ảnh) và $C$ kênh màu ($C = 3$ với ảnh RGB). Ở bài này $H$ là chiều cao ảnh, không phải số đầu attention như bài Họ LLaMA. Chữ nghiêng $W$ (chiều rộng) khác ma trận đậm $\mathbf{W}$ của projector ở Bước 4, và $H$ khác ma trận $\mathbf{H}_v$. Cỡ patch là $P$, số patch là $N$. Vectơ ra khỏi bộ mã hóa ảnh có $D_v$ chiều, embedding của LLM có $D$ chiều, độ dài chuỗi LLM đọc là $L$.
+
+### Bước 1: cắt ảnh thành patch
+
+Chia ảnh thành các ô $P \times P$ không chồng nhau. Theo chiều cao có $H/P$ hàng ô, theo chiều rộng có $W/P$ cột ô, nên số ô là tích của hai số đó:
+
+$$
+N = \frac{H}{P} \cdot \frac{W}{P} = \frac{HW}{P^2}
+$$
+
+Công thức cần $H$ và $W$ chia hết cho $P$; nếu không, ảnh được co giãn, cắt hoặc đệm trước. Mỗi patch có $P \cdot P$ điểm ảnh, mỗi điểm $C$ số, nên trải phẳng thành vectơ $\mathbf{x}_i \in \mathbb{R}^{P^2 C}$.
+
+$P$ nằm ở mẫu số và bị bình phương: **giảm nửa cỡ patch, hay gấp đôi mỗi cạnh ảnh, thì số token gấp 4**.
+
+### Bước 2: patch embedding
+
+Mỗi patch được nhân với **một** ma trận học được $\mathbf{E}$, rồi cộng thêm một vectơ vị trí:
+
+$$
+\mathbf{z}_i = \mathbf{x}_i\,\mathbf{E} + \mathbf{p}_i,
+\qquad
+\mathbf{E} \in \mathbb{R}^{(P^2 C) \times D_v}
+$$
+
+Ở đây $\mathbf{x}_i$ là vectơ hàng của patch thứ $i$, $\mathbf{z}_i \in \mathbb{R}^{D_v}$ là token ảnh, $\mathbf{p}_i$ là **embedding vị trí** (position embedding, chính là vectơ vị trí ở bài Xây dựng LLM đầu tiên) học được của ô thứ $i$.
+
+Vì sao một $\mathbf{E}$ chung cho mọi patch? Giống bảng embedding từ dùng chung cho mọi vị trí trong câu: "mèo" ở đầu hay cuối câu vẫn là một vectơ. Hệ quả là hai patch giống hệt nhau cho cùng một $\mathbf{x}_i\mathbf{E}$ dù nằm ở hai góc ảnh (ô NumPy kiểm điều này), nên cần $\mathbf{p}_i$ để biết ô nằm ở đâu. ViT đánh số ô theo thứ tự đọc và dùng embedding vị trí một chiều; tác giả thử loại hai chiều và không thấy lợi đáng kể. ViT thêm một **token lớp** (class token) học được ở đầu dãy (giống token `[CLS]` của BERT), rồi cho cả dãy qua các khối Transformer encoder chuẩn. Ngoài bước cắt patch, ViT gần như không dùng hiểu biết riêng nào về ảnh: quan hệ không gian giữa các ô do mô hình tự học từ dữ liệu.
+
+Về cài đặt, "cắt patch rồi nhân $\mathbf{E}$" chính là một **phép tích chập** (convolution) có kernel $P \times P$ và bước nhảy (stride) $P$, nên thư viện thường viết bằng `Conv2d`. Ra khỏi bộ mã hóa, ta có $\mathbf{Z}_v \in \mathbb{R}^{N \times D_v}$: mỗi hàng là đặc trưng của một ô, đã "nhìn" các ô khác qua self-attention.
+
+### Bước 3: vì sao lấy bộ mã hóa của CLIP
+
+CLIP (Radford và cộng sự, 2021) học trên 400 triệu cặp ảnh và chú thích từ Internet. Với một lô $N_b$ cặp, nó tính độ giống cosine giữa mọi ảnh và mọi chú thích, được bảng $N_b \times N_b$ mà đường chéo là các cặp đúng, rồi dùng cross-entropy theo cả hàng lẫn cột để điểm trên đường chéo cao hơn hẳn phần còn lại. Nhờ vậy đặc trưng ảnh của CLIP đã gần với ngôn ngữ: điểm xuất phát tốt cho LLM. LLaVA dùng bộ mã hóa ViT-L/14 của CLIP (patch $14 \times 14$). Nhưng CLIP chỉ **ghép** ảnh với chữ, không sinh câu nào.
+
+### Bước 4: projector và chuỗi cho LLM
+
+LLaVA (Liu và cộng sự, 2023) nối đặc trưng ảnh vào LLM bằng một lớp tuyến tính:
+
+$$
+\mathbf{H}_v = \mathbf{Z}_v\,\mathbf{W},
+\qquad
+\mathbf{W} \in \mathbb{R}^{D_v \times D}
+$$
+
+Mỗi hàng $D_v$ số của $\mathbf{Z}_v$ thành một hàng $D$ số, đúng số chiều embedding từ của LLM. Bài báo viết $\mathbf{H}_v = \mathbf{W}\mathbf{Z}_v$ theo cột; ở đây viết theo hàng cho khớp với code. Tác giả cố ý chọn lớp đơn giản để thử nghiệm nhanh. LLaVA-1.5 (Liu và cộng sự, 2023) thay nó bằng một **MLP hai lớp** và báo cáo kết quả tốt hơn:
+
+$$
+\mathbf{H}_v = \phi\big(\mathbf{Z}_v\,\mathbf{W}_1 + \mathbf{b}_1\big)\,\mathbf{W}_2 + \mathbf{b}_2
+$$
+
+$\phi$ là **hàm kích hoạt** (activation function). Bài báo chỉ nói "MLP hai lớp"; code của bài dùng GELU, trùng với code chính thức của LLaVA-1.5 (`mlp2x_gelu`: Linear → GELU → Linear).
+
+Ở dạng đơn giản nhất (và trong code của bài), token ảnh đứng trước embedding của token chữ, thành một chuỗi:
+
+$$
+\begin{bmatrix} \mathbf{H}_v \\ \mathbf{H}_t \end{bmatrix}
+\in \mathbb{R}^{L \times D},
+\qquad
+L = N + L_{\text{text}}
+$$
+
+$\mathbf{H}_t$ có $L_{\text{text}}$ hàng, mỗi hàng là embedding của một token chữ trong câu hỏi. Khi huấn luyện, LLaVA còn đổi ngẫu nhiên thứ tự ảnh và câu hỏi ở lượt đầu. Từ đây LLM làm việc như thường: dự đoán token kế tiếp. Khi huấn luyện, hàm mất mát chỉ tính trên các token của câu trả lời.
+
+**Số token ảnh là chi phí thật.** Self-attention chấm điểm mọi cặp vị trí, nên số cặp tỉ lệ với $L^2$. Câu hỏi 50 token kèm 576 token ảnh cho $626^2 \approx 392$ nghìn cặp, so với $50^2 = 2\,500$ nếu chỉ có chữ (tự tính). Token ảnh còn chiếm cửa sổ ngữ cảnh và KV cache như token chữ.
+
+| Ảnh $H \times W$ | $P$ | $N$ | Gặp ở đâu |
+|---|---:|---:|---|
+| $224 \times 224$ | 16 | 196 | ViT-B/16 trong bài báo ViT (tự tính) |
+| $224 \times 224$ | 14 | 256 | ViT-L/14 của CLIP ở cỡ ảnh 224 (tự tính); báo cáo Llama 3 ghi đúng 256 patch cho bộ mã hóa của họ |
+| $336 \times 336$ | 14 | 576 | CLIP ViT-L 336px của LLaVA-1.5 (tự tính) |
+| $448 \times 448$ | 14 | 1 024 | Tự tính: cạnh gấp đôi dòng 256 |
+
+### Huấn luyện hai giai đoạn của LLaVA
+
+| Giai đoạn | Dữ liệu | Bộ mã hóa ảnh | Projector | LLM |
+|---|---|---|---|---|
+| 1. Căn chỉnh đặc trưng | 595K cặp ảnh và chú thích, lọc từ CC3M (Conceptual Captions, khoảng 3 triệu cặp) | Đóng băng | Học | Đóng băng |
+| 2. Tinh chỉnh toàn bộ | LLaVA-Instruct-158K: hội thoại, mô tả chi tiết, suy luận | Đóng băng | Học | Học |
+
+**Giai đoạn 1.** Mỗi cặp thành một hội thoại một lượt: câu hỏi kiểu "hãy mô tả ngắn ảnh này", đáp án là chú thích gốc. Chỉ $\mathbf{W}$ được cập nhật. Tác giả gọi đây là huấn luyện một "bộ tách từ cho ảnh" tương thích với LLM đóng băng: dạy người phiên dịch trong khi hai bên giữ nguyên.
+
+**Giai đoạn 2.** Bộ mã hóa ảnh vẫn đóng băng; projector và cả LLM (Vicuna) được cập nhật trên dữ liệu làm theo chỉ dẫn có ảnh. Đây là **instruction tuning** của bài [Họ GPT và fine-tune đa nhiệm](/vi/llm/gpt-family-finetuning/), giờ có thêm ảnh. 158K mẫu này do GPT-4 **chỉ đọc chữ** sinh ra từ chú thích và khung tọa độ đối tượng của ảnh, không phải do người viết.
+
+LLaVA-1.5 giữ khung này, dùng projector MLP, ảnh $336 \times 336$ và thêm dữ liệu hỏi đáp về ảnh từ các bộ học thuật.
+
+### Cross-attention: Llama 3.2 Vision
+
+Cách nối chuỗi đặt token ảnh **vào trong** chuỗi; cross-attention để ảnh **ở ngoài**. Gọi $\mathbf{X} \in \mathbb{R}^{L \times D}$ là biểu diễn của các token chữ ở một lớp của LLM, $\mathbf{Z} \in \mathbb{R}^{N \times D_v}$ là đặc trưng ảnh. Một lớp cross-attention tính:
+
+$$
+\begin{aligned}
+\mathbf{Q} &= \mathbf{X}\mathbf{W}_Q, \quad \mathbf{K} = \mathbf{Z}\mathbf{W}_K, \quad \mathbf{V} = \mathbf{Z}\mathbf{W}_V \\
+\mathrm{CrossAttn}(\mathbf{X}, \mathbf{Z}) &= \mathrm{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d}}\right)\mathbf{V}
+\end{aligned}
+$$
+
+Truy vấn (query) đến từ chữ, khóa và giá trị (key, value) đến từ ảnh; $d$ là số chiều mỗi đầu. Bảng điểm có cỡ $L \times N$: mỗi token chữ "liếc" sang mọi ô ảnh. Kết quả có $L$ hàng, đúng bằng số token chữ, nên chuỗi không dài thêm token nào.
+
+Ba nguồn cần tách bạch:
+
+- **Báo cáo Llama 3, mục 7** (Llama Team, 2024) mô tả các **thí nghiệm**, và ghi rõ các mô hình này khi đó chưa sẵn sàng phát hành. Bộ mã hóa là ViT-H/14 (630 triệu tham số, học kiểu đối chiếu trên 2.5 tỉ cặp ảnh và chữ), được pre-train trên ảnh $224 \times 224$, chia thành 256 patch; khi huấn luyện adapter, ảnh được đưa vào ở độ phân giải cao hơn, tối đa bốn mảnh $336 \times 336$. Lớp cross-attention được chèn sau mỗi lớp self-attention thứ tư của LLM; riêng bản 405B, chúng thêm khoảng 100 tỉ tham số. Khi huấn luyện bộ adapter này, nhóm tác giả cập nhật cả bộ mã hóa ảnh nhưng **cố ý không cập nhật LLM** (mục 1 và 7).
+- **Model card Llama 3.2 Vision** (Meta, phát hành 25/9/2024): hai cỡ 11B và 90B, dựng trên Llama 3.1 chỉ có chữ, thêm một bộ adapter ảnh huấn luyện riêng gồm các lớp cross-attention đưa biểu diễn của bộ mã hóa ảnh vào LLM; pre-train trên 6 tỉ cặp ảnh và chữ.
+- **Bài giới thiệu Llama 3.2** trên blog của Meta (25/9/2024) xác nhận cho bản phát hành: khi huấn luyện adapter, Meta cập nhật bộ mã hóa ảnh nhưng cố ý giữ nguyên tham số của LLM, nên khả năng xử lý chữ không đổi và bản Vision thay thẳng được cho Llama 3.1 ("drop-in replacement").
+
+Báo cáo Llama 3 nêu bốn lý do: phát triển phần nhìn và phần ngôn ngữ song song được; tránh rắc rối của việc huấn luyện chung ảnh và chữ; khả năng xử lý chữ **không bị ảnh hưởng** vì LLM giữ nguyên; và ảnh độ phân giải đầy đủ không phải đi qua các mạng truyền thẳng của LLM, nên suy luận hiệu quả hơn.
+
+### Fusion sớm: Chameleon
+
+Chameleon (Chameleon Team, 2024) đi hướng ngược lại: không có bộ mã hóa ảnh riêng. Một bộ tách từ cho ảnh **lượng tử hóa** (quantization) ảnh $512 \times 512$ thành 1 024 token rời rạc (khác với lượng tử hóa trọng số ở bài PEFT): mỗi token là số thứ tự trong một **sổ mã** (codebook) 8 192 mục, nằm luôn trong từ vựng chung 65 536 token cùng token chữ. Một Transformer duy nhất, huấn luyện từ đầu bằng dự đoán token kế tiếp, đọc và **sinh** được cả chữ lẫn ảnh xen kẽ. Bài báo gọi đây là **fusion sớm** (early fusion, trộn sớm), đối lập với **fusion muộn** (late fusion): các mô hình giữ bộ mã hóa riêng cho từng phương thức, như Flamingo (Alayrac và cộng sự, 2022) hay LLaVA. Cái giá, theo chính tác giả: huấn luyện khó giữ ổn định, và bộ tách từ ảnh yếu với ảnh chứa nhiều chữ.
+
+:::note[Ghi nhớ]
+Ảnh thành $N = HW/P^2$ token; projector đổi số chiều $D_v \to D$. LLaVA nối token ảnh vào chuỗi, Llama 3.2 Vision cho chữ nhìn sang ảnh qua cross-attention, Chameleon đưa ảnh vào cùng từ vựng với chữ.
+:::
+
+### Giới hạn
+
+- **Bài chỉ nói về ảnh vào, chữ ra.** Sinh ảnh chỉ có ở đoạn Chameleon; gọi API sinh ảnh và video thuộc bài [API cho hình ảnh và video](/vi/llm/image-video-api/).
+- **Phục vụ mô hình đa phương thức** (token ảnh làm KV cache lớn thêm) thuộc bài [Deploy LLM: nhiều GPU, phân tán](/vi/llm/llm-deployment/).
+- **Projector là phần nhỏ được huấn luyện**, cùng tinh thần với LoRA ở bài [Đánh giá mô hình và PEFT](/vi/llm/evaluation-peft/).
+
+## Minh họa
+
+Hình dưới vẽ cách nối chuỗi của LLaVA, cũng là cách ô PyTorch làm lại. Hãy nhìn chỗ token ảnh và token chữ gặp nhau: sau projector, chúng chỉ là các vectơ cùng số chiều, xếp chung một hàng.
+
+{/* FIG: ảnh qua bộ mã hóa ảnh và projector thành token ảnh, nằm chung một chuỗi với token chữ của LLM. */}
+<MultimodalFigure />
+
+Bảng dưới đặt ba cách cạnh nhau. Cột "Huấn luyện gì" là cấu hình trong bài báo của từng mô hình.
+
+| Tiêu chí | LLaVA (nối chuỗi) | Llama 3.2 Vision (cross-attention) | Chameleon (fusion sớm) |
+|---|---|---|---|
+| Ảnh thành gì | Đặc trưng CLIP, qua projector | Đặc trưng của bộ mã hóa ảnh | Token rời rạc từ sổ mã |
+| Ảnh nằm ở đâu | Trong chuỗi, chiếm $N$ vị trí | Ngoài chuỗi, chữ nhìn sang qua cross-attention | Trong chuỗi, 1 024 token mỗi ảnh $512 \times 512$ |
+| Huấn luyện gì | Projector, rồi thêm LLM; bộ mã hóa đóng băng | Adapter và bộ mã hóa; LLM đóng băng | Cả mô hình, từ đầu |
+| Sinh ảnh | Không | Không | Có |
+| Điểm mạnh | Đơn giản, rẻ, dựng trên LLM có sẵn | Khả năng xử lý chữ giữ nguyên, chuỗi không dài thêm | Đọc và viết xen kẽ chữ, ảnh |
+| Cái giá | Token ảnh tốn ngữ cảnh và tính toán | Nhiều tham số mới cho cross-attention | Huấn luyện khó ổn định, tốn kém |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 10/2026: ô NumPy với Python 3.14 và NumPy 2.4 (bản có trong Pyodide), ô PyTorch với Python 3.14 và PyTorch 2.14 trên CPU. Ô NumPy chạy ngay trên trang, ô PyTorch chạy trên máy bạn. Hai ô độc lập, không dùng biến của nhau.
+
+### Cắt patch bằng NumPy
+
+Ô dưới đây lấy một ảnh ngẫu nhiên $32 \times 32 \times 3$ (hạt giống 0), cắt thành patch $8 \times 8$, chiếu mỗi patch bằng một ma trận $\mathbf{E}$ thành vectơ $D_v = 64$ chiều, rồi đếm số token cho vài cỡ ảnh. Mẹo `reshape` rồi `transpose` tách mỗi trục ảnh thành "số thứ tự ô" và "vị trí trong ô".
+
+<PythonRunner code={patchifyCode} title="Cắt ảnh thành patch, chiếu thành token" />
+
+Đọc kết quả:
+
+- **`patches: (16, 192)`:** $N = (32/8)^2 = 16$ patch, mỗi patch $8 \cdot 8 \cdot 3 = 192$ số.
+- **Hai dòng `True` tiếp theo:** patch 0 là ô góc trên trái, patch 1 là ô ngay bên phải nó: đọc hết một hàng rồi mới xuống hàng.
+- **`tokens: (16, 64)`:** $\mathbf{E}$ có $192 \cdot 64 = 12\,288$ tham số, dùng chung cho cả 16 patch.
+- **`same token at two places: True`:** chép ô trên trái xuống góc dưới phải thì hai ô ở hai đầu ảnh cho cùng một vectơ. Thiếu embedding vị trí, mô hình không phân biệt được chúng.
+- **Bảng cuối:** khớp bảng ở mục Lý thuyết, thêm dòng $P = 8$: 784 token, gấp đúng 4 lần 196 của $P = 16$.
+
+### Patch embedding và projector bằng PyTorch
+
+File dưới đây dựng lại mẫu chung ở cỡ nhỏ: một `Conv2d` đóng vai bộ mã hóa ảnh (chỉ có bước patch embedding), một `nn.Embedding` đóng vai bảng embedding của LLM, cả hai đóng băng như giai đoạn 1 của LLaVA. Ở giữa là projector MLP hai lớp $64 \to 128 \to 128$. File kiểm `Conv2d` bằng "cắt patch rồi nhân ma trận", ghép token ảnh với 10 token chữ, rồi lan truyền ngược một hàm mất mát giả để xem gradient đi tới đâu. Cách cài PyTorch bản CPU có ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+<LocalCode
+  code={projectorCode}
+  title="Token ảnh, projector và chuỗi cho LLM"
+  packages={['torch']}
+  hardware="CPU là đủ. Vài giây trên máy phát triển, phần lớn là thời gian nạp PyTorch"
+  sampleVaries={false}
+>
+
+```text
+image tokens: (2, 256, 64)
+conv == unfold + matmul: True
+sequence for the LLM: (2, 266, 128)
+grad in projector: True
+grad in patch_embed: False
+patch_embed: 37696 params, 0 trainable
+projector: 24832 params, 24832 trainable
+text_embed: 128000 params, 0 trainable
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **`(2, 256, 64)`:** mỗi ảnh $224 \times 224$, patch 14, cho $N = 16 \cdot 16 = 256$ token $D_v = 64$ chiều.
+- **`conv == unfold + matmul: True`:** `Conv2d` với kernel bằng stride đúng là "cắt patch, trải phẳng, nhân $\mathbf{E}$" của Bước 2.
+- **`(2, 266, 128)`:** sau projector, token ảnh có $D = 128$ chiều như token chữ; $256 + 10 = 266$ là độ dài $L$ của chuỗi LLM đọc.
+- **Gradient và tham số:** chỉ projector có gradient và có tham số được học: $64 \cdot 128 + 128 + 128 \cdot 128 + 128 = 24\,832$. Đúng cấu hình giai đoạn 1 của LLaVA.
+
+Ở mô hình thật, $D$ lên tới hàng nghìn (Llama 3 8B có $D = 4\,096$), LLM có hàng tỉ tham số, và projector chỉ là một phần rất nhỏ.
+
+## Lỗi hay gặp
+
+:::caution[Nghĩ LLM "nhìn" ảnh như người, hay projector dịch ảnh ra chữ]
+LLM chỉ nhận dãy vectơ do bộ mã hóa ảnh tạo ra; thông tin nào bộ mã hóa bỏ mất thì LLM không lấy lại được. Báo cáo Llama 3 ghi rằng bộ mã hóa học kiểu đối chiếu không giữ tốt thông tin vị trí chi tiết; bài báo Chameleon thừa nhận bộ tách từ ảnh của họ yếu với ảnh nhiều chữ. Projector cũng không "dịch" ra từ nào: nó chỉ đổi số chiều của vectơ. Với câu hỏi về chữ nhỏ, chi tiết nhỏ hay đếm đồ vật trong ảnh, hãy kiểm lại câu trả lời.
+:::
+
+:::caution[Nhầm cỡ patch với số patch, hay nghĩ ảnh càng to càng tốt]
+$P$ nhỏ thì $N$ **lớn**: giảm nửa cỡ patch, hay gấp đôi mỗi cạnh ảnh, đều làm số token gấp 4 và số cặp attention giữa các token ảnh gấp 16. Ảnh to giúp thấy chi tiết, nhưng tốn ngữ cảnh, bộ nhớ, và tiền khi API tính theo token. Bộ mã hóa cũng có cỡ ảnh riêng (LLaVA-1.5 dùng CLIP ở $336 \times 336$); ảnh lớn hơn phải co lại hoặc cắt thành nhiều mảnh.
+:::
+
+:::caution[Lẫn phần nào đóng băng, hay gán thí nghiệm cho bản phát hành]
+LLaVA **đóng băng bộ mã hóa ảnh**, học projector rồi thêm LLM. Thí nghiệm Llama 3 và bản phát hành Llama 3.2 (theo blog của Meta) làm ngược lại: **đóng băng LLM**, học bộ mã hóa ảnh và adapter. Nhưng các chi tiết như "sau mỗi lớp thứ tư" hay ViT-H/14 chỉ là của thí nghiệm; model card và blog Llama 3.2 không xác nhận chúng. Trước khi dùng một mô hình qua API, hãy đọc model card: model card Llama 3.2 Vision ghi tác vụ ảnh cộng chữ **chỉ hỗ trợ tiếng Anh** (chữ thuần thì tám ngôn ngữ), nên hỏi về ảnh bằng tiếng Việt nằm ngoài phạm vi hỗ trợ chính thức.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- LLM chỉ đọc dãy vectơ. ViT cắt ảnh thành $N = HW/P^2$ patch, chiếu mỗi patch bằng một ma trận chung $\mathbf{E}$ và cộng embedding vị trí. Số token ảnh là chi phí thật: tốn ngữ cảnh, và số cặp attention tăng theo bình phương độ dài chuỗi.
+- Mẫu chung: bộ mã hóa ảnh (thường từ CLIP, đã học ghép ảnh với chữ) → projector ($D_v \to D$) → LLM. LLaVA nối token ảnh vào chuỗi, $L = N + L_{\text{text}}$, và huấn luyện hai giai đoạn: chỉ projector, rồi projector cùng LLM; bộ mã hóa luôn đóng băng.
+- Llama 3.2 Vision dùng cross-attention: truy vấn từ chữ, khóa và giá trị từ ảnh, chuỗi không dài thêm. LLM giữ nguyên (thí nghiệm Llama 3 và bài giới thiệu Llama 3.2), nên khả năng xử lý chữ không đổi.
+- Chameleon lượng tử hóa ảnh thành token rời rạc trong cùng từ vựng với chữ (1 024 token mỗi ảnh $512 \times 512$), nên đọc và sinh được cả hai, đổi lại huấn luyện khó hơn.
+
+**Đọc thêm:**
+
+- Dosovitskiy, A. và cộng sự (2021). [*An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale*](https://arxiv.org/abs/2010.11929), arXiv:2010.11929, mục 3.1. Ngắn, đủ cách cắt patch và embedding vị trí.
+- Radford, A. và cộng sự (2021). [*Learning Transferable Visual Models From Natural Language Supervision*](https://arxiv.org/abs/2103.00020), arXiv:2103.00020, mục 2.3 và hình 3. Giả mã hàm mất mát của CLIP chỉ khoảng mười dòng.
+- Liu, H., Li, C., Wu, Q., Lee, Y. J. (2023). [*Visual Instruction Tuning*](https://arxiv.org/abs/2304.08485), arXiv:2304.08485, mục 3 và 4; và Liu, H., Li, C., Li, Y., Lee, Y. J. (2023). [*Improved Baselines with Visual Instruction Tuning*](https://arxiv.org/abs/2310.03744), arXiv:2310.03744, mục 3. Kiến trúc, dữ liệu và hai giai đoạn huấn luyện của LLaVA; projector MLP của LLaVA-1.5.
+- Grattafiori, A., Dubey, A., Jauhri, A. và cộng sự (2024). [*The Llama 3 Herd of Models*](https://arxiv.org/abs/2407.21783), arXiv:2407.21783, mục 7 "Vision Experiments". Lý do chọn cross-attention và kiến trúc của thí nghiệm.
+- Meta (2024). [*Llama 3.2 Vision: model card*](https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/MODEL_CARD_VISION.md); và Meta (25/9/2024). [*Llama 3.2: Revolutionizing edge AI and vision with open, customizable models*](https://ai.meta.com/blog/llama-3-2-connect-2024-vision-edge-mobile-devices/), blog của Meta AI. Thông tin bản phát hành Llama 3.2: hai cỡ, dữ liệu, adapter cross-attention, LLM giữ nguyên.
+- Chameleon Team (2024). [*Chameleon: Mixed-Modal Early-Fusion Foundation Models*](https://arxiv.org/abs/2405.09818), arXiv:2405.09818, mục 2.1. Cách Chameleon tách ảnh thành token.
+
+<LessonProgress />

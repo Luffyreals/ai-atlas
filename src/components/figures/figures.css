@@ -44,6 +44,19 @@
   }
 }
 
+/*
+ * Every kit text is centred on its y; a text with no text-anchor attribute is centred on its x too
+ * (llm-lessons.md 2.9.3). Here, not on each <text>, to keep a figure within its HTML budget; the attribute
+ * still wins where it is written (start, end), since the rule skips texts that have one.
+ */
+.atlas-fig-svg text {
+  dominant-baseline: central;
+}
+
+.atlas-fig-svg text:not([text-anchor]) {
+  text-anchor: middle;
+}
+
 .atlas-fig-node rect {
   fill: var(--atlas-fig-node);
   stroke: var(--atlas-fig-muted);
@@ -63,9 +76,19 @@
   stroke-dasharray: 6 4;
 }
 
+/* A part that does not run (llm-lessons.md 2.9.2): dotted border, page colour, muted words; pairs of 8.2 f. */
+.atlas-fig-node[data-tone='off'] rect {
+  fill: var(--atlas-fig-bg);
+  stroke-dasharray: 3 3;
+}
+
 .atlas-fig-text {
   fill: var(--atlas-fig-ink);
   font-weight: 600;
+}
+
+.atlas-fig-node[data-tone='off'] .atlas-fig-text {
+  fill: var(--atlas-fig-muted);
 }
 
 .atlas-fig-text-sm {
@@ -86,6 +109,16 @@
 
 .atlas-fig-arrow-head {
   fill: var(--atlas-fig-muted);
+}
+
+/* A link of the second group (llm-lessons.md 2.9.1): dashed and blue, like a FigNode of tone alt. */
+.atlas-fig-arrow[data-tone='alt'] {
+  stroke: var(--atlas-fig-alt);
+  stroke-dasharray: 5 4;
+}
+
+.atlas-fig-arrow-head[data-tone='alt'] {
+  fill: var(--atlas-fig-alt);
 }
 
 /* Schematic plots (viz.md 11.4.3): a shaded region with a 2px border, level curves, dots, math labels. */
@@ -121,6 +154,11 @@
 .atlas-fig-math {
   fill: var(--atlas-fig-ink);
   font-weight: 400;
+}
+
+/* Upright bold symbol, the site's \mathbf (llm-lessons.md 2.9.2): Barlow 600 upright is loaded. */
+.atlas-fig-math-bold {
+  font-weight: 600;
 }
 
 .atlas-fig-caption {
