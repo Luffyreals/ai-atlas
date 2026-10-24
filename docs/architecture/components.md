@@ -5,7 +5,7 @@
 >
 > Tài liệu này ghi **hành vi, giao diện lập trình và hình thức** (mục 4.9). Cập nhật lần cuối 23/10/2026. Các chỗ ghi "đã kiểm chứng" là kết quả chạy thật trong ngày, không phải suy đoán.
 
-**Quyết định của người dùng ngày 23/10/2026** (cũng ghi ở [mvp.md](../mvp.md) mục 7, quyết định 8–17):
+**Quyết định của người dùng ngày 23/10/2026** (cũng ghi ở [decisions.md](../decisions.md), quyết định 8–17):
 
 | # | Quyết định | Áp dụng ở |
 |---|---|---|
@@ -15,10 +15,10 @@
 | 11 | Trang demo giữ trên bản deploy, giữ `noindex`, **lọc khỏi `sitemap.xml`** | 2.10 |
 | 12 | Câu hỏi và đáp án quiz có công thức: **tự sinh `aria-label`** từ chữ thường cộng mã TeX. Tác giả không viết lời đọc | 4.4 |
 | 13 | CSS của component bài học (và của `RoadmapMap`) **gộp vào `customCss`** của Starlight. Bài học không còn file CSS chặn render riêng | 3 |
-| 14 | Lighthouse trang chủ: "không thấp hơn bản trước M1, đo cùng lúc trên cùng máy" | [mvp.md](../mvp.md) |
+| 14 | Lighthouse trang chủ: "không thấp hơn bản trước M1, đo cùng lúc trên cùng máy" | [decisions.md](../decisions.md) |
 | 15 | Code Python lỗi: vùng trạng thái có thêm một dòng `sr-only` (key `errorTitle`). Giao diện nhìn thấy không đổi | 4.6, 4.9.5 |
 | 16 | Sửa ngay ở M1 điểm dừng Tab thừa khi radio có focus trước lúc quiz hydrate | 4.4, 7 |
-| 17 | Performance trang demo 87–90: chấp nhận ở M1, tối ưu ở M4 | [mvp.md](../mvp.md) |
+| 17 | Performance trang demo 87–90: chấp nhận ở M1, tối ưu ở M4 | [decisions.md](../decisions.md) |
 
 ## 1. Mục tiêu và phạm vi
 
@@ -85,7 +85,7 @@ import fitCode from '@code/ml/linear-regression/fit.vi.py?raw';
 <PythonRunner code={fitCode} />
 ```
 
-**Comment trong code theo ngôn ngữ của bài** (quyết định 22/10/2026). Mỗi ví dụ có hai file cùng thư mục: `<tên>.vi.py` và `<tên>.en.py`. Test `tests/unit/code-pairs.test.ts`:
+**Comment trong code theo ngôn ngữ của bài** (quyết định 22/10/2026). Mỗi ví dụ có hai file cùng thư mục: `<tên>.vi.py` và `<tên>.en.py`. Test `tests/unit/content/code-pairs.test.ts`:
 
 - Mỗi `.vi.py` phải có `.en.py` cùng tên, và ngược lại.
 - Sau khi bỏ comment (`#` đến cuối dòng, không tính `#` nằm trong chuỗi) và dòng trống, hai file phải giống hệt nhau. Chuỗi in ra (`print("...")`) là code, nên **viết tiếng Anh hoặc chỉ in số**.

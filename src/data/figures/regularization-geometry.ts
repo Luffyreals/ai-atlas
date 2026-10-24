@@ -1,6 +1,6 @@
 // Words and numbers of RegularizationGeometryFigure (ml/regularization, section "Lasso"): the level ellipses of
 // one shared loss touch the circle (Ridge) where both weights are non-zero, and the diamond (Lasso) at a vertex
-// on an axis, where one weight is exactly 0 (docs/architecture/viz.md, section 11.4; decision 49).
+// on an axis, where one weight is exactly 0 (docs/architecture/viz/static-plots.md, section 11.4; decision 49).
 // vi follows the lesson's FIG comment; en is a draft for lesson-translator (decision 43). The axis labels w1, w2
 // are math, drawn with FigMath in the component, so they are not here.
 import type { Quadratic } from '../../lib/figures/plot';
@@ -48,8 +48,8 @@ export const REGULARIZATION_GEOMETRY = {
 } satisfies FigureText<Key>;
 
 /**
- * Numbers of viz.md section 11.4.4 (one loss for both panels, decision 49). The touch points come from the
- * Python check there; tests/unit/figure-geometry.test.ts checks that they are the true touch points.
+ * Numbers of viz/static-plots.md section 11.4.4 (one loss for both panels, decision 49). The touch points come from the
+ * Python check there; tests/unit/viz/figure-geometry.test.ts checks that they are the true touch points.
  */
 export const REGULARIZATION_GEOMETRY_PLOT = {
   budget: 1, // circle radius and diamond vertex: t = 1

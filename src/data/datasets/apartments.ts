@@ -1,6 +1,6 @@
-// The one copy of the apartment table (decision 19 in docs/mvp.md; docs/architecture/viz.md, section 4.1).
+// The one copy of the apartment table (decision 19 in docs/decisions.md; docs/architecture/viz/shared.md, section 4.1).
 // Used by DatasetTable (Intuition), LinearFitViz (Illustration) and src/code/ml/{ml-overview,linear-regression,gradient-descent}/*.py, where
-// the same numbers sit under "# dataset: apartments" (kept equal by tests/unit/datasets.test.ts).
+// the same numbers sit under "# dataset: apartments" (kept equal by tests/unit/content/datasets.test.ts).
 // Relative imports only: Playwright e2e imports this file too.
 import type { GradientDescentConfig } from '../../lib/viz/gradient-descent';
 import type { LinearFitConfig } from '../../lib/viz/linear-fit';
@@ -44,8 +44,8 @@ export const APARTMENTS = {
 } as const satisfies XYDataset;
 
 /**
- * LinearFitViz on ml/linear-regression. Checked by tests/unit/linear-fit-apartments.test.ts against
- * the constraints of viz.md section 4.1 and the Python fixture.
+ * LinearFitViz on ml/linear-regression. Checked by tests/unit/viz/linear-fit-apartments.test.ts against
+ * the constraints of viz/shared.md section 4.1 and the Python fixture.
  * - Starts from the flat line w = 0 at about the mean rent (10.92): "line A" of the lesson, MSE 10.5020.
  * - b goes down to −10.5 (decision 24): for every w on the slider, the line through the mean point
  *   (52.4, 10.92) needs b = 10.92 − 52.4 w ≥ −10.04, so the reader can keep the line on that point while
@@ -65,8 +65,8 @@ export const APARTMENTS_LINEAR_FIT: LinearFitConfig = {
 };
 
 /**
- * GradientDescentViz on ml/gradient-descent (docs/architecture/viz.md, sections 12.2.3, 12.2.5, 12.4.2; decision 55).
- * Checked by tests/unit/gradient-descent-apartments.test.ts against the constraints of section 12.4.2 and the exact
+ * GradientDescentViz on ml/gradient-descent (docs/architecture/viz/gradient-descent.md, sections 12.2.3, 12.2.5, 12.4.2; decision 55).
+ * Checked by tests/unit/viz/gradient-descent-apartments.test.ts against the constraints of section 12.4.2 and the exact
  * paths of scripts/gradient-descent-fixture.py. On x̃ = (x − 25) / 60, L = 2.4533, so 2/L = 0.815:
  * - from (w̃, b̃) = (0, 0), MSE 129.75, the five rates show the four behaviours: 0.05 is still far from the bottom
  *   after 100 steps (MSE 1.0023), 0.3 (the initial one) gets within 1 % at step 69, 0.7 at step 29, 0.8 zigzags

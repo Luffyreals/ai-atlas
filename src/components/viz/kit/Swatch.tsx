@@ -1,4 +1,4 @@
-// Key and readout swatches of every VIZ (docs/architecture/viz.md, sections 4.3, 9.4.5; decision 50): a swatch
+// Key and readout swatches of every VIZ (docs/architecture/viz/, sections 4.3, 9.4.5; decision 50): a swatch
 // draws the same mark with the same class as the plot, so its colour and dash always match. Decorative: the
 // words next to it carry the meaning (aria-hidden).
 

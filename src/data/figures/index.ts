@@ -1,6 +1,6 @@
-// Registry of the static figures (docs/architecture/viz.md, section 8). The key is the figure id: kebab-case
+// Registry of the static figures (docs/architecture/viz/figures.md, section 8). The key is the figure id: kebab-case
 // name of <Name>Figure.astro without "Figure", the name of its words file here, and the element ids
-// fig-<id>, fig-<id>-desc. tests/unit/figure-conventions.test.ts keeps components, files and keys in step.
+// fig-<id>, fig-<id>-desc. tests/unit/viz/figure-conventions.test.ts keeps components, files and keys in step.
 import { ML_FAMILIES } from './ml-families';
 import { ML_WORKFLOW } from './ml-workflow';
 import { REGULARIZATION_GEOMETRY } from './regularization-geometry';

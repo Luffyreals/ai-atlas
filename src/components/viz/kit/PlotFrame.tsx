@@ -1,4 +1,4 @@
-// Axes, ticks and grid of a VIZ plot (docs/architecture/viz.md, sections 2.4, 4.3). No state, so it also renders
+// Axes, ticks and grid of a VIZ plot (docs/architecture/viz/, sections 2.4, 4.3). No state, so it also renders
 // as static HTML without client:*. Text (titles, tick labels) is HTML around the SVG, so it keeps the page's text
 // size at every width; the SVG has no viewBox and children place marks with pct(toPercentX(…)) / pct(toPercentY(…)).
 import type { CSSProperties, ReactNode } from 'react';

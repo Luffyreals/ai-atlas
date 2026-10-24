@@ -1,4 +1,4 @@
-// A 12px × at a point given in percent (docs/architecture/viz.md, sections 4.7, 12.4.3): the mean point of
+// A 12px × at a point given in percent (docs/architecture/viz/, sections 4.7, 12.4.3): the mean point of
 // LinearFitViz, the least-squares point of GradientDescentViz, and their key swatches. Drawn with AtPoint, so the
 // arms stay in px at every plot width. The halo (plot background, wider) keeps it readable where a line runs under it.
 import AtPoint from './AtPoint';

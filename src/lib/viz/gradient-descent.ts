@@ -1,9 +1,9 @@
-// Gradient descent on the MSE of simple linear regression, for GradientDescentViz (docs/architecture/viz.md,
+// Gradient descent on the MSE of simple linear regression, for GradientDescentViz (docs/architecture/viz/gradient-descent.md,
 // sections 12.2, 12.4.1). Pure: no DOM, no React. Notation follows the lesson ml/gradient-descent: the feature is
 // min-max scaled, x̃ = (x − min) / (max − min), the model is ŷ = w̃ x̃ + b̃, the loss is the MSE with 1/m (no 1/2),
 // so ∇L = (2/m) Xᵀ(Xθ − y) and the Hessian is H = (2/m) XᵀX. y stays raw: the MSE is the one of ml/linear-regression.
 // Only + − × ÷, Math.sqrt, Math.abs (section 9.2.2): the numbers are the same bit for bit at build time and in every
-// browser, so the prerendered HTML matches the hydrated one. tests/unit/gradient-descent.test.ts scans this file.
+// browser, so the prerendered HTML matches the hydrated one. tests/unit/viz/gradient-descent.test.ts scans this file.
 // Relative imports only: Playwright e2e may import this file.
 import type { Row } from '../../data/datasets/types';
 import { mse, type Line, type Point, type SliderSpec } from './linear-fit';

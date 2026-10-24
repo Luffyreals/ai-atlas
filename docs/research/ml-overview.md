@@ -1,6 +1,6 @@
 # Tổng quan về Học máy
 
-Bài: `ml/ml-overview`. Phạm vi đã chốt (`docs/mvp.md` mục 7, quyết định 40): nêu ba nhóm có giám sát, không giám sát, tăng cường. Trọng tâm là học có giám sát (hồi quy, phân loại), quy trình dữ liệu → huấn luyện → đánh giá, tách train/test, tổng quát hóa (generalization), trỏ tới `ml/overfitting-underfitting`. Toán chỉ ở mức ký hiệu. 2 ô code (`fit`/`predict` hộp đen, `train_test_split`), 2 hình SVG tĩnh, 4 câu quiz.
+Bài: `ml/ml-overview`. Phạm vi đã chốt (`docs/decisions.md`, quyết định 40): nêu ba nhóm có giám sát, không giám sát, tăng cường. Trọng tâm là học có giám sát (hồi quy, phân loại), quy trình dữ liệu → huấn luyện → đánh giá, tách train/test, tổng quát hóa (generalization), trỏ tới `ml/overfitting-underfitting`. Toán chỉ ở mức ký hiệu. 2 ô code (`fit`/`predict` hộp đen, `train_test_split`), 2 hình SVG tĩnh, 4 câu quiz.
 
 Ngày kiểm tra nguồn: **23/10/2026**, bằng WebFetch và curl. Thẻ nguồn: [MIT], [SAM], [MLCB1], [MLCB2], [GG-SUP], [GG-DS], [SK-TTS], [SK-CV], [ISL], [GER].
 

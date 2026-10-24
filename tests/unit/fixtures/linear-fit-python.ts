@@ -1,4 +1,4 @@
-// Numbers from Python for LinearFitViz (docs/architecture/viz.md, sections 2.5, 4.5, 6 task V1).
+// Numbers from Python for LinearFitViz (docs/architecture/viz/, sections 2.5, 4.5, 6 task V1).
 // Python 3.14.5 + NumPy 2.4.6 (the NumPy version Pyodide 314.0.7 ships), 23/10/2026, run from an empty folder.
 // Command (x, y = the two columns of `rows`; W0, B0 = APARTMENTS_LINEAR_FIT.w.initial, .b.initial):
 //   python -I -c "import numpy as np; x=np.array([25, 30, 36, 42, 48, 55, 60, 68, 75, 85]);

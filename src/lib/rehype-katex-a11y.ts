@@ -1,4 +1,4 @@
-// Build-time rehype step, run right after rehype-katex (decision 25 in docs/mvp.md): every display
+// Build-time rehype step, run right after rehype-katex (decision 25 in docs/decisions.md): every display
 // formula (.katex-display) becomes role="group" with an aria-label made of the word "Formula" in the
 // page's language plus its TeX source. A formula wider than the column scrolls in its own box
 // (custom.css), and Chrome then makes that box a Tab stop; the name says what the reader has reached.
