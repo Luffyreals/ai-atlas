@@ -122,7 +122,7 @@
       - thử vài giá trị $\eta$, vẽ MSE theo bước, có và không chuẩn hóa;
       - SGD/mini-batch, có `SGDRegressor`.
 
-Số 53 và 54 do phần LLM dùng (ở nhánh khác), nên không có ở nhánh này.
+Số 53, 54 và 59–61 do phần LLM dùng (nhánh `llm-lessons`), nên không có ở nhánh này. Quyết định mới bắt đầu từ 62.
 
 55. **VIZ bài Gradient Descent** (thiết kế ở `docs/architecture/viz/gradient-descent.md` mục 12; người dùng chốt ngày 24/10/2026; số 53, 54 đã dùng cho phần LLM ở nhánh khác):
     - **Chuẩn hóa:** chỉ chuẩn hóa diện tích, theo min-max: $\tilde{x} = (x - 25)/60$. Giữ $y$ gốc. Đường mức là elip với $\kappa = 15.3$, đủ để thấy chậm, zigzag, dao động và phân kỳ. Z-score làm đường mức thành vòng tròn, GD tới đáy sau 1 bước, nên không dùng.
