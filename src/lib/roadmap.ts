@@ -56,9 +56,13 @@ export function isTranslated(lesson: Lesson, locale: Locale): boolean {
   return lesson.status[locale] === 'published';
 }
 
-/** The first lesson in roadmap order that has a page (the homepage's "Start learning"); undefined while none has. */
-export function getFirstOpenLesson(lessons: readonly Lesson[] = LESSONS): Lesson | undefined {
-  return lessons.find(hasPage);
+/**
+ * The homepage's "Start learning": the first lesson in roadmap order written in `locale` (decision 43 in
+ * docs/mvp.md: en waits until after the MVP, so /en/ skips vi-only lessons), else the first with any page
+ * (its fallback page); undefined while no lesson has a page.
+ */
+export function getFirstOpenLesson(locale: Locale = 'vi', lessons: readonly Lesson[] = LESSONS): Lesson | undefined {
+  return lessons.find((lesson) => hasPage(lesson) && isTranslated(lesson, locale)) ?? lessons.find(hasPage);
 }
 
 export function getLessonUrl(id: LessonId, locale: Locale): string {

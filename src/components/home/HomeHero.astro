@@ -22,7 +22,7 @@ const otherLocale: Locale = locale === 'vi' ? 'en' : 'vi';
 
 // "Start learning" opens the first lesson in roadmap order that has a page; no button while none has.
 // Same link as RoadmapMap: an untranslated lesson keeps its /en/ URL, where Starlight shows the vi page.
-const firstLesson = getFirstOpenLesson();
+const firstLesson = getFirstOpenLesson(locale);
 const start = firstLesson ? lessonLinkView(firstLesson, locale) : undefined;
 const startLabel =
   start &&

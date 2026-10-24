@@ -241,7 +241,7 @@ ai-atlas/
 
 > **Trạng thái mốc M2 (23/10/2026):** xong. Bài `ml/linear-regression` có bản vi (người dùng đã duyệt, [quyết định 32](docs/mvp.md)) và bản en, VIZ `LinearFitViz`, bảng dữ liệu `DatasetTable`, SEO cho trang fallback (quyết định 30, 33, 34), nút "Bắt đầu học" ở trang chủ. Template đã chốt theo bài này. Báo cáo: [docs/progress/2026-10-23-m2.md](docs/progress/2026-10-23-m2.md).
 >
-> **Bước tiếp theo (M3):** 4 bài ML còn lại của MVP, vi rồi en, theo template đã chốt. Vẫn còn tồn: deploy lên Cloudflare Pages (Giai đoạn 0) và người dùng duyệt giao diện component (M1-10).
+> **Bước tiếp theo (M3):** 4 bài ML còn lại của MVP, bản vi, theo template đã chốt. Bản en làm sau MVP ([quyết định 43](docs/mvp.md)). Đã xong bản vi cả 4 bài: Tổng quan Học máy, Overfitting và Underfitting, Ridge/Lasso/Elastic Net, Gradient Descent (bài cuối chờ duyệt trên PR #1, quyết định 56). Vẫn còn tồn: deploy lên Cloudflare Pages (Giai đoạn 0) và người dùng duyệt giao diện component (M1-10).
 
 **Kết quả:** bài chuẩn dùng làm mẫu cho mọi bài sau.
 

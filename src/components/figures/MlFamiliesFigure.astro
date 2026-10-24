@@ -1,0 +1,36 @@
+---
+// ml/ml-overview, "Ba nhóm học máy": machine learning splits into three families by what the machine learns
+// from (labels, no labels, rewards). A small tree: "machine learning" on top, a spine down the left, one
+// arrow into each card. Supervised is the focus (accent). Narrow layout only: three stacked cards stay compact
+// on a wide screen too (docs/architecture/viz.md, section 8.4). Words: src/data/figures/ml-families.ts.
+import { ML_FAMILIES } from '@data/figures/ml-families';
+import { toLines } from '@lib/figures/geometry';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigNode from './kit/FigNode.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = ML_FAMILIES[getPageLocale(Astro.locals.starlightRoute)];
+
+const SPINE_X = 36;
+const ROOT = { x: 8, y: 8, width: 168, height: 40 };
+const CARD = { x: 64, width: 288, height: 76, top: 72, gap: 16 };
+const cards = (['supervised', 'unsupervised', 'reinforcement'] as const).map((key, i) => {
+  const [main = '', ...small] = toLines(t.labels[key]);
+  const y = CARD.top + i * (CARD.height + CARD.gap);
+  return { key, main, small, y, cy: y + CARD.height / 2, tone: key === 'supervised' ? ('accent' as const) : ('plain' as const) };
+});
+const height = CARD.top + cards.length * CARD.height + (cards.length - 1) * CARD.gap + 8;
+---
+
+<FigureFrame id="ml-families" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigNode {...ROOT} lines={t.labels.root} />
+    {cards.map((card) => <FigArrow from={[SPINE_X, ROOT.y + ROOT.height]} via={[[SPINE_X, card.cy]]} to={[CARD.x, card.cy]} />)}
+    {
+      cards.map((card) => (
+        <FigNode x={CARD.x} y={card.y} width={CARD.width} height={CARD.height} lines={card.main} small={card.small} tone={card.tone} />
+      ))
+    }
+  </Fragment>
+</FigureFrame>

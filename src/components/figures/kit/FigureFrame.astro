@@ -1,0 +1,75 @@
+---
+// Frame of every static figure (docs/architecture/viz.md, sections 8.2 d–g, 8.4): <figure>, the required
+// narrow SVG (viewBox 360 wide) and the optional wide one (640 wide, shown from a 640px frame), an sr-only
+// description and the visible caption ($…$ rendered with KaTeX here, at build). 0 JS; styles in figures.css.
+// Each SVG is role="img", named by aria-label (no <title>: no tooltip) and described by the sr-only text,
+// which stands in for the words drawn in it. Slots: "narrow" (required), "wide" (optional).
+import type { FigureId } from '@data/figures/index';
+import type { FigureStrings } from '@data/figures/types';
+import { NARROW_MAX_HEIGHT, NARROW_WIDTH, WIDE_WIDTH } from '@lib/figures/geometry';
+import { renderInlineMarkup } from '@lib/inline-markup';
+import { getPageLocale } from '@lib/page-locale';
+
+interface Props {
+  /** Key of src/data/figures/index.ts, e.g. "ml-workflow"; element ids fig-<id>, fig-<id>-desc. */
+  id: FigureId;
+  /** The figure's words, already picked for the page locale. */
+  text: FigureStrings<string>;
+  /** viewBox 0 0 360 narrowHeight; at most 540. */
+  narrowHeight: number;
+  /** viewBox 0 0 640 wideHeight; given if and only if the "wide" slot is. */
+  wideHeight?: number;
+}
+
+const { id, text, narrowHeight, wideHeight } = Astro.props;
+const where = `<FigureFrame id="${String(id)}"> on "${Astro.locals.starlightRoute.id}"`;
+const hasWide = Astro.slots.has('wide');
+
+if (!Astro.slots.has('narrow')) throw new Error(`${where}: the "narrow" slot is required.`);
+if (!(narrowHeight > 0 && narrowHeight <= NARROW_MAX_HEIGHT)) {
+  throw new Error(`${where}: narrowHeight must be in (0, ${NARROW_MAX_HEIGHT}], got ${narrowHeight}.`);
+}
+if (hasWide !== (wideHeight !== undefined)) {
+  throw new Error(`${where}: give both wideHeight and the "wide" slot, or neither.`);
+}
+if (wideHeight !== undefined && !(wideHeight > 0)) throw new Error(`${where}: wideHeight must be positive.`);
+for (const field of ['caption', 'label', 'description'] as const) {
+  if (!text[field].trim()) throw new Error(`${where}: "${field}" is empty.`);
+}
+
+const lang = getPageLocale(Astro.locals.starlightRoute);
+const figureId = `fig-${String(id)}`;
+const descId = `${figureId}-desc`;
+---
+
+<figure class="atlas-figure not-content" lang={lang} id={figureId} data-wide={hasWide ? '' : undefined}>
+  <svg
+    class="atlas-fig-svg"
+    data-layout="narrow"
+    viewBox={`0 0 ${NARROW_WIDTH} ${narrowHeight}`}
+    role="img"
+    aria-label={text.label}
+    aria-describedby={descId}
+    data-pagefind-ignore
+  >
+    <slot name="narrow" />
+  </svg>
+  {
+    hasWide && (
+      <svg
+        class="atlas-fig-svg"
+        data-layout="wide"
+        viewBox={`0 0 ${WIDE_WIDTH} ${wideHeight}`}
+        role="img"
+        aria-label={text.label}
+        aria-describedby={descId}
+        data-pagefind-ignore
+      >
+        <slot name="wide" />
+      </svg>
+    )
+  }
+  {/* aria-hidden: read once, through aria-describedby, not again as a paragraph */}
+  <p class="sr-only" id={descId} aria-hidden="true">{text.description}</p>
+  <figcaption class="atlas-fig-caption" set:html={renderInlineMarkup(text.caption)} />
+</figure>

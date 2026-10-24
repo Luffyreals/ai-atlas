@@ -65,6 +65,7 @@ import Quiz from '@components/Quiz.astro';
 import LessonProgress from '@components/LessonProgress.astro';
 import DatasetTable from '@components/DatasetTable.astro';
 import TenMinhHoa from '@components/viz/TenMinhHoa.astro';
+import TenHinhFigure from '@components/figures/TenHinhFigure.astro';
 import numpyCode from '@code/<phần>/<bài>/<tên-1>.vi.py?raw';
 import sklearnCode from '@code/<phần>/<bài>/<tên-2>.vi.py?raw';
 
@@ -75,6 +76,8 @@ import sklearnCode from '@code/<phần>/<bài>/<tên-2>.vi.py?raw';
       Bài không có bộ dữ liệu chung thì xóa dòng này.
     - VIZ: import wrapper @components/viz/<Name>.astro, không có client:*. Chỉ thêm khi component đã có
       (giai đoạn 2 ở mục Minh họa). Trước đó thì xóa dòng này.
+    - Hình tĩnh: import @components/figures/<Name>Figure.astro (không bao giờ từ @components/viz/).
+      Chỉ thêm khi hình đã có (giai đoạn 2, xem mục Minh họa). Trước đó thì xóa dòng này.
     - Code: mỗi ô một cặp file src/code/<phần>/<bài>/<tên>.vi.py và <tên>.en.py, chỉ khác comment,
       cùng số dòng (test code-pairs). Chưa dịch thì .en.py là bản sao của .vi.py.
       Tên biến import theo nội dung ô, ví dụ outlierCode. Bản en của bài import <tên>.en.py. */}
@@ -163,8 +166,16 @@ Kết quả chính của mục, viết lại bằng lời.
 
 {/* Hướng dẫn: chọn loại hình theo docs/architecture/viz.md mục 2.1.
     - Người đọc cần đổi một tham số và thấy hệ quả ngay: VIZ tương tác. Một VIZ một ý, tối đa 2 VIZ mỗi bài.
-    - Chỉ cần nhìn: hình tĩnh, là component .astro vẽ bằng SVG, không có client:*.
-      Cần đọc số liệu: DatasetTable hoặc bảng Markdown.
+    - Chỉ cần nhìn (sơ đồ khối, quy trình, phân loại): hình tĩnh, 0 JS, theo docs/architecture/viz.md mục 8.
+      Hình tĩnh đặt ở chỗ nó giúp hiểu nhất (Trực giác, Lý thuyết hay ở đây), tối đa khoảng 3 hình mỗi bài.
+      Cũng hai giai đoạn như VIZ, comment bắt đầu bằng "FIG:" (hai khối mẫu FIG ở cuối mục này):
+      · Giai đoạn 1 (lesson-writer): comment giữ chỗ nhiều dòng, đặt đúng chỗ hình sẽ hiện, đủ năm dòng
+        FIG, Ý, Khối và mũi tên, Nhãn, Chú thích. Nhãn không dùng công thức; ký hiệu toán để ở chú thích.
+      · Giai đoạn 2 (viz-builder thay): import, comment một dòng đặt liền trên thẻ, rồi thẻ không có prop.
+        Chữ của hình nằm ở src/data/figures/<name>.ts (vi và en), không viết trong MDX.
+        Bản en của bài dùng đúng import và thẻ đó.
+      · Trước hình tĩnh: một câu dẫn nói người đọc nên nhìn vào đâu. Không có danh sách "Hãy thử".
+    - Cần đọc số liệu: DatasetTable hoặc bảng Markdown.
     - Bài không cần VIZ: giữ mục này với hình tĩnh hoặc bảng. Nếu không có hình nào thật sự giúp hiểu thì bỏ
       cả mục (heading lẫn nội dung) và báo lại lý do.
     Trước hình: một đoạn nói hình cho thấy gì và mỗi điều khiển làm gì, rồi danh sách "Hãy thử" 3–4 bước,
@@ -189,6 +200,15 @@ Hình cho thấy gì, mỗi điều khiển làm gì. Hãy thử:
 
 {/* VIZ: ý chính của hình, một câu. */}
 <TenMinhHoa />
+
+{/* FIG: TenHinhFigure
+    Ý: một câu, điều người đọc phải thấy được.
+    Khối và mũi tên: theo thứ tự đọc; khối nào là trọng tâm, khối nào thuộc nhóm thứ hai.
+    Nhãn: chữ tiếng Việt của từng khối, tối đa 3 dòng ngắn, không có công thức.
+    Chú thích: một câu, được dùng công thức. Số trên hình khớp code của bài. */}
+
+{/* FIG: ý chính của hình, một câu. */}
+<TenHinhFigure />
 
 ## Ví dụ code
 

@@ -1,0 +1,36 @@
+---
+// RegularizationViz for ml/regularization (docs/architecture/viz.md, sections 10.4.4–10.4.5). The only file a
+// lesson imports: <RegularizationViz />, no props, no client:* in MDX. Here, at build time: UI strings and KaTeX
+// for the slider label. The island fits Ridge itself from the 24 points, with the same code at build time and in
+// the browser (section 10.2.4), and imports the precomputed Lasso path (sine-lasso-path.ts) into its own JS
+// chunk, not through props. No true curve here, so nothing runs Math.sin.
+// The island hydrates 200px before it scrolls into view. Styles: viz.css, through Starlight's customCss.
+import RegularizationVizIsland from './regularization-viz/RegularizationVizIsland';
+import { SINE_REGULARIZATION, SINE_TEST, SINE_TRAIN } from '@data/datasets/sine';
+import { getStrings } from '@i18n/ui';
+import { inlineMarkupLabel, renderInlineMarkup } from '@lib/inline-markup';
+import { getPageLocale } from '@lib/page-locale';
+import { axisText } from '@lib/viz/axis';
+
+const route = Astro.locals.starlightRoute;
+const locale = getPageLocale(route);
+const strings = getStrings(Astro.locals.t, 'vizRegularization');
+const tCommon = getStrings(Astro.locals.t, 'common');
+
+const description = [SINE_TRAIN.description, SINE_TEST.description].map((text) => text[locale]).join(' ');
+---
+
+<div class="atlas-viz not-content" lang={locale} data-pagefind-ignore>
+  <RegularizationVizIsland
+    client:visible={{ rootMargin: '200px' }}
+    train={SINE_TRAIN.rows}
+    test={SINE_TEST.rows}
+    config={SINE_REGULARIZATION}
+    axes={{ x: axisText(SINE_TRAIN.x, locale), y: axisText(SINE_TRAIN.y, locale) }}
+    itemLabels={{ train: SINE_TRAIN.itemLabel[locale], test: SINE_TEST.itemLabel[locale] }}
+    description={description}
+    labels={{ lambdaHtml: renderInlineMarkup(strings.lambdaLabel), lambdaText: inlineMarkupLabel(strings.lambdaLabel) }}
+    strings={strings}
+  />
+  <noscript><p class="atlas-viz-noscript">{tCommon.needsScript}</p></noscript>
+</div>

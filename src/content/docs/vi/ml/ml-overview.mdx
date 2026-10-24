@@ -1,0 +1,262 @@
+---
+title: Tổng quan về Học máy
+description: Cho máy học giá thuê căn hộ từ ví dụ thay vì viết luật. Ba nhóm học máy, hồi quy và phân loại, quy trình huấn luyện, tách train/test và tổng quát hóa.
+quiz:
+  - question: 'Một ngân hàng muốn dự đoán một khách hàng có trả nợ đúng hạn hay không, dựa vào thu nhập, tuổi và số tiền vay. Đây là bài toán gì?'
+    options:
+      - 'Hồi quy, vì thu nhập và số tiền vay đều là con số'
+      - 'Phân loại, vì nhãn chỉ có hai giá trị: trả đúng hạn hoặc không'
+      - 'Học không giám sát, vì chưa biết trước khách nào sẽ trả nợ'
+      - 'Học tăng cường, vì tiền lãi là phần thưởng'
+    answer: 1
+    explanation: 'Hồi quy hay phân loại xét theo nhãn $y$, không theo đặc trưng. Nhãn ở đây là một trong hai lớp, nên là phân loại dù mọi đặc trưng đều là số. Hồ sơ khách cũ cho biết ai đã trả đúng hạn, tức là có nhãn, nên đây là học có giám sát.'
+  - question: 'Hai mô hình đoán giá thuê. Mô hình A: MSE train $0.0$, MSE test $3.5$. Mô hình B: MSE train $0.4$, MSE test $0.6$. Bạn nên dùng mô hình nào cho căn hộ mới?'
+    options:
+      - 'A, vì MSE train bằng 0 là không sai căn nào'
+      - 'Không chọn được, vì mỗi mô hình thắng ở một tập'
+      - 'B, vì MSE test mới cho biết mô hình đoán căn chưa thấy tốt tới đâu'
+      - 'A, sau khi gộp tập test vào huấn luyện cho MSE test về 0'
+    answer: 2
+    explanation: 'MSE test mới ước lượng sai số trên căn hộ chưa thấy. MSE train bằng 0 chỉ cho thấy A thuộc lòng dữ liệu đã học, như mô hình "học thuộc" ở ô code thứ hai. Gộp tập test vào huấn luyện thì mất luôn cách đo trên dữ liệu mới.'
+  - question: 'Một cửa hàng có lịch sử mua sắm của 10 000 khách, không có cột nào ghi khách thuộc nhóm nào. Họ muốn chia khách thành vài nhóm mua sắm giống nhau. Đây là nhóm học máy nào?'
+    options:
+      - 'Học không giám sát, cụ thể là phân cụm'
+      - 'Học có giám sát, cụ thể là phân loại, vì kết quả là các nhóm'
+      - 'Học có giám sát, cụ thể là hồi quy, vì số tiền mua là con số'
+      - 'Học tăng cường, vì cửa hàng muốn tăng doanh thu'
+    answer: 0
+    explanation: 'Không có nhãn cho biết đáp án đúng, nên máy phải tự gom các khách giống nhau: đó là phân cụm. Phân loại cũng cho ra các nhóm, nhưng cần sẵn mẫu đã gắn nhãn nhóm để học theo.'
+  - question: 'Bạn thử 50 mô hình. Mỗi lần thử, bạn xem MSE trên tập test, rồi giữ mô hình có MSE test nhỏ nhất và báo cáo con số đó. Con số này thế nào?'
+    options:
+      - 'Đáng tin, vì nó tính trên tập test chứ không phải tập train'
+      - 'Đáng tin hơn, vì là kết quả tốt nhất trong 50 lần'
+      - 'Chính xác, miễn là đã đặt `random_state`'
+      - 'Có thể đẹp hơn thực tế, vì tập test đã được dùng để chọn mô hình'
+    answer: 3
+    explanation: 'Dùng tập test để chọn là đã gián tiếp học trên nó: mô hình thắng có thể chỉ tình cờ hợp với mấy mẫu test này, nên con số thường lạc quan. Hãy chọn bằng tập kiểm định, chỉ dùng tập test ở bước cuối. `random_state` chỉ giúp lặp lại cách chia.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import DatasetTable from '@components/DatasetTable.astro';
+import MlFamiliesFigure from '@components/figures/MlFamiliesFigure.astro';
+import MlWorkflowFigure from '@components/figures/MlWorkflowFigure.astro';
+import fitPredictCode from '@code/ml/ml-overview/fit-predict.vi.py?raw';
+import trainTestSplitCode from '@code/ml/ml-overview/train-test-split.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu học máy (machine learning) là gì: máy tự rút quy luật từ ví dụ, thay vì chạy theo luật do người viết sẵn.
+- Phân biệt ba nhóm học có giám sát (supervised), không giám sát (unsupervised) và tăng cường (reinforcement). Trong học có giám sát, phân biệt hồi quy (regression) với phân loại (classification) dựa vào kiểu của nhãn (label).
+- Đọc được các ký hiệu chung của cả phần Học máy: $\mathbf{x}$, $y$, $\hat{y} = f(\mathbf{x})$, $m$, $n$ và $\mathcal{L}$.
+- Chạy được quy trình huấn luyện (training) và đánh giá bằng scikit-learn, và giải thích vì sao phải tách tập huấn luyện (training set) với tập kiểm tra (test set) để đo khả năng tổng quát hóa (generalization).
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+**Mảng NumPy** (NumPy array) là một dãy số cùng kiểu, tính được trên cả dãy một lúc. `area.reshape(-1, 1)` biến dãy 10 số thành bảng 10 hàng, 1 cột (`-1` là "tự tính số hàng"). `X[:, 0]` lấy cột đầu của bảng `X` ra thành một dãy.
+:::
+
+## Trực giác
+
+Bạn đang tìm thuê căn hộ. Bạn hỏi giá 10 căn quanh khu mình muốn ở và ghi lại thành bảng dưới đây. Một người quen báo có căn 65 m² sắp trống. Giá bao nhiêu thì hợp lý?
+
+<DatasetTable dataset="apartments" />
+
+### Viết luật, hay học từ ví dụ
+
+Cách thứ nhất là **tự viết luật**, ví dụ "mỗi m² khoảng 200 nghìn đồng". Nhưng con số 200 nghìn là do bạn đoán. Muốn tính thêm vị trí, tầng, nội thất, bạn phải nghĩ thêm luật cho từng thứ, và giá đổi thì lại sửa tay.
+
+Cách thứ hai là **đưa cho máy các ví dụ**: 10 căn hộ, mỗi căn có diện tích và giá thật. Máy tự tìm quy luật nối diện tích với giá, rồi dùng nó để đoán căn 65 m². Có dữ liệu mới thì cho máy học lại. Đó là ý tưởng của **học máy**. Trang giới thiệu cuốn *Machine Learning* của Tom Mitchell (1997) mô tả học máy là ngành nghiên cứu các thuật toán máy tính tự cải thiện nhờ kinh nghiệm. Ở đây, "kinh nghiệm" chính là dữ liệu.
+
+Học máy đã có mặt quanh bạn: gợi ý phim, lọc thư rác, nhận ra khuôn mặt trong ảnh, dịch văn bản. Đó đều là những việc khó viết đủ luật bằng tay, nhưng có rất nhiều ví dụ.
+
+### Học thuộc không phải là học
+
+Giả sử máy đã học xong. Làm sao biết nó học tốt? Một học sinh luyện một đề toán tới mức thuộc lòng đáp án, rồi thi lại chính đề ấy, thì điểm 10 không chứng tỏ em hiểu bài. Muốn biết, bạn phải cho một **đề chưa từng thấy**.
+
+Máy cũng vậy. Một mô hình (model) có thể đoán đúng cả 10 căn hộ đã học chỉ bằng cách nhớ giá từng căn. Nhưng giá 10 căn đó bạn đã biết. Bạn cần nó đoán đúng căn 65 m² mà nó chưa thấy bao giờ.
+
+Bài toán của bài này là: **làm sao để máy rút ra quy luật từ ví dụ, và làm sao kiểm tra được quy luật ấy vẫn đúng với dữ liệu nó chưa từng thấy.**
+
+## Lý thuyết
+
+### Ba nhóm học máy
+
+Học máy là một nhánh của trí tuệ nhân tạo (artificial intelligence, AI), và học sâu (deep learning) lại là một nhánh của học máy: ba khái niệm lồng nhau, không phải một. Bản thân học máy thường được chia theo **tín hiệu mà máy dùng để học**.
+
+- **Học có giám sát** (supervised learning). Mỗi ví dụ có cả đầu vào lẫn đáp án đúng, gọi là **nhãn** (label), như bảng căn hộ: đầu vào là diện tích, nhãn là giá thuê. Máy học cách đi từ đầu vào tới nhãn. "Giám sát" nghĩa là có nhãn dẫn đường, không phải có người ngồi canh.
+- **Học không giám sát** (unsupervised learning). Chỉ có đầu vào, không có nhãn. Máy tự tìm cấu trúc trong dữ liệu, ví dụ **phân cụm** (clustering): gom các khách hàng mua sắm giống nhau thành nhóm, dù không ai cho trước danh sách nhóm.
+- **Học tăng cường** (reinforcement learning). Một **tác nhân** (agent) hành động trong một **môi trường** (environment), nhận về **phần thưởng** (reward), dương hoặc âm, và học cách chọn hành động để tổng phần thưởng lớn nhất, như một chương trình tự chơi game để ghi điểm. Chương trình chơi cờ vây AlphaGo thì dùng kết hợp cả học có giám sát lẫn học tăng cường.
+
+Hình dưới tóm tắt ba nhóm. Hãy nhìn dòng thứ hai của mỗi thẻ: ba nhóm khác nhau ở chỗ máy học từ cái gì.
+
+{/* FIG: học máy chia ba nhóm theo tín hiệu dùng để học: nhãn, không nhãn, phần thưởng. */}
+<MlFamiliesFigure />
+
+Còn có **học bán giám sát** (semi-supervised learning): chỉ một phần nhỏ dữ liệu có nhãn, hay gặp khi gắn nhãn tốn kém, như ảnh y tế cần bác sĩ đọc. Phần còn lại của bài nói về học có giám sát.
+
+### Ký hiệu của học có giám sát
+
+Các ký hiệu này dùng chung cho cả phần Học máy.
+
+Mỗi ví dụ là một **mẫu** (sample). Mẫu có các **đặc trưng** (feature), là những thông tin bạn đưa vào, như diện tích, số phòng, tầng. Các đặc trưng của một mẫu xếp thành vectơ $\mathbf{x}$:
+
+$$
+\mathbf{x} = [x_1, x_2, \dots, x_n]^\top
+$$
+
+- $n$ là **số đặc trưng**. $x_j$ là đặc trưng thứ $j$.
+- $y$ là **nhãn** của mẫu đó, tức đáp án đúng.
+- $m$ là **số mẫu**. Mẫu thứ $i$ viết là $\left(\mathbf{x}^{(i)}, y^{(i)}\right)$. Chỉ số $(i)$ viết ở trên nghĩa là "mẫu thứ $i$", không phải số mũ.
+
+Với bảng căn hộ, $m = 10$ và $n = 1$: mỗi căn chỉ có một đặc trưng là diện tích. Căn đầu tiên có $\mathbf{x}^{(1)} = [25]$ và $y^{(1)} = 6.7$. Sách khác có thể dùng chữ khác, ví dụ *Machine Learning cơ bản* gọi số mẫu là $N$.
+
+**Mô hình** (model) là một hàm $f$ nhận đầu vào và trả về dự đoán:
+
+$$
+\hat{y} = f(\mathbf{x})
+$$
+
+$\hat{y}$ (đọc là "y mũ") là giá trị **dự đoán**, để phân biệt với nhãn thật $y$.
+
+Mức sai của $f$ đo bằng **hàm mất mát** (loss function), ký hiệu $\mathcal{L}$: một con số tính từ các cặp dự đoán $\hat{y}^{(i)}$ và nhãn thật $y^{(i)}$, càng lệch thì càng lớn. Với hồi quy, hàm quen thuộc là **sai số bình phương trung bình** (mean squared error, MSE): trung bình bình phương các sai lệch. Bài [Hồi quy tuyến tính](/vi/ml/linear-regression/) giải thích vì sao lại bình phương.
+
+**Huấn luyện** (training) là chọn ra $f$, trong một họ hàm cho trước, sao cho $\mathcal{L}$ trên dữ liệu đã có càng nhỏ càng tốt. Họ hàm có thể là mọi đường thẳng, hoặc một họ linh hoạt hơn nhiều. Các con số mà huấn luyện điều chỉnh để chọn ra $f$ gọi là **tham số** (parameter) của mô hình. Cũng có mô hình không học theo cách này: `fit` của KNN ở phần Ví dụ code chỉ ghi nhớ dữ liệu, tới lúc dự đoán mới tìm các căn gần nhất.
+
+:::note[Ghi nhớ]
+Học có giám sát: từ $m$ mẫu $\left(\mathbf{x}^{(i)}, y^{(i)}\right)$, mỗi mẫu có $n$ đặc trưng, tìm hàm $f$ sao cho $\hat{y} = f(\mathbf{x})$ gần nhãn thật $y$, với mức gần đo bằng hàm mất mát $\mathcal{L}$.
+:::
+
+### Hồi quy và phân loại
+
+Học có giám sát có hai bài toán chính. Chúng khác nhau ở **kiểu của nhãn** $y$:
+
+- **Hồi quy** (regression): nhãn là một đại lượng đo được, có thể nhận vô số giá trị. Ví dụ đoán giá thuê, nhiệt độ ngày mai, doanh số tháng sau.
+- **Phân loại** (classification): nhãn là một trong số ít lớp cho trước. Ví dụ thư rác hay không, ảnh chó hay mèo, khách trả nợ đúng hạn hay không. Các lớp có khi được ghi bằng số, như 0 và 1, nhưng đó chỉ là tên lớp, không phải đại lượng đo được, nên vẫn là phân loại.
+
+Cùng bảng căn hộ có thể thành cả hai bài toán: nhãn là giá thuê thì là hồi quy, đổi nhãn thành "đắt" (từ 10 triệu trở lên) hay "rẻ" thì thành phân loại, dù đầu vào vẫn là diện tích. Ô code đầu tiên sẽ làm đúng như vậy.
+
+### Quy trình: dữ liệu, huấn luyện, đánh giá
+
+Một dự án học có giám sát thường đi qua các bước sau:
+
+1. **Thu dữ liệu** có nhãn, ví dụ 10 căn hộ có giá thật.
+2. **Tách dữ liệu ngay từ đầu**, ngẫu nhiên, thành **tập huấn luyện** (training set) để học và **tập kiểm tra** (test set) để giữ riêng, gọi tắt là tập train và tập test.
+3. **Huấn luyện chỉ trên tập train.** Mô hình không được thấy mẫu test nào.
+4. **Đánh giá trên tập test**: so dự đoán với nhãn thật bằng một thước đo như MSE.
+5. **Dùng mô hình** cho dữ liệu mới, nếu kết quả đủ tốt.
+
+Tập test đóng vai "đề thi chưa từng thấy" ở phần Trực giác.
+
+### Tổng quát hóa
+
+**Tổng quát hóa** là khả năng làm tốt trên dữ liệu mà mô hình chưa thấy khi huấn luyện. Đây mới là mục tiêu thật. Sai số trên tập train thường **lạc quan** hơn thực tế, vì mô hình đã được chỉnh để khớp đúng những mẫu đó. Một mô hình đủ linh hoạt có thể đưa sai số train về 0 chỉ bằng cách nhớ từng mẫu, mà vẫn đoán tệ trên dữ liệu mới. Tập test không tham gia huấn luyện, nên sai số trên nó là một **ước lượng** cho sai số trên dữ liệu mới.
+
+Khi sai số train nhỏ mà sai số test lớn hơn hẳn, mô hình đang học cả những chi tiết tình cờ của tập train. Hiện tượng này gọi là **overfitting**, chủ đề của bài Overfitting và Underfitting.
+
+Một tập test tốt cần: đủ lớn, đại diện cho dữ liệu mà mô hình sẽ gặp ngoài đời, và không chứa mẫu nào trùng với tập train.
+
+### Giới hạn
+
+- **Tập test nhỏ cho ước lượng dao động mạnh.** Với 10 căn hộ, tập test chỉ còn 3 căn (ô code thứ hai).
+- **Tập test "mòn" khi dùng lặp lại** để sửa mô hình (hộp thứ hai ở mục Lỗi hay gặp). Cần thêm một **tập kiểm định** (validation set), bạn sẽ gặp ở các bài sau.
+- **Mô hình chỉ học được từ dữ liệu nó có.** Dữ liệu không đại diện thì cả mô hình lẫn tập test đều lệch. Đoán ở ngoài vùng dữ liệu cũng dễ sai, xem hộp "Tin vào dự đoán ở ngoài vùng dữ liệu" ở bài [Hồi quy tuyến tính](/vi/ml/linear-regression/).
+
+## Minh họa
+
+Hình dưới vẽ quy trình học có giám sát trên bảng căn hộ, đúng như ô code thứ hai sẽ làm. Hãy nhìn tập kiểm tra: mũi tên duy nhất đi ra từ nó dẫn thẳng tới bước đánh giá, không đi qua bước huấn luyện.
+
+{/* FIG: tập kiểm tra được tách ra từ đầu và chỉ dùng để đánh giá, không đi vào huấn luyện. */}
+<MlWorkflowFigure />
+
+Với `random_state=4`, ô code thứ hai đưa 3 căn 42, 75 và 48 m² vào tập kiểm tra, 7 căn còn lại vào tập huấn luyện.
+
+## Ví dụ code
+
+Hai ô dưới đây chạy độc lập, chạy ô nào trước cũng được. Ô chạy đầu tiên lâu hơn một chút, vì trình duyệt phải tải thêm scikit-learn.
+
+Ô đầu tiên coi mô hình như hộp đen, chỉ cần hai bước: `fit` để học, `predict` để dự đoán. Ô này giải cả hai bài toán trên cùng bảng: hồi quy giá thuê, rồi phân loại đắt hay rẻ.
+
+<PythonRunner code={fitPredictCode} title="fit và predict: hồi quy và phân loại" />
+
+Mô hình hồi quy đoán căn 40 m² giá 8.82 triệu và căn 65 m² giá 13.06 triệu. Mô hình phân loại trả lời căn 40 m² là `cheap` (rẻ), căn 65 m² là `expensive` (đắt). Mô hình phân loại ở đây là K-Nearest Neighbors (KNN, k láng giềng gần nhất): nó xem 3 căn có diện tích gần nhất trong bảng, rồi theo số đông. Với căn 40 m², ba căn gần nhất là 42, 36 và 48 m², đều rẻ.
+
+Hai mô hình rất khác nhau, nhưng cách dùng giống hệt: tạo mô hình, gọi `fit(X, y)`, rồi `predict`. Hầu hết mô hình trong scikit-learn theo khuôn này. `X` là bảng $m$ hàng, $n$ cột, nên mới cần `reshape(-1, 1)`. Đổi sang phân loại, bạn chỉ đổi **nhãn**, không đổi `X`. Bài Hồi quy tuyến tính sẽ mở hộp đen `LinearRegression` ra.
+
+Ô thứ hai làm đúng quy trình ở mục Minh họa. `train_test_split` giữ lại 30% dữ liệu làm tập test, `random_state` cố định cách chia để lần nào chạy cũng ra cùng kết quả. Ô này so đường thẳng `LinearRegression` với một mô hình "học thuộc": đoán giá mỗi căn bằng giá của căn train có diện tích gần nhất (`KNeighborsRegressor(n_neighbors=1)`). Cuối cùng, ô thử thêm hai cách chia khác.
+
+<PythonRunner code={trainTestSplitCode} title="Tách train/test và đánh giá" />
+
+Kết quả với cách chia ở mục Minh họa (tập test là 3 căn 42, 75 và 48 m²):
+
+| Mô hình | MSE train | MSE test |
+|---|---:|---:|
+| Đường thẳng | 0.2190 | 1.0007 |
+| Học thuộc | 0.0000 | 2.6267 |
+
+Nếu chỉ nhìn tập train, mô hình học thuộc là hoàn hảo: MSE bằng 0, vì căn gần nhất với mỗi căn train chính là nó. Nhưng trên 3 căn chưa thấy, MSE của nó gấp khoảng 2.6 lần đường thẳng. Nó chép nguyên giá của một căn hàng xóm, kể cả phần chênh lệch tình cờ của căn đó (vị trí, tầng, nội thất). Gần như toàn bộ sai số đến từ căn 48 m²: căn train gần nhất là căn 55 m² giá 12.2 triệu, trong khi giá thật chỉ 9.4 triệu. Đường thẳng thì chỉ giữ xu hướng chung "rộng hơn thì đắt hơn".
+
+Giờ nhìn hai dòng cuối. Đây là bài học quan trọng nhất của ô này:
+
+| Cách chia | Các căn test (m²) | MSE test, đường thẳng | MSE test, học thuộc |
+|---|---|---:|---:|
+| `random_state=4` | 42, 75, 48 | 1.0007 | 2.6267 |
+| `random_state=8` | 75, 60, 85 | 0.6799 | 2.4567 |
+| `random_state=2` | 48, 30, 55 | 0.7327 | 0.1467 |
+
+Cùng hai mô hình, cùng dữ liệu, chỉ đổi 3 căn nào rơi vào tập test, mà MSE test của đường thẳng dao động từ 0.68 tới 1.00, còn của mô hình học thuộc từ 2.63 rơi xuống 0.15. Với `random_state=2`, mô hình học thuộc còn **thắng** đường thẳng, vì căn train gần nhất của cả ba căn test tình cờ chỉ chênh giá 0.2 tới 0.6 triệu. MSE test ở đây là trung bình của đúng 3 con số, nên một căn may hay rủi là đủ làm lệch kết quả.
+
+Vậy với 10 mẫu, một lần tách train/test **không đủ** để kết luận mô hình nào tốt hơn. Dữ liệu thật thường có hàng trăm tới hàng triệu mẫu, nên tập test đủ lớn để ước lượng ổn định hơn. Khi dữ liệu ít, người ta tách nhiều lần rồi lấy trung bình, gọi là kiểm định chéo (cross-validation), bạn sẽ gặp ở các bài sau.
+
+## Lỗi hay gặp
+
+:::caution[Chấm điểm mô hình trên chính dữ liệu nó đã học]
+Ở ô code thứ hai, mô hình học thuộc có MSE train bằng 0.0000, nhưng trên căn hộ chưa thấy, MSE của nó gấp khoảng 2.6 lần đường thẳng. Điểm train chỉ cho biết mô hình nhớ dữ liệu cũ tốt tới đâu. Hãy tách tập test **trước khi** huấn luyện, và báo cáo điểm trên tập test.
+:::
+
+:::caution[Để tập kiểm tra lọt vào quá trình huấn luyện]
+Tập test chỉ có giá trị khi mô hình thật sự chưa thấy nó. Có hai cách hay làm mất điều này mà không để ý:
+
+- **Mẫu trùng.** Cùng một căn hộ được nhập hai lần, một bản rơi vào tập train, một bản vào tập test. Mô hình chỉ cần nhớ là đoán đúng.
+- **Chọn mô hình bằng tập test.** Thử, nhìn điểm test, sửa, rồi lại nhìn. Sau nhiều vòng, mô hình được chọn hợp với chính các mẫu test đó, và điểm test thành lạc quan. Hãy chọn bằng một tập kiểm định riêng, chỉ dùng tập test ở bước cuối.
+
+Các lỗi kiểu này gọi chung là **rò rỉ dữ liệu** (data leakage). Cách phòng chung: tách tập test ra đầu tiên, rồi coi như nó không tồn tại cho tới bước đánh giá.
+:::
+
+:::caution[Đoán loại bài toán theo tên thuật toán]
+Hồi quy logistic (logistic regression) có chữ "hồi quy" trong tên nhưng là mô hình **phân loại**. Còn KNN làm được cả hai việc (`KNeighborsClassifier` và `KNeighborsRegressor`). Hãy nhìn nhãn $y$: là một đại lượng đo được (giá, nhiệt độ) thì là hồi quy; là một lớp, kể cả khi lớp được ghi bằng 0 và 1, thì là phân loại.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Học máy để máy tự rút quy luật từ ví dụ. Ba nhóm chính: có giám sát (học từ nhãn), không giám sát (tự tìm cấu trúc), tăng cường (học từ phần thưởng).
+- Học có giám sát: từ $m$ mẫu $\left(\mathbf{x}^{(i)}, y^{(i)}\right)$ có $n$ đặc trưng, tìm $\hat{y} = f(\mathbf{x})$ làm hàm mất mát $\mathcal{L}$ nhỏ. Nhãn là đại lượng đo được (giá, nhiệt độ) thì là hồi quy; là một lớp, kể cả lớp ghi bằng 0 và 1, thì là phân loại.
+- Quy trình: tách tập test ngay từ đầu, huấn luyện chỉ trên tập train, đánh giá trên tập test. Trong scikit-learn: `train_test_split`, `fit`, `predict`.
+- Mục tiêu là tổng quát hóa. Điểm train thường lạc quan; mô hình học thuộc đạt điểm train hoàn hảo mà vẫn đoán tệ. Tập test nhỏ thì điểm test dao động mạnh.
+
+**Đọc thêm:**
+
+- Vũ Hữu Tiệp (2016). [*Machine Learning cơ bản*, Bài 2: Phân nhóm các thuật toán Machine Learning](https://machinelearningcoban.com/2016/12/27/categories/). Tiếng Việt, có ví dụ cho từng nhóm học máy. Ký hiệu hơi khác: $N$ là số mẫu.
+- Google (cập nhật 2025). [*Machine Learning Crash Course*: Dividing the original dataset](https://developers.google.com/machine-learning/crash-course/overfitting/dividing-datasets), phần Datasets, generalization, and overfitting. Vì sao chia ba tập train, validation, test.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Cross-validation](https://scikit-learn.org/1.8/modules/cross_validation.html), mục 3.1, phần mở đầu: vì sao không đánh giá trên dữ liệu đã học. Xem thêm [`train_test_split`](https://scikit-learn.org/1.8/modules/generated/sklearn.model_selection.train_test_split.html).
+- Mitchell, T. M. (1997). [*Machine Learning*](https://www.cs.cmu.edu/~tom/mlbook.html), McGraw-Hill. Trang của cuốn giáo trình kinh điển, nguồn của câu mô tả học máy ở phần Trực giác.
+- Samuel, A. L. (1959). [*Some Studies in Machine Learning Using the Game of Checkers*](https://doi.org/10.1147/rd.33.0210), IBM Journal of Research and Development 3(3). Một công trình học máy đời đầu, dùng cờ đam (checkers).
+
+<LessonProgress />

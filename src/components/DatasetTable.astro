@@ -24,7 +24,9 @@ if (!data) {
   );
 }
 
-const header = (column: DatasetColumn) => `${column.name[locale]} (${column.unit[locale]})`;
+// A column without a unit (e.g. the sine data, x and y) shows its name alone, not "x ()" (viz.md, section 9.4.1).
+const header = (column: DatasetColumn) =>
+  column.unit[locale] === '' ? column.name[locale] : `${column.name[locale]} (${column.unit[locale]})`;
 ---
 
 <table lang={locale}>

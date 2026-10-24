@@ -6,7 +6,7 @@ export type Row = readonly [x: number, y: number];
 
 export interface DatasetColumn {
   name: Localized; // axis title and table header, e.g. { vi: 'Diện tích', en: 'Floor area' }
-  unit: Localized; // e.g. { vi: 'm²', en: 'm²' }
+  unit: Localized; // e.g. { vi: 'm²', en: 'm²' }; '' in every locale for a quantity without a unit
   digits: number; // decimals in the table; every value must already have at most this many
   python: string; // variable name in the lesson code, e.g. 'area'; a valid Python identifier
 }

@@ -4,12 +4,12 @@
 // slider labels and the ŷ, x symbols, the least-squares line (bad data fails the build) and the mean point
 // (x̄, ȳ) it passes through, marked on the plot (decision 24 in docs/mvp.md).
 // The island hydrates 200px before it scrolls into view. Styles: viz.css, through Starlight's customCss.
-import LinearFitVizIsland, { type AxisText } from './linear-fit-viz/LinearFitVizIsland';
+import LinearFitVizIsland from './linear-fit-viz/LinearFitVizIsland';
 import { APARTMENTS, APARTMENTS_LINEAR_FIT } from '@data/datasets/apartments';
-import type { DatasetColumn } from '@data/datasets/types';
 import { getStrings } from '@i18n/ui';
 import { inlineMarkupLabel, renderInlineMarkup } from '@lib/inline-markup';
 import { getPageLocale } from '@lib/page-locale';
+import { axisText } from '@lib/viz/axis';
 import { fitLeastSquares, meanPoint } from '@lib/viz/linear-fit';
 
 const route = Astro.locals.starlightRoute;
@@ -19,11 +19,6 @@ const tCommon = getStrings(Astro.locals.t, 'common');
 
 const { x, y } = APARTMENTS;
 const best = fitLeastSquares(APARTMENTS.rows);
-const axis = (column: DatasetColumn): AxisText => ({
-  name: column.name[locale],
-  unit: column.unit[locale],
-  title: `${column.name[locale]} (${column.unit[locale]})`,
-});
 ---
 
 <div class="atlas-viz not-content" lang={locale} data-pagefind-ignore>
@@ -33,7 +28,7 @@ const axis = (column: DatasetColumn): AxisText => ({
     config={APARTMENTS_LINEAR_FIT}
     best={best}
     mean={meanPoint(APARTMENTS.rows)}
-    axes={{ x: axis(x), y: axis(y) }}
+    axes={{ x: axisText(x, locale), y: axisText(y, locale) }}
     itemLabel={APARTMENTS.itemLabel[locale]}
     description={APARTMENTS.description[locale]}
     labels={{

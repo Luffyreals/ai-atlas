@@ -1,0 +1,46 @@
+---
+// PolyFitViz for ml/overfitting-underfitting (docs/architecture/viz.md, sections 9.4.5–9.4.6). The only file a
+// lesson imports: <PolyFitViz />, no props, no client:* in MDX. Here, at build time: UI strings, KaTeX for the
+// slider label, and the true curve sin(2πx) as polyline points (Math.sin runs here only, never in the island,
+// section 9.2.2). The island fits the 15 degrees itself, from the 24 points, with the same code at build time
+// and in the browser (section 9.2.3), so bad data fails the build.
+// The island hydrates 200px before it scrolls into view. Styles: viz.css, through Starlight's customCss.
+import PolyFitVizIsland from './poly-fit-viz/PolyFitVizIsland';
+import { SINE_POLY_FIT, SINE_TEST, SINE_TRAIN, SINE_TRUTH } from '@data/datasets/sine';
+import { getStrings } from '@i18n/ui';
+import { inlineMarkupLabel, renderInlineMarkup } from '@lib/inline-markup';
+import { getPageLocale } from '@lib/page-locale';
+import { axisText } from '@lib/viz/axis';
+import { sampleCurve, toPolyline } from '@lib/viz/poly-fit';
+
+const route = Astro.locals.starlightRoute;
+const locale = getPageLocale(route);
+const strings = getStrings(Astro.locals.t, 'vizPolyFit');
+const tCommon = getStrings(Astro.locals.t, 'common');
+
+const config = SINE_POLY_FIT;
+const truthPoints = toPolyline(
+  sampleCurve(SINE_TRUTH.f, config.xDomain, config.truthSamples),
+  config.xDomain,
+  config.yDomain,
+);
+const description = [SINE_TRAIN.description, SINE_TEST.description, SINE_TRUTH.description]
+  .map((text) => text[locale])
+  .join(' ');
+---
+
+<div class="atlas-viz not-content" lang={locale} data-pagefind-ignore>
+  <PolyFitVizIsland
+    client:visible={{ rootMargin: '200px' }}
+    train={SINE_TRAIN.rows}
+    test={SINE_TEST.rows}
+    config={config}
+    truthPoints={truthPoints}
+    axes={{ x: axisText(SINE_TRAIN.x, locale), y: axisText(SINE_TRAIN.y, locale) }}
+    itemLabels={{ train: SINE_TRAIN.itemLabel[locale], test: SINE_TEST.itemLabel[locale] }}
+    description={description}
+    labels={{ degreeHtml: renderInlineMarkup(strings.degreeLabel), degreeText: inlineMarkupLabel(strings.degreeLabel) }}
+    strings={strings}
+  />
+  <noscript><p class="atlas-viz-noscript">{tCommon.needsScript}</p></noscript>
+</div>

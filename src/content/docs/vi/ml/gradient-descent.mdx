@@ -1,0 +1,373 @@
+---
+title: Gradient Descent
+description: 'Tìm đáy MSE của 10 căn hộ bằng từng bước xuống dốc: quy tắc cập nhật, tốc độ học và ngưỡng 2/L, chuẩn hóa đặc trưng, tiêu chí dừng, SGD và mini-batch.'
+quiz:
+  - question: 'Hàm mất mát một chiều $\mathcal{L}(w) = 2(w - 3)^2$. Bạn chạy gradient descent với $\eta = 0.4$, xuất phát từ $w = 0$. Điều gì xảy ra?'
+    options:
+      - '$w$ tăng dần về 3 và không bao giờ vượt quá 3'
+      - '$w$ nhảy qua lại hai bên 3, mỗi lần một gần hơn, rồi hội tụ về 3'
+      - '$w$ nhảy qua lại giữa 0 và 6 mãi mãi'
+      - '$w$ ngày càng xa 3, tức là phân kỳ'
+    answer: 1
+    explanation: 'Đạo hàm là $4(w - 3)$, nên độ cong $L = 4$ và mỗi bước khoảng cách $w - 3$ bị nhân với $q = 1 - \eta L = 1 - 1.6 = -0.6$. Dấu âm làm $w$ nhảy sang phía bên kia ($0$, rồi $4.8$, rồi $1.92$, rồi $3.648$), còn $\lvert q\rvert = 0.6 < 1$ làm khoảng cách nhỏ dần. Ngưỡng phân kỳ là $2/L = 0.5$, nên $\eta = 0.4$ vẫn hội tụ, dù đã vượt $1/L = 0.25$ nên có dao động.'
+  - question: 'Tại $\boldsymbol{\theta} = [w, b]^\top = [1, 2]^\top$, gradient của $\mathcal{L}$ là $[-4, 2]^\top$. Sau một bước gradient descent với $\eta = 0.1$, $\boldsymbol{\theta}$ bằng bao nhiêu?'
+    options: ['$[0.6, 2.2]^\top$', '$[0.6, 1.8]^\top$', '$[1.4, 1.8]^\top$', '$[1.4, 2.2]^\top$']
+    answer: 2
+    explanation: 'Đi ngược gradient: $\boldsymbol{\theta} - \eta\nabla\mathcal{L} = [1 - 0.1 \cdot (-4),\ 2 - 0.1 \cdot 2]^\top = [1.4, 1.8]^\top$. Đạo hàm riêng theo $w$ âm nghĩa là tăng $w$ thì $\mathcal{L}$ giảm, nên $w$ tăng. $[0.6, 2.2]^\top$ là kết quả khi cộng gradient, tức là đi lên dốc.'
+  - question: 'Bạn chạy GD trên diện tích thô (m², không chuẩn hóa) với một $\eta$ đang hội tụ tốt. Đồng nghiệp đổi cột diện tích sang dm² (nhân 100) và giữ nguyên $\eta$. Nhiều khả năng điều gì xảy ra?'
+    options:
+      - 'GD phân kỳ, vì độ cong của $\mathcal{L}$ theo $w$ tăng khoảng 10 000 lần nên $\eta$ cũ vượt ngưỡng $2/L$'
+      - 'GD hội tụ nhanh hơn khoảng 100 lần, vì gradient lớn hơn'
+      - 'Không có gì thay đổi, vì dự đoán tốt nhất không phụ thuộc đơn vị'
+      - 'GD hội tụ tới một nghiệm khác, có MSE lớn hơn'
+    answer: 0
+    explanation: 'Độ cong theo $w$ là $\frac{2}{m}\sum_i \left(x^{(i)}\right)^2$. Nhân $x$ với 100 thì nó nhân với 10 000, nên $L$ cũng tăng cỡ đó và ngưỡng $2/L$ nhỏ đi cỡ 10 000 lần: $\eta$ cũ gần như chắc chắn vượt ngưỡng. Gradient lớn hơn không có nghĩa là nhanh hơn: bước quá dài thì vọt qua đáy. Dự đoán tốt nhất đúng là không đổi, nhưng đường đi của GD tới đó thì hỏng.'
+  - question: 'Tập train có $m = 1000$ mẫu. Bạn huấn luyện 3 epoch bằng mini-batch cỡ 50. Tham số được cập nhật bao nhiêu lần?'
+    options: ['3 lần', '50 lần', '150 lần', '60 lần']
+    answer: 3
+    explanation: 'Một epoch là một lượt qua cả 1000 mẫu. Mỗi bước dùng 50 mẫu, nên một epoch có $1000/50 = 20$ bước, và 3 epoch có 60 bước. 3 lần là số bước của batch GD, mỗi epoch một bước. Với SGD (mỗi bước một mẫu), con số là 3000.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import DatasetTable from '@components/DatasetTable.astro';
+import GradientDescentViz from '@components/viz/GradientDescentViz.astro';
+import gdNumpyCode from '@code/ml/gradient-descent/gd-numpy.vi.py?raw';
+import learningRateCode from '@code/ml/gradient-descent/learning-rate.vi.py?raw';
+import sgdCode from '@code/ml/gradient-descent/sgd.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu gradient descent (GD) tìm đáy của hàm mất mát thế nào, và vì sao đi ngược gradient là đi xuống dốc.
+- Viết được quy tắc cập nhật $\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \eta\nabla\mathcal{L}(\boldsymbol{\theta})$ cho MSE ở dạng vectơ, và cài đặt nó bằng NumPy.
+- Giải thích được vì sao tốc độ học (learning rate) $\eta$ nhỏ thì chậm, lớn thì dao động hoặc phân kỳ (diverge), qua ngưỡng $\eta < 2/L$; vì sao chuẩn hóa đặc trưng (feature scaling) giúp GD nhanh hơn, và khi nào nên dừng.
+- Phân biệt batch GD, SGD và mini-batch, biết epoch là gì, và dùng được `SGDRegressor` của scikit-learn.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài này giải lại đúng bài toán của bài [Hồi quy tuyến tính](/vi/ml/linear-regression/): tìm $w$, $b$ làm MSE của 10 căn hộ nhỏ nhất. Đáp án đã biết là $w \approx 0.1695$, $b \approx 2.04$, MSE $\approx 0.3615$. **Đạo hàm** (derivative) của hàm một biến là độ dốc của đồ thị: dương thì hàm đi lên khi biến tăng, âm thì hàm đi xuống. **Đạo hàm bậc hai** (second derivative) là đạo hàm của đạo hàm: nó cho biết đồ thị cong cỡ nào.
+:::
+
+## Trực giác
+
+Bạn đứng trên sườn núi trong sương mù dày và muốn xuống thung lũng. Bạn không thấy đáy ở đâu, chỉ cảm nhận được mặt đất dưới chân đang dốc về phía nào. Cách làm hợp lý: bước một bước ngắn về phía dốc xuống, đứng lại, cảm nhận độ dốc lần nữa, rồi bước tiếp. Khi mặt đất dưới chân phẳng, bạn đã tới đáy.
+
+Đó là toàn bộ ý tưởng của **gradient descent** (đôi khi dịch là "hạ gradient", viết tắt GD). "Ngọn núi" là hàm mất mát, "vị trí" là bộ tham số, còn "độ dốc" là đạo hàm.
+
+Bài trước giải thẳng bằng phương trình chuẩn, nhưng nhiều mô hình (hồi quy logistic, mạng nơ-ron) không có công thức nghiệm, và khi số đặc trưng $n$ rất lớn, giải hệ $n + 1$ ẩn tốn cỡ $n^3$ phép tính. GD chỉ cần độ dốc tại điểm đang đứng. Bài này dùng nó giải lại bài toán 10 căn hộ, nên kiểm tra được từng bước.
+
+<DatasetTable dataset="apartments" />
+
+### Cảm nhận độ dốc bằng tay
+
+Bắt đầu từ một dự đoán rất tệ: $w = 0$, $b = 0$, tức căn nào cũng đoán giá 0 đồng. MSE là 129.75. Chưa biết đáy ở đâu, bạn thử nhích từng tham số một chút rồi tính lại MSE:
+
+| Thử | MSE |
+|---|---:|
+| Xuất phát: $w = 0$, $b = 0$ | 129.75 |
+| Tăng $w$ thêm 0.01 | 117.42 |
+| Tăng $b$ thêm 0.01 | 129.53 |
+
+Nhích tham số nào lên MSE cũng giảm, nên cả hai nên tăng. Nhưng tăng $w$ làm MSE giảm 12.33, còn tăng $b$ chỉ làm MSE giảm 0.22, kém khoảng 50 lần. Lý do: tăng $w$ thêm 0.01 làm giá dự đoán của một căn cỡ trung bình, khoảng 52 m², tăng 0.52 triệu, còn tăng $b$ thêm 0.01 chỉ làm mọi giá dự đoán tăng 0.01 triệu. Độ dốc cho biết nên đi về phía nào, và mạnh cỡ nào. Còn chênh lệch giữa hai hướng sẽ thành rắc rối ở mục chuẩn hóa đặc trưng.
+
+Bài toán của bài này là: **từ một điểm xuất phát bất kỳ, lặp lại "đo độ dốc, bước một bước ngắn xuống dốc" cho tới đáy của MSE, và chọn độ dài bước sao cho tới nơi nhanh mà không văng ra khỏi lòng chảo.**
+
+## Lý thuyết
+
+### Gradient: gom các độ dốc thành một vectơ
+
+Như bài trước, gộp tham số thành vectơ $\boldsymbol{\theta} = [w, b]^\top$. **Gradient** của $\mathcal{L}$ tại $\boldsymbol{\theta}$ là vectơ các đạo hàm riêng, ký hiệu $\nabla\mathcal{L}(\boldsymbol{\theta})$ (đọc là "nabla L"):
+
+$$
+\nabla\mathcal{L}(\boldsymbol{\theta}) = \begin{bmatrix} \partial\mathcal{L}/\partial w \\ \partial\mathcal{L}/\partial b \end{bmatrix}
+$$
+
+Với $n$ đặc trưng, gradient có $n + 1$ phần tử. Bài trước đã dẫn hai đạo hàm riêng của MSE, với $\hat{y}^{(i)} = wx^{(i)} + b$:
+
+$$
+\begin{aligned}
+\frac{\partial\mathcal{L}}{\partial w} &= \frac{2}{m}\sum_{i=1}^{m}x^{(i)}\left(\hat{y}^{(i)} - y^{(i)}\right) \\
+\frac{\partial\mathcal{L}}{\partial b} &= \frac{2}{m}\sum_{i=1}^{m}\left(\hat{y}^{(i)} - y^{(i)}\right)
+\end{aligned}
+$$
+
+Viết bằng ma trận thiết kế $\mathbf{X}$ (cột diện tích, rồi cột toàn số 1): vectơ $\mathbf{X}\boldsymbol{\theta} - \mathbf{y}$ chứa các hiệu $\hat{y}^{(i)} - y^{(i)}$. Nhân nó với $\mathbf{X}^\top$, hàng đầu (cột diện tích) cho tổng thứ nhất, hàng thứ hai (cột số 1) cho tổng thứ hai. Nhân thêm $\frac{2}{m}$ là được đúng hai đạo hàm riêng:
+
+$$
+\nabla\mathcal{L}(\boldsymbol{\theta}) = \frac{2}{m}\mathbf{X}^\top\left(\mathbf{X}\boldsymbol{\theta} - \mathbf{y}\right)
+$$
+
+Công thức này đúng với mọi $n$. Cho gradient bằng $\mathbf{0}$ thì được $\mathbf{X}^\top\left(\mathbf{X}\boldsymbol{\theta} - \mathbf{y}\right) = \mathbf{0}$, chính là phương trình chuẩn. Vậy chỗ GD dừng lại đúng là nghiệm của bài trước.
+
+Tại $(0, 0)$, gradient là $[-1264.08, -21.84]^\top$. Nhân với 0.01 được $-12.64$ và $-0.22$, gần đúng mức giảm trong bảng ở mục Trực giác.
+
+### Vì sao đi ngược gradient là xuống dốc
+
+**Một biến trước.** Nhìn thật gần một điểm $w$, đồ thị của $\mathcal{L}$ gần như trùng với tiếp tuyến (tangent line) của nó, đường thẳng có độ dốc $\mathcal{L}'(w)$. Nên với một bước nhỏ $\Delta$:
+
+$$
+\mathcal{L}(w + \Delta) \approx \mathcal{L}(w) + \mathcal{L}'(w)\,\Delta
+$$
+
+Chọn $\Delta = -\eta\,\mathcal{L}'(w)$ với $\eta > 0$ nhỏ, thay vào:
+
+$$
+\mathcal{L}(w + \Delta) \approx \mathcal{L}(w) - \eta\left(\mathcal{L}'(w)\right)^2
+$$
+
+Bình phương không âm, nên $\mathcal{L}$ giảm (trừ khi $\mathcal{L}'(w) = 0$, tức đã ở chỗ phẳng). Đọc bằng lời: dốc lên về bên phải ($\mathcal{L}' > 0$) thì bước sang trái, và ngược lại.
+
+**Nhiều biến.** Nhích tham số một đoạn $\boldsymbol{\Delta} = [\Delta_w, \Delta_b]^\top$. Mỗi tham số góp phần thay đổi bằng độ dốc theo nó nhân với đoạn nhích, và tổng các phần là một tích vô hướng:
+
+$$
+\begin{aligned}
+\mathcal{L}(\boldsymbol{\theta} + \boldsymbol{\Delta}) &\approx \mathcal{L}(\boldsymbol{\theta}) + \frac{\partial\mathcal{L}}{\partial w}\Delta_w + \frac{\partial\mathcal{L}}{\partial b}\Delta_b \\
+&= \mathcal{L}(\boldsymbol{\theta}) + \nabla\mathcal{L}(\boldsymbol{\theta})^\top\boldsymbol{\Delta}
+\end{aligned}
+$$
+
+Chọn $\boldsymbol{\Delta} = -\eta\nabla\mathcal{L}(\boldsymbol{\theta})$, số hạng cuối thành $-\eta\lVert\nabla\mathcal{L}(\boldsymbol{\theta})\rVert^2$, luôn không dương. Hơn nữa, trong mọi bước cùng độ dài, tích vô hướng $\nabla\mathcal{L}^\top\boldsymbol{\Delta} = \lVert\nabla\mathcal{L}\rVert\,\lVert\boldsymbol{\Delta}\rVert\cos\alpha$ nhỏ nhất khi góc $\alpha$ giữa hai vectơ là 180°. Vậy gradient chỉ hướng **đi lên dốc nhất**, và ngược gradient là hướng **đi xuống dốc nhất**. Trên bản đồ **đường mức** (contour line), tức các đường nối những điểm cùng MSE, hướng này vuông góc với đường mức đi qua điểm đang đứng.
+
+Chữ "xấp xỉ" là điểm mấu chốt: tiếp tuyến chỉ giống đồ thị ở gần điểm đang đứng, nên bước quá dài thì $\mathcal{L}$ có thể tăng.
+
+Ý tưởng này có từ năm 1847. Để giải các hệ phương trình trong bài toán tính quỹ đạo thiên thể, Augustin-Louis Cauchy gom chúng thành một tổng bình phương, rồi làm tổng đó nhỏ dần bằng cách dịch mỗi ẩn ngược dấu đạo hàm riêng của nó.
+
+### Quy tắc cập nhật
+
+Gradient descent lặp lại một bước duy nhất:
+
+$$
+\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \eta\nabla\mathcal{L}(\boldsymbol{\theta}_t)
+$$
+
+Ở đây $t = 0, 1, 2, \dots$ là số thứ tự của bước, $\boldsymbol{\theta}_0$ là điểm xuất phát (thường là $\mathbf{0}$), và $\eta > 0$ là **tốc độ học**, một siêu tham số (hyperparameter) do bạn chọn. Với MSE, thay gradient vào:
+
+$$
+\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \eta \cdot \frac{2}{m}\mathbf{X}^\top\left(\mathbf{X}\boldsymbol{\theta}_t - \mathbf{y}\right)
+$$
+
+Mỗi bước dùng cả $m$ mẫu để tính gradient, nên cách này gọi là **batch gradient descent**. Hai điều đáng để ý:
+
+- **Bước tự ngắn lại gần đáy**, vì độ dài bước là $\eta\lVert\nabla\mathcal{L}\rVert$ mà gradient nhỏ dần. Không cần giảm $\eta$ theo thời gian.
+- **MSE của hồi quy tuyến tính là một cái bát**, gọi là hàm lồi (convex function): chỉ có một đáy, không có hố phụ nào để mắc kẹt. Với mạng nơ-ron thì không còn đảm bảo này.
+
+### Tốc độ học: ví dụ một chiều
+
+Xét cái bát đơn giản nhất, một parabol:
+
+$$
+f(w) = \frac{L}{2}\left(w - w^\ast\right)^2 + c
+$$
+
+$w^\ast$ là đáy, $c$ là giá trị nhỏ nhất, còn $L > 0$ là **độ cong** (curvature): đạo hàm bậc hai của $f$, cho biết thành bát dựng đứng cỡ nào. Đừng nhầm chữ $L$ này với hàm mất mát $\mathcal{L}$.
+
+Đạo hàm là $f'(w) = L\left(w - w^\ast\right)$. Thay vào quy tắc cập nhật $w_{t+1} = w_t - \eta f'(w_t)$, rồi trừ $w^\ast$ ở cả hai vế:
+
+$$
+\begin{aligned}
+w_{t+1} - w^\ast &= \left(w_t - w^\ast\right) - \eta L\left(w_t - w^\ast\right) \\
+&= \left(1 - \eta L\right)\left(w_t - w^\ast\right)
+\end{aligned}
+$$
+
+Dòng thứ hai đặt $w_t - w^\ast$ ra ngoài. Vậy sau mỗi bước, khoảng cách tới đáy bị nhân với cùng một số $q = 1 - \eta L$. Sau $t$ bước, nó là $q^t\left(w_0 - w^\ast\right)$. Mọi thứ phụ thuộc vào $q$:
+
+| $\eta$ | $q = 1 - \eta L$ | GD làm gì |
+|---|---|---|
+| $0 < \eta < 1/L$ | $0 < q < 1$ | Tiến dần về đáy từ một phía. $\eta$ càng nhỏ, $q$ càng gần 1, càng **chậm** |
+| $\eta = 1/L$ | $q = 0$ | Tới đáy sau đúng một bước |
+| $1/L < \eta < 2/L$ | $-1 < q < 0$ | Nhảy qua lại hai bên đáy, lần sau ngắn hơn lần trước: **dao động** nhưng vẫn hội tụ (converge) |
+| $\eta = 2/L$ | $q = -1$ | Nhảy qua lại mãi, không gần thêm |
+| $\eta > 2/L$ | $q < -1$ | Mỗi lần nhảy xa hơn: **phân kỳ** |
+
+Thử với $f(w) = w^2$, tức $L = 2$, đáy $w^\ast = 0$, ngưỡng $2/L = 1$, xuất phát từ $w_0 = 1$:
+
+| $\eta$ | $q$ | $w_0, w_1, \dots, w_5$ |
+|---|---:|---|
+| 0.1 | 0.8 | 1, 0.8, 0.64, 0.512, 0.4096, 0.3277 |
+| 0.5 | 0 | 1, 0, 0, 0, 0, 0 |
+| 0.9 | −0.8 | 1, −0.8, 0.64, −0.512, 0.4096, −0.3277 |
+| 1.1 | −1.2 | 1, −1.2, 1.44, −1.728, 2.0736, −2.4883 |
+
+Để ý hàng 0.1 và hàng 0.9: khoảng cách tới đáy giống hệt nhau ở mọi bước, chỉ khác dấu. Bước dài gấp 9 lần mà không nhanh hơn chút nào.
+
+:::note[Ghi nhớ]
+Trên parabol có độ cong $L$, GD hội tụ khi và chỉ khi $0 < \eta < 2/L$. Thành bát càng dốc ($L$ càng lớn), $\eta$ càng phải nhỏ.
+:::
+
+### Hai tham số: mỗi hướng một độ cong
+
+MSE theo $(w, b)$ cũng là một cái bát bậc hai, nhưng cong nhiều theo hướng này, ít theo hướng kia. Độ cong đo bằng các đạo hàm riêng bậc hai: lấy đạo hàm của $\partial\mathcal{L}/\partial w$ theo $w$ được $\frac{2}{m}\sum_i\left(x^{(i)}\right)^2$, theo $b$ được $\frac{2}{m}\sum_i x^{(i)}$; đạo hàm của $\partial\mathcal{L}/\partial b$ theo $b$ là 2. Xếp vào một ma trận, gọi là **ma trận Hessian** (Hessian matrix):
+
+$$
+\mathbf{H} = \begin{bmatrix} \frac{2}{m}\sum_i \left(x^{(i)}\right)^2 & \frac{2}{m}\sum_i x^{(i)} \\ \frac{2}{m}\sum_i x^{(i)} & 2 \end{bmatrix} = \frac{2}{m}\mathbf{X}^\top\mathbf{X}
+$$
+
+Dấu bằng cuối đúng vì các phần tử của $\mathbf{X}^\top\mathbf{X}$ là $\sum_i \left(x^{(i)}\right)^2$, $\sum_i x^{(i)}$ và $m$. $\mathbf{H}$ không phụ thuộc $\boldsymbol{\theta}$: cái bát cong như nhau ở mọi chỗ.
+
+Bài này không chứng minh, nhưng với mọi bát bậc hai, có hai hướng vuông góc với nhau (hai **vectơ riêng**, eigenvector, của $\mathbf{H}$) mà dọc theo mỗi hướng, GD cư xử **đúng như ví dụ một chiều**, với độ cong riêng của hướng đó. Hai độ cong ấy là hai **trị riêng** (eigenvalue) của $\mathbf{H}$. Gọi $L$ là trị riêng lớn nhất (hướng dốc nhất), $\mu$ là trị riêng nhỏ nhất (hướng phẳng nhất). Theo hai hướng, khoảng cách tới đáy lần lượt bị nhân với $1 - \eta L$ và $1 - \eta\mu$ mỗi bước:
+
+- **Hướng dốc nhất quyết định ngưỡng.** GD hội tụ khi $\eta < 2/L$. Vượt ngưỡng thì văng ra theo hướng này.
+- **Hướng có hệ số gần $\pm 1$ nhất quyết định tốc độ.** Khi $\eta$ còn xa $2/L$, đó là hướng phẳng: $1 - \eta\mu$ rất gần 1 khi $\mu$ nhỏ. Khi $\eta$ sát ngưỡng, $1 - \eta L$ gần $-1$: hướng dốc nhảy qua lại và tắt rất chậm.
+
+Tỉ số $\kappa = L/\mu$ gọi là **số điều kiện** (condition number). $\kappa$ lớn nghĩa là bát dẹt: đường mức là những elip dài và hẹp, và không có $\eta$ nào tốt cho cả hai hướng.
+
+### Chuẩn hóa đặc trưng
+
+Với diện tích thô của bảng căn hộ:
+
+$$
+\mathbf{H} = \begin{bmatrix} 6197.6 & 104.8 \\ 104.8 & 2 \end{bmatrix}, \qquad L \approx 6199.4, \quad \mu \approx 0.228
+$$
+
+$\kappa \approx 27\,200$, đúng con số "khoảng 27 nghìn" bạn đã gặp ở bài Hồi quy tuyến tính: số điều kiện của $\mathbf{X}^\top\mathbf{X}$. Hướng dốc nhất gần như trùng trục $w$, hướng phẳng gần như trùng trục $b$: lòng bát là một **khe hẹp và rất dài**. Thành khe dốc ép $\eta < 2/L \approx 3.2 \times 10^{-4}$. Với $\eta = 3 \times 10^{-4}$, khoảng cách dọc khe chỉ bị nhân với $1 - 3 \times 10^{-4} \times 0.228 \approx 0.99993$ mỗi bước: sau 100 bước, $b$ mới nhích từ 0 lên 0.017, trong khi đáp án là 2.04.
+
+Cách chữa là **chuẩn hóa đặc trưng**: đưa đặc trưng về thang đo cỡ 1, để đổi $w$ không còn mạnh hơn đổi $b$ hàng nghìn lần. Bài này dùng **chuẩn hóa min-max** (min-max scaling), đưa diện tích từ đoạn 25–85 m² về đoạn $[0, 1]$:
+
+$$
+\tilde{x} = \frac{x - 25}{85 - 25} = \frac{x - 25}{60}
+$$
+
+Ở bài trước, dấu ngã trong $\tilde{x}^{(i)}$ là độ lệch khỏi trung bình. Trong bài này, $\tilde{x}$ là diện tích đã chuẩn hóa.
+
+Chỉ chuẩn hóa diện tích, giữ nguyên giá thuê $y$, để MSE vẫn là MSE của bài trước. Mô hình mới là $\hat{y} = \tilde{w}\tilde{x} + \tilde{b}$, và hai tham số có nghĩa rất đời thường:
+
+- $\tilde{b}$ là giá dự đoán cho căn nhỏ nhất (25 m²), vì ở đó $\tilde{x} = 0$;
+- $\tilde{w}$ là chênh lệch giá dự đoán giữa căn lớn nhất (85 m²) và căn nhỏ nhất, vì $\tilde{x}$ đi từ 0 tới 1.
+
+Thay cột diện tích của $\mathbf{X}$ bằng cột $\tilde{x}$ rồi tính lại:
+
+$$
+\mathbf{H} = \begin{bmatrix} 0.613 & 0.913 \\ 0.913 & 2 \end{bmatrix}, \qquad L \approx 2.4533, \quad \mu \approx 0.160
+$$
+
+Ngưỡng thành $2/L \approx 0.815$ và $\kappa \approx 15$: từ khe hẹp 27 200 xuống một cái bát bầu dục, dài gấp khoảng 4 lần rộng ($\sqrt{\kappa} \approx 3.9$). Hướng dốc nhất giờ chủ yếu là $\tilde{b}$, tức nâng hay hạ cả đường. Hướng phẳng nhất là xoay đường quanh khoảng giữa bảng.
+
+Tại $(0, 0)$, gradient giờ là $[-11.97, -21.84]^\top$; với $\eta = 0.3$, bước đầu tới $(3.59, 6.55)$, MSE từ 129.75 xuống 12.05. Cứ thế, GD tới đáy ở $\tilde{w} \approx 10.17$, $\tilde{b} \approx 6.28$. Để đổi về đơn vị gốc, thay $\tilde{x} = (x - 25)/60$ vào mô hình rồi gom hệ số của $x$:
+
+$$
+\tilde{w}\,\frac{x - 25}{60} + \tilde{b} = \frac{\tilde{w}}{60}\,x + \left(\tilde{b} - 25\,\frac{\tilde{w}}{60}\right)
+\quad\Rightarrow\quad
+w = \frac{\tilde{w}}{60}, \qquad b = \tilde{b} - 25w
+$$
+
+Ra $w = 10.17/60 \approx 0.1695$ và $b \approx 6.28 - 25 \times 0.1695 \approx 2.04$, đúng đáp án của bài trước.
+
+Cách chuẩn hóa phổ biến nhất là **z-score** (`StandardScaler`, bài [Ridge, Lasso, Elastic Net](/vi/ml/regularization/)): trừ trung bình, chia độ lệch chuẩn. Với một đặc trưng, nó làm bát tròn hẳn ($\kappa = 1$): tốt cho tính toán, nhưng không còn thung lũng để quan sát, nên bài này dùng min-max. Cách nào cũng vậy, tham số chuẩn hóa chỉ học từ tập train.
+
+### Tiêu chí dừng
+
+GD không tự biết mình đã tới đáy. Bạn cần **tiêu chí dừng** (stopping criterion), thường dùng kết hợp:
+
+1. **Số bước tối đa.** Luôn nên có, để vòng lặp không chạy mãi khi phân kỳ.
+2. **Gradient đủ nhỏ:** $\lVert\nabla\mathcal{L}\rVert < \varepsilon$, ví dụ $10^{-6}$. Mặt đất gần như phẳng.
+3. **Mất mát gần như không giảm nữa.** Tham số `tol` của scikit-learn làm theo kiểu này, và có thể dừng quá sớm (hộp thứ hai ở mục Lỗi hay gặp).
+
+### Batch, SGD và mini-batch
+
+Với $m$ = 10 triệu, mỗi bước của batch GD phải duyệt hết 10 triệu mẫu. Ý tưởng: tính gradient trên **một phần** dữ liệu, có nhiễu nhưng rẻ hơn nhiều.
+
+- **SGD** (stochastic gradient descent, gradient descent ngẫu nhiên): mỗi bước dùng **một** mẫu chọn ngẫu nhiên.
+- **Mini-batch gradient descent:** mỗi bước dùng một nhóm $B$ mẫu, gradient là $\frac{2}{B}\mathbf{X}_B^\top\left(\mathbf{X}_B\boldsymbol{\theta} - \mathbf{y}_B\right)$, với $\mathbf{X}_B$, $\mathbf{y}_B$ là các hàng của nhóm đó. Đây là lựa chọn mặc định khi huấn luyện mạng nơ-ron.
+- **Epoch:** một lượt đi qua toàn bộ tập train, gồm $m/B$ bước. Nên xáo trộn dữ liệu ở đầu mỗi epoch.
+
+Cùng một epoch, SGD cập nhật $m$ lần, batch GD chỉ một lần. Đổi lại, SGD lắc lư: mỗi bước kéo $\boldsymbol{\theta}$ về phía một mẫu, nên với $\eta$ cố định nó cứ nhấp nhô quanh đáy. Cách chữa là giảm $\eta$ dần, gọi là lịch tốc độ học (learning rate schedule). SGD có tiền thân là phương pháp xấp xỉ ngẫu nhiên (stochastic approximation) của Robbins và Monro (1951). Các cải tiến như Momentum và Adam để dành cho bài Các thuật toán tối ưu nâng cao.
+
+### Giới hạn
+
+GD cần chọn $\eta$ và chuẩn hóa cho đúng, chỉ chắc chắn tới cực tiểu toàn cục (global minimum) khi hàm lồi, và với ít đặc trưng thì phương trình chuẩn vẫn tiện hơn; nó đáng giá khi $n$ hoặc $m$ rất lớn, hoặc khi không có nghiệm dạng đóng, như ở bài Hồi quy Logistic và bài Mạng nơ-ron nhân tạo.
+
+## Minh họa
+
+Hình dưới vẽ đường mức của MSE theo $(\tilde{w}, \tilde{b})$, dấu × là đáy $(10.17, 6.28)$, GD xuất phát ở $(0, 0)$. Nút **Bước** đi một bước, **Chạy** đi tới tối đa 100 bước, **Đặt lại** về đầu, thanh trượt chọn một trong năm mức $\eta$. Biểu đồ nhỏ vẽ MSE theo số bước (thang log), đường đứt là MSE nhỏ nhất 0.3615. Ngưỡng là $2/L \approx 0.815$. Hãy thử:
+
+1. $\eta = 0.30$: bấm **Bước** vài lần. MSE đi 129.75 → 12.05 → 3.5960: hai bước đầu lao xuống lòng thung lũng, rồi đường đi rẽ ngoặt, men theo đáy và chậm hẳn. MSE vào trong 1% của đáy ở bước 69.
+2. $\eta = 0.05$: bấm **Chạy**. Các bước ngắn dần, hết 100 bước MSE vẫn còn 1.0023.
+3. $\eta = 0.70$: đường đi zigzag hai bên thung lũng, hẹp dần, và vào trong 1% của đáy ở bước 29, nhanh nhất trong năm mức.
+4. $\eta = 0.80$ rồi $0.85$: sát ngưỡng, đường đi nhảy gần hết bề ngang thung lũng, hết 100 bước còn 0.4240; vượt ngưỡng, MSE tăng 151.40 → 177.24 → 207.95 → 244.32 và văng khỏi khung ở bước 4.
+
+{/* VIZ: mỗi bước đi ngược gradient; η quyết định đi chậm, tới nhanh, nhảy qua lại hay văng ra ngoài. */}
+<GradientDescentViz />
+
+## Ví dụ code
+
+Ba ô dưới đây chạy độc lập, ô nào cũng tự tạo bảng căn hộ. Ô thứ hai và thứ ba lần đầu chạy lâu hơn, vì trình duyệt phải tải thêm Matplotlib và scikit-learn.
+
+Ô đầu tiên cài đặt batch GD: chuẩn hóa min-max, xuất phát từ $(0, 0)$ với $\eta = 0.3$, dừng khi $\lVert\nabla\mathcal{L}\rVert < 10^{-6}$ hoặc khi đủ 10 000 bước, rồi đổi nghiệm về đơn vị gốc và so với phương trình chuẩn.
+
+<PythonRunner code={gdNumpyCode} title="Batch gradient descent bằng NumPy" />
+
+GD dừng sau 282 bước với $\tilde{w} = 10.1686$, $\tilde{b} = 6.2763$, tức $w = 0.1695$, $b = 2.0394$, MSE $= 0.3615$: khớp phương trình chuẩn. MSE đã vào trong 1% của đáy từ bước 69; hơn 200 bước còn lại là để gradient nhỏ tới $10^{-6}$. Hãy sửa `eta` thành 0.05 hoặc 0.7 rồi chạy lại.
+
+Ô thứ hai chạy 100 bước GD với vài mức $\eta$, trên diện tích thô (bên trái) và đã chuẩn hóa (bên phải), rồi vẽ MSE theo số bước, trục tung theo thang log. Số in ra là MSE sau 100 bước.
+
+<PythonRunner
+  code={learningRateCode}
+  title="Tốc độ học, có và không chuẩn hóa"
+  figureAlt={['Hai biểu đồ MSE theo số bước, trục tung log từ 0.1 tới 1000, đường chấm ngang ở 0.3615. Bên trái, diện tích thô: eta 0.0003 giảm nhanh trong khoảng 20 bước rồi nằm ngang quanh 0.83, trên đường chấm; eta 0.00033 đi lên và ra khỏi khung. Bên phải, diện tích chuẩn hóa: eta 0.7 vào trong 1% của đáy ở bước 29; eta 0.3 rơi rất nhanh rồi xuống chậm, vào trong 1% của đáy ở bước 69; eta 0.05 giảm chậm, dừng quanh 1; eta 0.8 đi xuống gần như thẳng, dừng quanh 0.42; eta 0.85 đi lên và ra khỏi khung.']}
+/>
+
+- **Diện tích đã chuẩn hóa:** các số khớp phần Minh họa. Để ý $\eta = 0.8$: đường cong mất mát (loss curve) trông như giảm đều, dù tham số đang nhảy qua lại. $\eta = 0.85$ phân kỳ tới $1.635 \times 10^{9}$.
+- **Diện tích thô:** ngưỡng là $2/L \approx 3.226 \times 10^{-4}$. $\eta = 3 \times 10^{-4}$ giảm nhanh rồi nằm ngang ở 0.8273: đã xuống đáy khe, giờ bò dọc khe. Sau 10 000 bước còn 0.4819 (dòng in cuối); tới bước 35 650 mới vào trong 1% của đáy. $\eta = 3.3 \times 10^{-4}$, chỉ hơn ngưỡng một chút, đã phân kỳ tới $9.987 \times 10^{5}$.
+
+Các mức phân kỳ chỉ chạy 100 bước: chạy lâu hơn thì số tràn và NumPy báo `RuntimeWarning`.
+
+Ô thứ ba so ba cỡ batch bằng một vòng lặp tự viết, cùng $\eta = 0.1$ và 100 epoch, rồi dùng `SGDRegressor` của scikit-learn, lớp cài đặt SGD.
+
+<PythonRunner code={sgdCode} title="SGD, mini-batch và SGDRegressor" />
+
+Đích là $w = 0.1695$, $b = 2.04$, MSE 0.3615.
+
+- **Batch 10 (batch GD)** chỉ cập nhật 100 lần, MSE còn 0.4885: chưa tới.
+- **Batch 2 (mini-batch)** cập nhật 500 lần, gần đáy nhất: MSE 0.3632.
+- **Batch 1 (SGD)** cập nhật 1 000 lần nhưng kết thúc xa đáy hơn: MSE 0.3766, $b = 2.15$, vì nó cứ lắc lư quanh đáy.
+
+`SGDRegressor` mặc định trên diện tích thô phân kỳ tới MSE $3.6 \times 10^{24}$ sau 6 epoch: `eta0=0.01` mặc định quá lớn so với thang đo của diện tích thô. Cấu hình cuối có `MinMaxScaler`, `penalty=None` (tắt phạt L2 bật sẵn), $\eta$ cố định 0.05 và `tol=None` (chạy đủ 1000 epoch). MSE ra 0.3615, nhưng $b = 2.05$ vẫn lệch 0.01: với $\eta$ cố định, SGD dừng ở một điểm nào đó trong lúc đang nhấp nhô quanh đáy.
+
+## Lỗi hay gặp
+
+:::caution[Quên chuẩn hóa đặc trưng]
+Không chuẩn hóa thì GD hoặc rất chậm, hoặc phân kỳ, có khi không một cảnh báo (`SGDRegressor()` ở ô thứ ba). Hãy đặt bộ chuẩn hóa trong pipeline, ví dụ `make_pipeline(MinMaxScaler(), SGDRegressor(...))` hoặc với `StandardScaler()`, để nó chỉ học từ dữ liệu đưa vào `fit` và dữ liệu mới được biến đổi đúng như lúc huấn luyện.
+:::
+
+:::caution[Đường mất mát nằm ngang chưa chắc đã tới đáy]
+Trên diện tích thô với $\eta = 3 \times 10^{-4}$, MSE từ bước 50 tới bước 100 chỉ giảm từ 0.8306 xuống 0.8273, trong khi đáy là 0.3615. Tiêu chí "mất mát hết giảm" cũng mắc bẫy này: `SGDRegressor` mặc định dừng khi mất mát không giảm quá `tol=1e-3` trong 5 epoch liên tiếp. Với `random_state=0`, thêm `MinMaxScaler` thì nó dừng sau 440 epoch ở MSE 1.3669, thêm `StandardScaler` thì dừng ở 0.4160, đều không cảnh báo. Hãy xem thêm độ lớn gradient.
+:::
+
+:::caution[Chép $\eta$ từ tài liệu khác]
+Ngưỡng $2/L$ phụ thuộc dữ liệu và cách viết hàm mất mát. Nhiều sách dùng $\frac{1}{2m}$ thay cho $\frac{1}{m}$, nên gradient nhỏ đi một nửa và ngưỡng $\eta$ gấp đôi. `SGDRegressor` cũng tính mất mát mỗi mẫu là $\frac{1}{2}\left(y - \hat{y}\right)^2$, nên `eta0` của nó không so thẳng được với $\eta$ của bài.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Gradient descent lặp lại $\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \eta\nabla\mathcal{L}(\boldsymbol{\theta})$, với $\nabla\mathcal{L} = \frac{2}{m}\mathbf{X}^\top\left(\mathbf{X}\boldsymbol{\theta} - \mathbf{y}\right)$ cho MSE, và dừng ở đúng nghiệm của phương trình chuẩn.
+- GD hội tụ khi $0 < \eta < 2/L$, với $L$ là trị riêng lớn nhất của Hessian $\frac{2}{m}\mathbf{X}^\top\mathbf{X}$: $\eta$ nhỏ thì chậm, trên $1/L$ thì dao động, trên $2/L$ thì phân kỳ.
+- Chuẩn hóa min-max $\tilde{x} = (x - 25)/60$ đưa $\kappa$ từ 27 200 về khoảng 15, nên số bước tới 1% của đáy giảm từ 35 650 ($\eta = 3 \times 10^{-4}$) xuống 69 ($\eta = 0.3$); đổi về đơn vị gốc bằng $w = \tilde{w}/60$, $b = \tilde{b} - 25w$.
+- Batch GD dùng cả $m$ mẫu mỗi bước, mini-batch dùng $B$ mẫu, SGD dùng 1 mẫu, và đường mất mát nằm ngang chưa chắc đã tới đáy.
+
+**Đọc thêm:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Bài 7: Gradient Descent (phần 1/2)](https://machinelearningcoban.com/2017/01/12/gradientdescent/) và [Bài 8: Gradient Descent (phần 2/2)](https://machinelearningcoban.com/2017/01/16/gradientdescent2/). Tiếng Việt, có SGD, mini-batch và momentum. Ký hiệu khác: $N$ là số mẫu, mất mát dùng $\frac{1}{2N}$; ở bài 8, $n$ là cỡ mini-batch.
+- Google (cập nhật 2025–2026). [*Machine Learning Crash Course*: Linear regression: Gradient descent](https://developers.google.com/machine-learning/crash-course/linear-regression/gradient-descent) và [Linear regression: Hyperparameters](https://developers.google.com/machine-learning/crash-course/linear-regression/hyperparameters). Ngắn, nhiều hình.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*, mục 1.5: Stochastic Gradient Descent](https://scikit-learn.org/1.8/modules/sgd.html). Hàm mục tiêu thật của `SGDRegressor` và các lịch tốc độ học.
+- Ruder, S. (2016). [*An overview of gradient descent optimization algorithms*](https://arxiv.org/abs/1609.04747). arXiv:1609.04747. Tổng quan các biến thể của GD và Momentum, Adagrad, RMSProp, Adam.
+- Hai bài gốc. Cauchy, A. (1847). [*Méthode générale pour la résolution des systèmes d'équations simultanées*](https://gtfp.cs.rhul.ac.uk/pulskamp/Cauchy/Orbits/1847%20CR%20536%28383%29.pdf) (PDF, bản dịch tiếng Anh của R. J. Pulskamp). *Comptes rendus de l'Académie des sciences* 25, 536–538: ba trang, Cauchy giảm một tổng bình phương bằng cách dịch mỗi ẩn ngược dấu đạo hàm riêng. Robbins, H., Monro, S. (1951). [*A Stochastic Approximation Method*](https://doi.org/10.1214/aoms/1177729586). *The Annals of Mathematical Statistics* 22(3), 400–407: phương pháp xấp xỉ ngẫu nhiên, tiền thân của SGD.
+
+<LessonProgress />
