@@ -1,4 +1,4 @@
-// Number formatting for every VIZ (docs/architecture/viz.md, section 2.6). Pure, relative imports only.
+// Number formatting for every VIZ (docs/architecture/viz/README.md, section 2.6). Pure, relative imports only.
 // Same output in vi and en, at build time and in every browser: toFixed, never Intl.
 import type { Line } from './linear-fit';
 

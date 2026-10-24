@@ -1,4 +1,4 @@
-// Simple linear regression for LinearFitViz (docs/architecture/viz.md, section 4.2). Pure: no DOM, no React.
+// Simple linear regression for LinearFitViz (docs/architecture/viz/shared.md, section 4.2). Pure: no DOM, no React.
 // Notation follows the lesson ml/linear-regression: ŷ = wx + b, residual e = y − ŷ, MSE with 1/m.
 // Relative imports only: Playwright e2e imports this file to compute the expected numbers.
 import type { Row } from '../../data/datasets/types';

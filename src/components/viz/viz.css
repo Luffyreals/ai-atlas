@@ -1,8 +1,8 @@
 /*
- * Every VIZ (docs/architecture/viz.md, sections 2.3, 4.4, 4.7). The only CSS file under src/components/viz/,
+ * Every VIZ (docs/architecture/viz/, sections 2.3, 4.4, 4.7). The only CSS file under src/components/viz/,
  * loaded on every page through Starlight's customCss, so it styles the build HTML before hydration.
  * Colours exist here only: role variables on .atlas-viz point at theme tokens. Classes are named by role,
- * never by VIZ. Budget: 2.5 KB gzip (tests/unit/viz-conventions.test.ts).
+ * never by VIZ. Budget: 2.5 KB gzip (tests/unit/viz/viz-conventions.test.ts).
  */
 .atlas-viz {
   --atlas-viz-plot-bg: var(--sl-color-bg);

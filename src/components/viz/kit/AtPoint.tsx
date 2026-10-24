@@ -1,4 +1,4 @@
-// Marks sized in px at a position given in percent (docs/architecture/viz.md, sections 2.4, 9.4.4): the nested
+// Marks sized in px at a position given in percent (docs/architecture/viz/, sections 2.4, 9.4.4): the nested
 // 1 × 1 <svg> moves the origin to (x, y) and lets its children overflow, so a child drawn around 0,0 keeps its
 // size at every plot width. CrossMark is drawn with it.
 import type { ReactNode } from 'react';

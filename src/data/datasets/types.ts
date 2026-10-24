@@ -1,4 +1,4 @@
-// Shapes of the shared lesson datasets (docs/architecture/viz.md, section 4.1). Types only.
+// Shapes of the shared lesson datasets (docs/architecture/viz/shared.md, section 4.1). Types only.
 // Relative imports only: Playwright e2e imports these files too, and it does not know the @data/* alias.
 import type { LessonId, Localized } from '../roadmap';
 
@@ -13,7 +13,7 @@ export interface DatasetColumn {
 
 export interface XYDataset {
   id: string; // registry key, and the "# dataset: <id>" marker in src/code/
-  lessons: readonly LessonId[]; // lessons whose code must carry this data (viz.md, section 2.5)
+  lessons: readonly LessonId[]; // lessons whose code must carry this data (viz/README.md, section 2.5)
   caption: Localized; // DatasetTable caption; says so when the numbers are made up
   itemLabel: Localized; // what one point is, for the legend: { vi: 'Một căn hộ', en: 'One apartment' }
   description: Localized; // 1–2 sentences for screen readers: what the cloud of points shows

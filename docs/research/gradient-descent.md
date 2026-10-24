@@ -1,6 +1,6 @@
 # Gradient Descent (hạ gradient)
 
-Bài: `ml/gradient-descent` (tiền đề: `ml/linear-regression`; bài sau: `ml/optimizers`). Quyết định liên quan trong `docs/mvp.md` mục 7: số 37 (VIZ chạy từng bước, đổi tốc độ học), số 38 (giải lại đúng bài toán 10 căn hộ của bài Hồi quy tuyến tính, `src/data/datasets/apartments.ts`). Code chỉ dùng `numpy`, `scikit-learn`, `matplotlib` (Pyodide, scikit-learn 1.8).
+Bài: `ml/gradient-descent` (tiền đề: `ml/linear-regression`; bài sau: `ml/optimizers`). Quyết định liên quan trong `docs/decisions.md`: số 37 (VIZ chạy từng bước, đổi tốc độ học), số 38 (giải lại đúng bài toán 10 căn hộ của bài Hồi quy tuyến tính, `src/data/datasets/apartments.ts`). Code chỉ dùng `numpy`, `scikit-learn`, `matplotlib` (Pyodide, scikit-learn 1.8).
 
 Ngày kiểm tra nguồn: **24/10/2026**, bằng WebFetch/WebSearch. Thẻ nguồn: [C47], [L12], [RM51], [SK-SGDR], [SK-SGD], [MLCB-7], [MLCB-8], [G-GD], [G-HP], [R16]. Mục "Số tự chạy" ghi kết quả `summarizer` tự tính. Ý không có thẻ là kiến thức chung hoặc suy ra đại số.
 

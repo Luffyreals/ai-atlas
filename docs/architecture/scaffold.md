@@ -614,7 +614,7 @@ Thiết kế giao diện trang chủ và component bằng skill `design-taste-fr
 | 1 | Astro 7 mặc định Sätteri. Quên `processor: unified(...)` thì công thức hỏng **mà build vẫn qua** | Toàn bộ công thức hiện thô | E2E kiểm tra `.katex` trên trang dev (bước 8) |
 | 2 | Node trên Cloudflare mặc định 22.16.0 < 22.23.4 | Build trên Cloudflare lỗi | `.node-version` + biến `NODE_VERSION` |
 | 3 | Hệ sinh thái mới (Astro 7, Vite 8, TS 6, Vitest 5) đổi nhanh | Nâng cấp có thể vỡ | Ghim chính xác phiên bản (`-E`); nâng cấp có chủ đích, mỗi lần một nhóm gói |
-| 4 | `katex` phải giữ 0.16.x chừng nào `rehype-katex` còn dùng 0.16 | Lệch CSS và HTML nếu ai đó nâng katex lên 0.19 | Unit test đọc `package.json`: `katex` phải bắt đầu bằng `0.16.` (thêm vào `tests/unit/deps.test.ts` ở bước 7) |
+| 4 | `katex` phải giữ 0.16.x chừng nào `rehype-katex` còn dùng 0.16 | Lệch CSS và HTML nếu ai đó nâng katex lên 0.19 | Unit test đọc `package.json`: `katex` phải bắt đầu bằng `0.16.` (thêm vào `tests/unit/content/deps.test.ts` ở bước 7) |
 | 5 | Cấu hình `site` đang là placeholder | Canonical và sitemap sai cho tới M0-13 | M0-13 |
 | 6 | Trang 404 song ngữ chung một trang | Người đọc tiếng Anh thấy tiếng Việt trước | Chấp nhận ở MVP; có thể làm `/en/404.html` riêng sau bằng file tĩnh |
 | 7 | Trang `dev/components` vẫn có trong sitemap | Nhỏ | Có `noindex`. **Lọc ở M1** (quyết định 23/10/2026): khai báo `@astrojs/sitemap` tường minh có `filter`, xem [components.md](components.md) mục 2.10 |

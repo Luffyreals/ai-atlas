@@ -1,9 +1,9 @@
 """Exact gradient-descent paths of GradientDescentViz on the apartment table.
 
-docs/architecture/viz.md, sections 12.2 and 12.6 task D0. Writes one GENERATED file:
+docs/architecture/viz/gradient-descent.md, sections 12.2 and 12.6 task D0. Writes one GENERATED file:
   tests/unit/fixtures/gradient-descent-python.ts   PYTHON_GRADIENT_DESCENT
 
-Run by hand with the venv of viz.md section 2.5 (the versions Pyodide 314.0.7 ships: Python 3.14.5, NumPy 2.4.6),
+Run by hand with the venv of viz/README.md section 2.5 (the versions Pyodide 314.0.7 ships: Python 3.14.5, NumPy 2.4.6),
 from an empty folder outside the repo, so nothing local shadows a module:
   cd <an empty folder>
   C:/Users/Dell/.venvs/ai-atlas-py314/Scripts/python.exe -I "<repo>/scripts/gradient-descent-fixture.py"
@@ -41,9 +41,9 @@ warnings.simplefilter("error")
 REPO = Path(__file__).resolve().parent.parent
 APARTMENTS_TS = REPO / "src" / "data" / "datasets" / "apartments.ts"
 FIXTURE_TS = REPO / "tests" / "unit" / "fixtures" / "gradient-descent-python.ts"
-COMMAND = "python -I scripts/gradient-descent-fixture.py (venv of viz.md section 2.5, from an empty folder)"
+COMMAND = "python -I scripts/gradient-descent-fixture.py (venv of docs/architecture/viz/README.md section 2.5, from an empty folder)"
 
-# Same as APARTMENTS_GD in apartments.ts (tests/unit/gradient-descent-apartments.test.ts compares them).
+# Same as APARTMENTS_GD in apartments.ts (tests/unit/viz/gradient-descent-apartments.test.ts compares them).
 LEVELS = [0.05, 0.3, 0.7, 0.8, 0.85]
 START = (0, 0)
 MAX_STEPS = 100
@@ -242,7 +242,7 @@ def main():
         f"// Command: {COMMAND}\n"
         f"// Date: {today}\n"
         "// Exact numbers (rational arithmetic on x~ = (x - 25) / 60 as NumPy makes it, each rounded once to a double)\n"
-        "// of GradientDescentViz (docs/architecture/viz.md, sections 12.2, 12.6 task D0): the least-squares point on\n"
+        "// of GradientDescentViz (docs/architecture/viz/gradient-descent.md, sections 12.2, 12.6 task D0): the least-squares point on\n"
         "// x~ and in raw units, the Hessian and its eigenvalues L, mu, and the gradient-descent path of every level of\n"
         "// APARTMENTS_GD from (0, 0): every step until maxSteps or the first one outside the box. NumPy agreed on\n"
         "// every shown string when this was written. rows is a copy of APARTMENTS.rows.\n"

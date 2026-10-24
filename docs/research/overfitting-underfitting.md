@@ -1,6 +1,6 @@
 # Overfitting và Underfitting
 
-Bài: `ml/overfitting-underfitting`. Quyết định liên quan trong `docs/mvp.md` mục 7: số 37 (VIZ thanh trượt bậc đa thức, vẽ đường khớp cùng sai số train/test), số 38 (dữ liệu nhỏ tự sinh có seed). Code chỉ dùng `numpy`, `scikit-learn`, `matplotlib` (Pyodide, scikit-learn 1.8.0).
+Bài: `ml/overfitting-underfitting`. Quyết định liên quan trong `docs/decisions.md`: số 37 (VIZ thanh trượt bậc đa thức, vẽ đường khớp cùng sai số train/test), số 38 (dữ liệu nhỏ tự sinh có seed). Code chỉ dùng `numpy`, `scikit-learn`, `matplotlib` (Pyodide, scikit-learn 1.8.0).
 
 Ngày kiểm tra nguồn: **23/10/2026**, bằng WebFetch. Thẻ nguồn: [SK-EX], [SK-PF], [SK-MP], [SK-CV], [GG-OF], [MLCB15], [ISL]. Ý không có thẻ là kiến thức chung của `summarizer`.
 

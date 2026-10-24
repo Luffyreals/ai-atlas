@@ -1,4 +1,4 @@
-// Geometry of static figures (docs/architecture/viz.md, section 8). Pure functions and constants, no DOM.
+// Geometry of static figures (docs/architecture/viz/figures.md, section 8). Pure functions and constants, no DOM.
 // Coordinates are viewBox units. Hand-written coordinates are integers; computed ones are rounded to 1 decimal.
 // Relative imports only: Playwright e2e may import this file too, and it does not know the @lib/* alias.
 import type { Lines } from '../../data/figures/types';
@@ -76,7 +76,7 @@ export function arrowHead(from: Pt, to: Pt, size: number = ARROW_HEAD): string {
 const MATH_SYMBOL = /^[A-Za-z\u0391-\u03A1\u03A3-\u03A9\u03B1-\u03C1\u03C3-\u03C9]$/u;
 /** 1–2 digits or Latin letters. */
 const MATH_SUB = /^[A-Za-z0-9]{1,2}$/;
-/** Digits, spaces and a few math signs: no words can hide here (viz.md section 11.3). */
+/** Digits, spaces and a few math signs: no words can hide here (viz/static-plots.md section 11.3). */
 const MATH_AFTER = /^[0-9 =+\u2212\-.,<>\u2264\u2265()]+$/u;
 
 /**

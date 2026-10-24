@@ -8,7 +8,7 @@ import { isTranslated } from '../../src/lib/roadmap';
 import { lessonShape } from '../unit/fixtures/lesson-shape';
 import { installContrast, type Contrast } from './helpers';
 
-// Checks shared by every VIZ (docs/architecture/viz.md, sections 2.7–2.9, 2.12; task V5 in section 6), on every
+// Checks shared by every VIZ (docs/architecture/viz/, sections 2.7–2.9, 2.12; task V5 in section 6), on every
 // lesson page whose file uses one: /vi/<id>/ when status.vi is 'published', and /en/<id>/ (the fallback page
 // shows the vi file with en strings). A new VIZ is covered here without a test of its own.
 // All URLs end with "/" (trailingSlash 'always').
