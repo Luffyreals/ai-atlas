@@ -27,7 +27,7 @@ export const UI_KEYS = {
     'hintIndexError', 'hintKeyError', 'hintAttributeError', 'hintZeroDivisionError',
     'hintModuleNotFoundError', 'hintEOFError', 'hintGeneric',
   ],
-  // One namespace per VIZ, named viz<Name> (docs/architecture/viz.md, section 2.6).
+  // One namespace per VIZ, named viz<Name> (docs/architecture/viz/README.md, section 2.6).
   vizLinearFit: [
     'caption', 'plotLabel', 'controls', 'wLabel', 'bLabel', 'wValueText', 'bValueText',
     'yourLine', 'bestLine', 'residual', 'mseValue', 'showBest', 'nearBest', 'bestNote',

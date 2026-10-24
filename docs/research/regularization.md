@@ -1,6 +1,6 @@
 # Regularization: Ridge, Lasso, Elastic Net
 
-Bài: `ml/regularization` (tiền đề: `ml/overfitting-underfitting`). Quyết định liên quan trong `docs/mvp.md` mục 7: số 37 (VIZ thanh trượt $\lambda$, các hệ số co lại), số 38 và 44 (dùng lại bộ `src/data/datasets/sine.ts`: 16 điểm train, 8 điểm test). Code chỉ dùng `numpy`, `scikit-learn`, `matplotlib` (Pyodide, scikit-learn 1.8).
+Bài: `ml/regularization` (tiền đề: `ml/overfitting-underfitting`). Quyết định liên quan trong `docs/decisions.md`: số 37 (VIZ thanh trượt $\lambda$, các hệ số co lại), số 38 và 44 (dùng lại bộ `src/data/datasets/sine.ts`: 16 điểm train, 8 điểm test). Code chỉ dùng `numpy`, `scikit-learn`, `matplotlib` (Pyodide, scikit-learn 1.8).
 
 Ngày kiểm tra nguồn: **24/10/2026**, bằng WebFetch. Thẻ nguồn: [HK70], [T96], [ZH05], [SK-LM], [SK-R], [SK-L], [SK-EN], [SK-RCV], [SK-LCV], [SK-SS], [MLCB15]. Mục "Số tự chạy" ghi kết quả `summarizer` tự tính. Ý không có thẻ là kiến thức chung.
 

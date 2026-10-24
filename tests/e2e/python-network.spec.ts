@@ -317,7 +317,7 @@ const LESSON_SOURCE = readFileSync(
 const LESSON_ALTS = [...LESSON_SOURCE.matchAll(/<PythonRunner\b([\s\S]*?)\/>/g)].map(
   (match) => /figureAlt=\{\['([^']+)'\]\}/.exec(match[1] ?? '')?.[1],
 );
-// Output of `python -I src/code/ml/linear-regression/<name>.vi.py` (venv of viz.md 2.5, the versions Pyodide
+// Output of `python -I src/code/ml/linear-regression/<name>.vi.py` (venv of viz/README.md 2.5, the versions Pyodide
 // 314.0.7 ships). The lesson quotes these numbers: b = 2.0394, w = 0.1695, MSE = 0.3615; 65 m² -> 13.06,
 // 300 m² -> 52.88; with the outlier w = 0.0760, b = 6.36.
 const LESSON_RUNS = [

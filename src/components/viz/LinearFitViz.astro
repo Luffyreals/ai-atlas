@@ -1,8 +1,8 @@
 ---
-// LinearFitViz for ml/linear-regression (docs/architecture/viz.md, sections 4.5–4.7). The only file a lesson
+// LinearFitViz for ml/linear-regression (docs/architecture/viz/linear-fit.md, sections 4.5–4.7). The only file a lesson
 // imports: <LinearFitViz />, no props, no client:* in MDX. Here, at build time: UI strings, KaTeX for the
 // slider labels and the ŷ, x symbols, the least-squares line (bad data fails the build) and the mean point
-// (x̄, ȳ) it passes through, marked on the plot (decision 24 in docs/mvp.md).
+// (x̄, ȳ) it passes through, marked on the plot (decision 24 in docs/decisions.md).
 // The island hydrates 200px before it scrolls into view. Styles: viz.css, through Starlight's customCss.
 import LinearFitVizIsland from './linear-fit-viz/LinearFitVizIsland';
 import { APARTMENTS, APARTMENTS_LINEAR_FIT } from '@data/datasets/apartments';

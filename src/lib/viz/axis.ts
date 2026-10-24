@@ -1,4 +1,4 @@
-// Axis text of a VIZ, built by the wrapper in the page locale (docs/architecture/viz.md, sections 4.5, 9.4.1;
+// Axis text of a VIZ, built by the wrapper in the page locale (docs/architecture/viz/, sections 4.5, 9.4.1;
 // decision 50). Pure, relative imports only: Playwright e2e may import this file.
 import type { DatasetColumn } from '../../data/datasets/types';
 import type { Locale } from '../../data/roadmap';

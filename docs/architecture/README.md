@@ -63,13 +63,13 @@ Từ mốc M1, `@astrojs/sitemap` được khai báo tường minh trong `astro.
 
 - Trang không phải bài học: `index.mdx` (trang chủ), `dev/components.mdx` (trang nội bộ để thử hiển thị, có `noindex`, không vào tìm kiếm). `about` dành cho mốc M4.
 - Bài đã có bản Việt nhưng chưa dịch: `/en/...` dùng cơ chế fallback của Starlight, hiện nội dung tiếng Việt kèm thông báo chưa dịch.
-- **Trang fallback và SEO** (quyết định 30 trong `docs/mvp.md`). Người đọc vẫn mở được trang fallback, nhưng máy tìm kiếm không lập chỉ mục nó:
+- **Trang fallback và SEO** (quyết định 30 trong `docs/decisions.md`). Người đọc vẫn mở được trang fallback, nhưng máy tìm kiếm không lập chỉ mục nó:
   - `src/routeData.ts` là route middleware của Starlight (tùy chọn `routeMiddleware` trong `astro.config.ts`). Nó thay `starlightRoute.head` bằng kết quả của `fallbackSeoHead()` trong `src/lib/seo.ts`, trước khi trang render.
   - Mọi trang có `starlightRoute.isFallback` (không riêng bài học): thêm `<meta name="robots" content="noindex">` (trừ khi frontmatter đã có thẻ `robots`), và bỏ `hreflang` trỏ tới chính ngôn ngữ đó.
   - Trang vi của bài chưa dịch: bỏ `hreflang="en"`. `hreflang="vi"`, `x-default` (trỏ trang vi) và canonical giữ nguyên ở cả hai trang.
   - Sitemap: `filter` của `@astrojs/sitemap` là `isInSitemap()` (cùng file). Hàm bỏ trang `/dev/` và `/en/<bài>/` của bài chưa dịch. Dòng của trang vi khi đó không còn `xhtml:link` vì không có bản en đi kèm.
   - Bài nào chưa dịch: đọc từ `status` trong `roadmap.ts` (`roadmap-files.test.ts` giữ `status` khớp file thật). Phần sitemap và `hreflang` của trang vi chỉ xét bài học, vì các trang khác (trang chủ, `dev/`) có đủ hai bản. Phần `noindex` dựa vào `isFallback` nên đúng cho mọi trang.
-  - Khi bài có bản en (có file và `status.en = 'published'`), ba điều trên tự trở lại bình thường, không phải sửa gì. Test: `tests/unit/seo.test.ts`.
+  - Khi bài có bản en (có file và `status.en = 'published'`), ba điều trên tự trở lại bình thường, không phải sửa gì. Test: `tests/unit/lib/seo.test.ts`.
   - `src/lib/seo.ts` được `astro.config.ts` nạp, nên theo cùng ràng buộc import ở mục 3.3.
 
 ### 3.2. Chuỗi giao diện: `src/i18n/ui.ts` + `src/content/i18n/`
@@ -99,7 +99,7 @@ Từ mốc M1, `@astrojs/sitemap` được khai báo tường minh trong `astro.
 | `astro.config.ts` | Gọi `buildSidebar()` cho tùy chọn `sidebar` của Starlight |
 
 - Nhãn sidebar lấy tiếng Việt làm mặc định, tiếng Anh nằm trong `translations.en`. Nút Trước/Sau của Starlight đi theo đúng thứ tự lộ trình.
-- Sidebar có đúng các bài đã có trang tiếng Việt, nên lớn dần khi bài được xuất bản. Khi mọi bài đều `planned` thì sidebar rỗng, đây là hành vi đúng. Test: `tests/unit/sidebar.test.ts`.
+- Sidebar có đúng các bài đã có trang tiếng Việt, nên lớn dần khi bài được xuất bản. Khi mọi bài đều `planned` thì sidebar rỗng, đây là hành vi đúng. Test: `tests/unit/lib/sidebar.test.ts`.
 - **Ràng buộc:** ba file trên chỉ dùng import tương đối và không import `astro:*`, vì `astro.config.ts` nạp chúng lúc đọc cấu hình.
 
 ## 4. Pipeline Markdown
@@ -128,7 +128,7 @@ markdown: {
   - **Ngôn ngữ:** plugin không biết ngôn ngữ của trang, nên **suy từ đường dẫn file** (`vfile.path`): thư mục gần file nhất có tên `vi` hoặc `en`. Không suy được (file ngoài `docs/vi`, `docs/en`) thì nhãn chỉ là mã TeX. Trang en dự phòng của bài chưa dịch hiện file vi, nên nhãn là "Công thức", khớp với `lang="vi"` Starlight đặt trên `<main>` của trang đó.
   - Không thêm JS lên trình duyệt, không thêm gói npm: plugin tự duyệt cây hast, chỉ import kiểu (`hast`, `@astrojs/markdown-remark`). Duyệt cả node JSX của MDX, nên công thức trong `<Aside>` cũng có tên. Vai trò hay nhãn đã có sẵn thì giữ nguyên.
   - Quiz và VIZ render KaTeX bằng `renderInlineMarkup` (công thức trong dòng, không qua rehype), nên không bị ảnh hưởng. Tên truy cập của chúng theo quyết định 12.
-  - Test: `tests/unit/rehype-katex-a11y.test.ts` (qua pipeline Markdown thật của Astro), e2e trong `tests/e2e/lessons.spec.ts` (thuộc tính trên mọi bài; ở 375px đọc cây trợ năng của Chrome bằng CDP cho công thức tràn ngang).
+  - Test: `tests/unit/lib/rehype-katex-a11y.test.ts` (qua pipeline Markdown thật của Astro), e2e trong `tests/e2e/lessons.spec.ts` (thuộc tính trên mọi bài; ở 375px đọc cây trợ năng của Chrome bằng CDP cho công thức tràn ngang).
 
 ## 5. Các lớp kiểm tra
 
@@ -182,4 +182,4 @@ Quy trình đầy đủ cho người đóng góp: [CONTRIBUTING.md](../../CONTRI
 | [roadmap-data.md](roadmap-data.md) | Schema của `roadmap.ts`, ý nghĩa trạng thái, quy tắc "cần biết trước", hàm tiện ích, bảng slug của 78 bài, test bắt buộc |
 | [components.md](components.md) | Mốc M1: `Prerequisites`, `Quiz`, `LessonProgress`, `PythonRunner` và tiến độ trên `RoadmapMap`. Quiz trong frontmatter, Pyodide (hàng đợi, Dừng, giới hạn output), lưu tiến độ, hình thức và tương phản, bảng chuỗi i18n, sitemap, thứ tự task M1 |
 | [homepage.md](homepage.md) | Nhận diện (màu, font, logo) và cấu trúc trang chủ |
-| [viz.md](viz.md) | Mốc M2: quy ước chung cho mọi minh họa tương tác (VIZ) của 78 bài (file, một `viz.css` dùng chung, dữ liệu dùng chung với bảng và code Python, chuỗi i18n và định dạng số, trợ năng, SSR và CLS, ngân sách, test). Đặc tả `LinearFitViz` của bài Hồi quy tuyến tính, bảng tương phản, thứ tự task V0–V8 |
+| [viz/](viz/README.md) | Mốc M2: quy ước chung cho mọi minh họa tương tác (VIZ) của 78 bài (file, một `viz.css` dùng chung, dữ liệu dùng chung với bảng và code Python, chuỗi i18n và định dạng số, trợ năng, SSR và CLS, ngân sách, test). Đặc tả `LinearFitViz` của bài Hồi quy tuyến tính, bảng tương phản, thứ tự task V0–V8. Mỗi phần một file (trước đây là một file `viz.md`, số mục giữ nguyên): [README.md](viz/README.md) (mục lục, quy ước chung), [shared.md](viz/shared.md) (dữ liệu, toán, kit, `viz.css`), [linear-fit.md](viz/linear-fit.md), [figures.md](viz/figures.md) (hình SVG tĩnh), [poly-fit.md](viz/poly-fit.md), [regularization.md](viz/regularization.md), [static-plots.md](viz/static-plots.md), [gradient-descent.md](viz/gradient-descent.md) |

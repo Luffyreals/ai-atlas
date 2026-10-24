@@ -231,7 +231,7 @@ ai-atlas/
 
 **Kết quả:** website có đủ khung lộ trình và đủ công cụ trình bày.
 
-> **Trạng thái mốc M1 (23/10/2026):** xong phần kỹ thuật. `npm run check` 0 lỗi 0 cảnh báo, `npm test` 244/244, `npm run build` 0 `[WARN]`, `npm run test:e2e` 111 qua (3 bỏ qua có chủ ý), `npm run test:e2e:network` 11/11. Lighthouse mobile trang demo: Accessibility 100, Performance 87–90 (chấp nhận theo [quyết định 17](docs/mvp.md), tối ưu ở M4). Còn chờ: người dùng duyệt (M1-10) và tiêu chí "mọi component chạy trên bản deploy" (cần kết nối Cloudflare Pages, Giai đoạn 0).
+> **Trạng thái mốc M1 (23/10/2026):** xong phần kỹ thuật. `npm run check` 0 lỗi 0 cảnh báo, `npm test` 244/244, `npm run build` 0 `[WARN]`, `npm run test:e2e` 111 qua (3 bỏ qua có chủ ý), `npm run test:e2e:network` 11/11. Lighthouse mobile trang demo: Accessibility 100, Performance 87–90 (chấp nhận theo [quyết định 17](docs/decisions.md), tối ưu ở M4). Còn chờ: người dùng duyệt (M1-10) và tiêu chí "mọi component chạy trên bản deploy" (cần kết nối Cloudflare Pages, Giai đoạn 0).
 >
 > **Bước tiếp theo (M2, Giai đoạn 2):** bài mẫu Hồi quy tuyến tính, theo thứ tự ở [docs/mvp.md](docs/mvp.md) mục 5: `summarizer` tóm tắt tài liệu vào `docs/research/` → `lesson-writer` (vi) → `content-reviewer` → sửa → `viz-builder` → `tester` → `analyst` → **người dùng duyệt bản vi và template** → chỉnh bài và `docs/lesson-template.mdx` → `lesson-translator` (en) → `content-reviewer` (khớp vi/en) → `tester` → `analyst` (Lighthouse trên bài thật). File bài và `status` của `ml/linear-regression` trong `roadmap.ts` phải đổi **trong cùng một lần**, vì test `roadmap-files` bắt buộc như vậy: `lesson-writer` đổi `status.vi`, `lesson-translator` đổi `status.en`.
 
@@ -239,9 +239,9 @@ ai-atlas/
 - [x] Viết hoàn chỉnh **1 bài mẫu: Hồi quy tuyến tính**. Bài có đủ trực giác, toán từng bước, minh họa tương tác, code ví dụ và quiz.
 - [x] Bạn duyệt, chỉnh template cho đến khi ưng ý
 
-> **Trạng thái mốc M2 (23/10/2026):** xong. Bài `ml/linear-regression` có bản vi (người dùng đã duyệt, [quyết định 32](docs/mvp.md)) và bản en, VIZ `LinearFitViz`, bảng dữ liệu `DatasetTable`, SEO cho trang fallback (quyết định 30, 33, 34), nút "Bắt đầu học" ở trang chủ. Template đã chốt theo bài này. Báo cáo: [docs/progress/2026-10-23-m2.md](docs/progress/2026-10-23-m2.md).
+> **Trạng thái mốc M2 (23/10/2026):** xong. Bài `ml/linear-regression` có bản vi (người dùng đã duyệt, [quyết định 32](docs/decisions.md)) và bản en, VIZ `LinearFitViz`, bảng dữ liệu `DatasetTable`, SEO cho trang fallback (quyết định 30, 33, 34), nút "Bắt đầu học" ở trang chủ. Template đã chốt theo bài này. Báo cáo: [docs/progress/2026-10-23-m2.md](docs/progress/2026-10-23-m2.md).
 >
-> **Bước tiếp theo (M3):** 4 bài ML còn lại của MVP, bản vi, theo template đã chốt. Bản en làm sau MVP ([quyết định 43](docs/mvp.md)). Đã xong bản vi cả 4 bài: Tổng quan Học máy, Overfitting và Underfitting, Ridge/Lasso/Elastic Net, Gradient Descent (bài cuối chờ duyệt trên PR #1, quyết định 56). Vẫn còn tồn: deploy lên Cloudflare Pages (Giai đoạn 0) và người dùng duyệt giao diện component (M1-10).
+> **Bước tiếp theo (M3):** 4 bài ML còn lại của MVP, bản vi, theo template đã chốt. Bản en làm sau MVP ([quyết định 43](docs/decisions.md)). Đã xong bản vi cả 4 bài: Tổng quan Học máy, Overfitting và Underfitting, Ridge/Lasso/Elastic Net, Gradient Descent (bài cuối chờ duyệt trên PR #1, quyết định 56). Vẫn còn tồn: deploy lên Cloudflare Pages (Giai đoạn 0) và người dùng duyệt giao diện component (M1-10).
 
 **Kết quả:** bài chuẩn dùng làm mẫu cho mọi bài sau.
 
@@ -269,4 +269,4 @@ Mỗi phần viết xong bản tiếng Việt thì deploy luôn, rồi dịch sa
 4. ~~Giấy phép~~ → nội dung **CC BY-NC-SA 4.0**, code **MIT** (xem [LICENSE-CONTENT.md](LICENSE-CONTENT.md)).
 5. ~~Trang trống cho bài chưa viết~~ → **không tạo**. Lộ trình hiện đủ 78 bài, bài chưa viết có nhãn "Sắp có".
 
-Các quyết định kỹ thuật và cách viết bài khác: [docs/mvp.md](docs/mvp.md) mục 7.
+Các quyết định kỹ thuật và cách viết bài khác: [docs/decisions.md](docs/decisions.md).

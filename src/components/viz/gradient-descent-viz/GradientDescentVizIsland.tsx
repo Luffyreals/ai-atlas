@@ -1,4 +1,4 @@
-// GradientDescentViz (docs/architecture/viz.md, sections 12.2.7, 12.2.8, 12.4.4, 12.4.5). One idea: every step goes
+// GradientDescentViz (docs/architecture/viz/gradient-descent.md, sections 12.2.7, 12.2.8, 12.4.4, 12.4.5). One idea: every step goes
 // against the gradient on the MSE "bowl"; a small η crawls, a middle η gets to the bottom fast, an η close to 2/L
 // jumps back and forth across the valley, and an η above 2/L flies off the map.
 // A slider picks one of five η levels; Step, Reset and Run/Stop walk the path. A contour map shows the path over
