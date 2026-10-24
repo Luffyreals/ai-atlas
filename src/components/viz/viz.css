@@ -9,8 +9,12 @@
   --atlas-viz-ink: var(--sl-color-white);
   --atlas-viz-primary: var(--sl-color-accent);
   --atlas-viz-reference: var(--sl-color-blue-high);
+  /* A second group of data (the test set): the same token as --atlas-fig-alt of the static figures. */
+  --atlas-viz-alt: var(--sl-color-blue-high);
   --atlas-viz-error: var(--sl-color-red-high);
   --atlas-viz-muted: var(--sl-color-gray-3);
+  /* Level curves: one step darker than muted, so the accent path stands apart from them (section 12.4.6). */
+  --atlas-viz-level: var(--sl-color-gray-4);
   --atlas-viz-grid: var(--sl-color-gray-5);
   container-type: inline-size;
   padding: 16px;
@@ -104,6 +108,16 @@
   overflow: visible;
 }
 
+/* A low plot (PlotFrame shape="short"), such as an error chart under the main plot. */
+.atlas-viz-chart[data-shape='short'] .atlas-viz-plot {
+  aspect-ratio: 2 / 1;
+}
+
+/* Two axes in the same unit (shape="equal"): 4 : 3 at every width. More specific than the container rule. */
+.atlas-viz-chart[data-shape='equal'] .atlas-viz-plot {
+  aspect-ratio: 4 / 3;
+}
+
 /* Marks: each kind differs in shape as well as colour (solid, dashed, thin and upright). */
 .atlas-viz-grid-line,
 .atlas-viz-axis {
@@ -141,6 +155,41 @@
   stroke-width: 2px;
 }
 
+/* Curves (PlotCurve). Solid 3px fit, solid 2px series, dashed 6 4 second series, dotted 2 4 guide. */
+.atlas-viz-plot polyline {
+  fill: none;
+}
+
+/* A point of the second group, or a triangle off the top of the chart: hollow, so it differs in shape too. */
+.atlas-viz-ring {
+  fill: var(--atlas-viz-plot-bg);
+  stroke: var(--atlas-viz-alt);
+  stroke-width: 2px;
+}
+
+.atlas-viz-series {
+  stroke: var(--atlas-viz-ink);
+  stroke-width: 2px;
+}
+
+.atlas-viz-series-alt {
+  stroke: var(--atlas-viz-alt);
+  stroke-dasharray: 6 4;
+}
+
+/* Something to compare with, never louder than the fit: grey and dotted. */
+.atlas-viz-guide {
+  stroke: var(--atlas-viz-muted);
+  stroke-width: 2px;
+  stroke-dasharray: 2 4;
+}
+
+/* The chosen value on a chart, in the colour of the fit it belongs to. */
+.atlas-viz-cursor {
+  stroke: var(--atlas-viz-primary);
+  stroke-width: 2px;
+}
+
 /* A computed point to find (a mean, a minimum): an ×, with a halo of the plot background under it. */
 .atlas-viz-marker {
   stroke: var(--atlas-viz-ink);
@@ -150,6 +199,49 @@
 .atlas-viz-halo {
   stroke: var(--atlas-viz-plot-bg);
   stroke-width: 7px;
+}
+
+/* Level curves: grey, solid and thin, never louder than the path. The path: accent, 2px, with a dot per step. */
+.atlas-viz-level {
+  stroke: var(--atlas-viz-level);
+  stroke-width: 1.5px;
+}
+
+.atlas-viz-path {
+  stroke: var(--atlas-viz-primary);
+  stroke-width: 2px;
+}
+
+.atlas-viz-step {
+  fill: var(--atlas-viz-primary);
+}
+
+/* A coefficient bar, in the colour of the fit it belongs to; also its 2px stub, so a tiny w_k still shows. */
+.atlas-viz-bar {
+  stroke: var(--atlas-viz-primary);
+  stroke-width: 10px;
+}
+
+/* A coefficient exactly 0: a hollow ring in ink on the zero line (not blue, so it is no test point). */
+.atlas-viz-zero {
+  fill: var(--atlas-viz-plot-bg);
+  stroke: var(--atlas-viz-ink);
+  stroke-width: 2px;
+}
+
+/* One-of-two buttons in a row (aria-pressed toggles without a check box). */
+.atlas-viz-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* The chosen one: filled with the accent, text in the page background's ink on it (7.42 dark / 6.42 light).
+   Its fill against an unchosen button's gray-5 is 4.63 / 3.79, so the two never look alike. */
+.atlas-viz-choice > .atlas-viz-toggle[aria-pressed='true'] {
+  border-inline-start-color: var(--sl-color-accent);
+  background: var(--sl-color-accent);
+  color: var(--sl-color-black);
 }
 
 /* Key and readouts: a swatch draws the same mark with the same class. */
@@ -176,6 +268,16 @@
   overflow: visible;
 }
 
+/* A line with a point on it: wide enough for a 6 4 dash on both sides of the point. */
+.atlas-viz-swatch-wide {
+  width: 36px;
+}
+
+/* A swatch on a chip of the plot background: for a mark that reaches 3:1 there only (the level curves). */
+.atlas-viz-swatch-plot {
+  background: var(--atlas-viz-plot-bg);
+}
+
 .atlas-viz-swatch .atlas-viz-point {
   stroke-width: 0;
 }
@@ -183,7 +285,7 @@
 /* Two rows on one grid, so the two MSE values sit one above the other. */
 .atlas-viz-readouts {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 4px 12px;
   align-items: start;
   color: var(--sl-color-white);
@@ -316,6 +418,16 @@
   margin: 0;
 }
 
+/* Every sentence the status can show, stacked in one cell (the unused ones data-off): the line is as tall as
+   the longest one from the start, so a sentence that appears mid-run moves nothing. */
+.atlas-viz-status-stack {
+  display: grid;
+}
+
+.atlas-viz-status-stack > p {
+  grid-area: 1 / 1;
+}
+
 .atlas-viz-near {
   display: flex;
   align-items: center;
@@ -334,6 +446,14 @@
 @container (min-width: 32rem) {
   .atlas-viz-plot {
     aspect-ratio: 3 / 2;
+  }
+
+  .atlas-viz-chart[data-shape='short'] .atlas-viz-plot {
+    aspect-ratio: 3 / 1;
+  }
+
+  .atlas-viz-bar {
+    stroke-width: 16px;
   }
 }
 

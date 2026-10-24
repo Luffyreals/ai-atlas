@@ -36,7 +36,11 @@ Trang demo: `/vi/dev/components/` và `/en/dev/components/` (không vào sitemap
 
 Nhận diện và trang chủ thiết kế bằng skill `design-taste-frontend`: bảng màu "walnut and tan", font Barlow, logo con đường rẽ ba, trang chủ dạng tấm bản đồ atlas. Xem `docs/architecture/homepage.md`.
 
-Mốc M2 (bài mẫu) xong: bài `ml/linear-regression` có bản vi (người dùng đã duyệt, là bài mẫu) và bản en, VIZ `LinearFitViz` (thiết kế ở `docs/architecture/viz.md`), bảng dữ liệu `DatasetTable`, SEO cho trang fallback (`src/lib/seo.ts`, `src/routeData.ts`), nút "Bắt đầu học" ở trang chủ. Template đã chốt theo bài này. Bước tiếp theo: M3, 4 bài ML còn lại của MVP.
+Mốc M2 (bài mẫu) xong: bài `ml/linear-regression` có bản vi (người dùng đã duyệt, là bài mẫu) và bản en, VIZ `LinearFitViz` (thiết kế ở `docs/architecture/viz.md`), bảng dữ liệu `DatasetTable`, SEO cho trang fallback (`src/lib/seo.ts`, `src/routeData.ts`), nút "Bắt đầu học" ở trang chủ. Template đã chốt theo bài này.
+
+Mốc M3 (xong bản vi, chờ duyệt trên PR #1): 4 bài ML còn lại, **chỉ bản vi**, bản en làm sau MVP (`docs/mvp.md` quyết định 43). Đã xong bản vi (người dùng đã duyệt) của `ml/ml-overview` (2 hình SVG tĩnh, `docs/architecture/viz.md` mục 8) `ml/overfitting-underfitting` (VIZ `PolyFitViz`, bộ dữ liệu `sine`, viz.md mục 9) và `ml/regularization` (VIZ `RegularizationViz`, viz.md mục 10; đồ thị tĩnh L1/L2, viz.md mục 11). Bản vi `ml/gradient-descent` có VIZ `GradientDescentViz` (viz.md mục 12, chuẩn hóa min-max), làm hết quy trình rồi đẩy thẳng vào PR #1 (quyết định 56). Các VIZ dùng chung `src/components/viz/kit/` (`Swatch`, `CrossMark`) và `src/lib/viz/axis.ts`.
+
+Mỗi phiên Claude làm trong một worktree riêng (người dùng quyết ngày 24/10/2026), không làm chung thư mục `ai-atlas`. Bước tiếp theo: M4 (ra mắt), song song với phần LLM do phiên khác làm.
 
 ## Công nghệ
 
@@ -52,6 +56,8 @@ src/components/                        # Component tương tác (React/Astro)
 src/components/home/                   # Các khối của trang chủ (render qua override Hero của Starlight)
 src/components/viz/                    # Minh họa tương tác (VIZ) của từng bài, kit dùng chung, viz.css
 src/lib/viz/                           # Toán và thang đo của VIZ (thuần TypeScript, có unit test)
+src/components/figures/                # Hình SVG tĩnh (FIG) và kit của chúng, figures.css
+src/data/figures/                      # Chữ vi/en của từng hình tĩnh, registry FIGURES
 src/code/<phần>/<bài>/<tên>.vi.py      # Code ví dụ của bài, mỗi ô một file .vi.py và .en.py
 src/data/datasets/                     # Bảng dữ liệu dùng chung cho bài, VIZ và code
 src/routeData.ts                       # Route middleware của Starlight (SEO cho trang fallback)

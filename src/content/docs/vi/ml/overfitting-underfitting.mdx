@@ -1,0 +1,339 @@
+---
+title: Overfitting và Underfitting
+description: Khớp đa thức bậc 1, 3 và 15 lên cùng 16 điểm. Vì sao MSE train giảm mãi còn MSE test giảm rồi tăng, bias–variance, và chọn bậc bằng kiểm định chéo.
+quiz:
+  - question: 'Một mô hình có MSE train $0.002$ nhưng MSE test $2.5$. Cách nào dưới đây ít có khả năng giúp nhất?'
+    options:
+      - 'Thu thêm dữ liệu huấn luyện'
+      - 'Giảm bậc của đa thức'
+      - 'Tăng bậc của đa thức để mô hình linh hoạt hơn'
+      - 'Chọn bậc bằng kiểm định chéo thay vì đoán'
+    answer: 2
+    explanation: 'MSE train rất nhỏ mà MSE test lớn hơn hẳn là dấu hiệu overfitting: mô hình đã quá linh hoạt. Tăng bậc làm nó linh hoạt thêm, nên MSE train còn nhỏ hơn nữa mà MSE test thường tệ đi. Ba cách còn lại đều nhắm vào overfitting: thêm dữ liệu, hạ độ linh hoạt, hoặc chọn độ linh hoạt bằng dữ liệu chưa dùng để khớp.'
+  - question: 'Bạn khớp đa thức bậc 1 tới 12 lên 25 điểm train, rồi giữ bậc có MSE train nhỏ nhất. Bạn sẽ được bậc nào?'
+    options:
+      - 'Bậc 12, vì MSE train không bao giờ tăng khi tăng bậc'
+      - 'Bậc ở đáy chữ U, vì đó là bậc tốt nhất'
+      - 'Bậc 1, vì mô hình đơn giản nhất ít sai nhất'
+      - 'Không đoán trước được, vì còn tùy dữ liệu'
+    answer: 0
+    explanation: 'Mọi đa thức bậc $d$ cũng là một đa thức bậc $d + 1$ có $w_{d+1} = 0$. Bậc cao hơn được chọn trong một tập rộng hơn, nên MSE train nhỏ nhất của nó không thể lớn hơn. Đáy chữ U là của MSE test, không phải MSE train. Vì vậy MSE train không dùng để chọn bậc được.'
+  - question: 'Năm người, mỗi người có 16 điểm train riêng, sinh từ cùng đường sin cộng nhiễu (nhiễu khác nhau). Ai cũng khớp một đường thẳng, rồi một đa thức bậc 12. So năm đường của mỗi loại, bạn thấy gì?'
+    options:
+      - 'Năm đường thẳng khác nhau nhiều, năm đường bậc 12 gần như trùng nhau'
+      - 'Cả hai loại đều gần như trùng nhau, vì dữ liệu sinh từ cùng một hàm'
+      - 'Cả hai loại đều khác nhau nhiều, vì nhiễu khác nhau'
+      - 'Năm đường thẳng gần như trùng nhau nhưng đều không theo được dạng sóng; năm đường bậc 12 uốn theo sóng nhưng khác nhau nhiều, nhất là ở hai mép'
+    answer: 3
+    explanation: 'Đường thẳng có bias cao nhưng variance thấp: dữ liệu đổi một chút thì đường đổi ít (variance thấp), nhưng không bao giờ uốn được theo sóng (bias cao). Bậc 12 thì ngược lại, bias thấp nhưng variance cao: đủ linh hoạt để theo sóng, nhưng cũng uốn theo nhiễu riêng của từng bộ, nên mỗi người được một đường khác.'
+  - question: 'Kiểm định chéo với `scoring=''neg_mean_squared_error''` cho điểm trung bình: bậc 2 là $-0.25$, bậc 5 là $-0.04$, bậc 9 là $-3.1$. Nên chọn bậc nào?'
+    options:
+      - 'Bậc 9, vì $-3.1$ là số nhỏ nhất'
+      - 'Bậc 5, vì điểm gần 0 nhất nghĩa là MSE nhỏ nhất'
+      - 'Bậc 2, vì là bậc thấp nhất'
+      - 'Không chọn được, vì điểm âm nghĩa là cả ba mô hình đều đoán tệ'
+    answer: 1
+    explanation: 'Điểm là MSE mang dấu âm, nên MSE của ba bậc lần lượt là $0.25$, $0.04$ và $3.1$. Bậc 5 có MSE kiểm định chéo nhỏ nhất. Chọn số nhỏ nhất mà quên dấu âm thì lại ra bậc tệ nhất. Dấu âm chỉ là quy ước "điểm càng lớn càng tốt" của scikit-learn, không nói gì về chất lượng mô hình.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import DatasetTable from '@components/DatasetTable.astro';
+import PolyFitViz from '@components/viz/PolyFitViz.astro';
+import threeDegreesCode from '@code/ml/overfitting-underfitting/three-degrees.vi.py?raw';
+import errorByDegreeCode from '@code/ml/overfitting-underfitting/error-by-degree.vi.py?raw';
+import crossValidationCode from '@code/ml/overfitting-underfitting/cross-validation.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Nhận ra underfitting (thiếu khớp) và overfitting (quá khớp) chỉ bằng hai con số: MSE train và MSE test.
+- Hiểu vì sao hồi quy đa thức (polynomial regression) vẫn là hồi quy tuyến tính, và vì sao bậc (degree) của đa thức quyết định mô hình linh hoạt tới đâu.
+- Giải thích đường cong sai số hình chữ U bằng sự đánh đổi bias–variance (bias–variance trade-off), ở mức trực giác.
+- Chọn bậc bằng kiểm định chéo (cross-validation) với `cross_val_score`, và biết nên sửa mô hình theo hướng nào.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài này dùng tiếp cách đánh giá ở bài [Tổng quan về Học máy](/vi/ml/ml-overview/): mô hình chỉ học trên **tập huấn luyện** (training set, gọi tắt là tập train), rồi được chấm trên **tập kiểm tra** (test set, tập test) mà nó chưa thấy. Sai số trên tập test ước lượng khả năng **tổng quát hóa** (generalization), tức làm tốt trên dữ liệu mới.
+:::
+
+## Trực giác
+
+Ba bạn An, Bình và Chi cùng nhận 16 điểm trên giấy kẻ ô. Đề bài: vẽ một đường cho thấy quy luật của các điểm, để sau này đoán $y$ ở những $x$ mới.
+
+- An đặt thước, kẻ một **đường thẳng** xuyên qua đám điểm.
+- Bình vẽ một **đường cong mềm**: lên một nhịp, xuống một nhịp, đi gần các điểm nhưng không chạm hết.
+- Chi cẩn thận nhất: đường của Chi **đi qua đúng cả 16 điểm**, không lệch điểm nào.
+
+Nếu chấm trên chính 16 điểm đó, Chi được điểm tuyệt đối. Nhưng đề bài là đoán điểm **mới**. Ai sẽ đoán tốt nhất?
+
+### Dữ liệu biết trước đáp án
+
+Ngoài đời, bạn không bao giờ biết quy luật thật nằm sau dữ liệu. Bài này thì cố ý biết. Các điểm được sinh từ đường sin $y = \sin(2\pi x)$ với $x$ từ 0 tới 1, rồi cộng thêm **nhiễu** (noise) ngẫu nhiên. Đường sin là "đáp án". Nhiễu là phần tình cờ, không quy luật nào đoán trước được.
+
+Có tất cả 24 điểm. Xếp theo $x$ tăng dần, cứ 3 điểm thì lấy 1 làm điểm test: 16 điểm train, 8 điểm test. Bài Tổng quan chia ngẫu nhiên, còn bài này chia cố định để mọi điểm test nằm xen giữa các điểm train. Như vậy sai số bạn thấy không lẫn với lỗi **ngoại suy** (extrapolation), một chuyện khác hẳn (xem bài [Hồi quy tuyến tính](/vi/ml/linear-regression/)).
+
+<details>
+<summary>Xem bảng 24 điểm</summary>
+
+<DatasetTable dataset="sine-train" />
+
+<DatasetTable dataset="sine-test" />
+
+</details>
+
+### Ba đường, ba kết quả
+
+Đường thẳng của An, đường cong của Bình và đường của Chi lần lượt là đa thức bậc 1, bậc 3 và bậc 15, cùng khớp trên 16 điểm train. Ô code đầu tiên sẽ vẽ chúng. Sai số đo bằng MSE:
+
+| Đường | Bậc | MSE train | MSE test |
+|---|---:|---:|---:|
+| An: đường thẳng | 1 | 0.1663 | 0.2732 |
+| Bình: đường cong mềm | 3 | 0.0377 | 0.0754 |
+| Chi: đi qua mọi điểm | 15 | 0.0000 | khoảng 133 |
+
+- **An** sai nhiều trên cả hai tập. Đường thẳng quá cứng, không uốn theo sóng được. Đây là **underfitting**: mô hình quá đơn giản so với quy luật.
+- **Chi** không sai điểm train nào, nhưng sai tới mức vô lý trên điểm test. Để đi qua đủ 16 điểm, đường của Chi uốn theo cả nhiễu, và giữa các điểm thì vọt lên, cắm xuống. Đây là **overfitting**: mô hình học thuộc cả những chi tiết tình cờ của tập train.
+- **Bình** có MSE test nhỏ nhất. Đường của Bình đủ linh hoạt để theo sóng, nhưng không đủ để chạy theo từng hạt nhiễu.
+
+Bài toán của bài này là: **chọn độ linh hoạt của mô hình sao cho đủ để bắt được quy luật, mà không đủ để học thuộc nhiễu, khi trong tay chỉ có dữ liệu.**
+
+## Lý thuyết
+
+### Hồi quy đa thức
+
+Mô hình đa thức (polynomial) **bậc** $d$ dự đoán:
+
+$$
+\hat{y} = w_1x + w_2x^2 + \dots + w_dx^d + b
+$$
+
+- $x$ là đầu vào, $\hat{y}$ là giá trị dự đoán.
+- $d$ là bậc, số mũ lớn nhất. Bậc 1 là đường thẳng $\hat{y} = w_1x + b$. Bậc 3 thêm $x^2$ và $x^3$.
+- $w_1, \dots, w_d$ là các trọng số, $b$ là hệ số tự do. Tất cả có $d + 1$ tham số.
+
+Thoạt nhìn, đây là một đường cong, không còn là hồi quy tuyến tính. Nhưng hãy coi mỗi lũy thừa là một đặc trưng (feature) riêng: $x_1 = x$, $x_2 = x^2$, ..., $x_d = x^d$. Khi đó mô hình viết lại thành
+
+$$
+\hat{y} = w_1x_1 + w_2x_2 + \dots + w_dx_d + b = \mathbf{w}^\top\mathbf{x} + b
+$$
+
+với $\mathbf{x} = [x, x^2, \dots, x^d]^\top$. Đây đúng là hồi quy tuyến tính nhiều đặc trưng, với số đặc trưng $n = d$, dù đầu vào gốc chỉ có một biến $x$.
+
+Mô hình cong theo $x$ nhưng **tuyến tính theo tham số**, như hộp Lỗi hay gặp đầu tiên của bài [Hồi quy tuyến tính](/vi/ml/linear-regression/) đã nói: mỗi $x^j$ chỉ là một cột số tính sẵn. Vì vậy ma trận thiết kế có hàng thứ $i$ là $\left[\,x^{(i)}, \left(x^{(i)}\right)^2, \dots, \left(x^{(i)}\right)^d, 1\,\right]$, và vẫn giải bằng bình phương tối thiểu.
+
+**Bậc 15 trên 16 điểm.** Bậc 15 có $15 + 1 = 16$ tham số, đúng bằng số điểm train. Đòi đường đi qua cả 16 điểm cho ta 16 phương trình bậc nhất với 16 ẩn. Khi các $x^{(i)}$ khác nhau đôi một, hệ này có đúng một nghiệm, nên đường của Chi đi qua mọi điểm và MSE train bằng 0. Bậc cao hơn nữa thì số tham số vượt số điểm, và có vô số nghiệm (xem mục "Khi nào nghiệm không duy nhất" ở bài [Hồi quy tuyến tính](/vi/ml/linear-regression/)). Vì vậy bài này dừng ở bậc 15.
+
+### MSE train và MSE test
+
+Mô hình chỉ được khớp trên tập train, có $m_{\text{train}} = 16$ điểm. Sau đó, cùng một công thức MSE được tính trên hai tập khác nhau:
+
+$$
+\begin{aligned}
+\mathcal{L}_{\text{train}} &= \frac{1}{m_{\text{train}}}\sum_{i \in \text{train}}\left(\hat{y}^{(i)} - y^{(i)}\right)^2 \\
+\mathcal{L}_{\text{test}} &= \frac{1}{m_{\text{test}}}\sum_{i \in \text{test}}\left(\hat{y}^{(i)} - y^{(i)}\right)^2
+\end{aligned}
+$$
+
+Dòng đầu là MSE train, trên 16 điểm đã dùng để khớp. Dòng thứ hai là MSE test, trên $m_{\text{test}} = 8$ điểm mà mô hình chưa thấy. Huấn luyện làm $\mathcal{L}_{\text{train}}$ nhỏ nhất, nhưng thứ bạn thật sự muốn nhỏ là $\mathcal{L}_{\text{test}}$.
+
+### Vì sao MSE train không bao giờ tăng theo bậc
+
+Lấy một đa thức bậc $d$ bất kỳ. Thêm số hạng $w_{d+1}x^{d+1}$ với $w_{d+1} = 0$, bạn được một đa thức bậc $d + 1$ cho **đúng** cùng dự đoán. Vậy mọi đường mà bậc $d$ vẽ được, bậc $d + 1$ cũng vẽ được, và còn vẽ được thêm nhiều đường khác.
+
+Khớp bậc $d + 1$ là tìm đường có MSE train nhỏ nhất trong tập rộng hơn này. Đường tốt nhất của bậc $d$ nằm trong tập đó, nên kết quả của bậc $d + 1$ chỉ có thể bằng hoặc nhỏ hơn:
+
+$$
+\mathcal{L}_{\text{train}}(d + 1) \le \mathcal{L}_{\text{train}}(d)
+$$
+
+MSE test thì **không** có bảo đảm nào như vậy, vì điểm test không tham gia khớp. Đây là gốc rễ của mọi chuyện trong bài.
+
+### Đường cong sai số theo bậc
+
+Khớp lần lượt bậc 1 tới 15 rồi vẽ hai MSE theo bậc, bạn được hai đường rất khác nhau (ô code thứ hai in đủ 15 bậc):
+
+| Bậc $d$ | MSE train | MSE test |
+|---:|---:|---:|
+| 1 | 0.1663 | 0.2732 |
+| 2 | 0.1624 | 0.2766 |
+| 3 | 0.0377 | 0.0754 |
+| 5 | 0.0301 | 0.0969 |
+| 8 | 0.0216 | 0.1215 |
+| 10 | 0.0189 | 0.3286 |
+| 12 | 0.0013 | 3.5439 |
+| 15 | 0.0000 | khoảng 133 |
+
+- **MSE train** đi xuống suốt, đúng như vừa chứng minh.
+- **MSE test** tăng nhẹ ở bậc 2, tới bậc 3 mới giảm mạnh và đạt nhỏ nhất, rồi tăng dần, và tăng vọt từ khoảng bậc 10. Vẽ ra, nó có hình **chữ U**.
+
+Bậc 2 gần như không hơn bậc 1. Vòng sóng sin đối xứng qua điểm $(0.5, 0)$: nửa trái là nửa phải lật ngược. Parabol $x^2$ đối xứng theo kiểu khác hẳn, nên không giúp được gì. Phải có $x^3$, đường mới uốn được hình chữ S của sóng.
+
+Từ đó có hai định nghĩa bằng lời:
+
+- **Underfitting**: mô hình quá đơn giản. MSE train đã lớn, và MSE test cũng lớn. Đó là phần bên trái đáy chữ U.
+- **Overfitting**: mô hình quá linh hoạt. MSE train nhỏ, nhưng MSE test lớn hơn hẳn và tệ hơn mức có thể đạt được. Đó là phần bên phải đáy chữ U.
+
+### Bias và variance
+
+Chữ "bias" ở mục này **không phải** hệ số tự do $b$, dù tiếng Anh dùng cùng một chữ. Ở đây nó là **độ chệch** (bias) của mô hình. Để tránh nhầm, bài này luôn gọi $b$ là "hệ số tự do".
+
+Hình dung bạn lặp lại thí nghiệm nhiều lần: mỗi lần lấy 16 điểm train mới từ cùng đường sin, với nhiễu mới, rồi khớp lại cùng một bậc. Sai số trên dữ liệu mới đến từ ba nguồn. Hai nguồn đầu đổi theo bậc bạn chọn, nguồn thứ ba là nhiễu, không bỏ được:
+
+- **Độ chệch** (bias): sai lệch có hệ thống, do họ hàm quá cứng. Lấy bao nhiêu bộ dữ liệu thì đường thẳng cũng không uốn theo sóng được: lần nào nó cũng quá thấp ở đỉnh sóng, quá cao ở đáy sóng.
+- **Variance** (phương sai của mô hình): mức đường khớp thay đổi khi đổi bộ dữ liệu train. Đường thẳng gần như đứng yên. Đa thức bậc cao thì uốn theo nhiễu riêng của từng bộ, nên mỗi lần một hình, nhất là ở hai mép.
+- **Nhiễu**: phần tình cờ trong từng điểm dữ liệu. Không mô hình nào đoán trước được nó.
+
+Tăng bậc làm độ chệch giảm, vì họ hàm rộng ra, chứa được những đường gần đường sin hơn. Nhưng variance tăng, vì mô hình có thêm chỗ để uốn theo nhiễu. Bậc thấp thì độ chệch lấn át: underfitting. Bậc cao thì variance lấn át: overfitting. Đáy chữ U là chỗ cân bằng.
+
+Nhiễu cũng giải thích vì sao MSE train dễ đánh lừa. Ngay cả đường sin thật, nếu dùng làm mô hình, cũng có MSE trên 16 điểm train khoảng 0.06. Mô hình nào khớp trên tập train cũng nuốt một ít nhiễu, nên xuống dưới mức đó: bậc 3 có MSE train 0.0377. Bậc 15 thì nuốt trọn, MSE train xuống tận 0. Phần nhiễu đã nuốt không giúp gì với điểm mới, nên nó hiện ra ở MSE test.
+
+:::note[Ghi nhớ]
+Tăng bậc thì MSE train không bao giờ tăng, còn MSE test giảm rồi tăng thành hình chữ U. Bên trái đáy là underfitting (độ chệch cao), bên phải là overfitting (variance cao). Bậc tốt nhất là bậc ở đáy chữ U của **MSE test**, không phải bậc có MSE train nhỏ nhất.
+:::
+
+### Phát hiện và sửa
+
+Muốn biết mô hình đang ở đâu, hãy đặt MSE train cạnh MSE trên dữ liệu chưa dùng để khớp. "Lớn" hay "nhỏ" là so với mức sai số tốt nhất có thể đạt được: mức nhiễu nếu ước lượng được, hoặc sai số của mô hình tốt nhất bạn biết cho bài toán đó.
+
+| MSE train | MSE trên dữ liệu mới | Chẩn đoán | Hướng sửa |
+|---|---|---|---|
+| Lớn | Lớn, gần MSE train | Underfitting | Mô hình linh hoạt hơn: tăng bậc, thêm đặc trưng |
+| Nhỏ | Lớn hơn hẳn MSE train | Overfitting | Thêm dữ liệu, hạ bậc, regularization |
+| Nhỏ | Nhỏ, gần MSE train | Vừa khớp | Giữ nguyên |
+
+Ba hướng sửa overfitting:
+
+- **Thêm dữ liệu.** Với 16 điểm, đa thức bậc 15 bị buộc đi qua từng điểm. Với 1 000 điểm, nó không còn uốn theo từng hạt nhiễu được. Dữ liệu thêm phải đại diện cho dữ liệu thật, không phải bản sao của dữ liệu cũ.
+- **Giảm độ linh hoạt.** Hạ bậc, hoặc bớt đặc trưng.
+- **Regularization.** Giữ bậc cao, nhưng cộng vào hàm mất mát một khoản phạt khi trọng số lớn. Để uốn kịp các điểm, đa thức bậc 15 ở trên có hệ số lớn tới hàng chục tỉ. Phạt trọng số lớn kéo nó về một đường mềm hơn. Bài Ridge, Lasso, Elastic Net sẽ nói kỹ.
+
+### Chọn bậc: tập kiểm định và kiểm định chéo
+
+Cách dễ nghĩ nhất là chọn bậc có MSE test nhỏ nhất. Nhưng đó chính là lỗi "chọn mô hình bằng tập test" ở bài [Tổng quan về Học máy](/vi/ml/ml-overview/): bậc được chọn sẽ hợp với đúng 8 điểm test này, và MSE test thành lạc quan. Bậc là một **siêu tham số** (hyperparameter): con số bạn đặt trước khi khớp, không phải con số mà việc khớp tìm ra. Siêu tham số phải được chọn **mà không chạm vào tập test**.
+
+Cách thứ nhất là giữ lại một phần tập train làm **tập kiểm định** (validation set): khớp trên phần còn lại, chấm trên tập kiểm định, chọn bậc tốt nhất. Nhưng tập train chỉ có 16 điểm. Giữ 4 điểm làm tập kiểm định thì còn 12 điểm để khớp, và như bài Tổng quan đã cho thấy, điểm số trên vài mẫu dao động theo cách chia.
+
+**Kiểm định chéo** tận dụng dữ liệu tốt hơn. Với $k$ **fold**:
+
+1. Chia tập train thành $k$ phần gần bằng nhau, gọi là fold.
+2. Lần thứ $j$ ($j = 1, \dots, k$): khớp trên $k - 1$ fold còn lại, rồi tính MSE trên fold $j$, gọi là $\mathcal{L}_j$.
+3. Lấy trung bình $k$ con số đó.
+
+$$
+\text{CV} = \frac{1}{k}\sum_{j=1}^{k}\mathcal{L}_j
+$$
+
+Mỗi điểm train được chấm đúng một lần. Làm vậy cho từng bậc, chọn bậc có CV nhỏ nhất, rồi **khớp lại bậc đó trên cả tập train** và chấm **một lần** trên tập test.
+
+### Giới hạn
+
+- **Một chiều, ít điểm.** Ở đây bạn nhìn tận mắt đường cong uốn theo nhiễu. Với hàng chục đặc trưng thì không vẽ được, chỉ còn cách so các con số MSE.
+- **Bậc chỉ là một cái núm.** Mỗi loại mô hình có núm riêng: số láng giềng của KNN, độ sâu của cây quyết định (decision tree), số lớp của mạng nơ-ron. Hình chữ U thường vẫn hiện ra, chỉ đổi trục ngang.
+- **Kiểm định chéo cũng dao động khi dữ liệu ít.** Đổi cách chia fold có thể đổi bậc được chọn (cuối mục Ví dụ code).
+- **Không thay được dữ liệu tốt.** Nếu tập train không đại diện cho dữ liệu thật, mô hình vẫn đoán kém ngoài đời, dù kiểm định chéo đẹp đến đâu.
+
+## Minh họa
+
+Giờ bạn tự kéo bậc. Hình dưới vẽ 16 điểm train (chấm đặc) và 8 điểm test (vòng rỗng), cùng đa thức đã khớp trên tập train. Thanh trượt đổi bậc $d$ từ 1 tới 15. Bên dưới là hai số MSE, và một biểu đồ nhỏ vẽ MSE train và MSE test theo bậc, có vạch dọc ở bậc đang chọn. Nút **Hiện hàm thật** bật đường sin không có nhiễu. Hãy thử:
+
+1. Lúc đầu $d = 1$: đường thẳng, MSE train 0.1663, MSE test 0.2732. Hình ghi underfitting.
+2. Kéo lên $d = 3$: đường uốn theo sóng, MSE test giảm còn 0.0754, nhỏ nhất trong 15 bậc. Hình hiện dấu ✓.
+3. Kéo tiếp tới $d = 8$ rồi $d = 9$: MSE train vẫn giảm (0.0216, rồi 0.0206), nhưng MSE test tăng (0.1215, rồi 0.1656). Ở bậc 9, đầu trái của đường cong bắt đầu chúi xuống ra khỏi khung.
+4. Kéo tới $d = 15$: đường đi qua đúng mọi chấm đặc, MSE train 0.0000, MSE test 133.20. Từ bậc 11, MSE test lớn tới mức nằm ngoài biểu đồ nhỏ. Bật hàm thật để thấy đường bậc 15 khác xa nó thế nào.
+
+Nhãn trên hình theo một mốc gần đúng: so với bậc 3, MSE train gấp đôi trở lên là underfitting, MSE test gấp đôi trở lên là overfitting. Đây là cách dẫn dắt, không phải định nghĩa: bậc 8 vẫn ghi "vừa khớp", dù đường cong đã uốn khá mạnh ở hai mép.
+
+{/* VIZ: bậc vừa phải cho MSE test nhỏ nhất; thấp quá là underfitting, cao quá là overfitting. */}
+<PolyFitViz />
+
+## Ví dụ code
+
+Ba ô dưới đây chạy độc lập: ô nào cũng tự chép 24 điểm của bài. Ô chạy đầu tiên lâu hơn một chút, vì trình duyệt phải tải thêm scikit-learn.
+
+Ô đầu tiên khớp ba đường của An, Bình và Chi, in hai MSE, rồi vẽ. `make_pipeline` nối hai bước thành một mô hình: `PolynomialFeatures` biến $x$ thành các cột $x, x^2, \dots, x^d$, rồi `LinearRegression` khớp trên các cột đó. `include_bias=False` bỏ cột toàn số 1 mà `PolynomialFeatures` thêm theo mặc định, vì `LinearRegression` đã tự lo hệ số tự do $b$. `x_train[:, None]` biến dãy 16 số thành bảng 16 hàng, 1 cột.
+
+<PythonRunner
+  code={threeDegreesCode}
+  title="Khớp bậc 1, 3 và 15"
+  figureAlt={['Biểu đồ phân tán 16 điểm train (chấm đen) và 8 điểm test (vòng rỗng) theo dạng một vòng sóng, cùng ba đường khớp. Đường bậc 1 là đường thẳng chấm chấm đi xuống từ trái sang phải. Đường bậc 3 uốn mềm theo sóng, lên đỉnh gần x = 0.2 và xuống đáy gần x = 0.78. Đường bậc 15 nét đứt đi qua mọi chấm đen nhưng dao động mạnh giữa chúng, và vọt ra khỏi khung ở hai mép.']}
+/>
+
+Ba dòng in ra khớp bảng ở phần Trực giác. Nhìn hình, bạn thấy rõ ba kiểu:
+
+- Đường bậc 1 chỉ bắt được xu hướng "đi xuống" chung, bỏ qua cả đỉnh lẫn đáy sóng.
+- Đường bậc 3 đi gần cả chấm đen lẫn vòng rỗng.
+- Đường bậc 15 đi đúng qua từng chấm đen, kể cả điểm $(0.77, -0.28)$, điểm bị nhiễu đẩy xa đường sin nhất (đường sin thật ở đó quanh $-0.99$). Đường bậc 3 đi ở khoảng $-0.79$: chỉ bị điểm này kéo lên một chút, không đuổi theo nó.
+- Giữa hai điểm train đầu tiên ($x = 0.03$ và $x = 0.12$), đường bậc 15 vọt lên khỏi khung, đúng chỗ có điểm test $x = 0.06$. Ở đó nó đoán hơn 30, trong khi $y$ thật là 0.33. Riêng điểm này chiếm phần lớn con số 133.
+
+Ô thứ hai khớp lần lượt bậc 1 tới 15 và vẽ đường cong sai số.
+
+<PythonRunner
+  code={errorByDegreeCode}
+  title="MSE train và MSE test theo bậc"
+  figureAlt={['Biểu đồ đường của MSE theo bậc đa thức từ 1 tới 15, trục tung từ 0 tới 0.4. Đường MSE train (nét liền, chấm đặc) giảm dần từ khoảng 0.17 xuống gần 0. Đường MSE test (nét đứt, vòng rỗng) giảm mạnh từ khoảng 0.27 xuống 0.075 ở bậc 3, tăng chậm tới bậc 8, rồi tăng vọt và ra khỏi khung sau bậc 10, tạo hình chữ U.']}
+/>
+
+Cột MSE train giảm ở mọi bước, từ 0.1663 xuống 0.0000, đúng như chứng minh ở phần Lý thuyết. Cột MSE test nhỏ nhất ở bậc 3 (0.0754), tăng chậm tới 0.1215 ở bậc 8, rồi bùng lên: 0.3286 ở bậc 10, 3.5439 ở bậc 12. Trục tung bị cắt ở 0.4 để nhìn rõ đáy chữ U, nên từ bậc 11 trở đi MSE test nằm ngoài khung.
+
+Ở bậc 14 và 15, hệ số của đa thức khổng lồ, nên chữ số thứ ba, thứ tư sau dấu chấm của MSE test có thể khác đôi chút giữa các máy hay phiên bản thư viện. Hãy đọc chúng là "khoảng 30" và "khoảng 133".
+
+Ô thứ ba chọn bậc bằng kiểm định chéo, chỉ trên 16 điểm train. `KFold(n_splits=4, shuffle=True, random_state=0)` xáo 16 điểm rồi chia thành 4 fold, mỗi fold 4 điểm. Mỗi lần khớp chỉ còn 12 điểm, nên ô chỉ thử bậc 1 tới 10.
+
+<PythonRunner code={crossValidationCode} title="Chọn bậc bằng kiểm định chéo" />
+
+`cross_val_score` trả về 4 điểm số, mỗi fold một điểm. scikit-learn quy ước điểm càng **lớn** càng tốt, nên với MSE nó trả về số **âm**: `neg_mean_squared_error`. Code đổi dấu trung bình để được MSE kiểm định chéo.
+
+- MSE kiểm định chéo nhỏ nhất ở bậc 3, khoảng 0.0784. Đây là bậc được chọn, cùng bậc với đáy chữ U của MSE test, mà không cần nhìn tập test.
+- Từ bậc 7, MSE kiểm định chéo lên hàng đơn vị, và tới 830.2741 ở bậc 10. Bậc 10 có 11 tham số mà chỉ có 12 điểm để khớp, nên đường gần như bị buộc qua từng điểm và vọt mạnh ở chỗ trống của fold bị giữ lại.
+
+Cuối cùng, ô khớp bậc 3 trên cả 16 điểm train và chấm một lần trên tập test: MSE test 0.0754, đúng như ô thứ hai. Con số này trung thực, vì tập test không tham gia việc chọn bậc.
+
+Kết quả vẫn phụ thuộc cách chia. Đổi sang `KFold(n_splits=5, shuffle=True, random_state=0)` thì vẫn chọn bậc 3. Đổi sang `LeaveOneOut()` (import từ `sklearn.model_selection`), tức 16 fold, mỗi fold một điểm, thì chọn bậc 4: MSE kiểm định chéo 0.0774, so với 0.0793 của bậc 3. Hai bậc gần như ngang nhau. Với dữ liệu ít, đừng coi chênh lệch nhỏ là quan trọng.
+
+## Lỗi hay gặp
+
+:::caution[Chọn mô hình theo MSE train]
+MSE train không bao giờ tăng khi tăng bậc, nên chọn theo nó thì luôn được bậc cao nhất. Ở ô code thứ hai, cách đó chọn bậc 15: MSE train 0.0000, MSE test khoảng 133. MSE train chỉ cho biết mô hình khớp dữ liệu cũ tốt tới đâu. Hãy chọn bằng tập kiểm định hoặc kiểm định chéo, và giữ tập test cho bước cuối.
+:::
+
+:::caution[Quên dấu âm của `neg_mean_squared_error`]
+`cross_val_score` với `scoring='neg_mean_squared_error'` trả về MSE mang dấu âm. Nếu bạn chọn bậc có điểm **nhỏ nhất** mà quên điều này, bạn chọn đúng bậc có MSE **lớn nhất**: ở ô code thứ ba, đó là bậc 10, MSE kiểm định chéo 830.2741. Hoặc đổi dấu như trong ô code (`-scores.mean()`) rồi lấy nhỏ nhất, hoặc giữ nguyên dấu và lấy lớn nhất.
+:::
+
+:::caution[Chữa nhầm bệnh]
+Hai hiện tượng cần hai cách chữa ngược nhau. Underfitting thì mô hình phải linh hoạt hơn. Thêm dữ liệu không giúp, vì đường thẳng có bao nhiêu điểm vẫn là đường thẳng. Overfitting thì cần thêm dữ liệu, bớt độ linh hoạt hoặc regularization. Tăng bậc chỉ làm tệ hơn. Vì vậy, trước khi sửa, hãy đặt MSE train cạnh MSE kiểm định để biết mình đang ở bên nào của đáy chữ U.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Hồi quy đa thức $\hat{y} = w_1x + w_2x^2 + \dots + w_dx^d + b$ là hồi quy tuyến tính trên các đặc trưng $x, x^2, \dots, x^d$: tuyến tính theo tham số, nên vẫn giải bằng bình phương tối thiểu. Bậc $d$ quyết định độ linh hoạt.
+- Tăng bậc thì MSE train không bao giờ tăng, còn MSE test giảm rồi tăng thành hình chữ U. Underfitting: cả hai MSE đều lớn. Overfitting: MSE train nhỏ, MSE test lớn hơn hẳn.
+- Bậc thấp có độ chệch (bias) cao: quá cứng để theo quy luật. Bậc cao có variance cao: uốn theo nhiễu riêng của từng bộ dữ liệu. Chữ "bias" ở đây khác hệ số tự do $b$.
+- Bậc là một siêu tham số. Chọn nó bằng tập kiểm định hoặc kiểm định chéo (`cross_val_score`, nhớ đổi dấu `neg_mean_squared_error`), rồi khớp lại trên cả tập train và chấm tập test một lần. Sửa overfitting: thêm dữ liệu, hạ độ linh hoạt, regularization. Sửa underfitting: tăng độ linh hoạt.
+
+**Đọc thêm:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Bài 15: Overfitting](https://machinelearningcoban.com/2017/03/04/overfitting/). Tiếng Việt, cũng dùng ví dụ hồi quy đa thức, rồi nói về tập kiểm định, kiểm định chéo và regularization. Ký hiệu hơi khác: $N$ là số mẫu, $J$ là hàm mất mát.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8: Underfitting vs. Overfitting*](https://scikit-learn.org/1.8/auto_examples/model_selection/plot_underfitting_overfitting.html). Ví dụ chính thức với `PolynomialFeatures` và `cross_val_score`, trên dữ liệu khác bài này (hàm cos, 30 điểm, bậc 1, 4, 15).
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Cross-validation](https://scikit-learn.org/1.8/modules/cross_validation.html), mục 3.1. Cách dùng `cross_val_score`, `KFold`, `LeaveOneOut`, và vì sao cần tập kiểm định.
+- James, G., Witten, D., Hastie, T., Tibshirani, R. (2013). [*An Introduction to Statistical Learning*](https://www.statlearning.com/) (bản 1). Mục 2.2: đánh giá độ chính xác của mô hình, sự đánh đổi bias–variance. Chương 5: kiểm định chéo. Ký hiệu khác: $n$ là số mẫu, $p$ là số đặc trưng.
+- Bishop, C. M. (2006). [*Pattern Recognition and Machine Learning*](https://www.microsoft.com/en-us/research/publication/pattern-recognition-machine-learning/), Springer. Mục 1.1: khớp đa thức lên dữ liệu sinh từ $\sin(2\pi x)$ cộng nhiễu, ví dụ kinh điển mà bài này mượn ý.
+
+<LessonProgress />

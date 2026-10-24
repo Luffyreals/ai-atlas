@@ -1,0 +1,142 @@
+/*
+ * Every static figure (docs/architecture/viz.md, section 8.2 e–g). The only CSS file under
+ * src/components/figures/, loaded on every page through Starlight's customCss, just before viz.css.
+ * Colours exist here only: role variables on .atlas-figure point at theme tokens, measured in viz.md 4.9.
+ * Geometry and font sizes are SVG attributes written by the kit. Budget: 1 KB gzip
+ * (tests/unit/figure-conventions.test.ts).
+ */
+.atlas-figure {
+  --atlas-fig-ink: var(--sl-color-white);
+  --atlas-fig-muted: var(--sl-color-gray-3);
+  --atlas-fig-node: var(--sl-color-gray-6);
+  --atlas-fig-accent: var(--sl-color-accent);
+  --atlas-fig-accent-fill: var(--sl-color-accent-low);
+  --atlas-fig-alt: var(--sl-color-blue-high);
+  --atlas-fig-bg: var(--sl-color-bg);
+  container-type: inline-size;
+  display: grid;
+  gap: 12px;
+  /* Not margin: 0, which would beat Starlight's layered 1rem between blocks above the figure. */
+  margin-inline: 0;
+  margin-bottom: 0;
+}
+
+/* viewBox scales the text too: the narrow layout stays within 0.95–1.11 (343–400px for 360 units). */
+.atlas-fig-svg {
+  display: block;
+  width: 100%;
+  max-width: 400px;
+  height: auto;
+}
+
+.atlas-fig-svg[data-layout='wide'] {
+  display: none;
+  max-width: 640px;
+}
+
+@container (min-width: 640px) {
+  .atlas-figure[data-wide] > [data-layout='narrow'] {
+    display: none;
+  }
+
+  .atlas-figure[data-wide] > [data-layout='wide'] {
+    display: block;
+  }
+}
+
+.atlas-fig-node rect {
+  fill: var(--atlas-fig-node);
+  stroke: var(--atlas-fig-muted);
+  stroke-width: 1;
+}
+
+/* Not colour alone: the focus has a 2px border, the second group a dashed one. */
+.atlas-fig-node[data-tone='accent'] rect {
+  fill: var(--atlas-fig-accent-fill);
+  stroke: var(--atlas-fig-accent);
+  stroke-width: 2;
+}
+
+.atlas-fig-node[data-tone='alt'] rect {
+  stroke: var(--atlas-fig-alt);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+
+.atlas-fig-text {
+  fill: var(--atlas-fig-ink);
+  font-weight: 600;
+}
+
+.atlas-fig-text-sm {
+  fill: var(--atlas-fig-muted);
+}
+
+/* Muted on accent-low is not a measured pair; ink is (viz.md 4.9). */
+.atlas-fig-node[data-tone='accent'] .atlas-fig-text-sm {
+  fill: var(--atlas-fig-ink);
+}
+
+.atlas-fig-arrow {
+  fill: none;
+  stroke: var(--atlas-fig-muted);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.atlas-fig-arrow-head {
+  fill: var(--atlas-fig-muted);
+}
+
+/* Schematic plots (viz.md 11.4.3): a shaded region with a 2px border, level curves, dots, math labels. */
+.atlas-fig-region {
+  fill: var(--atlas-fig-node);
+  stroke: var(--atlas-fig-accent);
+  stroke-width: 2;
+}
+
+.atlas-fig-level {
+  fill: none;
+  stroke: var(--atlas-fig-alt);
+  stroke-width: 1.5;
+}
+
+.atlas-fig-level[data-tone='touch'] {
+  stroke-width: 2;
+}
+
+.atlas-fig-dot {
+  fill: var(--atlas-fig-alt);
+}
+
+/* Not colour alone: the touch point is larger (r 5) and has a halo of the page background. */
+.atlas-fig-dot[data-tone='touch'] {
+  fill: var(--atlas-fig-ink);
+  stroke: var(--atlas-fig-bg);
+  stroke-width: 2.5;
+  paint-order: stroke;
+}
+
+/* Weight 400: only Barlow 400 italic is loaded; 600 would make the browser slant a bold face (fake italic). */
+.atlas-fig-math {
+  fill: var(--atlas-fig-ink);
+  font-weight: 400;
+}
+
+.atlas-fig-caption {
+  color: var(--sl-color-text);
+  font-size: var(--sl-text-sm);
+}
+
+/* System colours, not colour codes. */
+@media (forced-colors: active) {
+  .atlas-figure {
+    --atlas-fig-ink: CanvasText;
+    --atlas-fig-muted: CanvasText;
+    --atlas-fig-node: Canvas;
+    --atlas-fig-accent: Highlight;
+    --atlas-fig-accent-fill: Canvas;
+    --atlas-fig-alt: CanvasText;
+    --atlas-fig-bg: Canvas;
+  }
+}

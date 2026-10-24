@@ -212,6 +212,14 @@ for (const locale of LOCALES) {
       expect(steps.map((step) => Number(step.value))).toEqual([1, 2, 3, 4, 5].map((n) => INITIAL.w + n * CONFIG.w.step));
       const gaps = steps.slice(1).map((step, i) => Math.round(step.t - steps[i]!.t));
       test.info().annotations.push({ type: 'gaps between steps', description: `${gaps.join(', ')} ms` });
+      // A gap of SETTLE_MS or more means the page stalled between two presses (seen under a loaded full run:
+      // 1425 ms). The timer of the earlier step is then overdue and may run just after the next input event,
+      // so the log pins its reading on the wrong step. The presses were not quick, which is what this test is
+      // about: only the final reading (checked above) holds then.
+      if (gaps.some((gap) => gap >= SETTLE_MS)) {
+        test.info().annotations.push({ type: 'not checked', description: 'a gap ≥ SETTLE_MS: the presses were not quick' });
+        return;
+      }
 
       // Each change of the live text, with the step it follows and how long after that step it came.
       const changes = live.map(({ t, text }) => {
@@ -230,8 +238,8 @@ for (const locale of LOCALES) {
       expect(new Set(changes.map((change) => change.after)).size).toBe(changes.length);
       for (const change of changes) expect(change.text).toBe(reading(Number(steps[change.after]!.value)));
       expect(changes.at(-1)?.after).toBe(steps.length - 1);
-      // So with every gap under SETTLE_MS (the usual case) there is exactly one reading: the final value.
-      if (gaps.every((gap) => gap < SETTLE_MS)) expect(changes.map((change) => change.text)).toEqual([spoken]);
+      // So with every gap under SETTLE_MS there is exactly one reading: the final value.
+      expect(changes.map((change) => change.text)).toEqual([spoken]);
     });
 
     test('(11) showing and hiding the best line moves neither slider nor the button', async ({ page }) => {

@@ -1,13 +1,14 @@
 // The one copy of the apartment table (decision 19 in docs/mvp.md; docs/architecture/viz.md, section 4.1).
-// Used by DatasetTable (Intuition), LinearFitViz (Illustration) and src/code/ml/linear-regression/*.py, where
+// Used by DatasetTable (Intuition), LinearFitViz (Illustration) and src/code/ml/{ml-overview,linear-regression,gradient-descent}/*.py, where
 // the same numbers sit under "# dataset: apartments" (kept equal by tests/unit/datasets.test.ts).
 // Relative imports only: Playwright e2e imports this file too.
+import type { GradientDescentConfig } from '../../lib/viz/gradient-descent';
 import type { LinearFitConfig } from '../../lib/viz/linear-fit';
 import type { XYDataset } from './types';
 
 export const APARTMENTS = {
   id: 'apartments',
-  lessons: ['ml/linear-regression'],
+  lessons: ['ml/ml-overview', 'ml/linear-regression', 'ml/gradient-descent'],
   caption: {
     vi: 'Giá thuê theo diện tích của 10 căn hộ. Số liệu tự tạo cho bài học, không phải giá thị trường.',
     en: 'Rent by floor area for 10 apartments. The numbers are made up for the lesson, not market prices.',
@@ -61,4 +62,32 @@ export const APARTMENTS_LINEAR_FIT: LinearFitConfig = {
   xTicks: [0, 20, 40, 60, 80, 100],
   yTicks: [0, 5, 10, 15, 20],
   digits: { w: 4, b: 2, mse: 4, meanX: 1, meanY: 2 },
+};
+
+/**
+ * GradientDescentViz on ml/gradient-descent (docs/architecture/viz.md, sections 12.2.3, 12.2.5, 12.4.2; decision 55).
+ * Checked by tests/unit/gradient-descent-apartments.test.ts against the constraints of section 12.4.2 and the exact
+ * paths of scripts/gradient-descent-fixture.py. On x̃ = (x − 25) / 60, L = 2.4533, so 2/L = 0.815:
+ * - from (w̃, b̃) = (0, 0), MSE 129.75, the five rates show the four behaviours: 0.05 is still far from the bottom
+ *   after 100 steps (MSE 1.0023), 0.3 (the initial one) gets within 1 % at step 69, 0.7 at step 29, 0.8 zigzags
+ *   and ends at 0.4240, 0.85 > 2/L leaves the box at step 4;
+ * - the box is 32 × 24, 4 : 3 in the same unit on both axes, so a step looks perpendicular to the level curves;
+ *   every path but the diverging one stays inside it;
+ * - nine level curves 0.5 … 200 in a 1–2–5 sequence, evenly spaced on the log axis of the MSE chart.
+ */
+export const APARTMENTS_GD: GradientDescentConfig = {
+  start: { w: 0, b: 0 },
+  levels: [0.05, 0.3, 0.7, 0.8, 0.85],
+  slider: { min: 0, max: 4, step: 1, initial: 1 },
+  maxSteps: 100,
+  wDomain: [-10, 22],
+  bDomain: [-4, 20],
+  wTicks: [-10, -5, 0, 5, 10, 15, 20],
+  bTicks: [0, 5, 10, 15, 20],
+  contourLevels: [0.5, 1, 2, 5, 10, 20, 50, 100, 200],
+  contourHalf: 24,
+  stepTicks: [0, 25, 50, 75, 100],
+  logMseDomain: [-1, 3],
+  logMseTicks: [-1, 0, 1, 2, 3],
+  digits: { eta: 2, params: 2, w: 4, b: 2, mse: 4, mseLarge: 2, limit: 3 },
 };

@@ -6,6 +6,7 @@ import { expect, test, type ConsoleMessage, type Locator, type Page } from '@pla
 import { LESSONS, LOCALES, type Locale } from '../../src/data/roadmap';
 import { isTranslated } from '../../src/lib/roadmap';
 import { lessonShape } from '../unit/fixtures/lesson-shape';
+import { installContrast, type Contrast } from './helpers';
 
 // Checks shared by every VIZ (docs/architecture/viz.md, sections 2.7–2.9, 2.12; task V5 in section 6), on every
 // lesson page whose file uses one: /vi/<id>/ when status.vi is 'published', and /en/<id>/ (the fallback page
@@ -101,85 +102,90 @@ function ownJs(islandFile: string, rendererFile: string): { files: string[]; gzi
   return { files, gzip };
 }
 
-// --- Contrast (WCAG 2.x), from the colours the browser computed. Runs in the page. ---
+// --- Contrast (WCAG 2.x): the core (rgba, backgroundOf, luminance, pair) is in helpers.ts. Runs in the page. ---
 
-interface Contrast {
-  what: string;
-  color: string;
-  background: string;
-  ratio: number;
+/**
+ * States a contrast test walks through, so marks that only some states draw are measured too: every toggle
+ * pressed in turn (Ridge then Lasso: the last one wins), then every slider at its end (RegularizationViz
+ * draws its "exactly 0" rings only with Lasso at a λ above 0; at λ = 0 it draws bars and triangles).
+ * A Run button (GradientDescentViz) is pressed too: its animation is still going while 'toggles on' is
+ * measured (step dots appear as it goes; their colour is also measured on the key swatch); no button is ever disabled, so no click waits on it (section 12.2.7).
+ */
+const CONTRAST_STATES = ['as loaded', 'toggles on', 'sliders at the end'] as const;
+type ContrastState = (typeof CONTRAST_STATES)[number];
+
+/** Moves a hydrated VIZ from the previous state of CONTRAST_STATES to `state`. */
+async function enterState(page: Page, viz: Locator, state: ContrastState): Promise<void> {
+  if (state === 'toggles on') for (const button of await viz.getByRole('button').all()) await button.click();
+  if (state === 'sliders at the end') {
+    for (const slider of await viz.getByRole('slider').all()) {
+      await slider.focus();
+      await page.keyboard.press('End');
+    }
+  }
 }
 
-/** Contrast of plot marks, key swatches and text of one VIZ. Canvas turns any CSS colour into sRGB bytes. */
-function measureContrast(root: Element): { marks: Contrast[]; swatches: Contrast[]; text: Contrast[] } {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1;
-  canvas.height = 1;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-  type Rgba = [number, number, number, number];
-  const rgba = (color: string): Rgba => {
-    ctx.clearRect(0, 0, 1, 1);
-    ctx.fillStyle = 'rgba(0, 0, 0, 0)';
-    ctx.fillStyle = color;
-    ctx.fillRect(0, 0, 1, 1);
-    const [r = 0, g = 0, b = 0, a = 0] = ctx.getImageData(0, 0, 1, 1).data;
-    return [r, g, b, a / 255];
-  };
-  const over = (top: Rgba, under: Rgba): Rgba => {
-    const a = top[3];
-    return [top[0] * a + under[0] * (1 - a), top[1] * a + under[1] * (1 - a), top[2] * a + under[2] * (1 - a), 1];
-  };
-  /** The opaque background behind an element: the nearest backgrounds up the tree, composited. */
-  const backgroundOf = (element: Element): Rgba => {
-    const layers: Rgba[] = [];
-    for (let el: Element | null = element; el; el = el.parentElement) {
-      const layer = rgba(getComputedStyle(el).backgroundColor);
-      if (layer[3] > 0) layers.push(layer);
-      if (layer[3] >= 1) break;
-    }
-    return layers.reduceRight<Rgba>((under, top) => over(top, under), [255, 255, 255, 1]);
-  };
-  const luminance = ([r, g, b]: Rgba) => {
-    const channel = (value: number) => {
-      const c = value / 255;
-      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    };
-    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
-  };
-  const css = (c: Rgba) => `rgb(${c.slice(0, 3).map(Math.round).join(', ')})`;
-  const pair = (what: string, colour: string, background: Rgba): Contrast => {
-    const fg = over(rgba(colour), background);
-    const [l1, l2] = [luminance(fg), luminance(background)].sort((a, b) => b - a) as [number, number];
-    return { what, color: css(fg), background: css(background), ratio: Math.round(((l1 + 0.05) / (l2 + 0.05)) * 100) / 100 };
-  };
+/** Contrast of plot marks, key swatches and text of one VIZ. Needs installContrast(page) first. */
+function measureContrast(root: Element): {
+  marks: Contrast[];
+  swatches: Contrast[];
+  text: Contrast[];
+  unmeasured: string[];
+} {
+  const { backgroundOf, pair } = window.atlasContrast!;
+  const SHAPES = 'line, circle, polyline, polygon, path, rect, ellipse';
 
-  // Marks on the plot against the plot background. Not measured on purpose (section 4.9): the grid
-  // (decoration), the halo of the × and the outline of the points (both the plot background colour).
-  const plot = root.querySelector('.atlas-viz-plot');
+  // Marks on every plot (a VIZ may have more than one, e.g. an error chart) against the plot background.
+  // Not measured on purpose (sections 4.9, 9.4.7 and 10.4.6): the grid (decoration), the halo of the ×, the
+  // outline of the points and the inside of a ring, a triangle or a zero ring (the plot background colour).
   const marks: Contrast[] = [];
-  if (plot) {
+  const unmeasured: string[] = [];
+  for (const [n, plot] of [...root.querySelectorAll('.atlas-viz-plot')].entries()) {
     const plotBg = backgroundOf(plot);
+    const measured = new Set<Element>();
     for (const [selector, property] of [
       ['circle.atlas-viz-point', 'fill'],
+      ['circle.atlas-viz-ring', 'stroke'],
+      ['polygon.atlas-viz-ring', 'stroke'],
       ['line.atlas-viz-primary', 'stroke'],
+      ['polyline.atlas-viz-primary', 'stroke'],
+      ['polyline.atlas-viz-series', 'stroke'], // also the second series (atlas-viz-series atlas-viz-series-alt)
+      ['polyline.atlas-viz-guide', 'stroke'],
       ['line.atlas-viz-reference', 'stroke'],
       ['line.atlas-viz-error', 'stroke'],
       ['line.atlas-viz-axis', 'stroke'],
       ['line.atlas-viz-marker', 'stroke'],
+      ['line.atlas-viz-cursor', 'stroke'],
+      ['line.atlas-viz-bar', 'stroke'], // a coefficient bar and its 2px stub (section 10.4.5)
+      ['circle.atlas-viz-zero', 'stroke'], // a coefficient exactly 0: a hollow ring on the zero line
+      ['polyline.atlas-viz-level', 'stroke'], // a contour line of the MSE (section 12.4.6)
+      ['polyline.atlas-viz-path', 'stroke'], // the gradient descent path, one point at step 0
+      ['circle.atlas-viz-step', 'fill'], // a dot per step of the path
     ] as const) {
       for (const el of plot.querySelectorAll(selector)) {
-        marks.push(pair(`${selector} ${property}`, getComputedStyle(el).getPropertyValue(property), plotBg));
+        measured.add(el);
+        const what = `plot ${n} ${el.tagName.toLowerCase()}.${el.getAttribute('class')?.trim().replace(/\s+/g, '.')} ${property}`;
+        marks.push(pair(what, getComputedStyle(el).getPropertyValue(property), plotBg));
       }
+    }
+    // A new kind of mark must be added above (or here, if it is decoration), not left out silently.
+    for (const el of plot.querySelectorAll(SHAPES)) {
+      if (measured.has(el) || el.matches('.atlas-viz-grid-line, .atlas-viz-halo')) continue;
+      unmeasured.push(`plot ${n}: <${el.tagName.toLowerCase()} class="${el.getAttribute('class') ?? ''}">`);
     }
   }
 
   // Swatches of the key and the readouts against the block (section 4.9, second table): 3:1 like any mark.
+  // A filled point is measured by its fill; a ring, a zero ring, a triangle and every line by their stroke
+  // (the inside of a ring is the plot background on purpose, sections 9.4.7 and 10.4.6).
   const swatches: Contrast[] = [];
   for (const swatch of root.querySelectorAll('svg.atlas-viz-swatch')) {
     const background = backgroundOf(swatch);
-    for (const el of swatch.querySelectorAll('line, circle')) {
-      const property = el.tagName.toLowerCase() === 'circle' ? 'fill' : 'stroke';
-      swatches.push(pair(`swatch ${el.getAttribute('class')} ${property}`, getComputedStyle(el).getPropertyValue(property), background));
+    for (const el of swatch.querySelectorAll(SHAPES)) {
+      const hollow = el.matches('.atlas-viz-ring, .atlas-viz-zero');
+      const property = el.tagName.toLowerCase() === 'circle' && !hollow ? 'fill' : 'stroke';
+      const what = `swatch ${el.tagName.toLowerCase()}.${el.getAttribute('class')?.trim().replace(/\s+/g, '.')} ${property}`;
+      swatches.push(pair(what, getComputedStyle(el).getPropertyValue(property), background));
     }
   }
 
@@ -194,14 +200,14 @@ function measureContrast(root: Element): { marks: Contrast[]; swatches: Contrast
     if (!parent.checkVisibility({ visibilityProperty: true, opacityProperty: true })) continue;
     text.push(pair(`"${words.slice(0, 40)}"`, getComputedStyle(parent).color, backgroundOf(parent)));
   }
-  return { marks, swatches, text };
+  return { marks, swatches, text, unmeasured };
 }
 
 if (PAGES.length === 0) {
   test.skip('VIZ: no published lesson uses a VIZ yet', () => {});
 }
 
-for (const { path, count } of PAGES) {
+for (const { path, locale, count } of PAGES) {
   test.describe(`VIZ on ${path}`, () => {
     test('every VIZ written in the file is on the page, as one client:visible island', async ({ page }) => {
       await page.goto(path);
@@ -214,11 +220,13 @@ for (const { path, count } of PAGES) {
             client: island?.getAttribute('client'),
             notContent: block.classList.contains('not-content'),
             pagefindIgnore: block.hasAttribute('data-pagefind-ignore'),
+            // The VIZ speaks the page's language, even on a fallback page showing the vi file (decision 43).
+            lang: block.getAttribute('lang'),
           };
         }),
       );
       for (const island of islands) {
-        expect(island).toEqual({ islands: 1, client: 'visible', notContent: true, pagefindIgnore: true });
+        expect(island).toEqual({ islands: 1, client: 'visible', notContent: true, pagefindIgnore: true, lang: locale });
       }
     });
 
@@ -307,11 +315,13 @@ for (const { path, count } of PAGES) {
         await page.goto(path);
         await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
         for (const viz of await hydrateAll(page)) {
-          // Measure with every toggle on as well, so parts hidden at first are measured too.
-          for (const pass of ['as loaded', 'toggles on']) {
-            if (pass === 'toggles on') for (const button of await viz.getByRole('button').all()) await button.click();
+          // Measure in every state of CONTRAST_STATES, so parts hidden at first are measured too.
+          for (const pass of CONTRAST_STATES) {
+            await enterState(page, viz, pass);
             await page.mouse.move(0, 0); // no hover style on a button
-            const { marks, swatches, text } = await viz.evaluate(measureContrast);
+            await installContrast(page);
+            const { marks, swatches, text, unmeasured } = await viz.evaluate(measureContrast);
+            expect(unmeasured, 'marks on a plot that measureContrast does not know').toEqual([]);
             const lowest = (list: Contrast[]) => list.reduce((low, m) => (m.ratio < low.ratio ? m : low), list[0]!);
             test.info().annotations.push({
               type: `contrast ${pass}`,
@@ -329,19 +339,60 @@ for (const { path, count } of PAGES) {
       });
     }
 
-    test('(4) control: the contrast check does see a mark and a text that are too faint', async ({ page }) => {
+    test('(4) control: the contrast check does see a mark, a swatch and a text that are too faint', async ({ page }) => {
       await page.goto(path);
       const viz = page.locator('.atlas-viz').first();
       await hydrate(viz);
-      await viz.evaluate((root) => {
-        const plot = root.querySelector('.atlas-viz-plot') as HTMLElement;
-        const caption = root.querySelector('figcaption') as HTMLElement;
-        root.querySelector('line.atlas-viz-error')?.setAttribute('style', `stroke: ${getComputedStyle(plot).backgroundColor}`);
-        caption.style.color = getComputedStyle(root).backgroundColor;
-      });
-      const result = await viz.evaluate(measureContrast);
-      expect(result.marks.some((m) => m.what.includes('atlas-viz-error') && m.ratio < 1.1)).toBe(true);
-      expect(result.text.some((m) => m.ratio < 1.1)).toBe(true);
+      let brokenInPlots = 0;
+      // In each state (a zero ring is only drawn in the last one), one mark of each of these kinds that the
+      // VIZ has, on its plots and in its swatches, made the colour of what is behind it (a ring by its
+      // stroke: its inside is that colour already). The inline style stays until React redraws the mark.
+      for (const state of CONTRAST_STATES) {
+        await enterState(page, viz, state);
+        await page.mouse.move(0, 0);
+        const broken = await viz.evaluate((root) => {
+          const kinds = [
+            ['line.atlas-viz-error', 'stroke'],
+            ['circle.atlas-viz-ring', 'stroke'],
+            ['polygon.atlas-viz-ring', 'stroke'],
+            ['line.atlas-viz-bar', 'stroke'],
+            ['circle.atlas-viz-zero', 'stroke'],
+            ['polyline.atlas-viz-path', 'stroke'],
+          ] as const;
+          // Undo the previous state's breaks first, so each state is checked on its own.
+          for (const el of root.querySelectorAll('[data-atlas-broken]')) {
+            el.removeAttribute('style');
+            el.removeAttribute('data-atlas-broken');
+          }
+          const out: { where: 'plot' | 'swatch'; what: string }[] = [];
+          for (const [where, scope, behind] of [
+            ['plot', '.atlas-viz-plot', '.atlas-viz-plot'],
+            ['swatch', 'svg.atlas-viz-swatch', '.atlas-viz'],
+          ] as const) {
+            for (const [selector, property] of kinds) {
+              const el = root.querySelector(`${scope} ${selector}`);
+              if (!el) continue;
+              const bg = getComputedStyle(el.closest(behind) as Element).backgroundColor;
+              el.setAttribute('style', `${property}: ${bg}`);
+              el.setAttribute('data-atlas-broken', '');
+              out.push({ where, what: `${selector} ${property}` });
+            }
+          }
+          (root.querySelector('figcaption') as HTMLElement).style.color = getComputedStyle(root).backgroundColor;
+          return out;
+        });
+        brokenInPlots += broken.filter((b) => b.where === 'plot').length;
+        await installContrast(page);
+        const result = await viz.evaluate(measureContrast);
+        for (const { where, what } of broken) {
+          const list = where === 'plot' ? result.marks : result.swatches;
+          expect(list.some((m) => m.what.includes(what) && m.ratio < 1.1), `${state}, ${where}: ${what} seen as too faint`).toBe(
+            true,
+          );
+        }
+        expect(result.text.some((m) => m.ratio < 1.1), `${state}: the faint caption seen`).toBe(true);
+      }
+      expect(brokenInPlots, 'a mark kind to break').toBeGreaterThan(0);
     });
 
     test('(5) Tab goes through every control in DOM order, each with the focus ring, then leaves the VIZ', async ({

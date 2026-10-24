@@ -9,7 +9,7 @@
 Sau MVP, một người mới học AI có thể:
 
 1. Mở trang chủ, **thấy toàn bộ lộ trình** 78 bài và biết nên bắt đầu từ đâu.
-2. Đọc **5 bài đầu của phần Machine Learning**, bằng tiếng Việt hoặc tiếng Anh.
+2. Đọc **5 bài đầu của phần Machine Learning** bằng tiếng Việt. Bản tiếng Anh làm sau MVP, trừ bài mẫu Hồi quy tuyến tính đã có (quyết định 43).
 3. Trong mỗi bài: đọc công thức, tương tác với minh họa, **chạy thử code Python ngay trên trang**, làm quiz.
 4. Đánh dấu bài đã học. Quay lại lần sau vẫn thấy tiến độ.
 
@@ -29,7 +29,7 @@ Với người phát triển (bạn), MVP chứng minh rằng:
 
 ### Có trong MVP
 
-**Nội dung (5 bài × 2 ngôn ngữ = 10 trang bài học):**
+**Nội dung (5 bài tiếng Việt, cộng bản tiếng Anh của bài mẫu; quyết định 43):**
 
 | # | Bài | File | Ghi chú |
 |---|---|---|---|
@@ -95,7 +95,7 @@ MVP chỉ được coi là xong khi **tất cả** mục dưới đây đều đ
 
 - [ ] 5 bài đều qua `content-reviewer`, không còn lỗi mức "Nghiêm trọng" hay "Nên sửa".
 - [ ] Mọi code ví dụ đã chạy thật, kết quả khớp lời giải thích.
-- [ ] Bản en khớp bản vi: cùng số heading, công thức, khối code, component.
+- [ ] Bài đã có bản en thì bản en khớp bản vi: cùng số heading, công thức, khối code, component. Bài chưa dịch hiện trang fallback (quyết định 30, 33).
 - [ ] Mọi nguồn tham khảo có thật, link mở được.
 
 **Ra mắt**
@@ -113,7 +113,7 @@ Mỗi mốc kết thúc bằng một bản deploy dùng được.
 | **M0. Bộ khung** | Khởi tạo Astro + Starlight, i18n vi/en, KaTeX, `roadmap.ts` đủ 78 bài, trang chủ tạm, cài Vitest + Playwright, deploy lên Cloudflare Pages | Website trống chạy online | Giai đoạn 0 |
 | **M1. Công cụ trình bày** | `Prerequisites`, `Quiz`, `LessonProgress`, `PythonRunner`, `RoadmapMap` bản đơn giản. Một trang demo dùng đủ component. | Mọi component có test và chạy trên bản deploy | Giai đoạn 1 |
 | **M2. Bài mẫu** | Bài Hồi quy tuyến tính bản vi → review → minh họa → **bạn duyệt** → chỉnh template → bản en | Bài chuẩn, template chốt | Giai đoạn 2 |
-| **M3. Mạch ML đầu tiên** | 4 bài còn lại, vi rồi en | 5 bài × 2 ngôn ngữ | Một phần Giai đoạn 3 |
+| **M3. Mạch ML đầu tiên** | 4 bài còn lại, bản vi (en sau MVP, quyết định 43) | 5 bài tiếng Việt | Một phần Giai đoạn 3 |
 | **M4. Ra mắt** | SEO cơ bản, trang Giới thiệu, 404, Lighthouse, kiểm tra điện thoại, gắn tên miền (nếu đã mua) | **MVP công khai** | Một phần Giai đoạn 4 |
 
 M2 có một bước **chờ bạn duyệt**. Mọi bài sau đều theo template đã chốt ở bước này, nên đừng bỏ qua.
@@ -175,5 +175,86 @@ M2 có một bước **chờ bạn duyệt**. Mọi bài sau đều theo templat
 33. **Trang fallback ra khỏi tìm kiếm Pagefind:** trang fallback có `pagefind: false` (route middleware `src/routeData.ts`), để chữ tiếng Việt không lọt vào chỉ mục tìm kiếm tiếng Anh. Bổ sung cho quyết định 30.
 34. **Mọi trang không phải bài học phải có đủ bản vi và en**, kiểm bằng test trong `roadmap-files.test.ts`. Nhờ vậy `src/lib/seo.ts` chỉ cần xét bài học khi quyết định trang nào chưa dịch.
 35. **Sửa nhỏ bài Hồi quy tuyến tính sau review vi/en:** "cùng dự đoán **trên tập huấn luyện**" khi $\mathbf{X}^\top\mathbf{X}$ suy biến; `LinearRegression` "cũng giải trực tiếp trên $\mathbf{X}$" thay vì "như `np.linalg.lstsq`"; ghi tiếng Anh lần đầu cho "tham số", "độ lệch", "nghiệm có độ dài nhỏ nhất"; thêm 3 thuật ngữ vào glossary.
+
+Đã quyết ngày 23/10/2026 (mốc M3):
+
+36. **Nhịp làm:** từng bài theo thứ tự lộ trình, bắt đầu từ Tổng quan Học máy. Xong bản vi thì dừng chờ người dùng duyệt, rồi mới dịch sang en.
+37. **Minh họa:** VIZ tương tác cho 3 bài, tái dùng kit VIZ có sẵn. Overfitting: thanh trượt bậc đa thức, sai số train/test. Regularization: thanh trượt λ, hệ số co lại. Gradient Descent: chạy từng bước, đổi tốc độ học. Bài Tổng quan Học máy chỉ dùng hình SVG tĩnh.
+38. **Dữ liệu ví dụ:** dùng lại bảng 10 căn hộ khi hợp (Gradient Descent giải lại đúng bài toán của Hồi quy tuyến tính). Overfitting và Regularization dùng dữ liệu nhỏ tự sinh, có seed, đặt trong `src/data/datasets/`.
+39. **Test cho bài mới:** gọn hơn M2. Dựa vào test chung cho mọi bài (`lessons.spec.ts`, `lesson-pairs.test.ts`, `viz.spec.ts`), cộng unit test cho toán của từng VIZ. Không viết spec e2e riêng cho từng bài, không so tọa độ hay chuỗi chính xác.
+40. **Bài Tổng quan Học máy (`ml/ml-overview`):**
+    - **Phạm vi:** nêu ba nhóm có giám sát, không giám sát và tăng cường. Trọng tâm là học có giám sát (hồi quy, phân loại), quy trình dữ liệu → huấn luyện → đánh giá, tách train/test, khái niệm tổng quát hóa, trỏ tới bài Overfitting.
+    - **Toán:** chỉ giới thiệu ký hiệu chung ($\mathbf{x}$, $y$, $\hat{y} = f(\mathbf{x})$, $m$, $n$, $\mathcal{L}$), không dẫn công thức.
+    - **Code và quiz:** 2 ô code trên bảng căn hộ (`fit`/`predict` dạng hộp đen, `train_test_split`). Khoảng 8–10 phút đọc, 4 câu quiz.
+    - **Hình:** 2 hình SVG tĩnh, gồm sơ đồ các nhóm học máy và sơ đồ quy trình.
+41. ~~**Thư ngỏ trang chủ:** giữ nguyên tới khi bài Tổng quan có bản en.~~ Thay bằng quyết định 43.
+42. **Tự chọn khi làm bài Tổng quan** (đổi lại được khi người dùng duyệt):
+    - Ô code 2 dùng `random_state` 4, 8, 2 thay cho 0, 1, 2. Lý do: ở seed 0 và 1, KNN với k = 1 gặp hai láng giềng cách đều, nên kết quả tùy vào cách scikit-learn phá hòa.
+    - `MlWorkflowFigure` chỉ có bố cục hẹp. Bố cục rộng vượt ngân sách 10 000 ký tự.
+    - Đoạn mô tả `sr-only` của hình có `aria-hidden="true"`, để trình đọc màn hình chỉ đọc một lần qua `aria-describedby`.
+
+Đã quyết ngày 23/10/2026 (sau khi duyệt bản vi bài Tổng quan):
+
+43. **Bản tiếng Anh của các bài M3 làm sau MVP.** MVP gồm 5 bài tiếng Việt; chỉ bài mẫu Hồi quy tuyến tính có bản en. Bản vi bài Tổng quan Học máy đã được người dùng duyệt, bước tiếp là bài Overfitting và Underfitting. Hệ quả:
+    - Trang `/en/` của bài chưa dịch là trang fallback: `noindex`, không vào sitemap, không vào tìm kiếm (quyết định 30, 33).
+    - Nút "Bắt đầu học" theo từng ngôn ngữ: `/vi/` dẫn tới bài đầu tiên có bản vi (Tổng quan), `/en/` dẫn tới bài đầu tiên có bản en (Hồi quy tuyến tính). Xem `getFirstOpenLesson(locale)`.
+    - Thư ngỏ: bản vi link tới Tổng quan, bản en giữ Hồi quy tuyến tính.
+    - Bước `lesson-translator` và `content-reviewer` (khớp vi/en) của mỗi bài M3 chuyển sang sau MVP.
+44. **Bài Overfitting và Underfitting (`ml/overfitting-underfitting`):**
+    - **Phạm vi:** hai hiện tượng qua hồi quy đa thức, đường cong sai số train/test theo bậc, bias–variance ở mức trực giác, tập kiểm định và kiểm định chéo ở mức giới thiệu. Regularization chỉ nhắc tên, để dành cho bài sau.
+    - **Toán:** viết mô hình đa thức $\hat{y} = w_1x + w_2x^2 + \dots + w_dx^d + b$ và MSE, giải thích vì sao nó vẫn tuyến tính theo tham số. Không dẫn công thức phân rã bias–variance.
+    - **Dữ liệu:** đường cong sin cộng nhiễu, khoảng 20 điểm, tự sinh có seed, đặt trong `src/data/datasets/`. Dùng chung cho lời văn, VIZ và code; bài Regularization dùng lại.
+    - **Độ dài:** khoảng 10–12 phút đọc, 3 ô code (khớp bậc 1, 3, 15 và vẽ; sai số train/test theo bậc; `cross_val_score` để chọn bậc), 4 câu quiz, 1 VIZ thanh trượt bậc (quyết định 37).
+45. **Dữ liệu và VIZ bài Overfitting** (thiết kế ở `docs/architecture/viz.md` mục 9):
+    - **Dữ liệu:** 24 điểm thay vì khoảng 20, gồm 16 điểm train và 8 điểm test. Bậc 15 có 16 hệ số, nên cần ít nhất 16 điểm train thì mới có nghiệm duy nhất và trình duyệt mới tính ra đúng số của scikit-learn.
+    - **Bậc của VIZ:** từ 1 tới 15.
+    - **`PolyFitViz`:** có thêm biểu đồ nhỏ "MSE theo bậc" (hình chữ U). Trên điện thoại VIZ cao thêm khoảng 220px.
+
+46. **Bản vi bài Overfitting và Underfitting đã được người dùng duyệt (23/10/2026).** Gồm các lựa chọn tự quyết khi làm bài:
+    - quiz câu 2 thu phạm vi về bậc 1–12;
+    - chưa gộp phần trùng lặp giữa `PolyFitViz` và `LinearFitViz` (mẫu nét, hàm `axis()`).
+47. **Bài Ridge, Lasso, Elastic Net (`ml/regularization`):**
+    - **Phạm vi:** Ridge và Lasso đi kỹ: hàm mục tiêu, vì sao hệ số co lại, vì sao L1 cho hệ số đúng bằng 0, chuẩn hóa đặc trưng, chọn λ bằng kiểm định chéo. Elastic Net chỉ một mục ngắn.
+    - **Toán:** viết $\mathcal{L} + \lambda\lVert\mathbf{w}\rVert_2^2$ và $\mathcal{L} + \lambda\lVert\mathbf{w}\rVert_1$. Dẫn nghiệm dạng đóng của Ridge từ phương trình chuẩn. Lasso giải thích bằng hình học và ví dụ một biến, không dẫn thuật toán.
+    - **Dữ liệu:** dùng lại bộ `sine`, với đa thức bậc 15.
+    - **VIZ:** thanh trượt λ. Hiện đường bậc 15, MSE train/test và cột 15 hệ số; có nút chuyển Ridge/Lasso. Phần Lasso tính sẵn bằng Python lúc viết bài.
+    - **Độ dài:** khoảng 10–12 phút đọc, 4 câu quiz, 3 ô code: Ridge với vài giá trị λ; Lasso và số hệ số bằng 0; chọn λ bằng kiểm định chéo, có Elastic Net.
+48. **VIZ bài Regularization** (thiết kế ở `docs/architecture/viz.md` mục 10):
+    - **Thanh trượt λ:** 17 mức, gồm 0 và 10⁻¹⁴ … 10, mỗi nấc một bậc mười.
+    - **Chuyển Ridge/Lasso:** hai nút có `aria-pressed`.
+    - **Biểu đồ cột hệ số:** thang tuyến tính [−10, 10]. Cột vượt khung có tam giác ở mép. Hệ số bằng đúng 0 có vòng "0".
+    - **Bài phải nói rõ:**
+      - Ở λ tốt nhất, Ridge (0.0894) và Lasso (0.0851) vẫn kém việc chọn thẳng bậc 3 (0.0754).
+      - Kiểm định chéo chọn λ = 0.1 cho Ridge, khác mức tốt nhất trên tập test. Lý do: đa thức bậc 15 phải ngoại suy tới các điểm mép bị giữ lại.
+49. **Hình L1/L2 của bài Regularization** (người dùng đồng ý thêm hình; thiết kế ở `docs/architecture/viz.md` mục 11): mở rộng kit hình tĩnh để vẽ được đồ thị tĩnh. Hai ô cạnh nhau dùng **chung một hàm mất mát**, để thấy chỉ có vùng ràng buộc khác nhau. Điểm chạm của Ridge chỉ lệch trục 24°. Phiên chính tự chọn cách này, đổi được khi người dùng duyệt.
+50. **Sau review RegularizationViz:**
+    - Nút Ridge/Lasso đang chọn dùng nền accent, chữ đậm màu.
+    - Gộp ngay phần lặp giữa ba VIZ vào kit: `Swatch`, `DotSwatch`, hàm dựng trục `axis()`. Mục đích là để VIZ của bài Gradient Descent dùng luôn.
+
+51. **Bản vi bài Ridge, Lasso, Elastic Net đã được người dùng duyệt (24/10/2026).** Duyệt cùng các lựa chọn phiên chính đã tự chọn: hai trục hình L1/L2 ghi ký hiệu $w_1$, $w_2$; `alpha` cố định qua các fold khi kiểm định chéo (có câu giải thích trong bài).
+
+52. **Bài Gradient Descent (`ml/gradient-descent`):**
+    - **Phạm vi:** đi kỹ batch GD:
+      - quy tắc cập nhật;
+      - tốc độ học (chậm, vừa, dao động, phân kỳ);
+      - chuẩn hóa đặc trưng;
+      - tiêu chí dừng.
+
+      SGD và mini-batch chỉ là một mục ngắn. Momentum và Adam chỉ nhắc tên, để dành cho bài `ml/optimizers`.
+    - **Toán:** dùng lại đạo hàm riêng đã dẫn ở bài Hồi quy tuyến tính, viết lại dạng vectơ. Giải thích vì sao đi ngược gradient là đi xuống dốc. Nêu ngưỡng $\eta < 2/L$ qua ví dụ một chiều, không chứng minh tổng quát.
+    - **Dữ liệu:** bảng 10 căn hộ, giải lại đúng bài toán của bài Hồi quy tuyến tính (quyết định 38).
+    - **VIZ:** đường mức của MSE theo $(w, b)$ trên dữ liệu đã chuẩn hóa, cùng đường đi của GD. Có các nút Bước / Chạy / Đặt lại, và thanh trượt $\eta$ có các mức chậm, vừa, dao động, phân kỳ. Kèm biểu đồ nhỏ MSE theo số bước.
+    - **Độ dài:** khoảng 10–12 phút đọc, 4 câu quiz. 3 ô code:
+      - GD tự viết bằng NumPy, so với phương trình chuẩn;
+      - thử vài giá trị $\eta$, vẽ MSE theo bước, có và không chuẩn hóa;
+      - SGD/mini-batch, có `SGDRegressor`.
+
+55. **VIZ bài Gradient Descent** (thiết kế ở `docs/architecture/viz.md` mục 12; người dùng chốt ngày 24/10/2026; số 53, 54 đã dùng cho phần LLM ở nhánh khác):
+    - **Chuẩn hóa:** chỉ chuẩn hóa diện tích, theo min-max: $\tilde{x} = (x - 25)/60$. Giữ $y$ gốc. Đường mức là elip với $\kappa = 15.3$, đủ để thấy chậm, zigzag, dao động và phân kỳ. Z-score làm đường mức thành vòng tròn, GD tới đáy sau 1 bước, nên không dùng.
+    - **Biểu đồ MSE theo bước:** trục MSE theo thang log.
+    - **Ký hiệu:** tham số trên dữ liệu đã chuẩn hóa viết $\tilde{w}$, $\tilde{b}$. Có công thức đổi về $w$, $b$ gốc.
+    - **Bản nháp:** do phiên LLM viết (dùng z-score), sẽ viết lại theo spec mục 12.
+
+56. **Bài Gradient Descent không dừng chờ duyệt bản vi** (người dùng chọn, 24/10/2026). Làm hết quy trình, rồi commit và push thẳng vào PR #1 (nhánh `m3-ml-lessons`). Người dùng duyệt trên PR.
 
 Còn mở: tên miền (trước M4).
