@@ -199,3 +199,4 @@
     - `PLAN.md`, `CHANGELOG.md`, `README.en.md`, `LICENSE-CONTENT.md` → `docs/`. `giáo án ai.md` → `docs/reference/giao-an-ai.md` (tên ASCII).
     - `CLAUDE.md` → `.claude/CLAUDE.md` (Claude Code đọc được ở vị trí này).
     - Giữ ở gốc: `README.md`, `LICENSE`, file cấu hình (`package.json`, `astro.config.ts`, `tsconfig.json`, `playwright.config.ts`, `vitest.config.ts`) để công cụ và IDE tự nhận; `skills-lock.json` và `.agents/` do CLI của skill quản lý.
+    - CI e2e chia **3 shard** (trước là 2) và `timeout-minutes: 30` (trước là 20): shard chậm hơn của 2 shard đã chạm giới hạn 20 phút và bị hủy hai lần trên PR #4, không có test nào lỗi.

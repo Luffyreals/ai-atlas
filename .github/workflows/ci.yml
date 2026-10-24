@@ -1,6 +1,6 @@
-# CI: type check, unit tests and build (verify), then end-to-end tests (e2e) in 2 shards that reuse
+# CI: type check, unit tests and build (verify), then end-to-end tests (e2e) in 3 shards that reuse
 # the dist/ built by verify (docs/architecture/llm-lessons.md section 2.10, E3).
-# Runs the same commands as the "Lệnh" table in CLAUDE.md.
+# Runs the same commands as the "Lệnh" table in .claude/CLAUDE.md.
 name: CI
 
 on:
@@ -82,15 +82,16 @@ jobs:
           if-no-files-found: error
 
   e2e:
-    name: E2E (Playwright, shard ${{ matrix.shard }}/2)
+    name: E2E (Playwright, shard ${{ matrix.shard }}/3)
     needs: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 2 shards took up to 20 min on the slower shard (10/2026); 3 shards keep each well under this limit.
+    timeout-minutes: 30
     strategy:
       # One failing shard must not cancel the other: each shard reports its own failures.
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -120,7 +121,7 @@ jobs:
       # fullyParallel in the config splits the shards test by test, not file by file.
       - name: E2E tests
         run: >-
-          npm run test:e2e -- --shard=${{ matrix.shard }}/2 --forbid-only
+          npm run test:e2e -- --shard=${{ matrix.shard }}/3 --forbid-only
           --reporter=list,html --trace=retain-on-failure
         env:
           CI: true
