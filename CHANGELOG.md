@@ -63,6 +63,11 @@ Mọi thay đổi đáng chú ý của AI Atlas được ghi ở đây. Mỗi m�
 
 ### Thay đổi
 
+- Tái cấu trúc tài liệu và test (quyết định 58), chỉ dời và tách file:
+  - `viz.md` tách thành [docs/architecture/viz/](docs/architecture/viz/README.md);
+  - nhật ký quyết định chuyển sang [docs/decisions.md](docs/decisions.md);
+  - `tests/unit/` chia thành `lib/`, `viz/`, `components/`, `content/`;
+  - spec e2e riêng của bài mẫu chuyển vào `tests/e2e/sample-lesson/`.
 - `docs/lesson-template.mdx`: cập nhật cách dùng `Quiz` và `PythonRunner`.
 - Cổng e2e đổi sang 4322 (Astro 7 chỉ cho một `astro preview` mỗi project).
 - Đã biết: stdout của `PythonRunner` dùng `write` thay `batched` (lệch spec), vì `batched` làm mất chữ in cuối khi không có `
