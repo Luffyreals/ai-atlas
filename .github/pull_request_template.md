@@ -11,7 +11,7 @@
 
 ## Danh sách kiểm tra
 
-Giống từng dòng mục [Định nghĩa hoàn thành](https://github.com/Luffyreals/ai-atlas/blob/main/CONTRIBUTING.md#định-nghĩa-hoàn-thành) trong `CONTRIBUTING.md`. Bỏ qua mục không áp dụng.
+Giống từng dòng mục [Định nghĩa hoàn thành](https://github.com/Luffyreals/ai-atlas/blob/main/.github/CONTRIBUTING.md#định-nghĩa-hoàn-thành) trong `.github/CONTRIBUTING.md`. Bỏ qua mục không áp dụng.
 
 **Mọi thay đổi**
 
@@ -20,7 +20,7 @@ Giống từng dòng mục [Định nghĩa hoàn thành](https://github.com/Luff
 - [ ] `npm test` qua hết.
 - [ ] `npm run test:e2e` qua trên cả `desktop` và `mobile`.
 - [ ] Không có chữ giao diện viết cứng. Mọi chuỗi mới có đủ bản vi và en.
-- [ ] Thay đổi đáng chú ý đã ghi vào `CHANGELOG.md`, mục "Chưa phát hành".
+- [ ] Thay đổi đáng chú ý đã ghi vào `docs/CHANGELOG.md`, mục "Chưa phát hành".
 
 **Thêm bài học**
 

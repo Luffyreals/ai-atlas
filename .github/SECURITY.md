@@ -51,7 +51,7 @@ Báo cáo nên có:
 - Ảnh hưởng thực tế bạn quan sát được.
 - Cách sửa đề xuất, nếu có.
 
-Dự án do một người duy trì, nên thời gian phản hồi không cố định. Bạn sẽ được phản hồi sớm nhất có thể. Sau khi lỗi được sửa, bạn có thể được ghi nhận trong [CHANGELOG.md](CHANGELOG.md) nếu muốn.
+Dự án do một người duy trì, nên thời gian phản hồi không cố định. Bạn sẽ được phản hồi sớm nhất có thể. Sau khi lỗi được sửa, bạn có thể được ghi nhận trong [CHANGELOG.md](../docs/CHANGELOG.md) nếu muốn.
 
 ---
 
@@ -69,4 +69,4 @@ AI Atlas is a **fully static** website served by Cloudflare Pages. It has no app
 
 GitHub only offers this feature on public repositories. AI Atlas is still private, so **there is no private reporting channel yet**. The maintainer will turn the feature on as soon as the repository becomes public.
 
-Please include the affected page or file, steps to reproduce (browser and device), the impact you observed, and a suggested fix if you have one. This is a single-maintainer project, so there is no fixed response time; you will get a reply as soon as possible. Once the issue is fixed, you can be credited in [CHANGELOG.md](CHANGELOG.md) if you wish.
+Please include the affected page or file, steps to reproduce (browser and device), the impact you observed, and a suggested fix if you have one. This is a single-maintainer project, so there is no fixed response time; you will get a reply as soon as possible. Once the issue is fixed, you can be credited in [CHANGELOG.md](../docs/CHANGELOG.md) if you wish.

@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Cảm ơn bạn đã góp ý. Lộ trình hiện có 78 bài, bạn xem danh sách trong [PLAN.md mục 6](https://github.com/Luffyreals/ai-atlas/blob/main/PLAN.md#6-danh-sách-nội-dung-78-bài) trước để tránh đề xuất trùng.
+        Cảm ơn bạn đã góp ý. Lộ trình hiện có 78 bài, bạn xem danh sách trong [PLAN.md mục 6](https://github.com/Luffyreals/ai-atlas/blob/main/docs/PLAN.md#6-danh-sách-nội-dung-78-bài) trước để tránh đề xuất trùng.
         Notebook thực hành Colab/Kaggle nằm **ngoài phạm vi** website, nên không nhận đề xuất loại này.
 
         *You can write in English.*

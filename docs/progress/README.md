@@ -5,8 +5,8 @@ Mỗi báo cáo là một file `<YYYY-MM-DD>.md`, thường viết cuối mỗi 
 ## Quy ước
 
 - **Chỉ ghi điều có bằng chứng:** commit, file, kết quả test, số đo. Không suy đoán việc đã xong.
-- Thay đổi đáng chú ý cũng ghi vào [CHANGELOG.md](../../CHANGELOG.md).
-- Sau báo cáo, `team-lead` cập nhật ô `[x]` trong [PLAN.md](../../PLAN.md) mục 7.
+- Thay đổi đáng chú ý cũng ghi vào [CHANGELOG.md](../CHANGELOG.md).
+- Sau báo cáo, `team-lead` cập nhật ô `[x]` trong [PLAN.md](../PLAN.md) mục 7.
 
 ## Khung một báo cáo
 
