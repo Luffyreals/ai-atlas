@@ -19,10 +19,10 @@ Thư mục này chứa tài liệu cho **người viết bài** và **người p
 
 | File | Nội dung |
 |---|---|
-| [PLAN.md](../PLAN.md) | Kế hoạch tổng thể và tiến độ các giai đoạn |
-| [CLAUDE.md](../CLAUDE.md) | Quy tắc nội dung, quy ước code, sub agent và các lệnh |
-| [CONTRIBUTING.md](../CONTRIBUTING.md) | Hướng dẫn đóng góp: cài đặt, nhánh và commit, quy trình, định nghĩa hoàn thành |
-| [SECURITY.md](../SECURITY.md) | Chính sách bảo mật và cách báo lỗ hổng |
+| [PLAN.md](PLAN.md) | Kế hoạch tổng thể và tiến độ các giai đoạn |
+| [CLAUDE.md](../.claude/CLAUDE.md) | Quy tắc nội dung, quy ước code, sub agent và các lệnh |
+| [CONTRIBUTING.md](../.github/CONTRIBUTING.md) | Hướng dẫn đóng góp: cài đặt, nhánh và commit, quy trình, định nghĩa hoàn thành |
+| [SECURITY.md](../.github/SECURITY.md) | Chính sách bảo mật và cách báo lỗ hổng |
 
 ## Quy trình thêm một bài học
 

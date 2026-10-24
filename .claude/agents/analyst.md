@@ -15,7 +15,7 @@ Xem thay đổi bằng `git diff` hoặc `git diff main...HEAD`, cùng các file
    - Logic có lỗi không? Có thiếu trường hợp biên không, ví dụ chuỗi rỗng, localStorage bị chặn, Pyodide tải thất bại, bài chưa có bản en?
 2. **Khớp thiết kế:**
    - Có làm đúng `docs/architecture/` không?
-   - Có tuân thủ quy ước trong `CLAUDE.md` không: song ngữ, biến CSS, TypeScript, `client:*`?
+   - Có tuân thủ quy ước trong `.claude/CLAUDE.md` không: song ngữ, biến CSS, TypeScript, `client:*`?
 3. **Đơn giản:**
    - Có code trùng lặp không?
    - Có phần phức tạp không cần thiết không?

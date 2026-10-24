@@ -3,7 +3,7 @@
 <!-- The CI badge only renders for viewers with access to the repository while it is private. -->
 [![CI](https://github.com/Luffyreals/ai-atlas/actions/workflows/ci.yml/badge.svg)](https://github.com/Luffyreals/ai-atlas/actions/workflows/ci.yml)
 
-[Tiếng Việt](README.md) | **English**
+[Tiếng Việt](../README.md) | **English**
 
 > A map of AI knowledge: from Python basics to large language models, explained clearly, free for everyone.
 
@@ -70,11 +70,11 @@ After Part 4, you can continue with the **NLP**, **Computer Vision** or **LLM** 
 
 | Document | Contents |
 |---|---|
-| [docs/mvp.md](docs/mvp.md) | MVP spec: scope, acceptance criteria, milestones (Vietnamese) |
+| [docs/mvp.md](mvp.md) | MVP spec: scope, acceptance criteria, milestones (Vietnamese) |
 | [PLAN.md](PLAN.md) | Overall plan and phase progress (Vietnamese) |
 | [CHANGELOG.md](CHANGELOG.md) | Changes made so far |
-| [docs/](docs/README.md) | Docs for lesson authors and developers (Vietnamese) |
-| [docs/architecture/](docs/architecture/README.md) | Technical architecture overview (Vietnamese) |
+| [docs/](README.md) | Docs for lesson authors and developers (Vietnamese) |
+| [docs/architecture/](architecture/README.md) | Technical architecture overview (Vietnamese) |
 
 ## Tech stack
 
@@ -90,7 +90,7 @@ The site is fully static: no server, no database, no sign-in.
 
 ## Running locally
 
-You need **Node.js 24.15.0** (pinned in [.node-version](.node-version), minimum `>=22.23.4`) and npm.
+You need **Node.js 24.15.0** (pinned in [.node-version](../.node-version), minimum `>=22.23.4`) and npm.
 
 ```sh
 git clone https://github.com/Luffyreals/ai-atlas.git
@@ -110,7 +110,7 @@ Other commands:
 | `npm test` | Unit tests (Vitest) |
 | `npm run test:e2e` | E2E tests (Playwright); builds and starts the preview itself |
 
-Full list and caveats: [CONTRIBUTING.md](CONTRIBUTING.md#các-lệnh) (Vietnamese).
+Full list and caveats: [CONTRIBUTING.md](../.github/CONTRIBUTING.md#các-lệnh) (Vietnamese).
 
 ## Project structure
 
@@ -131,13 +131,13 @@ Configuration files live at the repo root: `astro.config.ts`, `package.json`, `t
 
 The project currently has a single maintainer. Feedback and bug reports are always welcome.
 
-- Setup, commit conventions, the lesson workflow and the definition of done: [CONTRIBUTING.md](CONTRIBUTING.md) (Vietnamese).
+- Setup, commit conventions, the lesson workflow and the definition of done: [CONTRIBUTING.md](../.github/CONTRIBUTING.md) (Vietnamese).
 - Website bugs, lesson errors or lesson requests: use the issue templates. You can write in English.
-- Security issues: do **not** open a public issue; see [SECURITY.md](SECURITY.md#english).
+- Security issues: do **not** open a public issue; see [SECURITY.md](../.github/SECURITY.md#english).
 
 ## License
 
 - **Content** (lessons, illustrations): [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/). You may share and adapt it with attribution, for non-commercial purposes, under the same license.
-- **Code** (website source, code examples): [MIT](LICENSE).
+- **Code** (website source, code examples): [MIT](../LICENSE).
 
 See [LICENSE-CONTENT.md](LICENSE-CONTENT.md#english) for the exact scope of each license.

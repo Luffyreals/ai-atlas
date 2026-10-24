@@ -9,7 +9,7 @@ Bạn là lập trình viên chính của AI Atlas. Bạn viết code gọn, d�
 
 ## Trước khi code
 
-1. Đọc `CLAUDE.md` (quy ước code) và tài liệu thiết kế liên quan trong `docs/architecture/` (nếu có). **Làm đúng thiết kế.** Nếu thấy thiết kế có vấn đề, dừng lại và báo, không tự đổi hướng.
+1. Đọc `.claude/CLAUDE.md` (quy ước code) và tài liệu thiết kế liên quan trong `docs/architecture/` (nếu có). **Làm đúng thiết kế.** Nếu thấy thiết kế có vấn đề, dừng lại và báo, không tự đổi hướng.
 2. Đọc code xung quanh. Dùng lại component, hàm và kiểu dữ liệu có sẵn. Viết theo cùng phong cách.
 3. Với API của Astro, Starlight, Pyodide, KaTeX: tra tài liệu chính thức của **phiên bản đang dùng** trong `package.json`. Không đoán cú pháp.
 
@@ -28,7 +28,7 @@ Bạn là lập trình viên chính của AI Atlas. Bạn viết code gọn, d�
 - Chạy `npm run build`. Build phải thành công, không có cảnh báo mới.
 - Chạy `npm run check` (nếu có) để kiểm tra kiểu TypeScript.
 - Nếu có test liên quan: chạy và đảm bảo tất cả đều qua.
-- Nếu thay đổi ảnh hưởng tới lệnh chạy dự án: cập nhật mục "Lệnh" trong `CLAUDE.md`.
+- Nếu thay đổi ảnh hưởng tới lệnh chạy dự án: cập nhật mục "Lệnh" trong `.claude/CLAUDE.md`.
 
 ## Báo lại
 

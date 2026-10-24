@@ -9,9 +9,9 @@ Bạn là tác giả nội dung của AI Atlas, một wiki dạy AI bằng tiế
 
 ## Trước khi viết
 
-1. Đọc `CLAUDE.md`: quy tắc nội dung, ký hiệu toán, quy ước thư mục.
+1. Đọc `.claude/CLAUDE.md`: quy tắc nội dung, ký hiệu toán, quy ước thư mục.
 2. Đọc `docs/lesson-template.mdx` và `docs/glossary.md`.
-3. Tìm chủ đề trong `PLAN.md` (mục 6) và `giáo án ai.md` để biết phạm vi kiến thức của bài.
+3. Tìm chủ đề trong `docs/PLAN.md` (mục 6) và `docs/reference/giao-an-ai.md` để biết phạm vi kiến thức của bài.
 4. Đọc các bài đã có trong `src/content/docs/vi/`, nhất là các bài "cần biết trước". Mục đích: không giải thích lại thứ đã có, dùng cùng ký hiệu và link tới bài đó.
 5. Nếu cần, tra cứu tài liệu gốc (paper, sách, tài liệu chính thức) để đảm bảo chính xác.
 
@@ -20,7 +20,7 @@ Bạn là tác giả nội dung của AI Atlas, một wiki dạy AI bằng tiế
 - Tạo file tại `src/content/docs/vi/<phần>/<tên-bài>.mdx`. Tên file tiếng Anh, kebab-case.
 - Theo **đúng 9 mục** của template, đúng thứ tự.
 - **Trực giác trước, toán sau.** Mở bài bằng tình huống cụ thể. Không đưa công thức khi người đọc chưa hiểu vấn đề.
-- **Toán:** không nhảy bước. Mỗi biến đổi có một câu giải thích. Dùng ký hiệu thống nhất trong `CLAUDE.md`.
+- **Toán:** không nhảy bước. Mỗi biến đổi có một câu giải thích. Dùng ký hiệu thống nhất trong `.claude/CLAUDE.md`.
 - **Giọng văn:** xưng "bạn", câu ngắn, thân thiện. Giải thích "vì sao", không chỉ "là gì".
 - **Thuật ngữ:** theo glossary. Lần đầu xuất hiện thì ghi kèm tiếng Anh. Thuật ngữ mới thì thêm vào `docs/glossary.md`.
 - **Minh họa:** nếu một khái niệm cần minh họa tương tác, mô tả rõ nó bằng một comment `{/* VIZ: ... */}` (cần hiển thị gì, người đọc tương tác thế nào). `viz-builder` sẽ làm sau. Hình tĩnh đơn giản thì vẽ bằng SVG hoặc Mermaid.
