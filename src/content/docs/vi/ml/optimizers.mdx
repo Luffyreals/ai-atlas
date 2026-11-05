@@ -1,0 +1,329 @@
+---
+title: 'Các thuật toán tối ưu nâng cao: SGD, Momentum, RMSProp, Adam'
+description: 'GD bò chậm trong thung lũng hẹp và lắc theo nhiễu mini-batch. Momentum, RMSProp, Adam sửa việc đó thế nào, hiệu chỉnh độ lệch và lịch tốc độ học.'
+quiz:
+  - question: 'Bạn dùng Momentum với $\beta = 0.9$. Trên một sườn dốc đều, gradient giữ nguyên bằng $\mathbf{g}$ qua rất nhiều bước. Về sau, mỗi bước $\boldsymbol{\theta}$ dịch đi khoảng bao nhiêu?'
+    options: ['$\eta\mathbf{g}$, giống GD', '$0.9\,\eta\mathbf{g}$', '$10\,\eta\mathbf{g}$', '$0.1\,\eta\mathbf{g}$']
+    answer: 2
+    explanation: 'Vận tốc cộng dồn các gradient cũ: $\mathbf{v}_t = \mathbf{g}\left(1 + \beta + \beta^2 + \dots\right)$, tiến tới $\mathbf{g}/(1 - \beta) = 10\,\mathbf{g}$. Bước là $\eta\mathbf{v}_t$, nên dài gấp 10 lần bước của GD. $\beta$ không nhân thẳng vào bước: nó là phần vận tốc cũ được giữ lại, và giữ lại nhiều thì vận tốc lớn dần.'
+  - question: 'Bạn dùng Adam ($\beta_1 = 0.9$, $\beta_2 = 0.999$, $\varepsilon$ rất nhỏ, có hiệu chỉnh độ lệch). Ở bước đầu tiên, gradient theo $\theta_1$ là $0.002$, theo $\theta_2$ là $500$. Mỗi tham số dịch đi bao xa?'
+    options:
+      - 'Cả hai dịch đúng $\eta$, ngược dấu gradient của mình'
+      - '$\theta_2$ dịch xa hơn $\theta_1$ khoảng 250 000 lần'
+      - 'Cả hai dịch $0.1\,\eta$, vì $1 - \beta_1 = 0.1$'
+      - 'Cả hai dịch khoảng $3.16\,\eta$'
+    answer: 0
+    explanation: 'Ở bước 1, sau hiệu chỉnh $\hat{\mathbf{v}}_1 = \mathbf{g}_1$ và $\hat{\mathbf{s}}_1 = \mathbf{g}_1^2$, nên mỗi tham số dịch $\eta\,g/\lvert g\rvert$, tức đúng $\eta$, bất kể gradient lớn hay nhỏ. 250 000 lần là tỉ lệ của GD thường. $3.16\,\eta$ là bước khi bỏ hiệu chỉnh độ lệch, vì $0.1/\sqrt{0.001} \approx 3.16$.'
+  - question: 'Bạn nhân hàm mất mát với 100 (ví dụ đổi đơn vị của $y$) và giữ nguyên $\eta$ đang chạy tốt. Nhiều khả năng điều gì xảy ra với GD và với Adam?'
+    options:
+      - 'Cả hai cùng phân kỳ, vì gradient lớn gấp 100'
+      - 'Cả hai chạy y như cũ, vì đáy vẫn ở chỗ cũ'
+      - 'Adam phân kỳ, còn GD không đổi'
+      - 'GD có bước dài gấp 100 nên dễ vượt ngưỡng $2/L$ và phân kỳ; Adam gần như không đổi'
+    answer: 3
+    explanation: 'Gradient nhân 100 thì bước của GD nhân 100, và độ cong $L$ cũng nhân 100 nên ngưỡng $2/L$ nhỏ đi 100 lần. Với Adam, cả $\hat{\mathbf{v}}_t$ lẫn $\sqrt{\hat{\mathbf{s}}_t}$ đều nhân 100, nên tỉ số không đổi (bỏ qua $\varepsilon$). Đáy đúng là không đổi, nhưng đường đi của GD tới đó thì hỏng.'
+  - question: 'Bạn huấn luyện rất lâu bằng AdaGrad. Loss còn cao, gradient chưa nhỏ, nhưng tham số gần như không nhúc nhích nữa. Lý do hợp lý nhất là gì?'
+    options:
+      - 'Mô hình đã tới cực tiểu toàn cục'
+      - '$\mathbf{s}_t$ chỉ cộng thêm, không bao giờ giảm, nên $\eta/\sqrt{\mathbf{s}_t}$ co dần về gần 0'
+      - 'Hiệu chỉnh độ lệch làm bước quá ngắn'
+      - '$\varepsilon$ quá lớn so với gradient'
+    answer: 1
+    explanation: 'AdaGrad cộng dồn bình phương mọi gradient từ đầu, nên mẫu số chỉ tăng và tốc độ học hiệu dụng của mỗi tham số giảm mãi. RMSProp sửa đúng chỗ này bằng trung bình động mũ: gradient cũ bị quên dần. Cực tiểu thì gradient phải gần 0, trái với đề bài. AdaGrad không có hiệu chỉnh độ lệch.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import compareCode from '@code/ml/optimizers/compare.vi.py?raw';
+import pathsCode from '@code/ml/optimizers/paths.vi.py?raw';
+import minibatchCode from '@code/ml/optimizers/minibatch.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Nhận ra ba điểm yếu của gradient descent thuần: bò chậm trong thung lũng hẹp, lắc theo nhiễu của mini-batch, và chỉ có một tốc độ học cho mọi tham số.
+- Viết được quy tắc cập nhật của Momentum, AdaGrad, RMSProp và Adam, và nói được mỗi ký hiệu trong đó làm gì.
+- Giải thích được vì sao Adam cần hiệu chỉnh độ lệch (bias correction), bằng một phép tính ở bước đầu tiên.
+- Chọn được bộ tối ưu (optimizer), tốc độ học và lịch tốc độ học (learning rate schedule) hợp lý khi bắt đầu một bài toán.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài [Gradient Descent](/vi/ml/gradient-descent/) cho thấy: trên một cái bát bậc hai, GD hội tụ khi $\eta < 2/L$, với $L$ là **độ cong** (curvature) lớn nhất. Khi độ cong theo các hướng chênh nhau nhiều, tức **số điều kiện** (condition number) $\kappa$ lớn, đường mức là elip dài và hẹp, và GD bò rất chậm. Bài đó cũng giới thiệu **mini-batch**: mỗi bước tính gradient trên $B$ mẫu thay vì cả $m$ mẫu.
+:::
+
+## Trực giác
+
+Bạn thả một viên bi vào một con mương dài, hai thành rất dốc, đáy nghiêng nhẹ về một đầu. Viên bi không lăn thẳng xuống đầu thấp. Nó lăn qua lại giữa hai thành mương vài lần, rồi mới trôi dọc theo đáy. Nhưng khác GD, viên bi có **quán tính**: càng lăn lâu theo một hướng, nó càng nhanh.
+
+GD thì không có quán tính. Mỗi bước, nó chỉ nhìn độ dốc ngay dưới chân. Bài này dùng một con mương đồ chơi để thấy rõ điều đó:
+
+$$
+\mathcal{L}(w_1, w_2) = \frac{1}{2}\left(w_1^2 + 100\,w_2^2\right)
+$$
+
+Đáy ở $(0, 0)$. Theo $w_1$ độ cong là 1, theo $w_2$ là 100, nên $\kappa = 100$: thung lũng dài gấp 10 lần bề ngang ($\sqrt{\kappa} = 10$). Xuất phát ở $(-8, 1.5)$.
+
+### Ba điểm yếu của GD thuần
+
+**Thứ nhất, thung lũng hẹp.** Thành dốc theo $w_2$ ép $\eta < 2/100 = 0.02$. Lấy $\eta = 0.018$, sát ngưỡng. Theo $w_2$, khoảng cách tới đáy bị nhân với $1 - 0.018 \times 100 = -0.8$ mỗi bước: $w_2$ nhảy qua lại hai bên đáy (zigzag). Theo $w_1$, nó bị nhân với $1 - 0.018 \times 1 = 0.982$: mỗi bước chỉ gần thêm 1.8%. GD cần 369 bước để vào trong bán kính 0.01 quanh đáy, gần như toàn bộ là bò dọc thung lũng.
+
+**Thứ hai, nhiễu của mini-batch.** Với mini-batch, gradient mỗi bước là ước lượng trên vài chục mẫu, nên hướng đi lệch qua lệch lại. Bài Gradient Descent đã thấy SGD với $\eta$ cố định cứ nhấp nhô quanh đáy thay vì dừng hẳn.
+
+**Thứ ba, một tốc độ học cho mọi tham số.** Ở điểm xuất phát, gradient là $[-8, 150]^\top$: theo $w_2$ lớn gấp gần 19 lần theo $w_1$. Cùng một $\eta$, tham số có gradient lớn bước dài, tham số có gradient nhỏ bước ngắn, dù chính tham số đó mới cần đi xa (từ $-8$ về 0). Mạng nơ-ron có hàng triệu tham số, thang đo gradient của chúng chênh nhau rất xa.
+
+### Hai ý tưởng sửa
+
+1. **Nhớ hướng đã đi.** Cộng dồn các gradient cũ thành một "vận tốc". Hướng nào gradient cứ cùng dấu thì vận tốc lớn dần (dọc thung lũng). Hướng nào gradient đổi dấu liên tục thì các phần cộng vào triệt tiêu nhau (ngang thung lũng). Đó là **Momentum**.
+2. **Mỗi tham số một tốc độ học.** Chia bước của mỗi tham số cho độ lớn điển hình của gradient của chính nó. Tham số có gradient lớn được hãm lại, tham số có gradient nhỏ được đẩy lên. Đó là **AdaGrad** và **RMSProp**.
+
+**Adam** ghép cả hai ý. Bài toán của bài này là: **sửa quy tắc cập nhật của GD để nó đi nhanh dọc thung lũng hẹp, bớt lắc theo nhiễu, và không phải chọn lại $\eta$ mỗi khi thang đo của gradient thay đổi.**
+
+## Lý thuyết
+
+### Ký hiệu chung
+
+Mọi thuật toán trong bài đều là GD có sửa đổi, nên dùng chung ký hiệu. Bài này đánh số bước từ 1, vì Adam cần $t \geq 1$:
+
+$$
+\mathbf{g}_t = \nabla_{\boldsymbol{\theta}}\mathcal{L}\left(\boldsymbol{\theta}_{t-1}\right), \qquad t = 1, 2, 3, \dots
+$$
+
+$\mathbf{g}_t$ là gradient ở bước $t$, tính tại tham số hiện có $\boldsymbol{\theta}_{t-1}$; với mini-batch thì tính trên nhóm mẫu của bước đó. GD thường viết lại thành $\boldsymbol{\theta}_t = \boldsymbol{\theta}_{t-1} - \eta\,\mathbf{g}_t$. Các bộ tối ưu dưới đây giữ thêm vài vectơ cùng kích thước với $\boldsymbol{\theta}$, gọi là **trạng thái bộ tối ưu** (optimizer state), tất cả bắt đầu bằng $\mathbf{0}$.
+
+Từ mục RMSProp trở đi, các phép bình phương, căn và chia giữa hai vectơ đều làm **trên từng phần tử**: $\mathbf{g}_t^2$ là vectơ các $g_j^2$, chứ không phải tích vô hướng.
+
+### Momentum: thêm vận tốc
+
+**Momentum** (quán tính) do Polyak đề xuất năm 1964, còn gọi là phương pháp "viên bi nặng" (heavy ball). Nó giữ một vectơ **vận tốc** (velocity) $\mathbf{v}$:
+
+$$
+\begin{aligned}
+\mathbf{v}_t &= \beta\,\mathbf{v}_{t-1} + \mathbf{g}_t \\
+\boldsymbol{\theta}_t &= \boldsymbol{\theta}_{t-1} - \eta\,\mathbf{v}_t
+\end{aligned}
+$$
+
+$\beta \in [0, 1)$ là **hệ số momentum**, thường lấy $\beta = 0.9$. Dòng đầu: giữ lại phần $\beta$ của vận tốc cũ, cộng thêm gradient mới. Dòng hai: đi theo vận tốc thay vì theo gradient. Với $\beta = 0$, $\mathbf{v}_t = \mathbf{g}_t$ và ta có lại GD.
+
+**Vận tốc nhớ những gì?** Thay $\mathbf{v}_{t-1} = \beta\,\mathbf{v}_{t-2} + \mathbf{g}_{t-1}$ vào dòng đầu, rồi thay tiếp $\mathbf{v}_{t-2}$, và cứ thế tới $\mathbf{v}_0 = \mathbf{0}$:
+
+$$
+\mathbf{v}_t = \mathbf{g}_t + \beta\,\mathbf{g}_{t-1} + \beta^2\,\mathbf{g}_{t-2} + \dots + \beta^{t-1}\,\mathbf{g}_1
+$$
+
+Vận tốc là tổng mọi gradient đã gặp, gradient càng cũ thì trọng số càng nhỏ, giảm theo cấp số nhân. Hai trường hợp cho thấy vì sao cách này hợp với thung lũng hẹp:
+
+- **Gradient cùng dấu mãi** (dọc thung lũng), $\mathbf{g}_t = \mathbf{g}$: tổng là $\mathbf{g}\left(1 + \beta + \beta^2 + \dots\right)$, tiến tới $\mathbf{g}/(1 - \beta)$. Với $\beta = 0.9$, bước dài gấp **10 lần** GD.
+- **Gradient đổi dấu mỗi bước** (ngang thung lũng), $\mathbf{g}, -\mathbf{g}, \mathbf{g}, \dots$: tổng là $\mathbf{g}\left(1 - \beta + \beta^2 - \dots\right)$, tiến tới $\mathbf{g}/(1 + \beta) \approx 0.53\,\mathbf{g}$. Các phần cộng vào triệt tiêu một nửa.
+
+Trên con mương đồ chơi, cùng $\eta = 0.018$, Momentum vào trong bán kính 0.01 của đáy sau **111 bước**, thay vì 369. Cái giá là quán tính: viên bi lao dọc thung lũng, **vượt qua đáy** tới $w_1 \approx 2.19$ rồi mới quay lại. Theo chiều hẹp nó cũng vẫn lắc qua lại, và với $\beta$ lớn thì dao động này tắt chậm hơn ở GD. Cả hai điều đều thấy ở hình của mục Minh họa.
+
+Nhiều tài liệu viết $\mathbf{v}_t = \beta\,\mathbf{v}_{t-1} + (1 - \beta)\,\mathbf{g}_t$. Đây là **trung bình động mũ** (exponential moving average, EMA) của gradient: các trọng số $(1 - \beta)\beta^k$ cộng lại gần bằng 1, và "cửa sổ nhớ" dài cỡ $1/(1 - \beta)$ bước, tức khoảng 10 bước với $\beta = 0.9$. Vectơ đó bằng đúng $(1 - \beta)$ lần vectơ $\mathbf{v}_t$ ở trên, nên hai cách viết cho cùng đường đi nếu $\eta$ của cách thứ hai lớn gấp $1/(1 - \beta)$. Khi đọc code hay paper, hãy xem họ dùng cách nào trước khi chép $\eta$.
+
+**Nesterov momentum** sửa một chi tiết: đo gradient ở chỗ quán tính sắp đưa tới, thay vì ở chỗ đang đứng:
+
+$$
+\mathbf{v}_t = \beta\,\mathbf{v}_{t-1} + \nabla_{\boldsymbol{\theta}}\mathcal{L}\left(\boldsymbol{\theta}_{t-1} - \eta\beta\,\mathbf{v}_{t-1}\right)
+$$
+
+Nếu quán tính sắp đưa viên bi qua đáy, gradient đo ở phía bên kia đã chỉ ngược lại và hãm bớt, nên đỡ vượt quá. Sutskever và cộng sự (2013) viết Nesterov dưới dạng này và dùng nó để huấn luyện mạng sâu. `MLPClassifier` của scikit-learn bật nó sẵn (`nesterovs_momentum=True`).
+
+### AdaGrad và RMSProp: mỗi tham số một tốc độ học
+
+**AdaGrad** (Duchi, Hazan, Singer, 2011) cộng dồn bình phương gradient của từng tham số, rồi chia bước cho căn của tổng đó:
+
+$$
+\begin{aligned}
+\mathbf{s}_t &= \mathbf{s}_{t-1} + \mathbf{g}_t^2 \\
+\boldsymbol{\theta}_t &= \boldsymbol{\theta}_{t-1} - \frac{\eta}{\sqrt{\mathbf{s}_t} + \varepsilon}\,\mathbf{g}_t
+\end{aligned}
+$$
+
+$\varepsilon$ là một số rất nhỏ, ví dụ $10^{-8}$, chỉ để không chia cho 0. Tham số $j$ có tốc độ học riêng $\eta/\left(\sqrt{s_j} + \varepsilon\right)$: gradient của nó từng lớn thì tốc độ học nhỏ, và ngược lại. AdaGrad hợp với dữ liệu thưa, nơi có đặc trưng hiếm khi xuất hiện. Nhưng $\mathbf{s}_t$ **chỉ tăng, không bao giờ giảm**, nên huấn luyện lâu thì mọi tốc độ học co dần về 0 và mô hình ngừng học, dù chưa tới đáy.
+
+**RMSProp** (Hinton, bài giảng 6e của khóa *Neural Networks for Machine Learning*, 2012) thay tổng bằng trung bình động mũ, để gradient cũ bị quên dần:
+
+$$
+\begin{aligned}
+\mathbf{s}_t &= \rho\,\mathbf{s}_{t-1} + (1 - \rho)\,\mathbf{g}_t^2 \\
+\boldsymbol{\theta}_t &= \boldsymbol{\theta}_{t-1} - \frac{\eta}{\sqrt{\mathbf{s}_t} + \varepsilon}\,\mathbf{g}_t
+\end{aligned}
+$$
+
+$\rho$ thường là 0.9 hoặc 0.99 (PyTorch mặc định 0.99). $\sqrt{\mathbf{s}_t}$ là **căn của trung bình bình phương** (root mean square, RMS) các gradient gần đây, nên mới có tên RMSProp. Nếu gradient của một tham số giữ độ lớn cỡ $\lvert g\rvert$, thì $\sqrt{s} \approx \lvert g\rvert$ và bước của nó là khoảng $\eta\,g/\lvert g\rvert$: **dài cỡ $\eta$, bất kể gradient lớn hay nhỏ**. Ở điểm xuất phát của con mương, gradient theo $w_2$ lớn gấp gần 19 lần theo $w_1$, nhưng hai bước của RMSProp dài ngang nhau.
+
+Hệ quả quan trọng: **nhân hàm mất mát với một hằng số $k$** thì gradient nhân $k$, $\sqrt{\mathbf{s}_t}$ cũng nhân $k$, và bước không đổi (bỏ qua $\varepsilon$). GD thì bước nhân $k$, và ngưỡng $2/L$ chia $k$.
+
+Có một điểm lạ ở bước đầu. $\mathbf{s}_0 = \mathbf{0}$, nên $\mathbf{s}_1 = (1 - \rho)\,\mathbf{g}_1^2$ và $\sqrt{\mathbf{s}_1} = \sqrt{1 - \rho}\,\lvert\mathbf{g}_1\rvert$. Với $\rho = 0.99$, căn này chỉ bằng $0.1\,\lvert\mathbf{g}_1\rvert$, nên bước đầu dài **gấp 10 lần** $\eta$. Trên con mương với $\eta = 0.1$, RMSProp nhảy một phát từ $(-8, 1.5)$ tới $(-7, 0.5)$. Adam sửa đúng chỗ này.
+
+### Adam: momentum cộng tốc độ học riêng
+
+**Adam** (adaptive moment estimation, Kingma và Ba, 2015) giữ hai trung bình động mũ: của gradient (như Momentum) và của bình phương gradient (như RMSProp):
+
+$$
+\begin{aligned}
+\mathbf{v}_t &= \beta_1\,\mathbf{v}_{t-1} + (1 - \beta_1)\,\mathbf{g}_t \\
+\mathbf{s}_t &= \beta_2\,\mathbf{s}_{t-1} + (1 - \beta_2)\,\mathbf{g}_t^2
+\end{aligned}
+$$
+
+$\mathbf{v}_t$ ước lượng trung bình của gradient, gọi là **moment bậc một** (first moment). $\mathbf{s}_t$ ước lượng trung bình của bình phương gradient, gọi là **moment bậc hai** (second moment). Hai vectơ này là trạng thái bộ tối ưu của Adam, nên Adam tốn thêm bộ nhớ gấp đôi số tham số. Rồi hiệu chỉnh độ lệch và cập nhật:
+
+$$
+\begin{aligned}
+\hat{\mathbf{v}}_t &= \frac{\mathbf{v}_t}{1 - \beta_1^t}, \qquad \hat{\mathbf{s}}_t = \frac{\mathbf{s}_t}{1 - \beta_2^t} \\
+\boldsymbol{\theta}_t &= \boldsymbol{\theta}_{t-1} - \eta\,\frac{\hat{\mathbf{v}}_t}{\sqrt{\hat{\mathbf{s}}_t} + \varepsilon}
+\end{aligned}
+$$
+
+$\beta_1^t$ là $\beta_1$ mũ $t$ (số bước), không phải chỉ số. Giá trị mặc định trong bài báo gốc, PyTorch và scikit-learn: $\eta = 0.001$, $\beta_1 = 0.9$, $\beta_2 = 0.999$, $\varepsilon = 10^{-8}$.
+
+**Vì sao cần hiệu chỉnh độ lệch.** Cả hai trung bình bắt đầu từ $\mathbf{0}$, nên lúc đầu chúng bị kéo về 0. Xét bước 1 trên con mương, $\mathbf{g}_1 = [-8, 150]^\top$:
+
+$$
+\begin{aligned}
+\mathbf{v}_1 &= 0.1\,\mathbf{g}_1 = [-0.8,\ 15]^\top \\
+\mathbf{s}_1 &= 0.001\,\mathbf{g}_1^2 = [0.064,\ 22.5]^\top, \qquad \sqrt{\mathbf{s}_1} \approx [0.253,\ 4.743]^\top
+\end{aligned}
+$$
+
+$\mathbf{v}_1$ chỉ bằng 10% gradient thật, còn $\sqrt{\mathbf{s}_1}$ chỉ bằng $\sqrt{0.001} \approx 3.2\%$ độ lớn thật. Nếu không hiệu chỉnh, tỉ số $\mathbf{v}_1/\sqrt{\mathbf{s}_1} \approx [-3.16,\ 3.16]^\top$: mẫu số bị kéo về 0 mạnh hơn tử số, nên bước đầu dài gấp $0.1/\sqrt{0.001} \approx 3.16$ lần $\eta$. Sau hiệu chỉnh, $\hat{\mathbf{v}}_1 = \mathbf{v}_1/0.1 = \mathbf{g}_1$ và $\hat{\mathbf{s}}_1 = \mathbf{s}_1/0.001 = \mathbf{g}_1^2$, nên tỉ số là $[-1, 1]^\top$: mỗi tham số đi đúng $\eta$. Với $\eta = 0.1$, Adam đi từ $(-8, 1.5)$ tới $(-7.9, 1.4)$.
+
+**Vì sao chia cho $1 - \beta^t$.** Giả sử gradient không đổi, $\mathbf{g}_t = \mathbf{g}$. Khai triển như ở mục Momentum:
+
+$$
+\begin{aligned}
+\mathbf{v}_t &= (1 - \beta_1)\left(1 + \beta_1 + \dots + \beta_1^{t-1}\right)\mathbf{g} \\
+&= (1 - \beta_1)\,\frac{1 - \beta_1^t}{1 - \beta_1}\,\mathbf{g} = \left(1 - \beta_1^t\right)\mathbf{g}
+\end{aligned}
+$$
+
+Dòng thứ hai dùng công thức tổng cấp số nhân $1 + \beta + \dots + \beta^{t-1} = (1 - \beta^t)/(1 - \beta)$. Vậy $\mathbf{v}_t$ chỉ bằng $1 - \beta_1^t$ lần giá trị đúng, và chia cho đúng số đó là trả nó về $\mathbf{g}$. Với $\beta_1 = 0.9$, độ lệch gần hết sau vài chục bước. Với $\beta_2 = 0.999$ thì rất chậm: $1 - 0.999^{100} \approx 0.095$, nên sau 100 bước, $\mathbf{s}_t$ chưa hiệu chỉnh vẫn chỉ bằng khoảng 10% giá trị đúng. Nếu gradient giữ nguyên, tỉ số chưa hiệu chỉnh là $\left(1 - \beta_1^t\right)/\sqrt{1 - \beta_2^t}$ lần $\eta$: 3.16 ở bước 1, lên tới khoảng 6.5 quanh bước 10, còn 3.24 ở bước 100 và khoảng 2 ở bước 290. Không có hiệu chỉnh, hàng trăm bước đầu đều quá dài.
+
+Trên con mương, Adam với $\eta = 0.1$ cần **193 bước**: nhanh hơn GD (369), chậm hơn Momentum (111) và RMSProp (103). Adam không phải nhanh nhất ở mọi bài toán. Điểm mạnh của nó là bền: cùng một $\eta$ chạy được khi thang đo của gradient thay đổi, như ô code thứ nhất sẽ cho thấy.
+
+:::note[Ghi nhớ]
+Momentum cộng dồn gradient để đi nhanh theo hướng nhất quán. RMSProp chia bước của mỗi tham số cho RMS gradient gần đây của nó, nên bước dài cỡ $\eta$ bất kể thang đo. Adam làm cả hai, và chia cho $1 - \beta^t$ để bù việc hai trung bình bắt đầu từ 0.
+:::
+
+### Lịch tốc độ học
+
+Với mini-batch, gradient có nhiễu. Giữ $\eta$ cố định thì tham số cứ nhấp nhô quanh đáy với biên độ cỡ bước đi. Cách chữa là cho $\eta$ đổi theo số bước, gọi là **lịch tốc độ học**. Ba kiểu hay gặp:
+
+- **Giảm theo bậc** (step decay): nhân $\eta$ với 0.1 sau một số epoch cố định.
+- **Giảm theo cosin** (cosine decay): đi từ $\eta_{\max}$ xuống $\eta_{\min}$ theo nửa chu kỳ cosin, chậm ở đầu và cuối, nhanh ở giữa. Công thức ở ngay dưới.
+- **Khởi động** (warmup): vài trăm hoặc vài nghìn bước đầu, tăng $\eta$ tuyến tính từ gần 0 lên $\eta_{\max}$, rồi mới giảm. Lúc đầu, tham số còn ngẫu nhiên và trạng thái bộ tối ưu chưa ổn định, bước lớn dễ làm hỏng việc học. Huấn luyện Transformer và LLM gần như luôn dùng warmup cộng giảm theo cosin.
+
+Với $T$ là tổng số bước, giảm theo cosin là:
+
+$$
+\eta_t = \eta_{\min} + \frac{1}{2}\left(\eta_{\max} - \eta_{\min}\right)\left(1 + \cos\frac{\pi t}{T}\right)
+$$
+
+Ở $t = 0$, $\cos 0 = 1$ nên $\eta_t = \eta_{\max}$. Ở $t = T$, $\cos\pi = -1$ nên $\eta_t = \eta_{\min}$.
+
+### Nên chọn gì trong thực tế
+
+| Tình huống | Gợi ý bắt đầu |
+|---|---|
+| Mạng nơ-ron, bài toán mới | Adam, $\eta = 10^{-3}$. Ít phải chỉnh nhất |
+| Transformer, LLM | AdamW, warmup rồi giảm theo cosin |
+| Mạng tích chập cho ảnh, có thời gian chỉnh | SGD + momentum 0.9 (thường kèm Nesterov), lịch giảm $\eta$ |
+| Mô hình tuyến tính, dữ liệu nhỏ | Không cần các bộ này: phương trình chuẩn, hoặc solver mặc định của scikit-learn |
+
+**AdamW** (Loshchilov và Hutter, 2019) là Adam có weight decay tách riêng. Nếu cộng phạt L2 $\lambda\lVert\boldsymbol{\theta}\rVert^2$ của bài [Ridge, Lasso, Elastic Net](/vi/ml/regularization/) vào hàm mất mát, phần gradient của phạt cũng bị chia cho $\sqrt{\hat{\mathbf{s}}_t}$, nên tham số có gradient lớn bị kéo về 0 ít hơn. AdamW trừ thẳng $\eta\lambda\boldsymbol{\theta}_{t-1}$ ở bước cập nhật, ngoài phân số của Adam, để mọi tham số bị kéo đều nhau.
+
+### Giới hạn
+
+- **Không có bộ tối ưu tốt nhất cho mọi bài.** Trên con mương đồ chơi, Momentum và RMSProp đều nhanh hơn Adam. Wilson và cộng sự (2017) còn thấy các phương pháp thích nghi như Adam đôi khi cho mô hình tổng quát hóa kém hơn SGD có momentum được chỉnh kỹ.
+- **Vẫn chỉ nhìn độ dốc.** Cả bốn thuật toán chỉ dùng gradient. Chúng giảm bớt, chứ không xóa được, ảnh hưởng của số điều kiện; chuẩn hóa đặc trưng vẫn nên làm.
+- **Không có đảm bảo trên hàm không lồi.** Mạng nơ-ron có nhiều cực tiểu cục bộ và điểm yên ngựa. Bài này không chứng minh hội tụ; phần huấn luyện mạng nơ-ron học ở bài Huấn luyện mạng nơ-ron.
+
+## Minh họa
+
+Hình dưới vẽ đường mức của con mương $\mathcal{L} = \frac{1}{2}\left(w_1^2 + 100\,w_2^2\right)$ và 60 bước đầu của ba thuật toán, cùng xuất phát ở $(-8, 1.5)$. Hãy nhìn vào ba kiểu đi: GD nhảy qua lại giữa hai thành rồi bò chậm dọc đáy, Momentum lao dọc thung lũng, vượt qua đáy rồi quay lại, còn Adam đi chéo xuống lòng thung lũng ngay từ đầu, gần như không zigzag.
+
+{/* FIG: OptimizerPathsFigure
+    Ý: trên cùng thung lũng hẹp, GD zigzag rồi bò chậm, Momentum lao nhanh nhưng vượt qua đáy rồi quay lại, Adam đi mượt, không zigzag.
+    Khối và mũi tên: đồ thị sơ đồ (static-plots.md mục 11), trục ngang w1 từ −9 tới 3, trục dọc w2 từ −2 tới 2, cùng một tỉ lệ cho hai trục. Nền là các elip đồng mức của L = 0.5(w1² + 100 w2²), tâm (0, 0), trục dài nằm ngang, tỉ lệ trục 10:1 (axisRatio 10, majorAngle 0). Dấu × ở đáy (0, 0), chấm ở điểm xuất phát (−8, 1.5). Ba đường gấp khúc có chấm nhỏ ở từng bước, mỗi đường 61 điểm (bước 0 tới 60), màu khác nhau: GD (η = 0.018), Momentum (η = 0.018, β = 0.9), Adam (η = 0.1, β1 = 0.9, β2 = 0.999, ε = 1e-8, có hiệu chỉnh độ lệch). Trọng tâm là hình dạng ba đường, không cần vạch chia hay số trên trục. Tọa độ: sinh bằng công thức cập nhật trong bài, làm tròn 3 chữ số (đặc tả trong báo cáo của lesson-writer).
+    Nhãn: "GD", "Momentum", "Adam" (chú giải màu, hoặc nhãn đặt cạnh đầu mỗi đường); "Xuất phát" cạnh chấm đầu; "Đáy" cạnh dấu ×; ký hiệu trục w1, w2 bằng FigMath.
+    Chú thích: Sau 60 bước, GD ở $(-2.690, 0)$ và Adam ở $(-2.799, 0.045)$, còn Momentum đã vượt qua đáy tới $w_1 \approx 2.19$ rồi quay về $(-0.184, -0.065)$. */}
+
+Ô code thứ hai vẽ lại hình này với đủ bốn thuật toán, chạy 100 bước, kèm đường loss. Bạn có thể đổi $\eta$ và $\beta$ ở đó.
+
+## Ví dụ code
+
+Ba ô dưới đây chạy độc lập. Ô thứ hai cần Matplotlib, ô thứ ba cần thêm scikit-learn, nên lần đầu chạy lâu hơn. Ô thứ ba huấn luyện ba mạng nơ-ron nhỏ, mất thêm vài giây.
+
+Ô thứ nhất cài đặt bốn thuật toán bằng NumPy, chạy trên con mương từ $(-8, 1.5)$, dừng khi khoảng cách tới đáy nhỏ hơn 0.01 hoặc sau 1000 bước. Lần chạy thứ hai nhân hàm mất mát với 10 (`scale = 10`), giữ nguyên mọi $\eta$.
+
+<PythonRunner code={compareCode} title="Bốn bộ tối ưu trên thung lũng hẹp" />
+
+Với `scale = 1`, số bước khớp phần Lý thuyết: GD 369, Momentum 111, RMSProp 103, Adam 193. Cột `L` là giá trị mất mát lúc dừng, đều dưới $5 \times 10^{-3}$. Với `scale = 10`, độ cong theo $w_2$ thành 1000 và ngưỡng của GD thành $2/1000 = 0.002$, nên $\eta = 0.018$ làm cả GD lẫn Momentum phân kỳ. RMSProp và Adam đi **đúng số bước như cũ**: gradient lớn gấp 10, mẫu số cũng lớn gấp 10, bước không đổi. `L` lúc dừng lớn gấp 10 chỉ vì chính hàm mất mát đã nhân 10. Hãy thử giảm `beta1` của Momentum xuống 0.5 hoặc thay `eta` của Adam bằng 0.3.
+
+Ô thứ hai vẽ đường đi 100 bước đầu trên đường mức (bên trái) và mất mát theo số bước, trục tung theo thang log (bên phải).
+
+<PythonRunner
+  code={pathsCode}
+  title="Đường đi trên đường mức"
+  figureAlt={['Bên trái: đường mức hình elip dẹt nằm ngang, tâm ở gốc tọa độ, và bốn đường đi từ điểm (-8, 1.5). GD nhảy qua lại theo chiều dọc vài lần rồi bò dọc trục ngang, dừng quanh -1.3. Momentum nhảy qua lại rất rộng, vượt qua gốc tới khoảng 2.2 rồi quay về gần gốc. RMSProp nhảy một bước dài tới (-7, 0.5), rồi đi thẳng dọc trục ngang tới sát gốc. Adam đi chéo xuống, uốn nhẹ quanh trục ngang và dừng quanh -0.9. Bên phải: mất mát theo số bước, trục log; RMSProp giảm đều và thấp nhất, Momentum giảm nhanh nhưng răng cưa, GD và Adam giảm chậm và gần nhau.']}
+/>
+
+Sau 100 bước, mất mát của RMSProp là $7.1 \times 10^{-5}$, Momentum $1.1 \times 10^{-3}$, Adam $0.45$, GD $0.85$. Đường loss của Momentum có răng cưa: viên bi nhảy qua lại theo chiều hẹp, và mỗi lần nó lên gần thành mương thì loss tăng trở lại. Đường đỏ của Adam uốn mềm quanh trục $w_1$, khác hẳn kiểu zigzag của GD. Để ý cả bước đầu của RMSProp: một bước dài 1.0 thay vì 0.1, đúng như phép tính ở mục RMSProp.
+
+Ô thứ ba chuyển sang dữ liệu thật: 1 797 ảnh chữ số viết tay $8 \times 8$ của `load_digits`, 75% để huấn luyện. Mô hình là `MLPClassifier`, một mạng nơ-ron nhỏ với 32 nơ-ron ẩn, học ở bài Mạng nơ-ron nhân tạo. Ở đây chỉ cần coi nó là một mô hình có khoảng 2 400 tham số và hàm mất mát không lồi. Ba lần huấn luyện có cùng khởi tạo, cùng $\eta = 0.01$, mini-batch 64 ảnh, 20 epoch; chỉ đổi bộ tối ưu. Loss là cross-entropy trung bình trên tập huấn luyện trong mỗi epoch.
+
+<PythonRunner
+  code={minibatchCode}
+  title="SGD, Momentum và Adam trên load_digits"
+  figureAlt={['Loss huấn luyện theo epoch từ 1 tới 20, trục tung log. SGD gần như nằm ngang, giảm chậm từ khoảng 2.4 xuống 1.48. Momentum giảm đều từ khoảng 2.2 xuống 0.18. Adam giảm nhanh nhất, từ 1.6 xuống dưới 0.04 ở epoch 20, có vài chỗ gợn nhỏ.']}
+/>
+
+Sau 20 epoch: SGD còn loss 1.4786 và độ chính xác trên tập kiểm tra 0.680; Momentum 0.1815 và 0.947; Adam 0.0321 và 0.971. Chỗ gợn trên đường của Adam là nhiễu của mini-batch. Phần lớn lợi thế của Momentum ở đây đến từ bước dài gấp khoảng 10 lần: thử đổi `learning_rate_init` của SGD thành 0.1, loss sau 20 epoch là 0.1783, ngang Momentum với $\eta = 0.01$. Còn Adam với $\eta = 0.1$ lại kém hơn ($0.936$ trên tập kiểm tra), vì bước dài cỡ $\eta$ cho mọi tham số thì 0.1 là quá lớn.
+
+## Lỗi hay gặp
+
+:::caution[Đổi bộ tối ưu mà giữ nguyên tốc độ học]
+Mỗi bộ tối ưu hiểu $\eta$ theo một cách. Với Momentum $\beta = 0.9$, bước thật dài cỡ $10\,\eta\,\lVert\mathbf{g}\rVert$; với Adam, bước dài cỡ $\eta$ bất kể gradient. Ở ô thứ ba, SGD với $\eta = 0.1$ cho loss 0.1783, gần như Momentum với $\eta = 0.01$. Khi đổi bộ tối ưu, hãy dò lại $\eta$, bắt đầu từ giá trị mặc định của nó: $10^{-3}$ cho Adam, khoảng $10^{-2}$ tới $10^{-1}$ cho SGD có momentum.
+:::
+
+:::caution[Tự cài Adam mà quên hiệu chỉnh độ lệch, hoặc đếm $t$ từ 0]
+Bỏ hiệu chỉnh thì hàng trăm bước đầu dài gấp 2 tới 6.5 lần $\eta$ (với $\beta_1 = 0.9$, $\beta_2 = 0.999$), dễ làm hỏng mô hình ngay từ đầu. Đếm $t$ từ 0 thì $1 - \beta_1^0 = 0$ và phép chia cho kết quả vô cùng. Bước đầu tiên phải là $t = 1$, như vòng `for t in range(1, ...)` ở ô thứ nhất. Tốt nhất là dùng bản cài đặt của thư viện.
+:::
+
+:::caution[Nghĩ rằng Adam thay được chuẩn hóa đặc trưng]
+Adam bù được việc thang đo gradient khác nhau giữa các tham số, nhưng chỉ theo từng trục tọa độ. Khi thung lũng nằm chéo (hai đặc trưng tương quan), chia theo từng tham số không làm nó tròn lại. Chuẩn hóa đặc trưng như ở bài [Gradient Descent](/vi/ml/gradient-descent/) vẫn rẻ và nên làm trước.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- GD thuần bò chậm khi $\kappa$ lớn, vì thành dốc ép $\eta < 2/L$ còn hướng phẳng cần bước dài. Trên con mương $\kappa = 100$, GD cần 369 bước.
+- Momentum: $\mathbf{v}_t = \beta\mathbf{v}_{t-1} + \mathbf{g}_t$, $\boldsymbol{\theta}_t = \boldsymbol{\theta}_{t-1} - \eta\mathbf{v}_t$. Theo hướng nhất quán, bước dài gấp $1/(1 - \beta)$; theo hướng đổi dấu, gradient triệt tiêu bớt. Cái giá là vượt qua đáy.
+- RMSProp chia bước của mỗi tham số cho căn trung bình động mũ của $\mathbf{g}_t^2$, nên bước dài cỡ $\eta$ và không đổi khi nhân hàm mất mát với một hằng số. AdaGrad cộng dồn thay vì lấy trung bình, nên tốc độ học co mãi về 0.
+- Adam ghép hai trung bình động ($\beta_1 = 0.9$, $\beta_2 = 0.999$) và chia chúng cho $1 - \beta^t$ để bù việc bắt đầu từ 0; không có bước này, bước đầu dài gấp khoảng 3.16 lần. Mặc định nên thử: Adam (AdamW) với $\eta = 10^{-3}$, cộng một lịch tốc độ học.
+
+**Đọc thêm:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Bài 8: Gradient Descent (phần 2/2)](https://machinelearningcoban.com/2017/01/16/gradientdescent2/). Tiếng Việt, có Momentum và Nesterov với hình động. Ký hiệu khác: $\gamma$ là hệ số momentum, và vận tốc đã nhân sẵn $\eta$: $v_t = \gamma v_{t-1} + \eta\nabla J$, rồi trừ thẳng $v_t$.
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. (2023). [*Dive into Deep Learning*, chương 12: Optimization Algorithms](https://d2l.ai/chapter_optimization/), các mục 12.6 (Momentum) tới 12.11 (Learning Rate Scheduling). Có code và hình cho từng thuật toán; dùng cùng ký hiệu $\mathbf{v}_t$, $\mathbf{s}_t$ như bài này.
+- Goh, G. (2017). [*Why Momentum Really Works*](https://distill.pub/2017/momentum/). *Distill*. Hình tương tác rất đẹp về Momentum trên hàm bậc hai, và vì sao nó vượt quá rồi dao động.
+- Ruder, S. (2016). [*An overview of gradient descent optimization algorithms*](https://arxiv.org/abs/1609.04747). arXiv:1609.04747. Tổng quan ngắn gọn các bộ tối ưu trong bài và vài biến thể khác.
+- Các bài gốc. Kingma, D. P., Ba, J. (2015). [*Adam: A Method for Stochastic Optimization*](https://arxiv.org/abs/1412.6980). ICLR 2015: mục 3 giải thích hiệu chỉnh độ lệch. Duchi, J., Hazan, E., Singer, Y. (2011). [*Adaptive Subgradient Methods for Online Learning and Stochastic Optimization*](https://jmlr.org/papers/v12/duchi11a.html). *JMLR* 12, 2121–2159: AdaGrad. Hinton, G., Srivastava, N., Swersky, K. (2012). [*Neural Networks for Machine Learning*, Lecture 6](https://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf) (PDF), bài 6e: RMSProp, chưa từng đăng thành bài báo. Loshchilov, I., Hutter, F. (2019). [*Decoupled Weight Decay Regularization*](https://arxiv.org/abs/1711.05101). ICLR 2019: AdamW.
+
+<LessonProgress />

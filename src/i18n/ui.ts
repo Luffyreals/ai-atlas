@@ -59,6 +59,11 @@ export const UI_KEYS = {
     'slowNote', 'zigzagNote', 'diverged', 'announceStep', 'announceEta', 'running', 'stopped', 'atEnd',
     'resetDone',
   ],
+  vizThreshold: [
+    'caption', 'plotLabel', 'rule', 'threshold', 'controls', 'thresholdLabel', 'thresholdValueText',
+    'matrixLabel', 'trueLabel', 'predPositive', 'predNegative', 'actualPositive', 'actualNegative',
+    'accuracy', 'precision', 'recall', 'f1', 'noPositive', 'undefinedValue', 'announce',
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 export type UiNamespace = keyof typeof UI_KEYS;

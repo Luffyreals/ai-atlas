@@ -1,0 +1,333 @@
+---
+title: K-Nearest Neighbors (KNN)
+description: Đoán nhãn một điểm mới bằng cách hỏi các điểm gần nó nhất. Bỏ phiếu và lấy trung bình, chọn k, ranh giới quyết định, chuẩn hóa đặc trưng, lời nguyền số chiều.
+quiz:
+  - question: 'Bạn khớp KNN với $k = 1$ rồi tính accuracy trên chính tập train, được $1.000$. Con số này cho bạn biết gì?'
+    options:
+      - 'Gần như không gì: điểm train gần nhất với mỗi điểm train là chính nó'
+      - 'Mô hình rất tốt, nên giữ $k = 1$'
+      - 'Dữ liệu không có nhiễu'
+      - 'Accuracy trên tập test cũng sẽ gần $1.000$'
+    answer: 0
+    explanation: 'Khi dự đoán một điểm train, chính điểm đó nằm trong tập train với khoảng cách 0, nên nó là láng giềng gần nhất và "bỏ phiếu" cho đúng nhãn của mình. Accuracy train bằng 1 với mọi bộ dữ liệu không có hai điểm trùng nhau mà khác nhãn, kể cả dữ liệu rất nhiễu. Trên 50 điểm của bài, $k = 1$ đạt $1.000$ trên train nhưng chỉ $0.733$ trên test.'
+  - question: 'KNN dùng hai đặc trưng chưa chuẩn hóa: chiều cao (mét) và cân nặng (kg). Đồng nghiệp đổi cột chiều cao sang centimét rồi khớp lại với cùng $k$. Dự đoán thay đổi thế nào?'
+    options:
+      - 'Không đổi, vì đổi đơn vị không làm đổi dữ liệu'
+      - 'Không đổi, vì KNN không có tham số để học'
+      - 'Có thể đổi: chiều cao lớn lên 100 lần nên lấn át khoảng cách, láng giềng gần nhất có thể khác đi'
+      - 'Chắc chắn tệ hơn, vì centimét là đơn vị nhỏ hơn'
+    answer: 2
+    explanation: 'Chênh lệch chiều cao nhân 100 thì bình phương của nó nhân 10 000, nên khoảng cách gần như chỉ còn phụ thuộc chiều cao. Tập láng giềng đổi theo, nên dự đoán có thể đổi, không chắc tốt hơn hay tệ hơn. KNN không học tham số, nhưng nó dựa hoàn toàn vào khoảng cách. Có `StandardScaler` trong pipeline thì đổi đơn vị không còn ảnh hưởng.'
+  - question: 'Tập train có 35 điểm: 18 điểm lớp 1, 17 điểm lớp 0. Bạn đặt $k = 35$. KNN dự đoán gì cho một điểm mới?'
+    options:
+      - 'Lớp của điểm train gần nó nhất'
+      - 'Tùy vị trí điểm mới, vì các điểm gần vẫn được ưu tiên'
+      - 'Không dự đoán được, vì $k$ phải nhỏ hơn số điểm train'
+      - 'Luôn là lớp 1, ở mọi vị trí'
+    answer: 3
+    explanation: 'Với $k = m$, mọi điểm train đều là láng giềng, ở bất kỳ vị trí nào. Phiếu luôn là 18 với 17, nên lớp 1 luôn thắng: mô hình bỏ qua hẳn đặc trưng, đó là underfitting nặng nhất. Các điểm gần chỉ được ưu tiên khi dùng `weights=''distance''`; mặc định mọi phiếu ngang nhau.'
+  - question: 'Dữ liệu rải đều trong khối lập phương đơn vị 20 chiều. Một khối lập phương con chứa 10% dữ liệu có cạnh dài khoảng bao nhiêu?'
+    options:
+      - 'Khoảng $0.005$, vì $10\%$ chia cho 20 chiều'
+      - 'Khoảng $0.1$, như trường hợp một chiều'
+      - 'Khoảng $0.89$, gần bằng cả cạnh khối lớn'
+      - 'Khoảng $0.5$, nửa cạnh khối lớn'
+    answer: 2
+    explanation: 'Thể tích khối con là $\ell^{20} = 0.1$, nên $\ell = 0.1^{1/20} \approx 0.89$. Muốn gom đủ 10% dữ liệu, mỗi chiều phải trải gần hết khoảng giá trị, nên "láng giềng" không còn gần chút nào. Đáp án $0.1$ chỉ đúng khi $n = 1$; số chiều càng lớn, cạnh càng tiến về 1.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import knnNumpyCode from '@code/ml/k-nearest-neighbors/knn-numpy.vi.py?raw';
+import chooseKCode from '@code/ml/k-nearest-neighbors/choose-k.vi.py?raw';
+import scalingCode from '@code/ml/k-nearest-neighbors/scaling.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu cách K-Nearest Neighbors (KNN, k láng giềng gần nhất) dự đoán: tìm $k$ điểm train gần nhất, rồi bỏ phiếu đa số (majority vote) khi phân loại, lấy trung bình khi hồi quy.
+- Tính được khoảng cách Euclid (Euclidean distance), đọc được ranh giới quyết định (decision boundary) và độ chính xác (accuracy) của một bộ phân loại.
+- Giải thích vì sao $k = 1$ dẫn tới overfitting, $k$ quá lớn dẫn tới underfitting, và chọn $k$ bằng kiểm định chéo.
+- Nhận ra hai điểm yếu của KNN: phải chuẩn hóa đặc trưng (feature scaling), và kém đi khi có nhiều đặc trưng vì lời nguyền số chiều (curse of dimensionality).
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Một mẫu có $n$ đặc trưng là một **vectơ** (vector) $\mathbf{x} = [x_1, \dots, x_n]^\top$, tức một điểm trong không gian $n$ chiều. **Độ dài** (chuẩn, norm) của vectơ $\mathbf{v}$ là $\lVert\mathbf{v}\rVert = \sqrt{v_1^2 + \dots + v_n^2}$: với $n = 2$, đó chính là định lý Pythagoras. Khoảng cách giữa hai điểm là độ dài của hiệu hai vectơ. Bài này cũng dùng tập train, tập test ở bài [Tổng quan về Học máy](/vi/ml/ml-overview/) và đường cong sai số ở bài [Overfitting và Underfitting](/vi/ml/overfitting-underfitting/).
+:::
+
+## Trực giác
+
+Ông bà ta có câu "bán anh em xa, mua láng giềng gần". KNN làm đúng như vậy: muốn biết một điểm mới thuộc loại nào, hãy hỏi những điểm ở **gần** nó.
+
+Bạn đã gặp KNN một lần. Ở bài [Tổng quan về Học máy](/vi/ml/ml-overview/), mô hình phân loại căn hộ đắt hay rẻ nhìn 3 căn có diện tích gần nhất rồi theo số đông. Còn mô hình "học thuộc" chép giá của **một** căn gần nhất, và đạt MSE train bằng 0.0000. Bài này mở hộp đen đó ra.
+
+### Hai vầng trăng
+
+Dữ liệu của bài là 50 điểm trên mặt phẳng, mỗi điểm có hai đặc trưng $x_1$, $x_2$ và một nhãn: lớp 0 hoặc lớp 1. Điểm được sinh bằng `make_moons` của scikit-learn: lớp 0 xếp thành một vầng trăng khuyết úp xuống ở phía trên, lớp 1 thành một vầng trăng ngửa lên ở phía dưới, lồng vào nhau. Có thêm **nhiễu** (noise), nên vài điểm lạc sang vùng của lớp kia. Bài lấy 35 điểm làm tập train, 15 điểm làm tập test.
+
+Ranh giới giữa hai lớp là một đường cong hình chữ S. Không đường thẳng nào tách được hai vầng trăng. Nhưng bạn không cần biết hình dạng ranh giới: chỉ cần nhìn quanh điểm mới.
+
+### Một láng giềng hay năm láng giềng
+
+Lấy điểm mới $(-0.4, 0.6)$. Nó nằm giữa vầng trăng phía trên, vùng của lớp 0. Năm điểm train gần nó nhất là:
+
+| Láng giềng | Điểm | Nhãn | Khoảng cách |
+|---:|---|---:|---:|
+| 1 | $(-0.25, 0.64)$ | 1 | 0.155 |
+| 2 | $(-0.54, 0.18)$ | 0 | 0.443 |
+| 3 | $(-0.01, 0.93)$ | 0 | 0.511 |
+| 4 | $(-0.81, 0.95)$ | 0 | 0.539 |
+| 5 | $(-0.96, 0.68)$ | 0 | 0.566 |
+
+Láng giềng gần nhất lại thuộc lớp 1. Đó là một điểm bị nhiễu đẩy lạc vào vùng lớp 0. Nếu chỉ hỏi **một** láng giềng, bạn đoán lớp 1. Hỏi **năm**, phiếu là 4 với 1, và bạn đoán lớp 0.
+
+Vậy hỏi bao nhiêu láng giềng thì đủ? "Gần" đo bằng gì? Và có khi nào đo "gần" lại đánh lừa bạn?
+
+Bài toán của bài này là: **đoán nhãn của một điểm mới chỉ từ nhãn của các điểm train gần nó, chọn số láng giềng $k$ sao cho đủ để không bị một điểm nhiễu đánh lừa, mà không nhiều tới mức xóa mất hình dạng thật của dữ liệu.**
+
+## Lý thuyết
+
+### Phát biểu bài toán
+
+Tập train có $m$ mẫu $\left(\mathbf{x}^{(i)}, y^{(i)}\right)$, mỗi mẫu có $n$ đặc trưng. Ở bộ hai vầng trăng, $m = 35$, $n = 2$, và nhãn $y^{(i)}$ là 0 hoặc 1. Cho một điểm mới $\mathbf{x}$, gọi là **điểm truy vấn** (query point), ta cần dự đoán $\hat{y}$.
+
+KNN làm ba bước:
+
+1. Tính khoảng cách từ $\mathbf{x}$ tới cả $m$ điểm train.
+2. Lấy ra $k$ điểm có khoảng cách nhỏ nhất. Tập chỉ số của chúng ký hiệu là $\mathcal{N}_k(\mathbf{x})$.
+3. Gộp nhãn của $k$ điểm đó thành một dự đoán.
+
+$k$ là một siêu tham số (hyperparameter): bạn đặt nó trước, không phải con số mà dữ liệu tìm ra.
+
+### Đo khoảng cách
+
+Cách đo hay dùng nhất là **khoảng cách Euclid**, tức độ dài của đoạn thẳng nối hai điểm:
+
+$$
+d\left(\mathbf{x}, \mathbf{x}^{(i)}\right) = \sqrt{\sum_{j=1}^{n}\left(x_j - x^{(i)}_j\right)^2} = \left\lVert \mathbf{x} - \mathbf{x}^{(i)} \right\rVert
+$$
+
+Lấy hiệu từng đặc trưng, bình phương, cộng lại, rồi lấy căn. Với điểm truy vấn $\mathbf{x} = (-0.4, 0.6)$ và láng giềng gần nhất $(-0.25, 0.64)$:
+
+$$
+\begin{aligned}
+d &= \sqrt{(-0.4 + 0.25)^2 + (0.6 - 0.64)^2} \\
+&= \sqrt{0.0225 + 0.0016} \\
+&= \sqrt{0.0241} \approx 0.155
+\end{aligned}
+$$
+
+Dòng thứ hai bình phương hai hiệu $-0.15$ và $-0.04$. Để ý hai số hạng này: chênh lệch theo $x_1$ lớn gấp gần 4 lần chênh lệch theo $x_2$, nhưng sau khi bình phương thì lớn gấp 14 lần. Đặc trưng nào chênh nhiều thì quyết định khoảng cách. Chuyện này sẽ quay lại ở mục chuẩn hóa.
+
+Một cách đo khác là **khoảng cách Manhattan** (Manhattan distance): cộng trị tuyệt đối các hiệu, $\sum_{j}\left\lvert x_j - x^{(i)}_j\right\rvert$, như đi bộ theo các dãy phố ô bàn cờ. Với hai điểm trên, nó bằng $0.15 + 0.04 = 0.19$. Trong scikit-learn, `KNeighborsClassifier` mặc định dùng Euclid; đặt `p=1` để đổi sang Manhattan.
+
+### Bỏ phiếu và lấy trung bình
+
+**Phân loại.** Mỗi láng giềng bỏ một phiếu cho nhãn của mình. Lớp nhiều phiếu nhất thắng:
+
+$$
+\hat{y} = \arg\max_{c} \sum_{i \in \mathcal{N}_k(\mathbf{x})} \mathbb{1}\left[y^{(i)} = c\right]
+$$
+
+- $\mathbb{1}[\cdot]$ bằng 1 khi điều trong ngoặc đúng, bằng 0 khi sai. Tổng của nó là số phiếu của lớp $c$.
+- $\arg\max_c$ nghĩa là "lớp $c$ làm tổng lớn nhất".
+
+Với điểm $(-0.4, 0.6)$ và $k = 5$, lớp 0 có 4 phiếu, lớp 1 có 1 phiếu, nên $\hat{y} = 0$.
+
+**Hồi quy.** Nhãn là con số, nên thay vì bỏ phiếu, lấy trung bình nhãn của $k$ láng giềng:
+
+$$
+\hat{y} = \frac{1}{k}\sum_{i \in \mathcal{N}_k(\mathbf{x})} y^{(i)}
+$$
+
+Với bảng 10 căn hộ ở bài Tổng quan, căn 50 m² có ba căn gần nhất là 48, 55 và 42 m², giá 9.4, 12.2 và 8.8 triệu. KNN với $k = 3$ đoán $(9.4 + 12.2 + 8.8)/3 \approx 10.13$ triệu. Đây là `KNeighborsRegressor(n_neighbors=3)`.
+
+**Khi phiếu hòa.** Hai lớp với $k$ chẵn có thể hòa, ví dụ 2 với 2. scikit-learn khi đó chọn lớp đứng trước trong `classes_`, tức nhãn nhỏ nhất: một quy ước, không có lý do gì về dữ liệu. Vì vậy, với hai lớp, hãy dùng $k$ lẻ. Còn khi hai điểm train cách điểm truy vấn **đúng bằng nhau** ở ranh giới thứ $k$, tài liệu scikit-learn ghi rõ: kết quả phụ thuộc thứ tự dữ liệu train.
+
+### Học lười
+
+Hồi quy tuyến tính làm việc nặng lúc huấn luyện: giải ra $\mathbf{w}$ và $b$, rồi bỏ dữ liệu đi. Dự đoán chỉ tốn $n$ phép nhân.
+
+KNN thì ngược lại. `fit` gần như chỉ **cất dữ liệu train** đi, không học tham số nào. Mọi việc dồn vào lúc dự đoán: mỗi điểm truy vấn phải tính khoảng cách tới cả $m$ điểm train, mỗi khoảng cách tốn cỡ $n$ phép tính, tức cỡ $m \times n$ phép tính. Kiểu mô hình này gọi là **học lười** (lazy learning). Với một triệu mẫu và 100 đặc trưng, đó là khoảng $10^8$ phép tính cho **mỗi** dự đoán. scikit-learn có thể dựng sẵn cây KD (KD-tree) hoặc ball tree lúc `fit` để tìm láng giềng nhanh hơn, nhưng cây chỉ giúp nhiều khi số đặc trưng nhỏ.
+
+### Ranh giới quyết định và độ chính xác
+
+Tô màu mọi điểm của mặt phẳng theo lớp mà KNN dự đoán, bạn được hai vùng. Đường phân cách hai vùng là **ranh giới quyết định**: bước qua nó thì dự đoán đổi lớp. Với KNN, ranh giới không phải đường thẳng mà uốn theo dữ liệu, nên tách được hai vầng trăng.
+
+Với phân loại, MSE không còn hợp: đoán lớp 1 khi đáp án là lớp 0 thì "sai bao nhiêu"? Thước đo đơn giản nhất là **độ chính xác** (accuracy), tỉ lệ mẫu đoán đúng:
+
+$$
+\text{accuracy} = \frac{1}{m}\sum_{i=1}^{m}\mathbb{1}\left[\hat{y}^{(i)} = y^{(i)}\right]
+$$
+
+Đếm số mẫu đoán đúng, chia cho tổng số mẫu. 15 điểm test đúng 11 điểm thì accuracy là $11/15 \approx 0.733$. Accuracy càng **lớn** càng tốt, ngược với MSE. Nó cũng có điểm yếu, nhất là khi một lớp chiếm gần hết dữ liệu; bài [Đánh giá mô hình: Accuracy, Precision, Recall, F1](/vi/ml/classification-metrics/) sẽ nói kỹ.
+
+### Chọn k
+
+$k$ đóng vai trò như bậc đa thức ở bài [Overfitting và Underfitting](/vi/ml/overfitting-underfitting/), nhưng theo chiều ngược lại: $k$ **nhỏ** là mô hình linh hoạt.
+
+- **$k = 1$:** mỗi điểm train tự quyết định một vùng nhỏ quanh nó. Điểm nhiễu $(-0.25, 0.64)$ của lớp 1 tạo ra một "hòn đảo" lớp 1 giữa vùng lớp 0, và ranh giới răng cưa theo từng điểm. Accuracy train luôn bằng 1, vì khi dự đoán một điểm train, chính nó là láng giềng gần nhất (khoảng cách 0). Đây là overfitting: mô hình học thuộc cả nhiễu.
+- **$k$ vừa phải:** vài điểm nhiễu bị số đông át đi. Ranh giới mượt hơn và theo hình hai vầng trăng.
+- **$k$ quá lớn:** láng giềng của mỗi điểm trải ra quá xa, gồm cả điểm của vầng trăng kia. Ranh giới thô đi, bỏ mất chỗ uốn. Cực đoan nhất là $k = m$: mọi điểm train đều là láng giềng của mọi điểm truy vấn, nên mô hình luôn đoán lớp đông hơn trong tập train. Đây là underfitting.
+
+Trên bộ hai vầng trăng (ô code thứ hai tính các số này):
+
+| $k$ | Accuracy train | Accuracy test |
+|---:|---:|---:|
+| 1 | 1.000 | 0.733 |
+| 3 | 0.943 | 0.800 |
+| 7 | 0.943 | 1.000 |
+| 15 | 0.914 | 0.800 |
+| 25 | 0.743 | 0.800 |
+| 35 | 0.514 | 0.467 |
+
+Accuracy train giảm dần khi $k$ tăng. Accuracy test tăng rồi giảm: một chữ U **lộn ngược**, vì accuracy càng lớn càng tốt. Ở $k = 35 = m$, tập train có 18 điểm lớp 1 và 17 điểm lớp 0, nên mọi dự đoán đều là lớp 1, và accuracy test chỉ còn 0.467, thấp hơn cả đoán bừa.
+
+Accuracy test 1.000 ở $k = 7$ nghe rất đẹp, nhưng nó chỉ tính trên 15 điểm. Đừng chọn $k$ bằng cách nhìn bảng này: đó là chọn mô hình bằng tập test. Hãy chọn $k$ bằng **kiểm định chéo** (cross-validation) trên tập train, như cách chọn bậc ở bài Overfitting, rồi mới chấm một lần trên tập test (ô code thứ ba).
+
+### Chuẩn hóa đặc trưng
+
+Khoảng cách Euclid cộng bình phương chênh lệch của mọi đặc trưng **theo đơn vị gốc**. Đặc trưng nào có số lớn sẽ lấn át.
+
+Bộ dữ liệu rượu vang `load_wine` có 13 đặc trưng hóa học. Đặc trưng proline nằm trong khoảng 278 tới 1680. Đặc trưng hue (sắc độ màu) nằm trong khoảng 0.48 tới 1.71. Hai chai vang chênh proline 100, mức chênh nhỏ đối với proline, góp $100^2 = 10\,000$ vào bình phương khoảng cách. Chênh hue trên **cả** khoảng giá trị, $1.71 - 0.48 = 1.23$, chỉ góp $1.23^2 \approx 1.51$. KNN gần như không nhìn thấy hue. Ở ô code thứ ba, proline chiếm 99.76% tổng bình phương khoảng cách giữa các cặp chai test và train.
+
+Cách chữa là **chuẩn hóa đặc trưng** bằng z-score, như bài [Ridge, Lasso, Elastic Net](/vi/ml/regularization/):
+
+$$
+z_j = \frac{x_j - \mu_j}{\sigma_j}
+$$
+
+với $\mu_j$, $\sigma_j$ là trung bình và độ lệch chuẩn của đặc trưng $j$, tính **trên tập train** (`StandardScaler`). Trên tập train của vang, $\sigma$ của proline là 325.4, của hue là 0.221. Sau chuẩn hóa, mức chênh 100 của proline chỉ còn $100/325.4 \approx 0.31$, còn mức chênh 1.23 của hue thành $1.23/0.221 \approx 5.57$. Mỗi đặc trưng được đo bằng "bao nhiêu độ lệch chuẩn", nên không đặc trưng nào thắng chỉ nhờ đơn vị.
+
+Bộ hai vầng trăng không cần bước này: hai đặc trưng đã cùng thang đo, cỡ từ $-1.3$ tới $2.2$.
+
+### Trọng số theo khoảng cách
+
+Bỏ phiếu đều coi láng giềng thứ nhất và láng giềng thứ $k$ như nhau. Một biến thể cho mỗi láng giềng phiếu nặng $1/d_i$, với $d_i = d\left(\mathbf{x}, \mathbf{x}^{(i)}\right)$:
+
+$$
+\hat{y} = \arg\max_{c} \sum_{i \in \mathcal{N}_k(\mathbf{x})} \frac{1}{d_i}\,\mathbb{1}\left[y^{(i)} = c\right]
+$$
+
+Điểm càng gần, phiếu càng nặng. Với điểm $(-0.4, 0.6)$ và $k = 5$, lớp 1 được $1/0.155 \approx 6.44$, lớp 0 được $1/0.443 + 1/0.511 + 1/0.539 + 1/0.566 \approx 7.84$. Lớp 0 vẫn thắng, nhưng sát nút hơn nhiều so với 4 phiếu với 1. Trong scikit-learn là `weights='distance'`. Nếu điểm truy vấn trùng hẳn một điểm train ($d_i = 0$), scikit-learn lấy luôn nhãn của điểm trùng.
+
+### Lời nguyền số chiều
+
+KNN dựa trên một giả định: điểm gần thì giống nhau. Với ít đặc trưng, giả định này ổn. Với nhiều đặc trưng, "gần" mất dần ý nghĩa.
+
+Giả sử dữ liệu rải đều trong một khối lập phương cạnh 1, có $n$ chiều. Bạn muốn một khối lập phương con chứa 10% dữ liệu, để có đủ láng giềng. Thể tích khối con là $\ell^n$, với $\ell$ là cạnh của nó. Đặt $\ell^n = 0.1$ rồi lấy căn bậc $n$ hai vế:
+
+$$
+\ell = 0.1^{1/n}
+$$
+
+- $n = 1$: $\ell = 0.1$, một đoạn ngắn.
+- $n = 2$: $\ell \approx 0.316$.
+- $n = 10$: $\ell \approx 0.794$.
+- $n = 100$: $\ell \approx 0.977$, gần bằng cả cạnh khối lớn.
+
+Với 100 đặc trưng, muốn gom 10% dữ liệu, mỗi chiều phải trải gần hết khoảng giá trị. "Láng giềng gần nhất" khi đó không còn gần, và khoảng cách từ một điểm tới các điểm khác gần như bằng nhau. Hiện tượng này gọi là **lời nguyền số chiều**. Muốn KNN chạy tốt với nhiều đặc trưng, bạn cần rất nhiều dữ liệu, hoặc bớt đặc trưng trước: chọn đặc trưng có ích, hoặc giảm số chiều bằng các kỹ thuật như PCA.
+
+:::note[Ghi nhớ]
+KNN dự đoán bằng $k$ điểm train gần nhất: bỏ phiếu khi phân loại, lấy trung bình khi hồi quy. $k$ nhỏ thì overfitting, $k$ lớn thì underfitting; chọn $k$ bằng kiểm định chéo, dùng $k$ lẻ khi có hai lớp. Luôn chuẩn hóa đặc trưng trước, vì khoảng cách cộng các đặc trưng theo đơn vị gốc.
+:::
+
+### Giới hạn
+
+- **Dự đoán chậm khi dữ liệu lớn.** Mỗi dự đoán quét cả tập train (mục Học lười).
+- **Nhạy với thang đo và đặc trưng vô ích.** Một đặc trưng không liên quan tới nhãn vẫn góp vào khoảng cách như mọi đặc trưng khác (ô code thứ ba, hộp Lỗi hay gặp đầu tiên).
+- **Kém với nhiều đặc trưng** vì lời nguyền số chiều.
+- **Không cho biết đặc trưng nào quan trọng.** KNN không có trọng số để đọc như hồi quy tuyến tính. Bài Hồi quy Logistic và bài Decision Tree và Random Forest cho những mô hình phân loại dễ đọc hơn.
+
+## Minh họa
+
+Hình dưới vẽ 35 điểm train (chấm đặc) và 15 điểm test (vòng rỗng) của bộ hai vầng trăng. Nền được tô màu theo lớp mà KNN dự đoán tại từng chỗ, nên chỗ đổi màu chính là ranh giới quyết định. Thanh trượt đổi $k$ qua các số lẻ từ 1 tới 35. Bên dưới là accuracy train và accuracy test của $k$ đang chọn. Bạn có thể kéo điểm truy vấn (dấu chữ thập) tới bất kỳ đâu: hình nối nó với $k$ láng giềng gần nhất và ghi số phiếu của mỗi lớp. Hãy thử:
+
+1. Lúc đầu $k = 1$: ranh giới răng cưa, có hòn đảo lớp 1 quanh điểm train $(-0.25, 0.64)$ nằm giữa vùng lớp 0. Accuracy train 1.000, accuracy test 0.733.
+2. Kéo điểm truy vấn tới $(-0.4, 0.6)$: với $k = 1$, nó nối với đúng điểm lạc đó và được đoán lớp 1. Tăng lên $k = 5$: phiếu thành 4 với 1, dự đoán đổi sang lớp 0.
+3. Kéo $k$ tới 7: hòn đảo biến mất, ranh giới mượt theo hình hai vầng trăng. Accuracy train giảm còn 0.943, accuracy test lên 1.000.
+4. Kéo tiếp tới $k = 15$ rồi $k = 35$: ranh giới thô dần, accuracy test về 0.800 rồi 0.467. Ở $k = 35$, cả nền một màu lớp 1.
+
+{/* VIZ: KnnViz
+    Ý: k nhỏ cho ranh giới răng cưa và accuracy train bằng 1 (overfitting), k vừa cho ranh giới mượt và accuracy test cao nhất, k quá lớn xóa mất hình dạng dữ liệu (underfitting).
+    Tương tác: thanh trượt k qua các số lẻ 1, 3, ..., 35 tô lại nền theo dự đoán trên một lưới, cập nhật accuracy train/test; kéo hoặc bấm để đặt điểm truy vấn, hình nối nó với k láng giềng gần nhất và ghi số phiếu lớp 0, lớp 1 cùng lớp dự đoán.
+    Dữ liệu: make_moons(n_samples=50, noise=0.3, random_state=11), np.round(X, 2), train_test_split(test_size=0.3, random_state=0, stratify=y): 35 điểm train, 15 điểm test (mảng chính xác trong báo cáo của lesson-writer, cần đưa vào src/data/datasets/). Khoảng cách Euclid, bỏ phiếu đều; điểm truy vấn mặc định (-0.4, 0.6).
+    Ký hiệu: x_1, x_2 trên hai trục; k; lớp 0, lớp 1; accuracy train, accuracy test. */}
+
+## Ví dụ code
+
+Ba ô dưới đây chạy độc lập: ô nào cũng tự tạo dữ liệu. Ô chạy đầu tiên lâu hơn một chút, vì trình duyệt phải tải thêm scikit-learn. Hai ô đầu sinh cùng 50 điểm hai vầng trăng và chia train/test giống hệt nhau. `stratify=y` giữ tỉ lệ hai lớp như nhau ở tập train và tập test.
+
+Ô đầu tiên làm lại ba bước của KNN bằng NumPy cho điểm $(-0.4, 0.6)$, với $k = 5$. `np.argsort(dist)` trả về chỉ số của các điểm xếp theo khoảng cách tăng dần, nên `[:k]` lấy $k$ điểm gần nhất. `np.bincount` đếm số phiếu của mỗi lớp.
+
+<PythonRunner code={knnNumpyCode} title="KNN tự viết cho một điểm" />
+
+Năm dòng đầu chính là bảng ở phần Trực giác: láng giềng gần nhất $(-0.25, 0.64)$ thuộc lớp 1, cách 0.155, đúng như phép tính tay ở phần Lý thuyết; bốn láng giềng sau thuộc lớp 0. Phiếu là 4 với 1, nên $k = 5$ đoán lớp 0, còn $k = 1$ đoán lớp 1. Đổi `k = 5` thành `k = 3` để thấy phiếu 2 với 1, vẫn đoán lớp 0.
+
+Ô thứ hai dùng `KNeighborsClassifier` với mọi $k$ lẻ từ 1 tới 35, in accuracy train và test của vài $k$, rồi vẽ hai đường theo $k$.
+
+<PythonRunner
+  code={chooseKCode}
+  title="Accuracy train và test theo k"
+  figureAlt={['Biểu đồ đường của accuracy theo k, với k lẻ từ 1 tới 35. Đường train (nét liền, chấm tròn) bắt đầu ở 1.0 khi k bằng 1, đi ngang quanh 0.94 tới k bằng 9, quanh 0.91 tới k bằng 15, rồi giảm dần và rơi xuống khoảng 0.51 ở k bằng 35. Đường test (nét đứt, ô vuông) đi lên từ khoảng 0.73 ở k bằng 1 tới đỉnh 1.0 ở k bằng 7, giảm về khoảng 0.73 đến 0.8 trong khoảng k từ 13 tới 33, rồi rơi xuống khoảng 0.47 ở k bằng 35.']}
+/>
+
+Các dòng in ra khớp bảng ở mục Chọn k. Trên hình, đường train gần như chỉ đi xuống, còn đường test lên đỉnh ở $k = 7$ rồi đi xuống: hình chữ U lộn ngược của bài Overfitting, với trục ngang là $k$ thay cho bậc.
+
+Ở $k = 7$, đúng hai điểm train bị đoán sai: $(-0.25, 0.64)$ và $(0.25, 0.83)$, hai điểm lớp 1 lạc vào vầng trăng của lớp 0. Mô hình chấp nhận sai hai điểm nhiễu này để có ranh giới mượt. Ngược lại, $k = 1$ đoán sai 4 trong 15 điểm test, trong đó có điểm test $(-0.25, 0.61)$ lớp 0, nằm sát ngay điểm lạc $(-0.25, 0.64)$.
+
+Ô thứ ba chuyển sang bộ vang thật: 178 chai, 13 đặc trưng, 3 giống nho. Ô in độ lệch chuẩn của proline và hue, tỉ lệ proline góp vào bình phương khoảng cách, rồi so KNN có và không có `StandardScaler`. Cuối cùng, `GridSearchCV` chọn $k$ bằng kiểm định chéo 5 fold, chỉ trên tập train. Tên tham số `kneighborsclassifier__n_neighbors` gồm tên bước trong pipeline, hai dấu gạch dưới, rồi tên tham số của bước đó.
+
+<PythonRunner code={scalingCode} title="Chuẩn hóa và chọn k bằng kiểm định chéo" />
+
+- Độ lệch chuẩn của proline là 325.4, của hue là 0.221. Proline chiếm 99.76% tổng bình phương khoảng cách: KNN trên dữ liệu thô gần như chỉ nhìn proline.
+- Cùng $k = 5$, accuracy test tăng từ 0.722 (39 trên 54 chai) lên 0.963 (52 trên 54 chai) chỉ nhờ chuẩn hóa. Không đổi mô hình, không thêm dữ liệu.
+- Kiểm định chéo chọn $k = 25$, accuracy kiểm định chéo 0.976. Với $k = 27$ và $k = 29$, điểm cũng bằng 0.976; khi hòa, `GridSearchCV` giữ giá trị đứng trước trong lưới. Khớp lại trên cả tập train rồi chấm một lần, accuracy test là 0.981 (53 trên 54 chai).
+
+Để ý `StandardScaler` nằm **trong** pipeline. Khi kiểm định chéo, trung bình và độ lệch chuẩn được tính lại trên phần train của từng fold, nên fold đang chấm không lọt vào bước chuẩn hóa.
+
+## Lỗi hay gặp
+
+:::caution[Quên chuẩn hóa đặc trưng]
+Không chuẩn hóa thì đặc trưng có số lớn quyết định khoảng cách, chỉ vì đơn vị của nó. Ở ô code thứ ba, proline chiếm 99.76% bình phương khoảng cách, và accuracy test chỉ 0.722 thay vì 0.963. Hãy đặt `StandardScaler` trong pipeline: `make_pipeline(StandardScaler(), KNeighborsClassifier(...))`. Đừng chuẩn hóa cả bộ dữ liệu trước khi chia train/test, vì trung bình và độ lệch chuẩn khi đó đã "thấy" tập test.
+:::
+
+:::caution[Chọn k theo accuracy train, hoặc theo tập test]
+Theo accuracy train thì $k = 1$ luôn thắng với 1.000, vì mỗi điểm train là láng giềng gần nhất của chính nó. Theo tập test thì bạn sẽ chọn $k = 7$ với accuracy 1.000 trên 15 điểm, và con số đó lạc quan, vì tập test đã được dùng để chọn. Hãy chọn $k$ bằng kiểm định chéo trên tập train (`GridSearchCV` hay `cross_val_score`), rồi chấm tập test một lần.
+:::
+
+:::caution[Dùng k chẵn với hai lớp]
+Với $k$ chẵn, phiếu có thể hòa, ví dụ 2 với 2. scikit-learn khi đó lặng lẽ chọn lớp có nhãn nhỏ hơn, không cảnh báo gì. Kết quả vẫn chạy, nhưng một phần dự đoán được quyết định bởi cách đánh số lớp. Với hai lớp, hãy dùng $k$ lẻ. Với nhiều lớp, $k$ lẻ vẫn có thể hòa (3 lớp, $k = 3$, mỗi lớp một phiếu); khi đó `weights='distance'` giúp phá hòa theo khoảng cách.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- KNN dự đoán bằng $k$ điểm train gần nhất theo khoảng cách Euclid $\lVert\mathbf{x} - \mathbf{x}^{(i)}\rVert$: bỏ phiếu đa số khi phân loại, lấy trung bình khi hồi quy. Đây là học lười: `fit` chỉ cất dữ liệu, mỗi dự đoán tốn cỡ $m \times n$ phép tính.
+- $k$ nhỏ cho ranh giới quyết định răng cưa và accuracy train bằng 1 (overfitting); $k$ lớn xóa mất hình dạng dữ liệu, $k = m$ luôn đoán lớp đông nhất (underfitting). Accuracy là tỉ lệ đoán đúng; chọn $k$ bằng kiểm định chéo, dùng $k$ lẻ khi có hai lớp.
+- Luôn chuẩn hóa đặc trưng, trong pipeline. Trên bộ vang, chỉ riêng `StandardScaler` đưa accuracy test từ 0.722 lên 0.963.
+- `weights='distance'` cho láng giềng gần phiếu nặng hơn. Với nhiều đặc trưng, lời nguyền số chiều làm "láng giềng gần nhất" không còn gần: khối con chứa 10% dữ liệu có cạnh $0.1^{1/n}$.
+
+**Đọc thêm:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Bài 6: K-nearest neighbors](https://machinelearningcoban.com/2017/01/08/knn/). Tiếng Việt, ví dụ trên bộ hoa Iris, có trọng số theo khoảng cách, KNN cho hồi quy và chuẩn hóa dữ liệu. Ký hiệu số láng giềng là $K$ viết hoa.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Nearest Neighbors](https://scikit-learn.org/1.8/modules/neighbors.html), mục 1.6.1 và 1.6.2. Cách dùng `KNeighborsClassifier`, `weights`, các thuật toán tìm láng giềng (`brute`, `kd_tree`, `ball_tree`), và lưu ý khi hai láng giềng cách đều nhau.
+- James, G., Witten, D., Hastie, T., Tibshirani, R. (2021). [*An Introduction to Statistical Learning*](https://www.statlearning.com/) (bản 2). Mục 2.2.3: bộ phân loại KNN với $K = 1$ và $K = 100$. Mục 3.5: so hồi quy tuyến tính với KNN, và lời nguyền số chiều. Ký hiệu khác: $n$ là số mẫu, $p$ là số đặc trưng.
+- Cover, T. M., Hart, P. E. (1967). [*Nearest neighbor pattern classification*](https://doi.org/10.1109/TIT.1967.1053964), IEEE Transactions on Information Theory 13(1). Bài báo kinh điển phân tích sai số của luật láng giềng gần nhất.
+
+<LessonProgress />

@@ -1,0 +1,35 @@
+---
+// ThresholdViz for ml/classification-metrics (docs/architecture/viz/threshold.md). The only file a lesson imports:
+// <ThresholdViz />, no props, no client:* in MDX. Here, at build time: UI strings, the patients' labels in the page
+// locale and KaTeX for the slider label. The island counts the confusion matrix itself (threshold.ts: 20
+// comparisons), with the same code at build time and in the browser.
+// The island hydrates 200px before it scrolls into view. Styles: viz.css, through Starlight's customCss.
+import ThresholdVizIsland from './threshold-viz/ThresholdVizIsland';
+import { PATIENTS, PATIENTS_THRESHOLD } from '@data/datasets/patients';
+import { getStrings } from '@i18n/ui';
+import { inlineMarkupLabel, renderInlineMarkup } from '@lib/inline-markup';
+import { getPageLocale } from '@lib/page-locale';
+
+const route = Astro.locals.starlightRoute;
+const locale = getPageLocale(route);
+const strings = getStrings(Astro.locals.t, 'vizThreshold');
+const tCommon = getStrings(Astro.locals.t, 'common');
+---
+
+<div class="atlas-viz not-content" lang={locale} data-pagefind-ignore>
+  <ThresholdVizIsland
+    client:visible={{ rootMargin: '200px' }}
+    y={PATIENTS.y}
+    p={PATIENTS.p}
+    config={PATIENTS_THRESHOLD}
+    text={{
+      positive: PATIENTS.positive[locale],
+      negative: PATIENTS.negative[locale],
+      axis: PATIENTS.probability[locale],
+      description: PATIENTS.description[locale],
+    }}
+    labels={{ tHtml: renderInlineMarkup(strings.thresholdLabel), tText: inlineMarkupLabel(strings.thresholdLabel) }}
+    strings={strings}
+  />
+  <noscript><p class="atlas-viz-noscript">{tCommon.needsScript}</p></noscript>
+</div>

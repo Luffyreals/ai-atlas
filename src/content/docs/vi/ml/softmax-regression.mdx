@@ -1,0 +1,380 @@
+---
+title: Hồi quy Softmax
+description: 'Phân loại một bông hoa iris vào một trong ba loài: vì sao ghép các bộ phân loại nhị phân chưa ổn, hàm softmax, cross-entropy, gradient ŷ − y và ranh giới quyết định.'
+quiz:
+  - question: 'Một mô hình cho ba logit $\mathbf{z} = (4, 2, 2)$. Xác suất softmax của lớp thứ nhất gần nhất với số nào?'
+    options: ['$0.50$', '$0.79$', '$0.67$', '$0.95$']
+    answer: 1
+    explanation: 'Chỉ chênh lệch giữa các logit là quan trọng, nên trừ 4 ở mọi logit được $(0, -2, -2)$. Xác suất lớp đầu là $1/(1 + 2e^{-2}) = e^2/(e^2 + 2) \approx 7.39/9.39 \approx 0.79$. Đáp án $0.50$ là kết quả của cách chia thẳng cho tổng, $4/(4 + 2 + 2)$: cách đó bỏ qua phép mũ, và hỏng ngay khi có logit âm.'
+  - question: 'Bông hoa thật là virginica (lớp thứ ba). Mô hình đang dự đoán $\hat{\mathbf{y}} = (0.1, 0.6, 0.3)$. Sau một bước gradient descent tính trên riêng bông hoa này, logit nào thay đổi thế nào?'
+    options:
+      - 'Chỉ logit virginica thay đổi, vì chỉ lớp đúng có mặt trong hàm mất mát'
+      - 'Logit versicolor tăng, vì nó đang có xác suất lớn nhất'
+      - 'Logit virginica tăng; logit versicolor giảm mạnh hơn logit setosa'
+      - 'Cả ba logit giảm cùng một lượng'
+    answer: 2
+    explanation: 'Gradient theo logit là $\hat{\mathbf{y}} - \mathbf{y} = (0.1, 0.6, -0.7)$. Gradient descent đi ngược gradient: thành phần âm làm logit virginica tăng, hai thành phần dương làm hai logit kia giảm, versicolor (0.6) giảm nhiều hơn setosa (0.1). Hàm mất mát $-\ln\hat{y}_3$ chỉ chứa xác suất lớp đúng, nhưng $\hat{y}_3$ lại phụ thuộc mọi logit qua mẫu số của softmax, nên mọi logit đều nhận gradient.'
+  - question: 'Bạn gắn nhãn ảnh: một ảnh có thể chứa cùng lúc mèo, chó và người. Đầu ra nào hợp lý nhất?'
+    options:
+      - 'Mỗi nhãn một sigmoid riêng, mỗi nhãn một ngưỡng, vì các nhãn không loại trừ nhau'
+      - 'Một softmax trên ba nhãn, rồi lấy nhãn có xác suất lớn nhất'
+      - 'Một softmax trên ba nhãn, rồi lấy mọi nhãn có xác suất trên $0.5$'
+    answer: 0
+    explanation: 'Softmax giả định đúng một lớp đúng: các xác suất cộng lại bằng 1, nên lớp này tăng thì lớp khác phải giảm. Ảnh có cả mèo lẫn chó thì hai nhãn phải cùng được xác suất cao, điều softmax không cho phép. Ngưỡng $0.5$ trên softmax còn tệ hơn: tối đa chỉ một nhãn vượt được $0.5$. Bài toán nhiều nhãn (multi-label) dùng sigmoid độc lập cho từng nhãn.'
+  - question: 'Hồi quy softmax với $K = 2$ lớp có $\mathbf{w}_1 = (2, -1)$, $b_1 = 0.5$ và $\mathbf{w}_2 = (0.5, 1)$, $b_2 = 1$. Hồi quy logistic $\sigma(\mathbf{w}^\top\mathbf{x} + b)$ cho đúng $P(\text{lớp 1})$ có tham số nào?'
+    options:
+      - '$\mathbf{w} = (2.5, 0)$, $b = 1.5$'
+      - '$\mathbf{w} = (2, -1)$, $b = 0.5$'
+      - '$\mathbf{w} = (-1.5, 2)$, $b = 0.5$'
+      - '$\mathbf{w} = (1.5, -2)$, $b = -0.5$'
+    answer: 3
+    explanation: 'Với hai lớp, $P(\text{lớp 1}) = \sigma(z_1 - z_2)$, và $z_1 - z_2 = (\mathbf{w}_1 - \mathbf{w}_2)^\top\mathbf{x} + (b_1 - b_2)$. Vậy $\mathbf{w} = (1.5, -2)$, $b = -0.5$. Phương án dùng riêng $\mathbf{w}_1$, $b_1$ bỏ qua việc xác suất lớp 1 còn phụ thuộc điểm của lớp 2. Phương án $(-1.5, 2)$ là $\mathbf{w}_2 - \mathbf{w}_1$, cho xác suất của lớp 2.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import softmaxNumpyCode from '@code/ml/softmax-regression/softmax-numpy.vi.py?raw';
+import softmaxGdCode from '@code/ml/softmax-regression/softmax-gd.vi.py?raw';
+import boundaryCode from '@code/ml/softmax-regression/boundary.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu vì sao ghép nhiều bộ phân loại nhị phân (one-vs-rest) chưa cho xác suất đúng nghĩa, và hồi quy softmax (softmax regression) giải quyết điều đó thế nào.
+- Tính được hàm softmax bằng tay, giải thích được vì sao nó dùng hàm mũ, và cài đặt được bản ổn định số bằng mẹo trừ logit lớn nhất.
+- Tự dẫn được hàm mất mát cross-entropy với nhãn one-hot và gradient $\hat{\mathbf{y}} - \mathbf{y}$, rồi huấn luyện mô hình bằng gradient descent.
+- Nhận ra ranh giới quyết định (decision boundary) của hồi quy softmax là tuyến tính từng đoạn, và biết khi nào không nên dùng softmax.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài [Hồi quy Logistic](/vi/ml/logistic-regression/) phân loại hai lớp: tính điểm $z = \mathbf{w}^\top\mathbf{x} + b$, rồi **sigmoid** $\sigma(z) = 1/(1 + e^{-z})$ đổi điểm thành xác suất $\hat{y}$ của lớp 1. Hàm mất mát là **log loss** (binary cross-entropy) $-\left[y\ln\hat{y} + (1 - y)\ln(1 - \hat{y})\right]$, và gradient của nó theo $\mathbf{w}$ có dạng gọn $(\hat{y} - y)\,\mathbf{x}$. Bài này mở rộng đúng ba thứ đó cho nhiều lớp.
+:::
+
+## Trực giác
+
+Bạn có một bông hoa diên vĩ (iris) và đo được cánh hoa (petal) dài 4.9 cm, rộng 1.5 cm. Nó thuộc loài nào trong ba loài: *setosa*, *versicolor* hay *virginica*? Đây là bộ dữ liệu iris, do nhà thống kê Ronald Fisher công bố năm 1936: 150 bông hoa, mỗi loài 50 bông. Bài này chỉ dùng hai số đo cánh hoa, để vẽ được lên mặt phẳng. Bông đầu tiên của mỗi loài trong bộ dữ liệu trông như sau:
+
+| Loài | Dài cánh hoa (cm) | Rộng cánh hoa (cm) |
+|---|---:|---:|
+| setosa | 1.4 | 0.2 |
+| versicolor | 4.7 | 1.4 |
+| virginica | 6.0 | 2.5 |
+
+Bông hoa của bạn nằm giữa versicolor và virginica, nên câu trả lời tốt không chỉ là một tên loài, mà là **ba xác suất cộng lại bằng 1**, ví dụ "64% versicolor, 35% virginica".
+
+### Cách thứ nhất: ghép ba bộ phân loại nhị phân
+
+Bạn đã biết hồi quy logistic cho hai lớp. Cách đơn giản nhất là huấn luyện ba mô hình riêng, mỗi mô hình trả lời một câu hỏi có/không: "có phải setosa không?", "có phải versicolor không?", "có phải virginica không?". Cách này gọi là **one-vs-rest** (OvR, một lớp với phần còn lại). Huấn luyện ba mô hình đó bằng `LogisticRegression` trên 105 bông hoa (70% dữ liệu, đã chuẩn hóa), rồi hỏi về bông hoa của bạn:
+
+| Câu hỏi | Xác suất "có" |
+|---|---:|
+| Có phải setosa? | 0.008 |
+| Có phải versicolor? | 0.425 |
+| Có phải virginica? | 0.350 |
+| **Tổng** | **0.783** |
+
+Hai điều không ổn:
+
+- **Tổng không bằng 1.** Mỗi mô hình được huấn luyện riêng, không mô hình nào biết hai mô hình kia nói gì. Trên cả 150 bông của bộ dữ liệu, tổng này dao động từ 0.405 tới 1.539.
+- **Cả ba mô hình đều nói "không"**, vì không xác suất nào vượt 0.5. Lấy lớp có xác suất lớn nhất vẫn ra versicolor, nhưng mô hình "có phải versicolor?" gặp khó thật sự: versicolor nằm giữa hai loài kia, nên một đường thẳng không tách được nó khỏi "phần còn lại".
+
+### Cách thứ hai: cho mỗi loài một điểm
+
+Thay vì ba câu hỏi rời, hãy cho **một** mô hình chấm cho mỗi loài một điểm, rồi so các điểm với nhau. Giả sử mô hình chấm cho bông hoa của bạn ba điểm, gọi là **logit**: setosa $-3.0$, versicolor $1.8$, virginica $1.2$. Điểm càng cao, loài đó càng hợp.
+
+Đổi ba điểm này thành xác suất thế nào? Chia mỗi điểm cho tổng thì không được: có điểm âm, và tổng $-3.0 + 1.8 + 1.2$ lại bằng đúng 0. Cách làm của softmax là lấy $e$ mũ từng điểm trước (kết quả luôn dương), rồi mới chia cho tổng:
+
+| Loài | Logit $z_k$ | $e^{z_k}$ | Xác suất |
+|---|---:|---:|---:|
+| setosa | −3.0 | 0.0498 | 0.0053 |
+| versicolor | 1.8 | 6.0496 | 0.6422 |
+| virginica | 1.2 | 3.3201 | 0.3525 |
+| **Tổng** | | 9.4195 | **1.0000** |
+
+Ví dụ $0.6422 = 6.0496 / 9.4195$. Ba xác suất cộng lại bằng 1, giữ đúng thứ tự của các điểm, và versicolor thắng.
+
+Bài toán của bài này là: **cho mỗi lớp một vectơ trọng số để chấm điểm, đổi các điểm thành xác suất cộng lại bằng 1, rồi học các trọng số sao cho lớp đúng của mỗi mẫu nhận xác suất cao.**
+
+## Lý thuyết
+
+### Phát biểu bài toán
+
+Có $K$ lớp, đánh số $k = 1, \dots, K$ (với iris, $K = 3$). Mỗi mẫu có $n$ đặc trưng $\mathbf{x} = [x_1, \dots, x_n]^\top$ và một nhãn là một trong $K$ lớp. Đây là **phân loại nhiều lớp** (multiclass classification): mỗi mẫu thuộc đúng một lớp.
+
+Hồi quy softmax cho **mỗi lớp $k$ một vectơ trọng số** $\mathbf{w}_k$ (có $n$ phần tử) và một hệ số tự do $b_k$. Điểm của lớp $k$ là **logit**:
+
+$$
+z_k = \mathbf{w}_k^\top\mathbf{x} + b_k, \qquad k = 1, \dots, K
+$$
+
+Mỗi logit là một mô hình tuyến tính như ở bài [Hồi quy tuyến tính](/vi/ml/linear-regression/), chỉ khác là có $K$ mô hình chạy song song trên cùng một $\mathbf{x}$. Với iris dùng 2 đặc trưng, mô hình có $3 \times 2 = 6$ trọng số và 3 hệ số tự do. Gom $K$ logit thành vectơ $\mathbf{z} = [z_1, \dots, z_K]^\top$.
+
+### Hàm softmax
+
+**Softmax** đổi vectơ logit thành vectơ xác suất $\hat{\mathbf{y}} = [\hat{y}_1, \dots, \hat{y}_K]^\top$:
+
+$$
+\hat{y}_k = \mathrm{softmax}(\mathbf{z})_k = \frac{e^{z_k}}{\sum_{j=1}^{K} e^{z_j}}
+$$
+
+Tử số là mũ của logit lớp $k$; mẫu số là tổng mũ của mọi logit, giống nhau cho mọi lớp. Đọc $\hat{y}_k$ là "xác suất mô hình gán cho lớp $k$". Lớp dự đoán là lớp có $\hat{y}_k$ lớn nhất.
+
+Vì sao lại là hàm mũ? Vì nó cho đúng ba tính chất cần có:
+
+1. **Luôn dương.** $e^{z} > 0$ với mọi $z$, kể cả $z$ âm, nên mọi xác suất đều dương, và chia cho tổng là ra các số cộng lại bằng 1.
+2. **Giữ thứ tự.** $e^{z}$ đồng biến: logit lớn hơn thì xác suất lớn hơn. Lớp có xác suất lớn nhất cũng chính là lớp có logit lớn nhất.
+3. **Khuếch đại khác biệt.** Chia hai xác suất cho nhau thì mẫu số triệt tiêu, rồi dùng $e^{a}/e^{c} = e^{a - c}$:
+
+$$
+\frac{\hat{y}_i}{\hat{y}_j} = \frac{e^{z_i}}{e^{z_j}} = e^{z_i - z_j}
+$$
+
+Hai logit chênh nhau 1 thì xác suất chênh nhau $e \approx 2.72$ lần; chênh nhau 2 thì $e^2 \approx 7.39$ lần. Trong ví dụ hoa iris, versicolor hơn virginica $0.6$ điểm, nên $0.6422 / 0.3525 \approx e^{0.6} \approx 1.82$.
+
+Cái tên "softmax" đến từ chỗ nó là một bản "mềm" của việc chọn giá trị lớn nhất (max, hay đúng hơn là argmax): lớp có logit lớn nhất nhận phần lớn xác suất, nhưng các lớp khác vẫn được một phần, và phần đó thay đổi trơn khi logit thay đổi. Tính trơn này là thứ cho phép lấy đạo hàm để huấn luyện.
+
+### Cộng hằng số không đổi gì, và mẹo trừ max
+
+Công thức tỉ số ở trên cho thấy chỉ **hiệu** giữa các logit là quan trọng. Kiểm tra trực tiếp: cộng cùng một số $c$ vào mọi logit, rồi tách $e^{z_k + c} = e^{c}e^{z_k}$:
+
+$$
+\begin{aligned}
+\mathrm{softmax}(\mathbf{z} + c)_k &= \frac{e^{c}e^{z_k}}{\sum_{j} e^{c}e^{z_j}} \\
+&= \frac{e^{c}e^{z_k}}{e^{c}\sum_{j} e^{z_j}} = \mathrm{softmax}(\mathbf{z})_k
+\end{aligned}
+$$
+
+Dòng thứ hai đặt $e^{c}$ ra ngoài tổng ở mẫu số, rồi giản ước với $e^{c}$ ở tử số.
+
+Tính chất này cứu máy tính khỏi **tràn số** (overflow). Số thực 64 bit lớn nhất khoảng $1.8 \times 10^{308}$, tức chỉ chứa được $e^{z}$ khi $z < 709.78$. Nếu logit là $(997, 1001.8, 1001.2)$, máy tính $e^{1001.8}$ ra vô cực, rồi vô cực chia vô cực ra `nan` (not a number). Mẹo: **trừ logit lớn nhất khỏi mọi logit trước khi lấy mũ**. Logit thành $(-4.8, 0, -0.6)$, mũ lớn nhất là $e^{0} = 1$, không thể tràn, và theo đẳng thức trên, kết quả vẫn y hệt: đó cũng chính là logit của bông hoa iris cộng thêm 1000, nên xác suất vẫn là $(0.0053, 0.6422, 0.3525)$. Mọi thư viện đều cài softmax theo cách này. Ô code thứ nhất thử cả hai cách.
+
+### Với hai lớp, softmax chính là sigmoid
+
+Đặt $K = 2$. Chia cả tử và mẫu của $\hat{y}_1$ cho $e^{z_1}$:
+
+$$
+\begin{aligned}
+\hat{y}_1 &= \frac{e^{z_1}}{e^{z_1} + e^{z_2}} \\
+&= \frac{1}{1 + e^{z_2 - z_1}} = \frac{1}{1 + e^{-(z_1 - z_2)}} = \sigma(z_1 - z_2)
+\end{aligned}
+$$
+
+Vậy hồi quy softmax hai lớp là hồi quy logistic với điểm $z = z_1 - z_2 = (\mathbf{w}_1 - \mathbf{w}_2)^\top\mathbf{x} + (b_1 - b_2)$, tức $\mathbf{w} = \mathbf{w}_1 - \mathbf{w}_2$ và $b = b_1 - b_2$. Ví dụ, logit $(1.8, 1.2)$ cho $\hat{y}_1 = \sigma(0.6) \approx 0.6457$. Hồi quy logistic là trường hợp riêng của hồi quy softmax, nên tên chính thức của hồi quy softmax là **hồi quy logistic đa thức** (multinomial logistic regression).
+
+Phép trừ cũng cho thấy một điều: hai bộ tham số khác nhau có thể cho cùng một mô hình. Cộng cùng một vectơ vào $\mathbf{w}_1$ và $\mathbf{w}_2$ thì hiệu không đổi. Mục huấn luyện ở dưới sẽ quay lại điểm này.
+
+### Nhãn one-hot và cross-entropy
+
+Để so $\hat{\mathbf{y}}$ với nhãn thật, viết nhãn cũng thành một vectơ $K$ phần tử: phần tử của lớp đúng bằng 1, còn lại bằng 0. Cách viết này gọi là **mã hóa one-hot** (one-hot encoding). Với iris:
+
+| Nhãn | $\mathbf{y}$ |
+|---|---|
+| setosa | $(1, 0, 0)$ |
+| versicolor | $(0, 1, 0)$ |
+| virginica | $(0, 0, 1)$ |
+
+Không dùng thẳng nhãn số 0, 1, 2, vì như vậy là ngầm nói virginica "lớn hơn" versicolor và "xa" setosa hơn, điều không có nghĩa với tên loài.
+
+Hàm mất mát của một mẫu là **cross-entropy**:
+
+$$
+\ell = -\sum_{k=1}^{K} y_k \ln\hat{y}_k
+$$
+
+Ở đây $\ln$ là logarit tự nhiên. Vì $\mathbf{y}$ là one-hot, mọi số hạng có $y_k = 0$ đều biến mất, chỉ còn số hạng của lớp đúng. Gọi lớp đúng là $c$:
+
+$$
+\ell = -\ln\hat{y}_c
+$$
+
+Hàm mất mát chỉ đơn giản là **trừ logarit của xác suất mà mô hình gán cho lớp đúng**. Với bông hoa iris là versicolor: $\ell = -\ln 0.6422 \approx 0.443$. Nếu nó thật ra là virginica thì $\ell = -\ln 0.3525 \approx 1.043$, còn nếu là setosa thì $\ell = -\ln 0.0053 \approx 5.24$: gán xác suất gần 0 cho lớp đúng bị phạt rất nặng. Với $K = 2$, công thức này chính là log loss của hồi quy logistic, viết gọn lại.
+
+Trên $m$ mẫu huấn luyện, hàm mất mát là trung bình:
+
+$$
+\mathcal{L} = \frac{1}{m}\sum_{i=1}^{m}\ell^{(i)} = -\frac{1}{m}\sum_{i=1}^{m}\sum_{k=1}^{K} y^{(i)}_k\ln\hat{y}^{(i)}_k
+$$
+
+Vì sao chọn cross-entropy mà không chọn MSE? Cũng như log loss, làm nhỏ $\mathcal{L}$ tương đương với làm lớn xác suất mà mô hình gán cho toàn bộ nhãn của tập huấn luyện (cực đại likelihood), và nó cho gradient rất gọn, như mục dưới.
+
+Một mốc để nhớ: lúc mọi tham số bằng 0, mọi logit bằng 0, softmax chia đều $1/K$ cho mỗi lớp, nên $\mathcal{L} = -\ln(1/K) = \ln K$. Với 3 lớp, đó là $\ln 3 \approx 1.0986$. Mô hình đã học được gì đó thì $\mathcal{L}$ phải nhỏ hơn số này.
+
+### Gradient: $\hat{\mathbf{y}} - \mathbf{y}$
+
+Cần đạo hàm của $\ell$ theo từng logit $z_j$. Cách gọn nhất là viết $\ell$ thẳng theo logit.
+
+**Bước 1: viết $\ell$ theo $\mathbf{z}$.** Thay định nghĩa softmax vào $\ell = -\ln\hat{y}_c$, rồi dùng $\ln(a/d) = \ln a - \ln d$ và $\ln e^{z_c} = z_c$:
+
+$$
+\ell = -\ln\frac{e^{z_c}}{\sum_{k} e^{z_k}} = -z_c + \ln\sum_{k=1}^{K} e^{z_k}
+$$
+
+**Bước 2: lấy đạo hàm theo $z_j$.** Số hạng đầu $-z_c$ có đạo hàm $-1$ nếu $j = c$, và 0 nếu $j \ne c$. Đó chính là $-y_j$, vì $y_j = 1$ đúng khi $j = c$. Số hạng thứ hai có dạng $\ln u$ với $u = \sum_k e^{z_k}$. Đạo hàm của $\ln u$ là $\frac{1}{u}$ nhân đạo hàm của $u$, và trong tổng $u$ chỉ số hạng $e^{z_j}$ phụ thuộc $z_j$:
+
+$$
+\frac{\partial}{\partial z_j}\ln\sum_{k} e^{z_k} = \frac{e^{z_j}}{\sum_{k} e^{z_k}} = \hat{y}_j
+$$
+
+**Bước 3: cộng lại.**
+
+$$
+\frac{\partial\ell}{\partial z_j} = \hat{y}_j - y_j, \qquad\text{tức là}\qquad \frac{\partial\ell}{\partial\mathbf{z}} = \hat{\mathbf{y}} - \mathbf{y}
+$$
+
+Đọc bằng lời: gradient theo logit là **xác suất dự đoán trừ nhãn one-hot**. Với bông hoa iris (lớp đúng versicolor): $\hat{\mathbf{y}} - \mathbf{y} = (0.0053, 0.6422 - 1, 0.3525) = (0.0053, -0.3578, 0.3525)$. Gradient descent đi ngược gradient, nên nó **tăng** logit của lớp đúng và **giảm** logit của các lớp sai, lớp sai nào đang được nhiều xác suất (virginica) thì bị giảm mạnh hơn. Các thành phần luôn cộng lại bằng 0, vì cả $\hat{\mathbf{y}}$ lẫn $\mathbf{y}$ đều cộng lại bằng 1.
+
+**Bước 4: đi tiếp tới trọng số.** Logit $z_j = \mathbf{w}_j^\top\mathbf{x} + b_j$ thay đổi theo $\mathbf{w}_j$ với tốc độ $\mathbf{x}$, và theo $b_j$ với tốc độ 1. Theo quy tắc hàm hợp (chain rule), nhân gradient theo logit với hai tốc độ này:
+
+$$
+\frac{\partial\ell}{\partial\mathbf{w}_j} = \left(\hat{y}_j - y_j\right)\mathbf{x}, \qquad \frac{\partial\ell}{\partial b_j} = \hat{y}_j - y_j
+$$
+
+Đúng dạng $(\hat{y} - y)\,\mathbf{x}$ của hồi quy logistic, nay lặp lại cho mỗi lớp.
+
+:::note[Ghi nhớ]
+Với softmax và cross-entropy, gradient theo logit là $\hat{\mathbf{y}} - \mathbf{y}$: dự đoán trừ nhãn one-hot. Gradient theo $\mathbf{w}_j$ là thành phần thứ $j$ của nó nhân với $\mathbf{x}$.
+:::
+
+### Huấn luyện bằng gradient descent
+
+Viết cho cả tập huấn luyện. Trong bài này, $\mathbf{X}$ chỉ gồm các đặc trưng ($m$ hàng, $n$ cột, không có cột số 1), còn hệ số tự do viết riêng. Xếp các $\mathbf{w}_k$ thành các cột của ma trận $\mathbf{W}$ ($n$ hàng, $K$ cột) và các $b_k$ thành vectơ $\mathbf{b}$. Khi đó:
+
+- $\mathbf{Z} = \mathbf{X}\mathbf{W} + \mathbf{1}\mathbf{b}^\top$ là ma trận logit, $m$ hàng $K$ cột: hàng $i$ là $\mathbf{z}^{(i)}$. Số hạng $\mathbf{1}\mathbf{b}^\top$ chỉ có nghĩa là cộng $\mathbf{b}$ vào mọi hàng.
+- $\hat{\mathbf{Y}}$ là softmax của từng hàng của $\mathbf{Z}$; $\mathbf{Y}$ là ma trận nhãn one-hot, cùng kích thước.
+
+Lấy trung bình gradient của $m$ mẫu (mỗi mẫu là một hàng của $\hat{\mathbf{Y}} - \mathbf{Y}$, nhân với $\mathbf{x}^{(i)}$) được:
+
+$$
+\nabla_{\mathbf{W}}\mathcal{L} = \frac{1}{m}\mathbf{X}^\top\left(\hat{\mathbf{Y}} - \mathbf{Y}\right), \qquad \nabla_{\mathbf{b}}\mathcal{L} = \frac{1}{m}\sum_{i=1}^{m}\left(\hat{\mathbf{y}}^{(i)} - \mathbf{y}^{(i)}\right)
+$$
+
+So với MSE ở bài [Gradient Descent](/vi/ml/gradient-descent/), $\frac{2}{m}\mathbf{X}^\top(\mathbf{X}\boldsymbol{\theta} - \mathbf{y})$: cùng hình dạng "đặc trưng nhân sai lệch". Quy tắc cập nhật vẫn là $\mathbf{W} \leftarrow \mathbf{W} - \eta\nabla_{\mathbf{W}}\mathcal{L}$, $\mathbf{b} \leftarrow \mathbf{b} - \eta\nabla_{\mathbf{b}}\mathcal{L}$. Ô code thứ hai cài đặt đúng hai dòng này.
+
+Ba điều cần biết khi huấn luyện:
+
+- **Không có công thức nghiệm**, như hồi quy logistic, nên phải lặp. Tin tốt: $\mathcal{L}$ là hàm lồi theo $(\mathbf{W}, \mathbf{b})$, không có hố phụ.
+- **Nghiệm không duy nhất.** Cộng cùng một vectơ $\mathbf{v}$ vào mọi $\mathbf{w}_k$ (và cùng một số vào mọi $b_k$) thì mọi logit cộng thêm $\mathbf{v}^\top\mathbf{x}$, mà softmax bất biến với việc cộng cùng một số. Đáy của $\mathcal{L}$ là cả một "rãnh" chứ không phải một điểm. Regularization (bài [Ridge, Lasso, Elastic Net](/vi/ml/regularization/)) chọn ra điểm có trọng số nhỏ nhất trong rãnh; `LogisticRegression` của scikit-learn có phạt L2 bật sẵn (`C=1.0`).
+- **Lớp tách được hoàn toàn thì trọng số phình mãi.** Setosa tách hẳn khỏi hai loài kia bằng một đường thẳng. Không có regularization, mô hình có thể làm xác suất của setosa gần 1 hơn nữa bằng cách tăng trọng số, nên $\mathcal{L}$ cứ giảm chậm mãi mà không dừng. Ô code thứ hai cho thấy điều này.
+
+Từ 3 lớp trở lên, `LogisticRegression` của scikit-learn (bộ giải mặc định `lbfgs`) huấn luyện đúng mô hình softmax này. Tham số `multi_class` trong các hướng dẫn cũ đã bị bỏ ở các bản scikit-learn mới, đừng truyền nó.
+
+### Ranh giới quyết định
+
+Mô hình dự đoán lớp có $\hat{y}_k$ lớn nhất, tức lớp có logit $z_k$ lớn nhất (softmax giữ thứ tự). Ranh giới giữa lớp $k$ và lớp $j$ là nơi hai logit bằng nhau:
+
+$$
+z_k = z_j \iff \left(\mathbf{w}_k - \mathbf{w}_j\right)^\top\mathbf{x} + \left(b_k - b_j\right) = 0
+$$
+
+Đây là một phương trình tuyến tính theo $\mathbf{x}$: với 2 đặc trưng, nó là một **đường thẳng**. Vùng của mỗi lớp là nơi logit của nó thắng mọi logit khác, tức giao của các nửa mặt phẳng, nên là một vùng lồi. Ghép các vùng lại, ranh giới giữa chúng là **tuyến tính từng đoạn** (piecewise linear): các đoạn thẳng gặp nhau tại những điểm mà ba logit bằng nhau. Ô code thứ ba vẽ ranh giới này cho iris.
+
+### Softmax trong mạng nơ-ron và LLM
+
+Lớp cuối của hầu hết mạng nơ-ron phân loại chính là một hồi quy softmax: các lớp phía trước biến đổi $\mathbf{x}$ thành đặc trưng mới, còn lớp cuối tính $K$ logit, áp softmax, và huấn luyện bằng cross-entropy với gradient $\hat{\mathbf{y}} - \mathbf{y}$ như trên. Mô hình ngôn ngữ lớn cũng vậy, với $K$ là số token trong từ vựng (hàng chục nghìn): mỗi bước, nó cho một logit cho mỗi token rồi softmax chọn token kế tiếp. Tham số `temperature` mà bạn chỉnh khi gọi API chỉ là chia mọi logit cho một số $T$ trước softmax, như bài [Sử dụng API văn bản](/vi/llm/text-api/). Mục Minh họa cho thấy việc co giãn logit làm gì.
+
+### Giới hạn
+
+- **Ranh giới luôn tuyến tính từng đoạn.** Lớp có hình dạng phức tạp (ví dụ một lớp nằm trong vòng tròn của lớp khác) cần đặc trưng mới, hoặc mô hình khác như bài Decision Tree và Random Forest hay mạng nơ-ron.
+- **Mỗi mẫu đúng một lớp.** Bài toán một mẫu có nhiều nhãn cùng lúc không dùng softmax (hộp thứ hai ở mục Lỗi hay gặp).
+- **Xác suất chưa chắc đáng tin.** Hai mô hình có cùng độ chính xác vẫn có thể cho xác suất khác nhau khá xa (hộp thứ ba ở mục Lỗi hay gặp).
+
+## Minh họa
+
+Bảng dưới lấy logit của bông hoa iris, $\mathbf{z} = (-3.0, 1.8, 1.2)$, nhân cả ba với cùng một số $c$, rồi tính softmax. Nhân với $c$ cũng là chia cho nhiệt độ $T = 1/c$.
+
+| Logit dùng | setosa | versicolor | virginica |
+|---|---:|---:|---:|
+| $0 \cdot \mathbf{z} = (0, 0, 0)$ | 0.3333 | 0.3333 | 0.3333 |
+| $0.5\,\mathbf{z}$ | 0.0495 | 0.5460 | 0.4045 |
+| $1 \cdot \mathbf{z}$ (gốc) | 0.0053 | 0.6422 | 0.3525 |
+| $\mathbf{z} + 5$ | 0.0053 | 0.6422 | 0.3525 |
+| $2\,\mathbf{z}$ | 0.0001 | 0.7685 | 0.2315 |
+| $10\,\mathbf{z}$ | 0.0000 | 0.9975 | 0.0025 |
+
+Đọc bảng từ trên xuống:
+
+- **Logit bằng nhau thì xác suất chia đều.** Hàng đầu là mô hình lúc chưa học gì: mỗi lớp $1/3$, và cross-entropy là $\ln 3$.
+- **Cộng thêm một hằng số không đổi gì.** Hàng $\mathbf{z} + 5$ giống hệt hàng gốc: đây là tính chất cho phép mẹo trừ max.
+- **Nhân với số lớn làm phân phối nhọn.** Thứ tự ba lớp không bao giờ đổi, nhưng với $10\,\mathbf{z}$, versicolor nhận gần hết xác suất: softmax tiến tới argmax, chọn hẳn một lớp. Nhân với số nhỏ thì ngược lại, phân phối phẳng dần về $1/3$.
+
+Điều này cũng giải thích vì sao trọng số phình to làm mô hình "tự tin" hơn: nhân mọi $\mathbf{w}_k$, $b_k$ với 2 thì mọi logit nhân với 2, ranh giới không đổi chỗ, nhưng xác suất bị đẩy về gần 0 và 1.
+
+## Ví dụ code
+
+Ba ô dưới đây chạy độc lập. Ô thứ nhất chỉ dùng NumPy. Ô thứ hai và thứ ba lần đầu chạy lâu hơn, vì trình duyệt phải tải thêm scikit-learn (và Matplotlib cho ô thứ ba).
+
+Ô đầu tiên cài đặt softmax theo hai cách, thử với logit của bông hoa iris, với logit cộng thêm 1000, và kiểm tra trường hợp $K = 2$.
+
+<PythonRunner code={softmaxNumpyCode} title="Softmax ổn định số bằng NumPy" />
+
+- Logit $(-3.0, 1.8, 1.2)$ cho $(0.0053, 0.6422, 0.3525)$, tổng bằng 1, đúng như bảng ở mục Trực giác. Cộng 5 vào mọi logit không đổi gì.
+- Cộng 1000: cách ngây thơ cho `[nan nan nan]` vì $e^{1001.8}$ tràn thành vô cực. Cách trừ max cho đúng xác suất cũ.
+- Dòng cuối: softmax của $(1.8, 1.2)$ cho lớp đầu $0.6457$, đúng bằng $\sigma(1.8 - 1.2) = \sigma(0.6)$.
+
+Ô thứ hai huấn luyện hồi quy softmax bằng batch gradient descent trên iris với hai đặc trưng cánh hoa. Dữ liệu được chia 105 bông để huấn luyện, 45 bông để kiểm tra (`stratify=y` giữ mỗi loài 15 bông trong tập test), rồi chuẩn hóa z-score bằng `StandardScaler` học từ tập train. Mô hình xuất phát từ $\mathbf{W} = \mathbf{0}$, $\mathbf{b} = \mathbf{0}$, $\eta = 0.5$, chạy 1000 epoch, rồi so với `LogisticRegression` của scikit-learn.
+
+<PythonRunner code={softmaxGdCode} title="Hồi quy softmax bằng gradient descent" />
+
+- Epoch 0, loss là 1.0986, đúng $\ln 3$: mọi lớp đang được $1/3$. Sau 10 epoch còn 0.4657, sau 100 epoch 0.1836, sau 1000 epoch 0.0976.
+- Loss vẫn đang giảm ở epoch 1000. Nếu cho chạy tới epoch 5000 (sửa cả `range(1001)` lẫn danh sách epoch được in), nó chỉ xuống 0.0891, còn trọng số thì tiếp tục lớn dần. Đây là hiện tượng setosa tách được hoàn toàn đã nói ở mục Lý thuyết.
+- Hai mô hình có cùng độ chính xác trên tập test, 0.9778, tức 44 trên 45 bông.
+- Với bông hoa 4.9 cm × 1.5 cm, scikit-learn cho $(0.006, 0.654, 0.340)$, rất gần bảng ở mục Trực giác: logit chưa làm tròn của nó là $(-2.95, 1.80, 1.15)$. Mô hình GD tự viết cho versicolor 0.771, tự tin hơn hẳn, vì nó không có phạt L2 nên trọng số lớn hơn.
+
+Ô thứ ba dùng `LogisticRegression` (sau `StandardScaler`, trong một pipeline) để tô màu mặt phẳng theo lớp dự đoán, rồi đánh giá trên tập test bằng ma trận nhầm lẫn (confusion matrix) và `classification_report`.
+
+<PythonRunner
+  code={boundaryCode}
+  title="Ranh giới quyết định và đánh giá trên tập test"
+  figureAlt={['Biểu đồ phân tán 105 bông hoa iris của tập train, trục hoành là chiều dài cánh hoa từ 0.5 tới 7.5 cm, trục tung là chiều rộng từ 0 tới 2.8 cm. Mặt phẳng được tô ba màu theo lớp dự đoán, ngăn bởi hai đường thẳng chéo. Setosa (vòng tròn) tụ ở góc dưới bên trái, trong vùng màu riêng, cách xa hai loài kia. Versicolor (hình vuông) nằm ở giữa, virginica (tam giác) ở góc trên bên phải; ranh giới giữa hai vùng này đi qua chỗ hai nhóm chạm nhau, vài điểm nằm sát hoặc lệch sang vùng bên kia.']}
+/>
+
+Hình cho thấy ranh giới tuyến tính từng đoạn: hai đoạn thẳng chia mặt phẳng thành ba vùng. Ba đường $z_1 = z_2$, $z_2 = z_3$, $z_1 = z_3$ gặp nhau ở một điểm nằm ngoài khung hình (chiều dài cánh hoa âm), nên trong khung bạn chỉ thấy hai đoạn. Ranh giới setosa nằm giữa khoảng trống rộng, còn ranh giới versicolor–virginica phải đi qua chỗ hai nhóm chồng lên nhau.
+
+Ma trận nhầm lẫn (hàng là lớp thật, cột là lớp dự đoán) cho thấy lỗi duy nhất: một bông virginica bị đoán là versicolor. Đó là bông có cánh hoa 5.6 cm × 1.4 cm, hẹp như versicolor; mô hình cho nó versicolor 0.593, virginica 0.405. Báo cáo có precision, recall và F1 cho từng lớp, rồi hai dòng gộp: **macro avg** lấy trung bình cộng của ba lớp, mỗi lớp nặng như nhau, còn **weighted avg** lấy trung bình theo số mẫu của mỗi lớp. Ở đây mỗi lớp có đúng 15 mẫu nên hai dòng bằng nhau: precision 0.979, recall và F1 0.978. Ý nghĩa của các chỉ số này và khi nào chọn cách gộp nào nằm ở bài [Đánh giá mô hình](/vi/ml/classification-metrics/).
+
+## Lỗi hay gặp
+
+:::caution[Tự cài softmax mà không trừ max]
+`np.exp(z) / np.exp(z).sum()` chạy đúng với logit nhỏ, rồi bất ngờ trả về `nan` khi một logit vượt khoảng 710, như ô code thứ nhất. Lỗi này hay xuất hiện giữa chừng khi huấn luyện, lúc trọng số đã lớn. Luôn trừ `z.max()` trước khi lấy mũ. Khi cần $\ln\hat{y}$, đừng lấy log của softmax (xác suất tròn về 0 thì log ra âm vô cực); tính $z_c - \ln\sum_k e^{z_k}$ bằng hàm có sẵn như `scipy.special.log_softmax` hoặc `scipy.special.logsumexp`, vốn cũng đã trừ max bên trong.
+:::
+
+:::caution[Dùng softmax cho bài toán nhiều nhãn]
+Softmax giả định mỗi mẫu thuộc **đúng một** lớp: xác suất cộng lại bằng 1, nên lớp này tăng thì lớp khác phải giảm. Nếu một mẫu có thể mang nhiều nhãn cùng lúc, ví dụ một bài báo vừa thuộc "kinh tế" vừa thuộc "công nghệ", đó là **phân loại nhiều nhãn** (multi-label classification). Khi đó dùng một sigmoid riêng cho mỗi nhãn, mỗi nhãn một ngưỡng, giống OvR nhưng ở đây việc tổng khác 1 lại là đúng ý.
+:::
+
+:::caution[Đọc xác suất softmax như độ chắc chắn thật]
+Ở ô code thứ hai, cùng bông hoa 4.9 cm × 1.5 cm, mô hình GD nói versicolor 0.771, scikit-learn nói 0.654, dù hai mô hình đúng cùng 44 trên 45 bông test. Độ lớn của trọng số (bị ảnh hưởng bởi regularization, số epoch, các lớp tách được) đẩy xác suất về gần 0 và 1 mà không đổi lớp dự đoán. Muốn dùng xác suất để ra quyết định (ví dụ chỉ tự động duyệt khi trên 0.9), hãy kiểm tra trên tập kiểm định xem trong các mẫu được 0.9, có thật khoảng 90% là đúng không.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Hồi quy softmax cho mỗi lớp một logit $z_k = \mathbf{w}_k^\top\mathbf{x} + b_k$, rồi $\hat{y}_k = e^{z_k}/\sum_j e^{z_j}$. Khác ba bộ phân loại one-vs-rest rời nhau, các xác suất luôn dương, giữ thứ tự của logit và cộng lại bằng 1.
+- Softmax chỉ phụ thuộc hiệu giữa các logit: cộng cùng một hằng số không đổi gì, nên trừ logit lớn nhất trước khi lấy mũ để tránh tràn số. Với $K = 2$, softmax là $\sigma(z_1 - z_2)$, tức hồi quy logistic.
+- Với nhãn one-hot, cross-entropy $-\sum_k y_k\ln\hat{y}_k$ thu về $-\ln\hat{y}_{\text{lớp đúng}}$, bắt đầu từ $\ln K$ khi mô hình chưa học gì. Gradient theo logit là $\hat{\mathbf{y}} - \mathbf{y}$, nên $\nabla_{\mathbf{W}}\mathcal{L} = \frac{1}{m}\mathbf{X}^\top(\hat{\mathbf{Y}} - \mathbf{Y})$, và huấn luyện bằng gradient descent.
+- Ranh giới quyết định là tuyến tính từng đoạn. Softmax cũng là lớp cuối của mạng nơ-ron phân loại và của LLM; nó chỉ dùng cho bài toán mỗi mẫu đúng một lớp.
+
+**Đọc thêm:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Bài 13: Softmax Regression](https://machinelearningcoban.com/2017/02/17/softmax/). Tiếng Việt, đi từ one-vs-rest tới softmax, có mục ổn định số và code NumPy. Ký hiệu khác: $C$ là số lớp, $N$ là số mẫu, hệ số tự do gộp vào $\mathbf{W}$ bằng cách thêm số 1 vào đầu $\mathbf{x}$.
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. (2023). [*Dive into Deep Learning*, mục 4.1: Softmax Regression](https://d2l.ai/chapter_linear-classification/softmax-regression.html). One-hot, softmax, cross-entropy theo góc nhìn likelihood và lý thuyết thông tin, dẫn gradient theo logit, có bài tập về nhiệt độ.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*, mục 1.1.11.2: Multinomial Case](https://scikit-learn.org/1.8/modules/linear_model.html#multinomial-case). Hàm mục tiêu thật của `LogisticRegression` nhiều lớp, và ghi chú vì sao dùng $K$ vectơ trọng số dù $K - 1$ là đủ.
+- Fisher, R. A. (1936). [*The Use of Multiple Measurements in Taxonomic Problems*](https://doi.org/10.1111/j.1469-1809.1936.tb02137.x). *Annals of Eugenics* 7(2), 179–188. Bài công bố bộ dữ liệu iris dùng trong bài này.
+- Bridle, J. S. (1990). [*Probabilistic Interpretation of Feedforward Classification Network Outputs, with Relationships to Statistical Pattern Recognition*](https://doi.org/10.1007/978-3-642-76153-9_28). Trong *Neurocomputing*, Springer, 227–236. Bài thường được dẫn là nơi đặt tên "softmax" cho lớp đầu ra của mạng nơ-ron.
+
+<LessonProgress />
