@@ -1,0 +1,91 @@
+---
+// dl/transformers, "Minh họa": what is inside one Transformer block, and that every sub-layer has a residual
+// connection round it. Read bottom-up, Post-LN as in Vaswani et al. (2017): a row of tokens → embedding → add
+// (the positional encoding comes in from the right) → a frame "× N blocks" holding multi-head attention
+// (accent) → add & norm → feed-forward → add & norm → output. Each residual forks off the arrow into a
+// sub-layer, runs up a lane at x 258 inside the frame and enters the add & norm box after it from the right.
+// EncoderDecoderFigure (llm/seq2seq) shows two stacks and cross-attention with plain sub-layer boxes; this one
+// shows one stack and its inside, so the two do not repeat each other. The frame is a closed headless FigArrow
+// (measured by e2e, llm-lessons.md 2.9.2). Narrow layout only. Words: src/data/figures/transformer-block.ts.
+import { TRANSFORMER_BLOCK } from '@data/figures/transformer-block';
+import type { Pt } from '@lib/figures/geometry';
+import { anchor, spreadByWeight, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigMath from './kit/FigMath.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = TRANSFORMER_BLOCK[getPageLocale(Astro.locals.starlightRoute)];
+
+// Column x 64–240 (centre 152); residual lane x 258; frame x 56–272, y 60–336; notes right of the frame.
+const COL = { x: 64, width: 176 } as const;
+const MID = COL.x + COL.width / 2;
+const LANE = 258;
+const FRAME = { left: COL.x - 8, right: 272, top: 60, bottom: 336 } as const;
+const box = (y: number, height = 36): Box => ({ ...COL, y, height });
+
+const output = box(8);
+const addNorm2 = box(88);
+const ffn = box(148);
+const addNorm1 = box(208);
+const attention = box(268);
+const add: Box = { x: MID - 18, y: 360, width: 36, height: 36 };
+const position: Box = { x: 230, y: 350, width: 122, height: 56 };
+const embedding = box(420);
+const TOKENS = { y: 480, height: 36 } as const;
+const words = t.labels.tokens as readonly string[];
+const { starts, sizes } = spreadByWeight(COL.x, COL.x + COL.width, words.map((w) => w.length + 3), 8);
+const tokens = words.map((word, i) => ({ word, box: { x: starts[i] ?? 0, width: sizes[i] ?? 0, ...TOKENS } as Box }));
+const height = TOKENS.y + TOKENS.height + 8;
+
+/** A residual: forks at y on the main arrow, runs up the lane, enters `into` from the right. */
+const residual = (forkY: number, into: Box) => {
+  const [x, y] = anchor(into, 'right');
+  return { from: [MID, forkY] as Pt, via: [[LANE, forkY], [LANE, y]] as Pt[], to: [x, y] as Pt };
+};
+const between = (lower: Box, upper: Box) => (lower.y + upper.y + upper.height) / 2;
+const layersY = FRAME.top + 14;
+---
+
+<FigureFrame id="transformer-block" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigNode {...output} lines={t.labels.output} />
+    <FigArrow from={anchor(addNorm2, 'top')} to={anchor(output, 'bottom')} />
+    <FigArrow
+      from={[FRAME.left, FRAME.top]}
+      via={[[FRAME.right, FRAME.top], [FRAME.right, FRAME.bottom], [FRAME.left, FRAME.bottom]]}
+      to={[FRAME.left, FRAME.top]}
+      head={false}
+    />
+    <FigMath x={COL.x} y={layersY} before="×" symbol="N" size="small" anchor="start" />
+    <FigText x={COL.x + 26} y={layersY} lines={t.labels.layers} size="small" anchor="start" />
+
+    <FigNode {...addNorm2} lines={t.labels.addNorm} />
+    <FigArrow from={anchor(ffn, 'top')} to={anchor(addNorm2, 'bottom')} />
+    <FigNode {...ffn} lines={t.labels.ffn} />
+    <FigArrow from={anchor(addNorm1, 'top')} to={anchor(ffn, 'bottom')} />
+    <FigArrow {...residual(between(addNorm1, ffn), addNorm2)} />
+    <FigNode {...addNorm1} lines={t.labels.addNorm} />
+    <FigArrow from={anchor(attention, 'top')} to={anchor(addNorm1, 'bottom')} />
+    <FigNode {...attention} lines={t.labels.attention} tone="accent" />
+    <FigArrow from={anchor(add, 'top')} to={anchor(attention, 'bottom')} />
+    <FigArrow {...residual(320, addNorm1)} />
+    <FigText x={FRAME.right + 8} y={(FRAME.top + FRAME.bottom) / 2} lines={t.labels.residual} size="small" anchor="start" />
+
+    <FigNode {...add} lines={t.labels.add} />
+    <FigNode {...position} lines={t.labels.position} />
+    <FigArrow from={anchor(position, 'left')} to={anchor(add, 'right')} />
+    <FigArrow from={anchor(embedding, 'top')} to={anchor(add, 'bottom')} />
+    <FigNode {...embedding} lines={t.labels.embedding} />
+    {
+      tokens.map(({ word, box: b }) => (
+        <Fragment>
+          <FigNode {...b} lines={word} />
+          <FigArrow from={anchor(b, 'top')} to={[anchor(b, 'top')[0], embedding.y + embedding.height]} />
+        </Fragment>
+      ))
+    }
+  </Fragment>
+</FigureFrame>

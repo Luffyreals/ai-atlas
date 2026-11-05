@@ -121,6 +121,16 @@
   fill: var(--atlas-fig-alt);
 }
 
+/* The focus path (dl-lessons.md 4.2: the state line of GRU and LSTM): accent and 2.5 wide, not colour alone. */
+.atlas-fig-arrow[data-tone='accent'] {
+  stroke: var(--atlas-fig-accent);
+  stroke-width: 2.5;
+}
+
+.atlas-fig-arrow-head[data-tone='accent'] {
+  fill: var(--atlas-fig-accent);
+}
+
 /* Schematic plots (viz/static-plots.md 11.4.3): a shaded region with a 2px border, level curves, dots, math labels. */
 .atlas-fig-region {
   fill: var(--atlas-fig-node);

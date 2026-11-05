@@ -1,0 +1,77 @@
+---
+// dl/rnn, "Minh họa": an RNN cell with a loop is a chain of copies that share one set of weights, linked through
+// the hidden state. Top: the folded cell (second group, dashed), x_t in from below through W_x, h_t out at the
+// top, and a loop on its right through W_h back into the cell; "= unrolled through time" beside it. Bottom (the
+// focus, accent): the same cell three times, steps t−1, t, t+1, each with x in from below through W_x, h out at
+// the top, and the hidden state passed on to the right through W_h. Every cell gets exactly one W_x and one W_h,
+// so "same weights" can be read off the figure; one line under the row says it in words.
+// Narrow layout only. Words: src/data/figures/rnn-unrolled.ts; symbols with FigMath.
+import { RNN_UNROLLED } from '@data/figures/rnn-unrolled';
+import { getPageLocale } from '@lib/page-locale';
+import type { Box } from '@lib/figures/layout';
+import FigArrow from './kit/FigArrow.astro';
+import FigMath from './kit/FigMath.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = RNN_UNROLLED[getPageLocale(Astro.locals.starlightRoute)];
+
+const CELL = { width: 64, height: 56 } as const;
+const cellAt = (cx: number, y: number): Box => ({ x: cx - CELL.width / 2, y, ...CELL });
+
+// Folded cell, left of centre so "= unrolled" fits on its right.
+const FX = 110;
+const folded = cellAt(FX, 52);
+const fBottom = folded.y + folded.height;
+const loop = { out: 66, back: 94, lane: 170 } as const;
+
+// Unrolled row: three cells, the state line through their middles.
+const STEPS = [
+  { cx: 72, sub: 't−1' },
+  { cx: 180, sub: 't' },
+  { cx: 288, sub: 't+1' },
+] as const;
+const ROW = 232;
+const rowBottom = ROW + CELL.height;
+const lineY = ROW + CELL.height / 2;
+const H_LABEL = 190;
+const X_TAIL = 324;
+const X_LABEL = 336;
+// Arrows into the cells along the state line, from the left edge and between cells; W_h sits over each.
+const into = STEPS.map((s, i) => ({ from: i === 0 ? 4 : (STEPS[i - 1]?.cx ?? 0) + CELL.width / 2, to: s.cx - CELL.width / 2 }));
+const last = STEPS[STEPS.length - 1]!.cx + CELL.width / 2;
+---
+
+<FigureFrame id="rnn-unrolled" text={t} narrowHeight={376}>
+  <Fragment slot="narrow">
+    <FigMath x={FX} y={12} symbol="h" sub="t" bold />
+    <FigArrow from={[FX, folded.y]} to={[FX, 26]} />
+    <FigNode {...folded} lines={t.labels.cell} tone="alt" />
+    <FigArrow from={[folded.x + folded.width, loop.out]} via={[[loop.lane, loop.out], [loop.lane, loop.back]]} to={[folded.x + folded.width, loop.back]} />
+    <FigMath x={loop.lane + 6} y={(loop.out + loop.back) / 2} symbol="W" sub="h" bold anchor="start" />
+    <FigArrow from={[FX, 148]} to={[FX, fBottom]} />
+    <FigMath x={FX + 6} y={128} symbol="W" sub="x" bold anchor="start" />
+    <FigMath x={FX} y={160} symbol="x" sub="t" bold />
+
+    <FigText x={220} y={84} lines={t.labels.equals} />
+    <FigText x={234} y={84} lines={t.labels.unrolled} size="small" anchor="start" />
+
+    {
+      STEPS.map((s, i) => (
+        <>
+          <FigMath x={s.cx} y={H_LABEL} symbol="h" sub={s.sub} bold />
+          <FigArrow from={[s.cx, ROW]} to={[s.cx, H_LABEL + 14]} />
+          <FigNode {...cellAt(s.cx, ROW)} lines={t.labels.cell} tone="accent" />
+          <FigArrow from={[into[i]!.from, lineY]} to={[into[i]!.to, lineY]} />
+          <FigMath x={(into[i]!.from + into[i]!.to) / 2} y={lineY - 16} symbol="W" sub="h" bold />
+          <FigArrow from={[s.cx, X_TAIL]} to={[s.cx, rowBottom]} />
+          <FigMath x={s.cx + 6} y={(X_TAIL + rowBottom) / 2} symbol="W" sub="x" bold anchor="start" />
+          <FigMath x={s.cx} y={X_LABEL} symbol="x" sub={s.sub} bold />
+        </>
+      ))
+    }
+    <FigArrow from={[last, lineY]} to={[356, lineY]} />
+    <FigText x={180} y={364} lines={t.labels.shared} size="small" />
+  </Fragment>
+</FigureFrame>

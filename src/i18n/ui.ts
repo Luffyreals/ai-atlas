@@ -59,6 +59,18 @@ export const UI_KEYS = {
     'slowNote', 'zigzagNote', 'diverged', 'announceStep', 'announceEta', 'running', 'stopped', 'atEnd',
     'resetDone',
   ],
+  vizGradientFlow: [
+    'caption', 'chartLabel', 'chartDesc', 'layerAxis', 'gradAxis', 'bar', 'lastLayer', 'controls',
+    'activation', 'init', 'sigmoid', 'tanh', 'relu', 'std1', 'xavier', 'he', 'depthLabel', 'depthValueText',
+    'weightStd', 'ratio', 'sciSpoken', 'vanishing', 'stable', 'exploding', 'vanishingNote', 'stableNote',
+    'explodingNote', 'announce',
+  ],
+  vizConvolution: [
+    'caption', 'kernelsLabel', 'identity', 'blur', 'sharpen', 'sobelVertical', 'sobelHorizontal',
+    'imageTitle', 'imageLabel', 'imageDesc', 'kernelTitle', 'kernelLabel', 'productsTitle', 'product', 'sum',
+    'mapTitle', 'mapLabel', 'cellLabel', 'legend', 'prev', 'next', 'identityNote', 'blurNote', 'sharpenNote',
+    'sobelVerticalNote', 'sobelHorizontalNote', 'announce',
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 export type UiNamespace = keyof typeof UI_KEYS;

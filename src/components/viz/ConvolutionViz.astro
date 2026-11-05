@@ -1,0 +1,20 @@
+---
+// ConvolutionViz for dl/cnn (docs/architecture/viz/convolution.md). The only file a lesson imports:
+// <ConvolutionViz />, no props, no client:* in MDX. Here, at build time: the UI strings of the page locale.
+// The island reads the 8 x 8 image and the five kernels from src/lib/viz/convolution.ts and computes the
+// feature map itself (a few hundred multiplications), with the same code at build time and in the browser.
+// The island hydrates 200px before it scrolls into view. Styles: viz.css, through Starlight's customCss.
+import ConvolutionVizIsland from './convolution-viz/ConvolutionVizIsland';
+import { getStrings } from '@i18n/ui';
+import { getPageLocale } from '@lib/page-locale';
+
+const route = Astro.locals.starlightRoute;
+const locale = getPageLocale(route);
+const strings = getStrings(Astro.locals.t, 'vizConvolution');
+const tCommon = getStrings(Astro.locals.t, 'common');
+---
+
+<div class="atlas-viz not-content" lang={locale} data-pagefind-ignore>
+  <ConvolutionVizIsland client:visible={{ rootMargin: '200px' }} strings={strings} />
+  <noscript><p class="atlas-viz-noscript">{tCommon.needsScript}</p></noscript>
+</div>

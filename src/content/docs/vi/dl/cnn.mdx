@@ -1,0 +1,328 @@
+---
+title: Mạng tích chập (CNN)
+description: 'Một bộ lọc 3×3 trượt khắp ảnh để tìm cạnh. Tích chập, padding, stride, nhiều kênh, pooling, trường tiếp nhận, và vì sao CNN cần ít tham số hơn MLP.'
+quiz:
+  - question: 'Ảnh vào $32 \times 32$, kernel $5 \times 5$, padding $p = 2$, stride $s = 2$. Bản đồ đặc trưng ra có kích thước bao nhiêu?'
+    options: ['$32 \times 32$', '$15 \times 15$', '$16 \times 16$', '$14 \times 14$']
+    answer: 2
+    explanation: '$\lfloor (32 + 2 \cdot 2 - 5)/2 \rfloor + 1 = \lfloor 15.5 \rfloor + 1 = 16$. Padding 2 với kernel 5 chỉ giữ nguyên kích thước khi stride là 1; stride 2 chia đôi nó. $15$ là kết quả khi quên cộng 1 ở cuối công thức.'
+  - question: 'Ảnh màu RGB đi vào một lớp tích chập có 16 kernel $3 \times 3$. Lớp này có bao nhiêu tham số, tính cả hệ số tự do?'
+    options: ['$160$', '$448$', '$432$', '$3 \times 3 \times 16 \times$ (số điểm ảnh)']
+    answer: 1
+    explanation: 'Mỗi kernel phủ cả 3 kênh màu, nên có $3 \cdot 3 \cdot 3 = 27$ trọng số cộng 1 hệ số tự do, tức 28 tham số. 16 kernel cho $16 \cdot 28 = 448$. $160$ là kết quả khi quên rằng kernel có chiều sâu bằng số kênh vào; $432$ là khi quên hệ số tự do. Số tham số không phụ thuộc kích thước ảnh, vì cùng một kernel dùng chung cho mọi vị trí.'
+  - question: 'Xếp chồng ba lớp tích chập $3 \times 3$, stride 1, không có pooling. Mỗi giá trị ở đầu ra lớp thứ ba phụ thuộc vào một vùng bao nhiêu điểm ảnh của ảnh vào?'
+    options: ['$3 \times 3$', '$9 \times 9$', '$27 \times 27$', '$7 \times 7$']
+    answer: 3
+    explanation: 'Mỗi lớp $3 \times 3$ stride 1 mở rộng trường tiếp nhận thêm $k - 1 = 2$ điểm ảnh: $3$, rồi $5$, rồi $7$. Trường tiếp nhận cộng dồn, không nhân lên: $9 \times 9$ và $27 \times 27$ là các phép nhân sai. Có thêm pooling hay stride lớn hơn 1 thì nó mới tăng nhanh hơn.'
+  - question: 'Một lớp tích chập (stride 1, có padding giữ kích thước). Bạn dịch vật trong ảnh sang phải 2 điểm ảnh, vật vẫn nằm gọn trong ảnh. Bản đồ đặc trưng của lớp này thay đổi thế nào?'
+    options:
+      - 'Cũng dịch sang phải 2 ô, các giá trị giữ nguyên'
+      - 'Không đổi gì, vì tích chập bất biến với phép dịch'
+      - 'Thay đổi hoàn toàn, vì mỗi vị trí có trọng số riêng'
+      - 'Nhỏ đi 2 cột'
+    answer: 0
+    explanation: 'Cùng một kernel quét mọi vị trí, nên mẫu hình xuất hiện ở đâu thì phản hồi xuất hiện ở đó: bản đồ dịch theo đúng 2 ô. Tính chất này gọi là đẳng biến với phép dịch. Bản đồ không đứng yên: chỉ sau pooling, hay khi gộp cả ảnh thành một số (pooling toàn cục), kết quả mới gần như không đổi. Mỗi vị trí có trọng số riêng là chuyện của lớp kết nối đầy đủ.'
+  - question: 'Bạn lấy kernel đã học từ một lớp `nn.Conv2d` của PyTorch, rồi áp lên ảnh bằng `scipy.signal.convolve2d`. Kết quả khác hẳn đầu ra của lớp đó trong PyTorch. Nguyên nhân hợp lý nhất?'
+    options:
+      - 'PyTorch luôn tự thêm padding nên kích thước khác'
+      - 'Kernel đã học phải chuẩn hóa về tổng bằng 1 trước khi dùng'
+      - '`convolve2d` lật kernel 180 độ, còn PyTorch tính cross-correlation, không lật'
+      - 'SciPy tính bằng số thực 64 bit nên sai số lớn'
+    answer: 2
+    explanation: 'Tích chập theo định nghĩa toán học lật kernel trước khi trượt, `convolve2d` làm đúng như vậy. Lớp "tích chập" của PyTorch thực ra tính cross-correlation, không lật. Dùng `scipy.signal.correlate2d` (hoặc lật kernel trước) thì khớp. Padding của `nn.Conv2d` mặc định là 0, và sai số 64 bit không thể làm kết quả khác hẳn.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import conv2dCode from '@code/dl/cnn/conv2d.vi.py?raw';
+import paramsCode from '@code/dl/cnn/params.vi.py?raw';
+import cnnDigitsCode from '@code/dl/cnn/cnn-digits.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu ảnh được lưu thành ma trận hay tensor nhiều kênh, và một bộ lọc (filter) 3×3 trượt trên ảnh làm mờ, làm nét hay tìm cạnh thế nào.
+- Tính được phép tích chập (convolution) 2D bằng tay và bằng NumPy, biết vì sao trong học sâu nó thực ra là cross-correlation, và tính được kích thước đầu ra theo padding, stride.
+- Đếm được số tham số của một lớp tích chập nhiều kênh, và giải thích vì sao mạng tích chập (Convolutional Neural Network, CNN) cần ít tham số hơn MLP nhờ kết nối cục bộ và chia sẻ trọng số.
+- Nhận ra cấu trúc tích chập → kích hoạt → pooling → … → lớp kết nối đầy đủ (fully connected layer), tính được trường tiếp nhận (receptive field), và đọc được một CNN nhỏ viết bằng PyTorch.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Một **lớp kết nối đầy đủ** tính $\mathbf{z} = \mathbf{W}\mathbf{a} + \mathbf{b}$: mỗi đầu ra nối với **mọi** đầu vào bằng một trọng số riêng, rồi qua **hàm kích hoạt** (activation function) như ReLU, $g(z) = \max(0, z)$ (bài [Mạng nơ-ron nhân tạo](/vi/dl/neural-networks/)). Mạng học bằng **lan truyền ngược** (backpropagation) (bài [Huấn luyện mạng nơ-ron](/vi/dl/training-neural-networks/)) và một bộ tối ưu như Adam (bài Các thuật toán tối ưu nâng cao). Bài này chỉ đổi **cách nối** giữa các lớp; cách học giữ nguyên.
+:::
+
+## Trực giác
+
+### Ảnh là một bảng số
+
+Với máy tính, một ảnh xám là một bảng số. Mỗi ô là một **điểm ảnh** (pixel), số càng lớn thì càng sáng. Đây là một ảnh xám 8×8, nền tối (0) và một hình vuông sáng (9) ở giữa. Bài này dùng đúng ảnh này từ đầu tới cuối:
+
+$$
+\mathbf{X} = \begin{bmatrix}
+0&0&0&0&0&0&0&0\\
+0&0&0&0&0&0&0&0\\
+0&0&9&9&9&9&0&0\\
+0&0&9&9&9&9&0&0\\
+0&0&9&9&9&9&0&0\\
+0&0&9&9&9&9&0&0\\
+0&0&0&0&0&0&0&0\\
+0&0&0&0&0&0&0&0
+\end{bmatrix}
+$$
+
+Ảnh màu thì có ba bảng chồng lên nhau, mỗi bảng một **kênh** (channel): đỏ, lục, lam (RGB). Một ảnh cao $H$, rộng $W$, có $C$ kênh là một **tensor** cỡ $H \times W \times C$, tức một mảng ba chiều. Ảnh chụp 224×224 có $224 \cdot 224 \cdot 3 = 150\,528$ số.
+
+### Thử cách đã biết: trải phẳng rồi đưa vào MLP
+
+Bạn đã biết MLP. Cách thẳng nhất là trải phẳng ảnh thành một vectơ dài, rồi đưa vào lớp kết nối đầy đủ. Có ba chỗ không ổn:
+
+- **Quá nhiều tham số.** Ảnh 224×224×3 nối tới chỉ 1000 nơ-ron ẩn đã cần $150\,528 \cdot 1000 \approx 150$ triệu trọng số, cho riêng lớp đầu.
+- **Vứt bỏ hàng xóm.** Sau khi trải phẳng, hai điểm ảnh cạnh nhau theo chiều dọc nằm cách nhau cả một hàng trong vectơ. MLP không biết điểm nào gần điểm nào; nó phải tự học lại điều đó từ dữ liệu.
+- **Học lại cùng một thứ ở mọi chỗ.** Một cái cạnh ở góc trái và cùng cái cạnh đó ở góc phải đi qua hai nhóm trọng số khác nhau. Mạng phải học cách nhận ra cạnh riêng cho từng vị trí.
+
+### Ý tưởng: một cửa sổ nhỏ trượt khắp ảnh
+
+Người làm xử lý ảnh đã có cách khác từ lâu. Lấy một bảng nhỏ 3×3, gọi là **bộ lọc** (filter) hay **kernel**. Đặt nó lên một góc ảnh, nhân từng ô của bảng với điểm ảnh nằm dưới nó, cộng hết lại thành một số. Trượt sang phải một ô, làm lại. Hết hàng thì xuống một ô. Các số thu được xếp thành một ảnh mới.
+
+Các con số trong kernel quyết định ảnh mới trông thế nào:
+
+| Kernel | Giá trị | Tác dụng |
+|---|---|---|
+| Làm mờ trung bình | chín ô đều bằng $1/9$ | Mỗi điểm thành trung bình của 9 điểm quanh nó, nên chi tiết nhòe đi |
+| Làm nét | tâm $5$, bốn ô trên dưới trái phải $-1$, góc $0$ | Điểm khác hàng xóm thì càng bị đẩy khác hơn, nên đường viền rõ hơn |
+| Sobel dọc | cột trái $-1, -2, -1$; cột giữa $0$; cột phải $1, 2, 1$ | Đo "bên phải sáng hơn bên trái bao nhiêu", nên chỉ sáng lên ở cạnh dọc |
+
+Ý hay nằm ở hai chỗ. Kernel chỉ nhìn **một vùng nhỏ**, nên nó tôn trọng hàng xóm. Và **cùng một kernel** dùng cho mọi vị trí, nên 9 số đủ để tìm cạnh dọc ở bất cứ đâu trong ảnh.
+
+Bài toán của bài này là: **thay vì tự tay thiết kế kernel như Sobel, để mạng nơ-ron tự học các kernel từ dữ liệu, xếp nhiều lớp như vậy chồng lên nhau, và hiểu mỗi lớp nhận gì, trả gì, tốn bao nhiêu tham số.**
+
+## Lý thuyết
+
+### Phép tích chập 2D
+
+Gọi $\mathbf{X}$ là ảnh xám và $\mathbf{K}$ là kernel cỡ $k \times k$. Ký hiệu $X_{i,j}$ là điểm ảnh ở hàng $i$, cột $j$, và $K_{u,v}$ là ô ở hàng $u$, cột $v$ của kernel, đều đếm từ 0 như trong NumPy. Đặt góc trên trái của kernel tại vị trí $(i, j)$, nhân từng cặp ô rồi cộng:
+
+$$
+Z_{i,j} = \sum_{u=0}^{k-1}\sum_{v=0}^{k-1} X_{i+u,\, j+v}\, K_{u,v} + b
+$$
+
+Ở đây $b$ là hệ số tự do (bias), một số chung cho cả kernel; các bộ lọc xử lý ảnh ở trên có $b = 0$. Bảng kết quả $\mathbf{Z}$ gọi là **bản đồ đặc trưng** (feature map): nó cho biết ở mỗi vị trí, vùng ảnh giống mẫu hình mà kernel tìm tới đâu.
+
+**Tính tay một ô.** Áp Sobel dọc lên ảnh ở trên, tại $(i, j) = (2, 0)$. Cửa sổ là hàng 2 tới 4, cột 0 tới 2 của $\mathbf{X}$:
+
+$$
+\begin{bmatrix} 0&0&9\\ 0&0&9\\ 0&0&9 \end{bmatrix}
+\odot
+\begin{bmatrix} -1&0&1\\ -2&0&2\\ -1&0&1 \end{bmatrix}
+=
+\begin{bmatrix} 0&0&9\\ 0&0&18\\ 0&0&9 \end{bmatrix}
+$$
+
+Phép $\odot$ nhân từng ô với ô cùng chỗ. Cộng chín số lại được $Z_{2,0} = 9 + 18 + 9 = 36$. Cột phải sáng, cột trái tối: đây là cạnh trái của hình vuông. Dời cửa sổ tới $(2, 2)$, cả cửa sổ toàn số 9, cột trái và cột phải triệt tiêu nhau, nên $Z_{2,2} = 0$: giữa hình vuông không có cạnh. Ở cạnh phải, tối nằm bên phải, nên giá trị âm, $Z_{2,5} = -36$.
+
+Ảnh 8×8, kernel 3×3: góc trên trái của kernel chỉ đặt được ở 6 vị trí mỗi chiều để kernel không lòi ra ngoài, nên $\mathbf{Z}$ cỡ 6×6.
+
+:::note[Tích chập trong học sâu thực ra là cross-correlation]
+Trong toán học và xử lý tín hiệu, **tích chập** theo định nghĩa lật kernel 180 độ trước khi trượt: $\sum_{u,v} X_{i-u,\, j-v} K_{u,v}$. Công thức ở trên không lật, nên đúng tên của nó là **tương quan chéo** (cross-correlation). Gần như mọi thư viện học sâu, kể cả `nn.Conv2d` của PyTorch, tính cross-correlation nhưng vẫn gọi là "tích chập". Với mạng nơ-ron điều này không quan trọng: kernel là tham số học được, nếu cần bản lật thì mạng tự học ra bản lật. Nó chỉ quan trọng khi bạn so với thư viện xử lý ảnh, xem hộp đầu tiên ở mục Lỗi hay gặp.
+:::
+
+### Padding và stride
+
+**Padding** (đệm) $p$: thêm $p$ vòng số 0 quanh ảnh trước khi trượt. Không có padding thì mỗi lớp làm ảnh co lại $k - 1$ điểm mỗi chiều, và các điểm ảnh ở mép được kernel ghé qua ít lần hơn điểm ở giữa. Với $k = 3$, $p = 1$ giữ nguyên kích thước.
+
+**Stride** (bước trượt) $s$: mỗi lần kernel nhảy $s$ ô thay vì 1. Stride 2 làm đầu ra nhỏ đi khoảng một nửa mỗi chiều.
+
+Với ảnh vuông cạnh $n$ (ở đây $n$ là số điểm ảnh mỗi cạnh, không phải số đặc trưng), ảnh sau khi đệm có cạnh $n + 2p$. Kernel cạnh $k$ đặt ở vị trí đầu tiên chiếm từ ô 0 tới ô $k - 1$, nên phần còn lại để trượt dài $n + 2p - k$ ô. Mỗi bước nhảy $s$ ô, nên có $\lfloor (n + 2p - k)/s \rfloor$ bước trọn vẹn, cộng thêm vị trí xuất phát:
+
+$$
+n_{\text{out}} = \left\lfloor \frac{n + 2p - k}{s} \right\rfloor + 1
+$$
+
+Dấu $\lfloor\cdot\rfloor$ là làm tròn xuống: bước cuối mà kernel lòi ra ngoài thì bỏ. Vài ví dụ với ảnh 8×8 của bài:
+
+| Kernel, padding, stride | Phép tính | Cạnh đầu ra |
+|---|---|---:|
+| $k = 3$, $p = 0$, $s = 1$ ("valid") | $\lfloor 5/1 \rfloor + 1$ | 6 |
+| $k = 3$, $p = 1$, $s = 1$ ("same") | $\lfloor 7/1 \rfloor + 1$ | 8 |
+| $k = 3$, $p = 0$, $s = 2$ | $\lfloor 5/2 \rfloor + 1$ | 3 |
+
+### Nhiều kênh vào, nhiều kênh ra
+
+Gọi số kênh vào là $C_{\text{in}}$ và số kênh ra là $C_{\text{out}}$, đúng như hai tham số `in_channels`, `out_channels` của `nn.Conv2d` trong PyTorch. Ảnh màu có $C_{\text{in}} = 3$. Khi đó kernel không phải 3×3 mà là $k \times k \times C_{\text{in}}$: nó có một lát 3×3 riêng cho mỗi kênh. Ở mỗi vị trí, nhân từng ô trên **cả** ba kênh rồi cộng tất cả thành **một** số, cộng thêm $b$. Vậy một kernel, dù ảnh vào có bao nhiêu kênh, cho ra một bản đồ đặc trưng.
+
+Một lớp tích chập thường có nhiều kernel, mỗi kernel tìm một mẫu hình riêng (cạnh dọc, cạnh ngang, một vệt màu…). $C_{\text{out}}$ kernel cho ra $C_{\text{out}}$ bản đồ, xếp chồng thành một tensor $n_{\text{out}} \times n_{\text{out}} \times C_{\text{out}}$. Tensor này lại là đầu vào có $C_{\text{out}}$ kênh cho lớp tích chập kế tiếp.
+
+**Đếm tham số.** Mỗi kernel có $k^2 C_{\text{in}}$ trọng số và 1 hệ số tự do. Cả lớp:
+
+$$
+\text{số tham số} = \left(k^2 C_{\text{in}} + 1\right) C_{\text{out}}
+$$
+
+Không có $n$ trong công thức: số tham số **không phụ thuộc kích thước ảnh**. Ví dụ, ảnh xám ($C_{\text{in}} = 1$), 8 kernel 3×3: $(9 + 1) \cdot 8 = 80$ tham số, dù ảnh là 28×28 hay 1000×1000.
+
+### Pooling
+
+Lớp **pooling** (gộp) làm bản đồ đặc trưng nhỏ lại. Phổ biến nhất là **max-pooling** 2×2, stride 2: chia bản đồ thành các ô 2×2 không chồng nhau, mỗi ô giữ lại số lớn nhất. Còn có **average pooling**, giữ trung bình. Pooling **không có tham số** và làm riêng trên từng kênh.
+
+Lấy bản đồ Sobel dọc 6×6 của ảnh, qua ReLU (số âm thành 0), rồi max-pooling 2×2. Kết quả 3×3 (ô code đầu tiên tính lại):
+
+$$
+\begin{bmatrix} 27&0&0\\ 36&0&0\\ 27&0&0 \end{bmatrix}
+$$
+
+Bản đồ còn một phần tư số ô, nhưng thông tin chính vẫn còn: "có cạnh dọc kiểu tối sang sáng ở cột bên trái". Pooling có ba tác dụng: giảm số phép tính ở các lớp sau, mở rộng vùng ảnh mà mỗi giá trị phía sau "thấy", và làm kết quả ít nhạy với xê dịch nhỏ, như mục sau.
+
+### Cấu trúc một CNN
+
+Một CNN điển hình xếp các khối như sau, đọc từ ảnh tới kết quả:
+
+1. **Tích chập → kích hoạt (thường là ReLU) → pooling**, lặp lại vài lần. Mỗi lần, ảnh nhỏ đi về chiều cao và chiều rộng, còn số kênh thường tăng lên (ví dụ 8, rồi 16, rồi 32).
+2. **Trải phẳng** (flatten) tensor cuối thành vectơ.
+3. **Một hay vài lớp kết nối đầy đủ**, lớp cuối có số đầu ra bằng số lớp, rồi softmax và cross-entropy như MLP.
+
+Các lớp đầu học các mẫu hình đơn giản như cạnh và vệt màu. Các lớp sau ghép chúng thành mẫu hình phức tạp hơn: góc, nét cong, rồi các bộ phận. Cả mạng học bằng lan truyền ngược như MLP; trọng số của các kernel chỉ là thêm tham số để cập nhật.
+
+### Vì sao CNN tốt hơn MLP với ảnh
+
+So một lớp tích chập với một lớp kết nối đầy đủ có cùng đầu vào và đầu ra:
+
+- **Kết nối cục bộ** (local connectivity). Mỗi giá trị đầu ra chỉ nối với $k \times k$ điểm ảnh xung quanh, không phải cả ảnh. Điều này mã hóa sẵn một giả định đúng với ảnh: điểm gần nhau liên quan với nhau nhiều hơn.
+- **Chia sẻ trọng số** (weight sharing). Cùng một kernel dùng ở mọi vị trí. Mẫu hình hữu ích ở góc này cũng hữu ích ở góc kia, nên học một lần là đủ.
+- **Ít tham số hơn hẳn.** Hai điều trên cộng lại: lớp tích chập 1 → 8 kênh, kernel 3×3, trên ảnh 28×28 cho 26×26×8 giá trị ra với 80 tham số. Một lớp kết nối đầy đủ cho cùng số giá trị ra cần 4 245 280 tham số (ô code thứ hai).
+- **Đẳng biến với phép dịch** (translation equivariance). Dịch vật trong ảnh sang phải 1 điểm ảnh thì bản đồ đặc trưng cũng dịch sang phải đúng 1 ô, các giá trị giữ nguyên, vì cùng một kernel quét mọi chỗ. Pooling biến điều này thành **bất biến gần đúng** (approximate invariance): kết quả ít đổi khi vật xê dịch nhỏ. Chỉ là gần đúng: với ảnh của bài, dịch hình vuông sang phải 1 điểm ảnh làm bản đồ 3×3 sau pooling ở trên đổi từ một cột khác 0 thành hai cột. Còn nếu lấy số lớn nhất của cả bản đồ (pooling toàn cục), kết quả là 36 ở cả hai trường hợp.
+
+Đổi lại, CNN giả định ảnh có cấu trúc cục bộ và lặp lại. Với dữ liệu dạng bảng, nơi thứ tự các cột không có nghĩa, giả định đó sai và CNN không có lợi thế.
+
+### Trường tiếp nhận
+
+**Trường tiếp nhận** (receptive field) của một giá trị trong bản đồ đặc trưng là vùng ảnh vào có ảnh hưởng tới nó. Sau một lớp 3×3, mỗi giá trị nhìn 3×3 điểm ảnh. Thêm một lớp 3×3 nữa: mỗi giá trị nhìn 3×3 giá trị của lớp trước, mỗi giá trị đó lại nhìn 3×3 điểm ảnh, chồng lên nhau thành 5×5.
+
+Tổng quát, đi từ ảnh vào, gọi $r$ là cạnh trường tiếp nhận và $\Delta$ là khoảng cách (tính bằng điểm ảnh của ảnh vào) giữa hai giá trị kề nhau ở lớp hiện tại. Lúc đầu $r = 1$, $\Delta = 1$. Mỗi lớp có kernel $k$ và stride $s$ cập nhật:
+
+$$
+r \leftarrow r + (k - 1)\, \Delta, \qquad \Delta \leftarrow \Delta \cdot s
+$$
+
+Cập nhật đầu đúng vì kernel thêm $k - 1$ giá trị mỗi chiều, mỗi giá trị cách nhau $\Delta$ điểm ảnh. Cập nhật thứ hai đúng vì stride $s$ bỏ qua $s - 1$ giá trị trong mỗi $s$ giá trị.
+
+- Ba lớp 3×3 stride 1: $r = 3, 5, 7$. Trường tiếp nhận tăng đều, mỗi lớp thêm 2.
+- CNN của ô code thứ hai (tích chập 3×3, pooling 2×2 stride 2, tích chập 3×3, pooling 2×2 stride 2): $r = 3$, rồi $4$ ($\Delta$ thành 2), rồi $4 + 2 \cdot 2 = 8$, rồi $8 + 1 \cdot 2 = 10$. Mỗi giá trị cuối cùng tóm tắt một vùng 10×10 của ảnh 28×28.
+
+Pooling và stride làm $\Delta$ tăng, nên các lớp sau mở rộng trường tiếp nhận nhanh hơn. Nhờ vậy mạng đủ sâu có thể nhìn cả vật, dù mỗi kernel chỉ 3×3.
+
+:::note[Ghi nhớ]
+Lớp tích chập trượt $C_{\text{out}}$ kernel cỡ $k \times k \times C_{\text{in}}$ trên ảnh. Đầu ra có cạnh $\lfloor (n + 2p - k)/s \rfloor + 1$ và $C_{\text{out}}$ kênh, với $(k^2 C_{\text{in}} + 1) C_{\text{out}}$ tham số, không phụ thuộc kích thước ảnh. Pooling thu nhỏ bản đồ, không có tham số.
+:::
+
+### Giới hạn
+
+- **Bất biến chỉ gần đúng.** Đẳng biến với phép dịch đúng cho tích chập stride 1, nhưng stride, pooling và mép ảnh làm nó lệch, như ví dụ dịch 1 điểm ảnh ở trên. CNN cũng không tự bất biến với phép xoay hay đổi tỉ lệ; người ta bù bằng tăng cường dữ liệu (xoay, lật, cắt ảnh khi huấn luyện), một chủ đề của phần Thị giác máy tính.
+- **Chỉ nhìn cục bộ ở mỗi lớp.** Muốn liên hệ hai vùng xa nhau, mạng cần đủ nhiều lớp. Kiến trúc nào xếp lớp thế nào cho hiệu quả là chủ đề của bài [Các kiến trúc CNN hiện đại](/vi/dl/modern-cnn-architectures/).
+
+## Minh họa
+
+Hình dưới có ảnh xám 8×8 của bài, kernel 3×3 và bản đồ đặc trưng 6×6. Năm nút chọn kernel: **Đồng nhất**, **Làm mờ**, **Làm nét**, **Sobel dọc**, **Sobel ngang**. Bấm vào một ô của bản đồ đặc trưng (hoặc dùng phím mũi tên, hay hai nút lùi, tới) để dời cửa sổ. Khung 3×3 trên ảnh cho thấy cửa sổ đang nằm đâu, bảng bên cạnh kernel ghi chín phép nhân từng ô và tổng của chúng. Hàng và cột đếm từ 0. Hãy thử:
+
+1. Lúc mở, hình chọn **Sobel dọc** và cửa sổ ở hàng 1, cột 1. Cột phải của kernel gặp hai số 9, nên tổng là $2 \cdot 9 + 1 \cdot 9 = 27$. Bấm ô hàng 2, cột 0: cột phải của cửa sổ là ba số 9, phép tính ra $9 + 18 + 9 = 36$, giá trị lớn nhất của bản đồ. Bấm ô hàng 2, cột 2: cửa sổ toàn số 9, tổng là 0. Bấm ô hàng 2, cột 5: $-36$, cạnh phải có dấu ngược lại.
+2. **Sobel ngang**: hai hàng trên của bản đồ dương (lớn nhất 36), hai hàng dưới âm, hai hàng giữa bằng 0. Kernel này tìm cạnh ngang.
+3. **Đồng nhất**: kernel chỉ có số 1 ở tâm, nên mỗi ô ra đúng bằng điểm ảnh ở tâm cửa sổ. Bản đồ là phần 6×6 ở giữa ảnh: hình vuông 9 trên nền 0, mất một vòng mép.
+4. **Làm mờ** rồi **Làm nét**: làm mờ cho 9.00 ở bốn ô giữa và nhỏ dần ra mép, tới 1.00 ở bốn góc. Làm nét đẩy góc hình vuông lên 27, giữa hình vuông giữ 9, và tạo viền $-9$ ngay bên ngoài.
+
+{/* VIZ: ConvolutionViz
+    Ý: tích chập là trượt một cửa sổ 3×3, nhân từng ô với kernel rồi cộng; đổi kernel là đổi mẫu hình được tìm.
+    Tương tác: chọn kernel (đồng nhất, làm mờ trung bình 3×3 = 1/9, làm nét [[0,-1,0],[-1,5,-1],[0,-1,0]], Sobel dọc [[-1,0,1],[-2,0,2],[-1,0,1]], Sobel ngang [[-1,-2,-1],[0,0,0],[1,2,1]]); bấm một ô của bản đồ 6×6 hoặc phím mũi tên để chọn vị trí (i, j), khung 3×3 trên ảnh di theo; bảng 3×3 hiện từng tích X·K và tổng. Màu của bản đồ: thang phân kỳ quanh 0 (âm và dương khác màu), ghi số trong từng ô.
+    Dữ liệu: ảnh 8×8 cố định, nền 0, hình vuông 9 ở hàng 2–5, cột 2–5 (đếm từ 0), giống IMAGE trong src/code/dl/cnn/conv2d.vi.py. Tích chập "valid", stride 1, không lật kernel (cross-correlation), bias 0.
+    Ký hiệu: X (ảnh), K (kernel), Z (bản đồ đặc trưng), Z_{i,j}, chỉ số đếm từ 0. Số khớp code: Sobel dọc lớn nhất 36 tại (2, 0), (2, 1), (3, 0), (3, 1); làm mờ lớn nhất 9, góc 1; làm nét lớn nhất 27. */}
+
+## Ví dụ code
+
+Hai ô đầu chạy trên trang, chỉ cần NumPy hoặc Python thuần, và chạy độc lập với nhau. Ô thứ ba huấn luyện CNN bằng PyTorch nên chạy trên máy bạn.
+
+Ô thứ nhất viết hàm `conv2d` bằng hai vòng lặp, đúng như công thức ở mục Lý thuyết, áp Sobel dọc lên ảnh 8×8, rồi qua ReLU và max-pooling 2×2.
+
+<PythonRunner code={conv2dCode} title="Tích chập 2D, Sobel và max-pooling bằng NumPy" />
+
+Bản đồ đặc trưng 6×6 có hai cột bên trái dương, đọc từ trên xuống là 9, 27, 36, 36, 27, 9 (cạnh trái, tối sang sáng), và hai cột bên phải là các số đối $-9, -27, -36, -36, -27, -9$ (cạnh phải, sáng sang tối). Hai cột giữa bằng 0, vì cửa sổ nằm trọn trong vùng đồng màu nên hai cột của kernel triệt tiêu nhau. Số giảm dần ở hàng trên và hàng dưới vì cửa sổ chỉ phủ một phần hình vuông: ở hàng 2 và 3 của bản đồ, cả ba hàng của cửa sổ chạm hình vuông, nên tổng là $9 \cdot (1 + 2 + 1) = 36$; ở hàng 1, chỉ hai hàng dưới của cửa sổ chạm, nên còn $9 \cdot (2 + 1) = 27$; ở hàng 0, chỉ hàng dưới cùng chạm, còn $9 \cdot 1 = 9$. Hàng 4 và 5 đối xứng như vậy. Với stride 2, cạnh đầu ra là $\lfloor (8 - 3)/2 \rfloor + 1 = 3$, khớp công thức. ReLU bỏ hết số âm, max-pooling 2×2 giữ lại 27, 36, 27 ở cột trái, đúng ma trận 3×3 ở mục Pooling.
+
+Dòng `pooled = relu.reshape(3, 2, 3, 2).max(axis=(1, 3))` là cách NumPy chia bản đồ 6×6 thành 3×3 khối 2×2 rồi lấy số lớn nhất của từng khối, không cần vòng lặp. Thử đổi dòng `fmap = conv2d(IMAGE, SOBEL_V)` thành `conv2d(IMAGE, SOBEL_V.T)` (Sobel ngang): bản đồ dương ở hai hàng trên, âm ở hai hàng dưới, và sau pooling các số 27, 36, 27 nằm ở hàng trên thay vì cột trái.
+
+Ô thứ hai đếm tham số cho ảnh xám 28×28 cỡ chữ số viết tay, so một MLP với một CNN nhỏ. Nó dùng đúng hai công thức của bài: kích thước đầu ra và số tham số.
+
+<PythonRunner code={paramsCode} title="Đếm tham số: MLP và CNN" />
+
+MLP 784 → 128 → 10 có 101 770 tham số, gần hết nằm ở lớp đầu ($784 \cdot 128 + 128 = 100\,480$). CNN có 5 258 tham số, ít hơn khoảng 19 lần. Đường đi của kích thước cho thấy làm tròn xuống: 28 → 26 → 13 → 11 → 5, vì pooling 2×2 trên cạnh 11 chỉ có $\lfloor 9/2 \rfloor + 1 = 5$ vị trí, cột cuối bị bỏ. Phần lớn tham số của CNN (4 010) nằm ở lớp kết nối đầy đủ cuối, lớp tích chập thứ hai chỉ có $(9 \cdot 8 + 1) \cdot 16 = 1\,168$.
+
+Hai dòng cuối là so sánh rõ nhất: lớp tích chập 1 → 8 kênh cho ra 26×26×8 = 5 408 giá trị với 80 tham số; một lớp kết nối đầy đủ ra cùng số giá trị cần 4 245 280 tham số, gấp hơn 50 nghìn lần.
+
+Ô thứ ba huấn luyện một CNN nhỏ trên bộ chữ số viết tay `load_digits` của scikit-learn (1 797 ảnh 8×8, một kênh, có sẵn khi cài, không cần tải). Nó so với một MLP cùng số epoch, rồi thử cả hai trên ảnh kiểm tra bị dịch sang phải 1 điểm ảnh.
+
+<LocalCode
+  code={cnnDigitsCode}
+  title="CNN và MLP trên chữ số 8×8"
+  packages={['torch', 'scikit-learn']}
+  hardware="CPU là đủ. Khoảng 40 giây tới 2 phút tùy máy"
+  sampleVaries={false}
+>
+
+```text
+CNN:  6090 params  test acc 0.976  shifted 0.650
+MLP:  4810 params  test acc 0.957  shifted 0.461
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Số tham số gần bằng nhau.** CNN có 6 090 tham số: 160 ở lớp tích chập đầu ($(9 + 1) \cdot 16$), 4 640 ở lớp thứ hai ($(9 \cdot 16 + 1) \cdot 32$), 1 290 ở lớp kết nối đầy đủ cuối. MLP có 4 810. Hai lớp tích chập dùng `padding=1` nên giữ nguyên cạnh, chỉ pooling làm ảnh nhỏ đi: 8 → 4 → 2.
+- **CNN đúng hơn trên ảnh kiểm tra:** 0.976 so với 0.957, sau cùng 15 epoch với cùng bộ tối ưu Adam. Ảnh 8×8 rất nhỏ nên MLP vẫn làm khá tốt; khoảng cách thường rộng ra khi ảnh lớn hơn.
+- **Dịch ảnh 1 điểm ảnh, cả hai đều tụt mạnh**, nhưng CNN ít hơn: 0.650 so với 0.461. Các lớp tích chập đẳng biến với phép dịch, nhưng lớp kết nối đầy đủ ở cuối vẫn gắn mỗi trọng số với một vị trí, và trên ảnh 8×8, 1 điểm ảnh là một phần tám bề ngang. Đây là con số cụ thể cho chữ "gần đúng" ở mục Lý thuyết. Cách bù thường dùng là huấn luyện với ảnh đã dịch, xoay ngẫu nhiên (bài Data augmentation trong CV).
+
+Seed cố định, nên ba lần chạy trên máy phát triển cho cùng kết quả; trên máy khác hay bản PyTorch khác, số có thể lệch đôi chút.
+
+## Lỗi hay gặp
+
+:::caution[So kết quả với thư viện xử lý ảnh mà quên chuyện lật kernel]
+`scipy.signal.convolve2d` tính tích chập đúng nghĩa toán học, tức lật kernel 180 độ trước. `nn.Conv2d` của PyTorch thì không lật. Với kernel đối xứng như làm mờ, hai cách cho cùng kết quả, nên lỗi dễ bị che. Với Sobel dọc, lật kernel đổi dấu toàn bộ: cạnh trái của hình vuông ra $-36$ thay vì 36. Muốn khớp PyTorch thì dùng `scipy.signal.correlate2d`, hoặc lật kernel bằng `kernel[::-1, ::-1]` trước khi gọi `convolve2d`.
+:::
+
+:::caution[Nhầm thứ tự các chiều của tensor ảnh]
+NumPy, Pillow và matplotlib thường lưu ảnh theo thứ tự $H \times W \times C$ (kênh ở cuối). PyTorch đòi $N \times C \times H \times W$: số ảnh trong batch, rồi kênh, rồi cao, rồi rộng. Đưa thẳng một ảnh 32×32×3 vào `nn.Conv2d(3, ...)` sẽ báo lỗi số kênh, hoặc tệ hơn, chạy được với cách hiểu sai nếu các cạnh tình cờ khớp. Đổi thứ tự bằng `x.permute(2, 0, 1)` cho một ảnh, và thêm chiều batch bằng `x.unsqueeze(0)`. Ô PyTorch ở trên dùng `reshape(-1, 1, 8, 8)` vì ảnh `load_digits` chỉ có một kênh.
+:::
+
+:::caution[Đếm tham số mà quên chiều sâu của kernel]
+Kernel "3×3" trên ảnh RGB thật ra là 3×3×3, và trên đầu vào 64 kênh là 3×3×64. Một lớp `nn.Conv2d(64, 128, 3)` có $(9 \cdot 64 + 1) \cdot 128 = 73\,856$ tham số, không phải $(9 + 1) \cdot 128 = 1\,280$. Kiểm tra nhanh bằng `sum(p.numel() for p in layer.parameters())`, như dòng `n_par` trong ô PyTorch.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Ảnh là tensor $H \times W \times C$. Một lớp tích chập trượt các kernel nhỏ $k \times k \times C_{\text{in}}$ trên ảnh, nhân từng ô rồi cộng; trong học sâu phép này không lật kernel, nên thực chất là cross-correlation.
+- Cạnh đầu ra là $\lfloor (n + 2p - k)/s \rfloor + 1$. Số tham số là $(k^2 C_{\text{in}} + 1) C_{\text{out}}$, không phụ thuộc kích thước ảnh. Pooling thu nhỏ bản đồ đặc trưng, không có tham số.
+- CNN xếp các khối tích chập → ReLU → pooling, rồi trải phẳng và đưa vào lớp kết nối đầy đủ. Kết nối cục bộ và chia sẻ trọng số làm nó ít tham số hơn MLP rất nhiều, và đẳng biến với phép dịch; pooling thêm bất biến gần đúng.
+- Trường tiếp nhận lớn dần theo độ sâu: mỗi lớp thêm $(k - 1)\,\Delta$, và pooling, stride làm nó tăng nhanh hơn.
+
+**Đọc thêm:**
+
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. (2020), bản dịch của nhóm Dịch thuật Việt Nam. [*Đắm mình vào Học Sâu*, chương 6: Mạng Nơ-ron Tích chập](https://d2l.aivivn.com/chapter_convolutional-neural-networks/index_vn.html). Tiếng Việt, đi từ lớp kết nối đầy đủ tới tích chập, đệm và sải bước, đa kênh, gộp, có code chạy được.
+- Goodfellow, I., Bengio, Y., Courville, A. (2016). [*Deep Learning*, chương 9: Convolutional Networks](https://www.deeplearningbook.org/contents/convnets.html). Mục 9.1 nói về tích chập và cross-correlation, mục 9.2 về tương tác thưa, chia sẻ tham số và đẳng biến, mục 9.3 về pooling.
+- Dumoulin, V., Visin, F. (2016). [*A guide to convolution arithmetic for deep learning*](https://arxiv.org/abs/1603.07285). Hình vẽ từng trường hợp padding và stride, kèm công thức kích thước đầu ra. Ký hiệu khác: $i$ là cạnh đầu vào, $o$ là cạnh đầu ra.
+- Stanford CS231n. [*Convolutional Neural Networks for Visual Recognition*: Convolutional Networks](https://cs231n.github.io/convolutional-networks/). Ghi chú bài giảng về các lớp của CNN, ví dụ đếm tham số của lớp đầu AlexNet có và không có chia sẻ trọng số. Ký hiệu khác: $W$ là cạnh ảnh, $F$ là cạnh kernel, $P$ là padding, $S$ là stride.
+- Azulay, A., Weiss, Y. (2019). [*Why do deep convolutional networks generalize so poorly to small image transformations?*](https://arxiv.org/abs/1805.12177). *JMLR* 20(184). Cho thấy CNN hiện đại có thể đổi dự đoán khi ảnh chỉ dịch vài điểm ảnh, vì stride và pooling bỏ qua định lý lấy mẫu.
+
+<LessonProgress />

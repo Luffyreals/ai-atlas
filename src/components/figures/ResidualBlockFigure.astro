@@ -1,0 +1,72 @@
+---
+// dl/modern-cnn-architectures, ResNet: the stacked layers only learn what to add to their input, and the
+// identity shortcut carries the input straight to the sum, y = ReLU(x + f(x)). Read top-down, like Figure 2 of
+// He et al.: x → 3×3 conv → BatchNorm → ReLU → 3×3 conv → BatchNorm → add (accent) → ReLU → output. A bracket
+// (a headless FigArrow, measured by e2e) on the left names the five layers f(x); the shortcut leaves x's box
+// on the right, runs down a lane at x 316 and enters the add box from the side; x + f(x) is written beside the
+// arrow out of it. Narrow layout only. Words: src/data/figures/residual-block.ts; symbols with FigFormula.
+import { RESIDUAL_BLOCK } from '@data/figures/residual-block';
+import type { Pt } from '@lib/figures/geometry';
+import { anchor, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigFormula from './kit/FigFormula.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = RESIDUAL_BLOCK[getPageLocale(Astro.locals.starlightRoute)];
+
+// Main column x 75–225 (centre 150), one box every 56 units; the shortcut lane at x 316, the bracket at x 60.
+const MID = 150;
+const LANE = 316;
+const BRACKET = 60;
+const row = (y: number, height = 36): Box => ({ x: MID - 75, y, width: 150, height });
+const input = row(8, 56);
+const layers = [
+  { box: row(84), lines: t.labels.conv },
+  { box: row(140), lines: t.labels.bn },
+  { box: row(196), lines: t.labels.relu },
+  { box: row(252), lines: t.labels.conv },
+  { box: row(308), lines: t.labels.bn },
+];
+const add: Box = { x: MID - 18, y: 364, width: 36, height: 36 };
+const relu = row(424);
+const output = row(480);
+const height = output.y + output.height + 8;
+
+const fTop = layers[0]!.box.y;
+const fBottom = layers[layers.length - 1]!.box.y + 36;
+const fMid = (fTop + fBottom) / 2;
+const chain = [input, ...layers.map((l) => l.box), add, relu, output];
+const steps = chain.slice(1).map((box, i) => ({ from: anchor(chain[i]!, 'bottom'), to: anchor(box, 'top') }));
+const addY = anchor(add, 'right')[1];
+const shortcut: Pt[] = [
+  [LANE, anchor(input, 'right')[1]],
+  [LANE, addY],
+];
+---
+
+<FigureFrame id="residual-block" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigNode {...input} math={{ symbol: 'x', bold: true }} lines={t.labels.input} />
+    {layers.map((l) => <FigNode {...l.box} lines={l.lines} />)}
+    <FigNode {...add} lines={t.labels.add} tone="accent" />
+    <FigNode {...relu} lines={t.labels.relu} />
+    <FigNode {...output} lines={t.labels.output} />
+    {steps.map((s) => <FigArrow {...s} />)}
+
+    <FigArrow from={[BRACKET + 8, fTop]} via={[[BRACKET, fTop], [BRACKET, fBottom]]} to={[BRACKET + 8, fBottom]} head={false} />
+    <FigFormula x={BRACKET - 28} y={fMid} parts={[{ symbol: 'f', after: '(' }, { symbol: 'x', bold: true, after: ')' }]} />
+
+    <FigArrow from={anchor(input, 'right')} via={shortcut} to={anchor(add, 'right')} />
+    <FigText x={LANE - 6} y={fMid} lines={t.labels.shortcut} size="small" anchor="end" />
+    <FigFormula x={LANE + 8} y={fMid} parts={[{ symbol: 'x', bold: true }]} anchor="start" />
+    <FigFormula
+      x={MID + 10}
+      y={(add.y + add.height + relu.y) / 2}
+      parts={[{ symbol: 'x', bold: true, after: '+' }, { symbol: 'f', after: '(' }, { symbol: 'x', bold: true, after: ')' }]}
+      anchor="start"
+    />
+  </Fragment>
+</FigureFrame>

@@ -1,0 +1,87 @@
+---
+// dl/neural-networks, "Minh họa": a neuron is a weighted sum plus a bias, then an activation; an MLP is layers
+// of such neurons, each linked to every unit of the layer before. Two parts, read top-down then left to right.
+// Top, one neuron: x_1, x_2, ⋮, x_n (left) go into "weighted sum" along arrows named w_1, w_2, w_n; b comes
+// down into it; z goes on to g, then a. Bottom, an MLP 2 → 3 → 1: input layer (x_1, x_2), hidden layer (three
+// bare accent boxes: each is the neuron above), output layer (one box), every pair of adjacent layers fully
+// linked; under the columns, the layer vectors x, a^[1] and ŷ (dl-lessons.md, section 2).
+// Neurons are square boxes, not circles: loose circles are not measured by e2e (llm-lessons.md 2.9.1).
+// Narrow layout only. Words: src/data/figures/mlp.ts; symbols with FigMath and FigFormula.
+import { MLP } from '@data/figures/mlp';
+import { anchor, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigFormula from './kit/FigFormula.astro';
+import FigMath from './kit/FigMath.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = MLP[getPageLocale(Astro.locals.starlightRoute)];
+
+// Top part: inputs at x 8–52, the sum (x 150–238) centred on the inputs' middle (y 118), then g and a.
+const input = (y: number): Box => ({ x: 8, y, width: 44, height: 36 });
+const inputs = [
+  { sub: '1', box: input(32), at: 0.25, w: [80, 54] },
+  { sub: '2', box: input(80), at: 0.5, w: [84, 92] },
+  { sub: 'n', box: input(168), at: 0.75, w: [84, 184] },
+] as const;
+const sum: Box = { x: 150, y: 91, width: 88, height: 54 };
+const bias: Box = { x: 172, y: 32, width: 44, height: 36 };
+const g: Box = { x: 266, y: 100, width: 40, height: 36 };
+const a: Box = { x: 322, y: 100, width: 30, height: 36 };
+const midY = anchor(sum, 'right')[1];
+
+// Bottom part: three columns centred on x 50, 180, 310.
+const COL = [50, 180, 310] as const;
+const unit = (cx: number, cy: number, width = 36): Box => ({ x: cx - width / 2, y: cy - 18, width, height: 36 });
+const layerIn = [
+  { sub: '1', box: unit(COL[0], 322, 44) },
+  { sub: '2', box: unit(COL[0], 378, 44) },
+];
+const hidden = [294, 350, 406].map((cy) => unit(COL[1], cy));
+const out = unit(COL[2], 350);
+const VECTORS_Y = 442;
+const height = VECTORS_Y + 16;
+---
+
+<FigureFrame id="mlp" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigText x={8} y={14} lines={t.labels.neuron} anchor="start" />
+    {
+      inputs.map((item) => (
+        <Fragment>
+          <FigNode {...item.box} math={{ symbol: 'x', sub: item.sub }} />
+          <FigArrow from={anchor(item.box, 'right')} to={anchor(sum, 'left', item.at)} />
+          <FigMath x={item.w[0]} y={item.w[1]} symbol="w" sub={item.sub} />
+        </Fragment>
+      ))
+    }
+    <FigText x={30} y={142} lines={t.labels.more} size="small" />
+    <FigNode {...bias} math={{ symbol: 'b' }} />
+    <FigArrow from={anchor(bias, 'bottom')} to={[anchor(bias, 'bottom')[0], sum.y]} />
+    <FigNode {...sum} lines={t.labels.sum} small={t.labels.weighted} />
+    <FigArrow from={anchor(sum, 'right')} to={anchor(g, 'left')} />
+    <FigMath x={252} y={midY - 12} symbol="z" />
+    <FigNode {...g} math={{ symbol: 'g' }} />
+    <FigText x={g.x + g.width / 2} y={g.y + g.height + 14} lines={t.labels.activation} size="small" />
+    <FigArrow from={anchor(g, 'right')} to={anchor(a, 'left')} />
+    <FigNode {...a} math={{ symbol: 'a' }} />
+    <FigText x={a.x + a.width / 2} y={a.y - 12} lines={t.labels.output} size="small" />
+
+    <FigText x={8} y={232} lines={t.labels.mlp} anchor="start" />
+    <FigText y={258} xs={COL} lines={t.labels.layers} size="small" />
+    {layerIn.map((item) => <FigNode {...item.box} math={{ symbol: 'x', sub: item.sub }} />)}
+    {
+      layerIn.flatMap((item, i) =>
+        hidden.map((h) => <FigArrow from={anchor(item.box, 'right')} to={anchor(h, 'left', i === 0 ? 0.35 : 0.65)} />),
+      )
+    }
+    {hidden.map((h) => <FigNode {...h} bare tone="accent" />)}
+    {hidden.map((h, i) => <FigArrow from={anchor(h, 'right')} to={anchor(out, 'left', 0.25 + 0.25 * i)} />)}
+    <FigNode {...out} bare />
+    <FigFormula x={COL[0]} y={VECTORS_Y} parts={[{ symbol: 'x', bold: true }]} />
+    <FigFormula x={COL[1]} y={VECTORS_Y} parts={[{ symbol: 'a', bold: true, sup: '[1]' }]} />
+    <FigFormula x={COL[2]} y={VECTORS_Y} parts={[{ symbol: 'y', hat: true }]} />
+  </Fragment>
+</FigureFrame>

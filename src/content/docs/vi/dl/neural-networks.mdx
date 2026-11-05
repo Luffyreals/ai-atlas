@@ -1,0 +1,433 @@
+---
+title: 'Mạng nơ-ron nhân tạo: perceptron, MLP, lan truyền xuôi, hàm kích hoạt'
+description: 'Đèn cầu thang hai công tắc là bài XOR mà một perceptron không giải được. Nơ-ron, perceptron, MLP, lan truyền xuôi, hàm kích hoạt, softmax, cross-entropy.'
+quiz:
+  - question: 'Bạn xếp ba lớp `nn.Linear` liên tiếp, 10 → 50 → 50 → 1, không có hàm kích hoạt nào ở giữa. Mạng này biểu diễn được loại hàm nào của $\mathbf{x}$?'
+    options:
+      - 'Mọi hàm liên tục, vì có 3 lớp và hơn 3000 tham số'
+      - 'Hàm bậc ba, vì mỗi lớp thêm một bậc'
+      - 'Chỉ hàm dạng $\mathbf{w}^\top\mathbf{x} + b$, như một lớp tuyến tính duy nhất'
+      - 'Hàm tuyến tính từng khúc, như mạng có ReLU'
+    answer: 2
+    explanation: 'Ghép hai phép biến đổi tuyến tính (có cộng hệ số tự do) vẫn là một phép biến đổi tuyến tính: $\mathbf{W}^{[2]}(\mathbf{W}^{[1]}\mathbf{x} + \mathbf{b}^{[1]}) + \mathbf{b}^{[2]} = (\mathbf{W}^{[2]}\mathbf{W}^{[1]})\mathbf{x} + (\mathbf{W}^{[2]}\mathbf{b}^{[1]} + \mathbf{b}^{[2]})$. Lặp lại cho lớp thứ ba, cả mạng chỉ là $\mathbf{w}^\top\mathbf{x} + b$. Nhiều tham số không giúp gì: định lý xấp xỉ phổ quát cần hàm kích hoạt phi tuyến.'
+  - question: 'Bạn chạy luật học perceptron trên 100 điểm thuộc hai lớp, xuất phát từ $\mathbf{w} = \mathbf{0}$, $b = 0$. Sau 1000 epoch, số mẫu đoán sai trong mỗi epoch vẫn chưa lần nào về 0. Kết luận hợp lý nhất là gì?'
+    options:
+      - 'Tốc độ học $\eta$ quá lớn, giảm $\eta$ là hội tụ'
+      - 'Nhiều khả năng không có đường thẳng (siêu phẳng) nào tách được hai lớp, nên luật học cứ sửa mãi'
+      - 'Cần chạy thêm epoch, vì perceptron luôn hội tụ'
+      - 'Cần thêm hàm sigmoid vào đầu ra của perceptron'
+    answer: 1
+    explanation: 'Định lý hội tụ perceptron chỉ đảm bảo dừng khi dữ liệu tách được tuyến tính; XOR ở ô code đầu tiên cũng sai 4 mẫu mỗi epoch mãi. Đổi $\eta$ không cứu được: xuất phát từ 0 thì mọi lần sửa đều nhân với $\eta$, nên $\mathbf{w}$, $b$ chỉ bị co giãn cùng tỉ lệ, còn dấu của $z$ (tức dự đoán) không đổi. Thêm sigmoid vẫn cho một biên quyết định thẳng.'
+  - question: 'Một lớp ẩn có 32 nơ-ron, nhận đầu vào từ lớp trước có 64 nơ-ron. Theo quy ước $\mathbf{z}^{[l]} = \mathbf{W}^{[l]}\mathbf{a}^{[l-1]} + \mathbf{b}^{[l]}$, $\mathbf{W}^{[l]}$ có kích thước nào, và lớp này có bao nhiêu tham số?'
+    options:
+      - '$64 \times 32$, 2048 tham số'
+      - '$64 \times 32$, 2112 tham số'
+      - '$32 \times 64$, 2048 tham số'
+      - '$32 \times 64$, 2080 tham số'
+    answer: 3
+    explanation: 'Mỗi hàng của $\mathbf{W}^{[l]}$ là vectơ trọng số của một nơ-ron trong lớp $l$, dài bằng số nơ-ron lớp trước. Vậy $\mathbf{W}^{[l]}$ có 32 hàng, 64 cột: $2048$ trọng số, cộng $32$ hệ số tự do (mỗi nơ-ron một số) là $2080$. Con số 2048 là quên hệ số tự do; 2112 là đếm hệ số tự do theo lớp trước.'
+  - question: 'Bài toán phân loại 3 lớp, lớp ra cho logit $\mathbf{z} = [2.0, 1.0, 0.1]^\top$. Nếu cộng 5 vào cả ba logit, xác suất softmax và cross-entropy thay đổi thế nào?'
+    options:
+      - 'Không đổi, vì $e^{z_k + 5} = e^{5}e^{z_k}$ và thừa số $e^{5}$ triệt tiêu giữa tử và mẫu'
+      - 'Lớp thứ nhất có xác suất gần 1 hơn, vì logit của nó lớn hơn'
+      - 'Cả ba xác suất đều tăng'
+      - 'Cross-entropy giảm, vì logit của lớp đúng tăng'
+    answer: 0
+    explanation: 'Softmax chỉ phụ thuộc vào chênh lệch giữa các logit. Cộng cùng một số vào mọi logit thì xác suất vẫn là $[0.659, 0.242, 0.099]$, nên cross-entropy cũng không đổi. "Cả ba đều tăng" không thể xảy ra, vì tổng các xác suất luôn bằng 1. Muốn lớp đúng có xác suất cao hơn, logit của nó phải tăng so với các logit khác.'
+  - question: 'Định lý xấp xỉ phổ quát đảm bảo điều gì?'
+    options:
+      - 'Gradient descent luôn tìm được trọng số tốt nếu mạng đủ rộng'
+      - 'Có một MLP một lớp ẩn, đủ nhiều nơ-ron, xấp xỉ một hàm liên tục cho trước trên một miền bị chặn với sai số nhỏ tùy ý'
+      - 'Mạng một lớp ẩn luôn tốt hơn mạng sâu có cùng số tham số'
+      - 'Mạng đủ lớn sẽ không bị overfitting'
+    answer: 1
+    explanation: 'Định lý chỉ nói bộ trọng số như vậy tồn tại. Nó không nói cần bao nhiêu nơ-ron (có thể rất nhiều), không nói gradient descent tìm ra chúng, và không nói gì về dữ liệu chưa thấy. Trên thực tế, mạng sâu thường cần ít tham số hơn mạng nông để biểu diễn cùng một hàm.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import perceptronCode from '@code/dl/neural-networks/perceptron.vi.py?raw';
+import xorForwardCode from '@code/dl/neural-networks/xor-forward.vi.py?raw';
+import mlpDigitsCode from '@code/dl/neural-networks/mlp-digits.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu một nơ-ron nhân tạo (artificial neuron) tính gì: cộng có trọng số, cộng hệ số tự do, rồi qua hàm kích hoạt (activation function); và perceptron học bằng luật học perceptron (perceptron learning rule) ra sao.
+- Tự chứng minh được vì sao một perceptron không giải được bài XOR, và vì sao thêm một lớp ẩn (hidden layer) thì giải được.
+- Viết được lan truyền xuôi (forward propagation) của perceptron nhiều lớp (multilayer perceptron, MLP) ở dạng ma trận, đếm được số tham số, và cài đặt nó bằng NumPy.
+- Biết các hàm kích hoạt hay dùng, vì sao chúng phải phi tuyến, cách chọn lớp ra cùng hàm mất mát cross-entropy, và định lý xấp xỉ phổ quát (universal approximation theorem) nói gì, không nói gì.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+**Hồi quy logistic** (logistic regression) tính $z = \mathbf{w}^\top\mathbf{x} + b$ rồi đưa qua **sigmoid** $\sigma(z) = 1/(1 + e^{-z})$ để được xác suất của lớp 1. **Hồi quy softmax** (softmax regression) làm việc đó cho $K$ lớp: mỗi lớp một điểm thô $z_k$ gọi là **logit**, và **softmax** đổi $K$ logit thành $K$ xác suất có tổng bằng 1. Cả hai học bằng [gradient descent](/vi/ml/gradient-descent/) trên **cross-entropy**, trung bình của $-\ln$ xác suất mà mô hình gán cho nhãn đúng.
+:::
+
+## Trực giác
+
+### Đèn cầu thang
+
+Cầu thang nhà bạn có hai công tắc, một ở chân cầu thang, một ở đầu cầu thang. Gạt công tắc nào cũng đổi trạng thái của đèn: đi lên thì bật ở dưới, lên tới nơi thì tắt ở trên. Ghi vị trí mỗi công tắc là 0 hoặc 1, lắp sao cho cả hai ở 0 thì đèn tắt. Bảng của đèn là:
+
+| Công tắc dưới $x_1$ | Công tắc trên $x_2$ | Đèn $y$ |
+|---:|---:|---:|
+| 0 | 0 | 0 (tắt) |
+| 0 | 1 | 1 (sáng) |
+| 1 | 0 | 1 (sáng) |
+| 1 | 1 | 0 (tắt) |
+
+Đèn sáng khi **đúng một** công tắc ở vị trí 1. Phép toán logic này gọi là **XOR** (exclusive or, "hoặc loại trừ").
+
+### Thử một quy tắc "cộng điểm rồi so ngưỡng"
+
+Cách đơn giản nhất để máy ra quyết định từ hai số $x_1$, $x_2$: cho mỗi số một trọng số, cộng lại, rồi so với một ngưỡng. Điểm đạt ngưỡng thì đèn sáng. Với vài cổng logic quen thuộc, cách này chạy tốt:
+
+- **AND** (sáng khi cả hai cùng bật): trọng số 1 và 1, ngưỡng 1.5. Chỉ $(1, 1)$ có điểm 2 đạt ngưỡng.
+- **OR** (sáng khi ít nhất một bật): trọng số 1 và 1, ngưỡng 0.5.
+
+Với XOR thì loay hoay mãi không ra. Muốn $(1, 0)$ và $(0, 1)$ sáng, mỗi trọng số phải đạt ngưỡng. Muốn $(0, 0)$ tắt, ngưỡng phải dương. Nhưng khi đó $(1, 1)$ có điểm bằng tổng hai trọng số, còn lớn hơn nữa, nên cũng sáng. Nhìn bằng hình: đặt bốn điểm ở bốn góc một hình vuông, hai điểm "sáng" nằm trên một đường chéo, hai điểm "tắt" nằm trên đường chéo kia. Quy tắc "cộng điểm rồi so ngưỡng" chỉ chia mặt phẳng bằng **một đường thẳng**, mà không đường thẳng nào tách được hai đường chéo.
+
+### Ghép hai quy tắc
+
+Nói bằng lời thì XOR rất dễ: đèn sáng khi "**ít nhất một** công tắc bật" **và** "**không phải cả hai** cùng bật". Vế đầu là OR, vế sau là "không phải AND". Mỗi vế là một quy tắc cộng điểm rồi so ngưỡng. Thêm một quy tắc thứ ba nhận kết quả của hai quy tắc đầu, và bạn có XOR. Đó là ý tưởng của mạng nơ-ron nhiều lớp: những đơn vị đơn giản, xếp thành lớp, lớp sau dùng kết quả của lớp trước.
+
+Bài toán của bài này là: **ghép những "nơ-ron" cộng điểm rồi quyết định thành nhiều lớp, để cả mạng biểu diễn được những quy tắc mà một nơ-ron không làm nổi, như đèn cầu thang; và viết phép tính của cả mạng thật gọn, để dùng được cho cả những bài lớn như đọc chữ số viết tay.**
+
+## Lý thuyết
+
+### Nơ-ron nhân tạo
+
+Nơ-ron sinh học nhận tín hiệu từ nhiều nơ-ron khác. Khi tổng kích thích đủ mạnh, nó "phát" một xung truyền đi. McCulloch và Pitts (1943) mô hình hóa việc này rất thô: cộng có trọng số các tín hiệu vào, rồi so với ngưỡng. Mạng nơ-ron (neural network) ngày nay chỉ giữ lại ý tưởng đó, không mô phỏng bộ não.
+
+Một **nơ-ron nhân tạo** nhận vectơ $\mathbf{x} = [x_1, \dots, x_n]^\top$ gồm $n$ đầu vào và tính hai bước:
+
+$$
+z = \mathbf{w}^\top\mathbf{x} + b = \sum_{j=1}^{n} w_j x_j + b, \qquad a = g(z)
+$$
+
+- $\mathbf{w}$ là vectơ **trọng số**, $b$ là **hệ số tự do**. Hệ số tự do đóng vai "trừ đi ngưỡng": "điểm $\geq$ ngưỡng $\theta$" chính là "$z \geq 0$" với $b = -\theta$.
+- $z$ là tổng có trọng số, còn gọi là **tiền kích hoạt** (pre-activation).
+- $g$ là **hàm kích hoạt**, và $a$ là đầu ra của nơ-ron, gọi là **kích hoạt** (activation).
+
+Bạn đã gặp nơ-ron này rồi. Với $g(z) = z$, nó là hồi quy tuyến tính. Với $g = \sigma$, nó là hồi quy logistic. Tập các điểm có $z = 0$ là một đường thẳng khi $n = 2$, một siêu phẳng (hyperplane) khi $n$ lớn hơn: đó là **biên quyết định** (decision boundary) của nơ-ron.
+
+### Perceptron và luật học perceptron
+
+**Perceptron** (Rosenblatt, 1958) là nơ-ron có hàm kích hoạt là **hàm bậc thang** (step function):
+
+$$
+\mathrm{step}(z) = \begin{cases} 1 & \text{nếu } z \geq 0 \\ 0 & \text{nếu } z < 0 \end{cases}
+\qquad\qquad
+\hat{y} = \mathrm{step}(\mathbf{w}^\top\mathbf{x} + b)
+$$
+
+Rosenblatt còn đưa ra một cách học $\mathbf{w}$, $b$ từ dữ liệu có nhãn $y \in \{0, 1\}$. Duyệt từng mẫu, tính $\hat{y}$, rồi sửa:
+
+$$
+\mathbf{w} \leftarrow \mathbf{w} + \eta\,(y - \hat{y})\,\mathbf{x}, \qquad b \leftarrow b + \eta\,(y - \hat{y})
+$$
+
+Hiệu $y - \hat{y}$ chỉ có ba giá trị, nên luật này đọc thành ba trường hợp:
+
+- **Đoán đúng** ($y - \hat{y} = 0$): không sửa gì.
+- **Đoán 0 nhưng đúng ra là 1** ($y - \hat{y} = 1$): cộng $\eta\mathbf{x}$ vào $\mathbf{w}$ và $\eta$ vào $b$. Tính lại $z$ của chính mẫu này với tham số mới: $(\mathbf{w} + \eta\mathbf{x})^\top\mathbf{x} + (b + \eta) = z + \eta\left(\lVert\mathbf{x}\rVert^2 + 1\right)$. Vậy $z$ tăng, mẫu bị kéo về phía "1".
+- **Đoán 1 nhưng đúng ra là 0** ($y - \hat{y} = -1$): trừ đi, $z$ của mẫu giảm cùng một lượng, mẫu bị kéo về phía "0".
+
+Ví dụ với AND, $\eta = 1$, xuất phát từ $\mathbf{w} = [0, 0]^\top$, $b = 0$. Epoch đầu tiên:
+
+| Mẫu $(x_1, x_2)$ | $y$ | $z$ | $\hat{y}$ | Sửa thành |
+|---|---:|---:|---:|---|
+| $(0, 0)$ | 0 | 0 | 1 | sai: $\mathbf{w} = [0, 0]^\top$, $b = -1$ |
+| $(0, 1)$ | 0 | $-1$ | 0 | đúng, giữ nguyên |
+| $(1, 0)$ | 0 | $-1$ | 0 | đúng, giữ nguyên |
+| $(1, 1)$ | 1 | $-1$ | 0 | sai: $\mathbf{w} = [1, 1]^\top$, $b = 0$ |
+
+Epoch này sai 2 mẫu. Lặp lại tới khi có một epoch không sai mẫu nào. Ô code đầu tiên chạy tiếp và dừng ở epoch thứ 6.
+
+**Khi nào luật học dừng?** Dữ liệu gọi là **tách được tuyến tính** (linearly separable) nếu có một siêu phẳng chia đúng mọi mẫu của hai lớp. **Định lý hội tụ perceptron** (Novikoff, 1962) nói: nếu dữ liệu tách được tuyến tính, luật học chỉ sửa một số hữu hạn lần rồi dừng, với mọi thứ tự duyệt mẫu. Nếu dữ liệu không tách được, nó sửa mãi, và các trọng số cứ đổi qua đổi lại.
+
+### Vì sao một perceptron không giải được XOR
+
+Phần Trực giác đã nói bằng hình. Giờ chứng minh chặt. Giả sử có $w_1, w_2, b$ để perceptron đúng cả bốn mẫu XOR. Với hàm bậc thang, $\hat{y} = 1$ khi $z \geq 0$, $\hat{y} = 0$ khi $z < 0$. Bốn mẫu cho bốn điều kiện:
+
+$$
+\begin{aligned}
+(0, 0) \to 0:&\quad b < 0 \\
+(0, 1) \to 1:&\quad w_2 + b \geq 0 \\
+(1, 0) \to 1:&\quad w_1 + b \geq 0 \\
+(1, 1) \to 0:&\quad w_1 + w_2 + b < 0
+\end{aligned}
+$$
+
+Cộng điều kiện thứ hai và thứ ba được $w_1 + w_2 + 2b \geq 0$. Chuyển một $b$ sang vế phải: $w_1 + w_2 + b \geq -b$. Theo điều kiện đầu, $b < 0$ nên $-b > 0$. Vậy $w_1 + w_2 + b > 0$, trái với điều kiện cuối. Không có bộ tham số nào thỏa cả bốn: **XOR không tách được tuyến tính**.
+
+Thay hàm bậc thang bằng sigmoid rồi quyết định "lớp 1 khi $\sigma(z) \geq 0.5$" cũng không cứu được, vì $\sigma(z) \geq 0.5$ đúng khi $z \geq 0$: biên quyết định vẫn là đường thẳng $z = 0$. Năm 1969, cuốn *Perceptrons* của Minsky và Papert phân tích kỹ những giới hạn kiểu này của perceptron một lớp, và góp phần làm giới nghiên cứu nguội đi với mạng nơ-ron trong khoảng một thập kỷ.
+
+### Perceptron nhiều lớp
+
+Trở lại ý "ghép hai quy tắc". Dùng hai perceptron ở lớp đầu và một perceptron ở lớp sau:
+
+- $h_1 = \mathrm{step}(x_1 + x_2 - 0.5)$: bằng 1 khi ít nhất một công tắc bật (OR).
+- $h_2 = \mathrm{step}(x_1 + x_2 - 1.5)$: bằng 1 khi cả hai cùng bật (AND).
+- $\hat{y} = \mathrm{step}(h_1 - h_2 - 0.5)$: bằng 1 khi $h_1 = 1$ và $h_2 = 0$.
+
+Kiểm tra cả bốn mẫu:
+
+| $(x_1, x_2)$ | $(h_1, h_2)$ | $h_1 - h_2 - 0.5$ | $\hat{y}$ | XOR |
+|---|---|---:|---:|---:|
+| $(0, 0)$ | $(0, 0)$ | $-0.5$ | 0 | 0 |
+| $(0, 1)$ | $(1, 0)$ | $0.5$ | 1 | 1 |
+| $(1, 0)$ | $(1, 0)$ | $0.5$ | 1 | 1 |
+| $(1, 1)$ | $(1, 1)$ | $-0.5$ | 0 | 0 |
+
+Để ý cột $(h_1, h_2)$. Lớp đầu đã **đổi cách biểu diễn** dữ liệu: hai mẫu "sáng" cùng thành điểm $(1, 0)$, hai mẫu "tắt" thành $(0, 0)$ và $(1, 1)$. Trong mặt phẳng $(h_1, h_2)$, ba điểm này tách được bằng một đường thẳng, và nơ-ron cuối chỉ việc vẽ đường thẳng đó. Đây là điều mạng nhiều lớp làm được mà một nơ-ron không làm được: các lớp đầu **học ra đặc trưng mới**, lớp cuối giải bài toán dễ hơn trên đặc trưng đó.
+
+Mạng như thế gọi là **perceptron nhiều lớp**:
+
+- **Lớp vào** (input layer) chỉ là các đầu vào $x_1, \dots, x_n$, không tính gì.
+- **Lớp ẩn** là các lớp ở giữa. "Ẩn" vì dữ liệu không cho biết chúng phải ra giá trị gì.
+- **Lớp ra** (output layer) cho dự đoán $\hat{y}$.
+
+Mỗi nơ-ron nhận đầu vào từ **mọi** nơ-ron của lớp ngay trước, nên mỗi lớp như vậy gọi là **lớp kết nối đầy đủ** (fully connected layer, hay dense layer). Thông tin chỉ đi một chiều từ lớp vào tới lớp ra, không quay vòng, nên MLP còn gọi là **mạng truyền thẳng** (feed-forward network). Mạng ở trên viết tắt là 2-2-1 (số nơ-ron mỗi lớp) và được gọi là mạng **2 lớp**: theo quy ước thường gặp, không đếm lớp vào.
+
+Tên "perceptron nhiều lớp" là di sản lịch sử. MLP ngày nay không dùng hàm bậc thang mà dùng các hàm kích hoạt trơn hơn, lý do ở mục Hàm kích hoạt.
+
+### Lan truyền xuôi dạng ma trận
+
+Với 2 đầu vào thì viết từng nơ-ron được. Bài đọc chữ số ở ô code thứ ba có 64 đầu vào và 64 nơ-ron ẩn: cần một cách viết gọn hơn.
+
+**Ký hiệu.** Đánh số lớp $l = 0, 1, \dots, N_L$, với lớp 0 là lớp vào và lớp $N_L$ là lớp ra. Lớp $l$ có $n^{[l]}$ nơ-ron; lớp vào có $n^{[0]} = n$, bằng số đặc trưng. Chỉ số trong ngoặc vuông $[l]$ là số thứ tự lớp, khác với $(i)$ là số thứ tự mẫu.
+
+**Một lớp.** Nơ-ron thứ $k$ của lớp $l$ có vectơ trọng số $\mathbf{w}^{[l]}_k$ (dài $n^{[l-1]}$) và hệ số tự do $b^{[l]}_k$. Nó nhận vectơ kích hoạt $\mathbf{a}^{[l-1]}$ của lớp trước và tính $z^{[l]}_k = \left(\mathbf{w}^{[l]}_k\right)^\top\mathbf{a}^{[l-1]} + b^{[l]}_k$. Xếp các vectơ $\left(\mathbf{w}^{[l]}_k\right)^\top$ thành các **hàng** của một ma trận $\mathbf{W}^{[l]}$, và các $b^{[l]}_k$ thành vectơ cột $\mathbf{b}^{[l]}$. Phép nhân ma trận với vectơ tính một lúc mọi tích vô hướng, mỗi hàng một tích, nên cả lớp viết được trong hai dòng:
+
+$$
+\begin{aligned}
+\mathbf{z}^{[l]} &= \mathbf{W}^{[l]}\mathbf{a}^{[l-1]} + \mathbf{b}^{[l]} \\
+\mathbf{a}^{[l]} &= g^{[l]}\!\left(\mathbf{z}^{[l]}\right)
+\end{aligned}
+$$
+
+Hàm kích hoạt $g^{[l]}$ áp lên **từng phần tử** của $\mathbf{z}^{[l]}$. Các lớp ẩn thường dùng chung một hàm $g$; lớp ra có thể dùng hàm khác (mục Lớp ra).
+
+**Kiểm tra kích thước.** $\mathbf{W}^{[l]}$ có $n^{[l]}$ hàng (mỗi nơ-ron của lớp $l$ một hàng) và $n^{[l-1]}$ cột (mỗi đầu vào một cột):
+
+$$
+\underbrace{\mathbf{z}^{[l]}}_{n^{[l]} \times 1} = \underbrace{\mathbf{W}^{[l]}}_{n^{[l]} \times n^{[l-1]}}\ \underbrace{\mathbf{a}^{[l-1]}}_{n^{[l-1]} \times 1} + \underbrace{\mathbf{b}^{[l]}}_{n^{[l]} \times 1}
+$$
+
+**Cả mạng.** Bắt đầu với $\mathbf{a}^{[0]} = \mathbf{x}$, áp hai dòng trên cho $l = 1, 2, \dots, N_L$, và đầu ra là $\hat{\mathbf{y}} = \mathbf{a}^{[N_L]}$. Tính lần lượt từ lớp vào tới lớp ra như vậy gọi là **lan truyền xuôi**.
+
+Mạng XOR ở trên viết thành:
+
+$$
+\mathbf{W}^{[1]} = \begin{bmatrix} 1 & 1 \\ 1 & 1 \end{bmatrix}, \quad
+\mathbf{b}^{[1]} = \begin{bmatrix} -0.5 \\ -1.5 \end{bmatrix}, \quad
+\mathbf{W}^{[2]} = \begin{bmatrix} 1 & -1 \end{bmatrix}, \quad
+\mathbf{b}^{[2]} = \begin{bmatrix} -0.5 \end{bmatrix}
+$$
+
+Với $\mathbf{x} = [1, 0]^\top$: $\mathbf{z}^{[1]} = [1 - 0.5,\ 1 - 1.5]^\top = [0.5, -0.5]^\top$, qua hàm bậc thang được $\mathbf{a}^{[1]} = [1, 0]^\top$. Tiếp theo $z^{[2]} = 1 \cdot 1 - 1 \cdot 0 - 0.5 = 0.5$, nên $\hat{y} = 1$. Đúng với dòng thứ ba của bảng.
+
+**Nhiều mẫu một lúc.** Xếp $m$ mẫu thành $m$ **cột** của ma trận $\mathbf{A}^{[0]} = \left[\mathbf{x}^{(1)}, \dots, \mathbf{x}^{(m)}\right]$, kích thước $n \times m$. Cột thứ $i$ của $\mathbf{W}^{[l]}\mathbf{A}^{[l-1]}$ chính là $\mathbf{W}^{[l]}$ nhân với cột thứ $i$ của $\mathbf{A}^{[l-1]}$, nên một phép nhân ma trận làm lan truyền xuôi cho cả $m$ mẫu:
+
+$$
+\mathbf{Z}^{[l]} = \mathbf{W}^{[l]}\mathbf{A}^{[l-1]} + \mathbf{b}^{[l]}, \qquad \mathbf{A}^{[l]} = g^{[l]}\!\left(\mathbf{Z}^{[l]}\right)
+$$
+
+Ở đây $\mathbf{b}^{[l]}$ được cộng vào **mọi cột**; NumPy tự làm việc này (gọi là broadcasting). Ô code thứ hai làm đúng phép tính này. Máy tính nhân ma trận rất nhanh, nhất là trên GPU, nên viết dạng ma trận không chỉ gọn mà còn là cách mạng nơ-ron thật sự được tính.
+
+**Số tham số.** Lớp $l$ có $n^{[l]} \times n^{[l-1]}$ trọng số và $n^{[l]}$ hệ số tự do, tức $n^{[l]}\left(n^{[l-1]} + 1\right)$ tham số. MLP 64-64-10 ở ô code thứ ba có $64 \times 65 + 10 \times 65 = 4160 + 650 = 4810$ tham số.
+
+### Hàm kích hoạt
+
+**Vì sao phải phi tuyến.** Thử bỏ hàm kích hoạt ở lớp ẩn, tức $g(z) = z$. Thay $\mathbf{a}^{[1]} = \mathbf{W}^{[1]}\mathbf{x} + \mathbf{b}^{[1]}$ vào lớp thứ hai:
+
+$$
+\begin{aligned}
+\mathbf{z}^{[2]} &= \mathbf{W}^{[2]}\left(\mathbf{W}^{[1]}\mathbf{x} + \mathbf{b}^{[1]}\right) + \mathbf{b}^{[2]} \\
+&= \left(\mathbf{W}^{[2]}\mathbf{W}^{[1]}\right)\mathbf{x} + \left(\mathbf{W}^{[2]}\mathbf{b}^{[1]} + \mathbf{b}^{[2]}\right)
+\end{aligned}
+$$
+
+Dòng thứ hai nhân phân phối $\mathbf{W}^{[2]}$ vào trong ngoặc rồi gom lại. Đặt $\mathbf{W} = \mathbf{W}^{[2]}\mathbf{W}^{[1]}$ và $\mathbf{b} = \mathbf{W}^{[2]}\mathbf{b}^{[1]} + \mathbf{b}^{[2]}$: hai lớp gộp thành **một** lớp $\mathbf{W}\mathbf{x} + \mathbf{b}$. Lặp lại lập luận này, xếp bao nhiêu lớp tuyến tính cũng chỉ bằng một lớp tuyến tính, và vẫn không giải được XOR. Chính hàm kích hoạt phi tuyến cho phép các lớp ẩn bẻ cong không gian, như cách lớp ẩn của mạng XOR gộp hai điểm "sáng" làm một.
+
+**Các hàm hay gặp.** Bảng giá trị ở một vài điểm (Leaky ReLU với $\alpha = 0.01$):
+
+| Hàm | $z = -2$ | $z = -0.5$ | $z = 0$ | $z = 0.5$ | $z = 2$ |
+|---|---:|---:|---:|---:|---:|
+| Bậc thang | 0 | 0 | 1 | 1 | 1 |
+| Sigmoid $\sigma$ | 0.119 | 0.378 | 0.5 | 0.622 | 0.881 |
+| tanh | −0.964 | −0.462 | 0 | 0.462 | 0.964 |
+| ReLU | 0 | 0 | 0 | 0.5 | 2 |
+| Leaky ReLU | −0.02 | −0.005 | 0 | 0.5 | 2 |
+| GELU | −0.046 | −0.154 | 0 | 0.346 | 1.954 |
+
+- **Bậc thang.** Đồ thị nằm ngang ở mọi nơi trừ chỗ nhảy tại 0, nên đạo hàm bằng 0 ở mọi chỗ có đạo hàm. Gradient descent cần độ dốc để biết nên sửa tham số về phía nào, nên mạng nhiều lớp với hàm bậc thang không học bằng gradient được. Luật học perceptron chỉ dùng được cho một lớp, vì chỉ lớp ra mới có nhãn để so.
+- **Sigmoid** $\sigma(z) = \dfrac{1}{1 + e^{-z}}$, giá trị trong $(0, 1)$. Trơn, nhưng **bão hòa** (saturate) khi $\lvert z\rvert$ lớn: đồ thị gần như nằm ngang, đạo hàm gần 0. Ngày nay sigmoid chủ yếu dùng ở lớp ra của bài phân loại hai lớp, và trong các cổng của GRU, LSTM.
+- **tanh** $\tanh(z) = \dfrac{e^{z} - e^{-z}}{e^{z} + e^{-z}} = 2\sigma(2z) - 1$, giá trị trong $(-1, 1)$. Là sigmoid co giãn lại cho đối xứng quanh 0, nên đầu ra có trung bình gần 0 hơn. Cũng bão hòa ở hai đầu. Hay dùng trong mạng hồi tiếp.
+- **ReLU** (rectified linear unit) $\mathrm{ReLU}(z) = \max(0, z)$. Tính rất rẻ, không bão hòa ở phía dương, và thành lựa chọn mặc định cho lớp ẩn từ đầu thập niên 2010 (Nair và Hinton, 2010; Glorot và cộng sự, 2011). Điểm yếu: với $z < 0$, đầu ra và đạo hàm đều bằng 0. Nếu một nơ-ron rơi vào cảnh $z < 0$ với mọi mẫu, nó không bao giờ học được nữa, gọi là **nơ-ron chết** (dying ReLU).
+- **Leaky ReLU** $\max(\alpha z, z)$ với $\alpha$ nhỏ, thường $0.01$ (Maas và cộng sự, 2013). Phía âm vẫn có một độ dốc nhỏ, nên nơ-ron không chết hẳn.
+- **GELU** (Gaussian error linear unit, Hendrycks và Gimpel, 2016) $\mathrm{GELU}(z) = z\,\Phi(z)$, với $\Phi$ là hàm phân phối tích lũy của phân phối chuẩn tắc: xác suất một biến chuẩn tắc nhỏ hơn $z$. Khi $z$ lớn, $\Phi(z) \approx 1$ nên GELU gần bằng $z$; khi $z$ rất âm, $\Phi(z) \approx 0$ nên GELU gần 0. Ở giữa, đồ thị trơn và hơi trũng xuống dưới 0, thấp nhất khoảng $-0.17$ tại $z \approx -0.75$. GELU là hàm kích hoạt của BERT và GPT; bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/) và bài [Họ LLaMA](/vi/llm/llama-family/) gặp lại nó trong khối MLP của Transformer.
+
+Không có hàm nào tốt nhất cho mọi bài. Điểm khởi đầu an toàn: **ReLU cho lớp ẩn** của MLP và CNN, GELU cho Transformer, tanh và sigmoid trong mạng hồi tiếp. Bài [Huấn luyện mạng nơ-ron](/vi/dl/training-neural-networks/) giải thích vì sao sự bão hòa của sigmoid làm mạng sâu khó học.
+
+### Lớp ra và hàm mất mát
+
+Lớp ẩn học đặc trưng; lớp ra biến đặc trưng đó thành đúng loại dự đoán mà bài toán cần. Ba trường hợp hay gặp:
+
+| Bài toán | Lớp ra | Hàm mất mát |
+|---|---|---|
+| Hồi quy (dự đoán một số) | 1 nơ-ron, $g(z) = z$ | MSE |
+| Phân loại hai lớp | 1 nơ-ron, sigmoid | Binary cross-entropy |
+| Phân loại $K$ lớp | $K$ nơ-ron, softmax | Cross-entropy |
+
+**Softmax.** Lớp ra có $K$ nơ-ron, cho $K$ logit $z_1, \dots, z_K$. Softmax đổi chúng thành phân phối xác suất:
+
+$$
+\hat{y}_k = \mathrm{softmax}(\mathbf{z})_k = \frac{e^{z_k}}{\sum_{j=1}^{K} e^{z_j}}
+$$
+
+Hàm mũ làm mọi số thành dương, phép chia làm tổng bằng 1, và logit lớn hơn thì xác suất lớn hơn. Khác các hàm kích hoạt ở trên, softmax **không** tính từng phần tử riêng: mỗi $\hat{y}_k$ phụ thuộc vào mọi logit. Ví dụ $\mathbf{z} = [2.0, 1.0, 0.1]^\top$ cho $\hat{\mathbf{y}} \approx [0.659, 0.242, 0.099]^\top$.
+
+**Cross-entropy.** Với một mẫu có nhãn đúng là lớp $c$, mất mát là $-\ln$ xác suất mà mạng gán cho lớp $c$. Viết nhãn thành **vectơ one-hot** $\mathbf{y}$ (phần tử thứ $c$ bằng 1, còn lại bằng 0) thì công thức trung bình trên $m$ mẫu là:
+
+$$
+\mathcal{L} = -\frac{1}{m}\sum_{i=1}^{m}\sum_{k=1}^{K} y^{(i)}_k \ln \hat{y}^{(i)}_k
+$$
+
+Trong tổng theo $k$, chỉ số hạng của lớp đúng còn lại (các $y^{(i)}_k$ khác bằng 0), nên mỗi mẫu góp đúng $-\ln \hat{y}^{(i)}_{c}$. Với ví dụ trên: nếu lớp đúng là lớp 1 thì mất mát là $-\ln 0.659 \approx 0.417$; nếu là lớp 3 thì $-\ln 0.099 \approx 2.317$. Đoán đúng và tự tin thì mất mát gần 0; tự tin mà sai thì mất mát rất lớn. Với $K = 2$ và một nơ-ron sigmoid cho $\hat{y} = P(y = 1)$, công thức thu về binary cross-entropy $-\frac{1}{m}\sum_i\left[y^{(i)}\ln\hat{y}^{(i)} + \left(1 - y^{(i)}\right)\ln\left(1 - \hat{y}^{(i)}\right)\right]$.
+
+Nhìn lại cả mạng: lớp ra softmax cộng cross-entropy **chính là hồi quy softmax**, chỉ khác ở chỗ đầu vào của nó không phải $\mathbf{x}$ mà là $\mathbf{a}^{[N_L - 1]}$, các đặc trưng do lớp ẩn học ra.
+
+### Định lý xấp xỉ phổ quát
+
+Mạng XOR cần đúng một lớp ẩn. Vậy một lớp ẩn làm được tới đâu? **Định lý xấp xỉ phổ quát** trả lời: với một hàm kích hoạt phi tuyến phù hợp, một MLP **một lớp ẩn**, **đủ nhiều nơ-ron**, xấp xỉ được mọi hàm liên tục trên một miền bị chặn với sai số nhỏ tùy ý. Cybenko (1989) chứng minh cho sigmoid; Hornik, Stinchcombe và White (1989) cho một lớp hàm rộng hơn; Leshno và cộng sự (1993) chỉ ra mọi hàm kích hoạt liên tục không phải đa thức đều dùng được, gồm cả ReLU.
+
+Bài này không chứng minh, nhưng ý chính dễ thấy với ReLU. Mỗi nơ-ron ReLU là một đường gãy khúc tại một điểm. Hiệu $\mathrm{ReLU}(z) - \mathrm{ReLU}(z - 1)$ là một con dốc đi từ 0 lên 1 rồi nằm ngang. Cộng nhiều con dốc như vậy, mỗi cái đặt ở một chỗ với một độ cao, bạn ghép được một đường gấp khúc bám theo đường cong bất kỳ. Càng nhiều nơ-ron, càng nhiều khúc, càng bám sát.
+
+Đọc kỹ những gì định lý **không** nói:
+
+- **Không nói cần bao nhiêu nơ-ron.** Với nhiều hàm, số nơ-ron cần có thể rất lớn. Trên thực tế, mạng **sâu** thường biểu diễn cùng một hàm với ít tham số hơn nhiều so với mạng nông và rộng.
+- **Không nói tìm ra trọng số bằng cách nào.** Định lý chỉ đảm bảo bộ trọng số tốt **tồn tại**. Gradient descent có tìm được nó không là chuyện khác.
+- **Không nói gì về dữ liệu mới.** Khớp tốt tập huấn luyện vẫn có thể là [overfitting](/vi/ml/overfitting-underfitting/).
+
+### Còn thiếu: học trọng số
+
+Trọng số của mạng XOR được đặt bằng tay. Mạng chữ số có 4810 tham số, mạng thật có hàng triệu tới hàng tỉ: không thể đặt tay. Hướng đi đã rõ: chọn hàm mất mát $\mathcal{L}$ (cross-entropy), rồi dùng [gradient descent](/vi/ml/gradient-descent/) để giảm nó. Muốn vậy cần $\partial\mathcal{L}/\partial\mathbf{W}^{[l]}$ và $\partial\mathcal{L}/\partial\mathbf{b}^{[l]}$ cho **mọi** lớp, mà mỗi tham số ảnh hưởng tới $\mathcal{L}$ qua tất cả các lớp sau nó. Cách tính các gradient này hiệu quả là **lan truyền ngược** (backpropagation), nội dung của bài [Huấn luyện mạng nơ-ron](/vi/dl/training-neural-networks/).
+
+Ngoài ra, MLP coi mỗi đầu vào là một con số độc lập: nó không biết hai điểm ảnh nằm cạnh nhau hay hai từ đứng liền nhau. Bài [Mạng tích chập (CNN)](/vi/dl/cnn/) và bài [Mạng nơ-ron hồi tiếp (RNN)](/vi/dl/rnn/) đưa cấu trúc của ảnh và chuỗi vào mạng.
+
+## Minh họa
+
+Hình dưới đặt hai thứ cạnh nhau. Bên trái là một nơ-ron: nhìn theo mũi tên, các đầu vào $x_j$ được nhân với trọng số $w_j$, cộng với $b$ thành $z$, rồi qua $g$ thành $a$. Bên phải là một MLP 2-3-1: mỗi nơ-ron của lớp ẩn chính là nơ-ron bên trái, và mỗi mũi tên giữa hai lớp là một trọng số, tức một phần tử của $\mathbf{W}^{[l]}$.
+
+{/* FIG: MlpFigure
+    Ý: một nơ-ron là "cộng có trọng số, cộng hệ số tự do, qua hàm kích hoạt"; MLP là nhiều nơ-ron như vậy xếp thành lớp, nối đầy đủ giữa hai lớp liền nhau.
+    Khối và mũi tên: bên trái (hoặc phía trên trên điện thoại) là một nơ-ron: ba ô đầu vào x1, x2, x3, mỗi ô một mũi tên ghi w1, w2, w3 đi vào một vòng tròn Σ; ô b đi vào cùng vòng tròn; từ Σ ra z, vào ô g, ra a. Bên phải (hoặc phía dưới) là MLP 2 → 3 → 1: cột lớp vào 2 vòng tròn, cột lớp ẩn 3 vòng tròn (trọng tâm, tô màu nhấn), cột lớp ra 1 vòng tròn; mỗi nơ-ron lớp vào nối tới cả 3 nơ-ron ẩn (6 mũi tên), mỗi nơ-ron ẩn nối tới nơ-ron ra (3 mũi tên). Một khung mảnh hoặc đường nối nhẹ cho thấy một nơ-ron ẩn chính là nơ-ron bên trái.
+    Nhãn: "Một nơ-ron"; "Đầu vào"; "Tổng có trọng số"; "Hàm kích hoạt"; "Lớp vào"; "Lớp ẩn"; "Lớp ra".
+    Chú thích: Một nơ-ron tính $z = \mathbf{w}^\top\mathbf{x} + b$ rồi $a = g(z)$; một lớp tính $\mathbf{a}^{[l]} = g(\mathbf{W}^{[l]}\mathbf{a}^{[l-1]} + \mathbf{b}^{[l]})$, ở đây $\mathbf{W}^{[1]}$ có kích thước $3 \times 2$ và $\mathbf{W}^{[2]}$ có kích thước $1 \times 3$. */}
+
+Bảng dưới là kết quả lan truyền xuôi của ô code thứ hai: mạng XOR 2-2-1, lần này dùng sigmoid thay cho hàm bậc thang, với trọng số lớn hơn để sigmoid gần giống bậc thang. Hãy nhìn cột lớp ẩn: hai mẫu "sáng" $(0, 1)$ và $(1, 0)$ cho **cùng một** điểm $(0.953, 0.047)$. Lớp ẩn đã gộp chúng lại, nên lớp ra chỉ còn phải tách ba điểm bằng một đường thẳng.
+
+| $(x_1, x_2)$ | Lớp ẩn $\mathbf{a}^{[1]}$ | Lớp ra $\hat{y}$ | XOR |
+|---|---|---:|---:|
+| $(0, 0)$ | $(0.047, 0.000)$ | 0.011 | 0 |
+| $(0, 1)$ | $(0.953, 0.047)$ | 0.983 | 1 |
+| $(1, 0)$ | $(0.953, 0.047)$ | 0.983 | 1 |
+| $(1, 1)$ | $(1.000, 0.953)$ | 0.011 | 0 |
+
+## Ví dụ code
+
+Các ô dưới đây chạy độc lập, ô nào cũng tự tạo dữ liệu. Hai ô đầu chỉ dùng NumPy và chạy ngay trên trang. Ô thứ ba cần PyTorch nên chạy trên máy bạn.
+
+Ô thứ nhất cài đặt perceptron và luật học perceptron, rồi cho nó học ba cổng AND, OR, XOR, mỗi cổng tối đa 20 epoch. Mỗi cổng in số epoch đã chạy, $\mathbf{w}$, $b$, số mẫu sai trong từng epoch, và dự đoán cuối cùng.
+
+<PythonRunner code={perceptronCode} title="Perceptron học AND, OR và XOR" />
+
+- **AND** hội tụ sau 6 epoch (số mẫu sai 2, 3, 3, 2, 1, 0), dừng ở $\mathbf{w} = [2, 1]^\top$, $b = -3$. Bộ số này không đối xứng như "trọng số 1 và 1, ngưỡng 1.5" của mục Trực giác, nhưng cũng đúng: chỉ $(1, 1)$ có $z = 0 \geq 0$. Dữ liệu tách được tuyến tính thì có vô số đường thẳng tách đúng, và perceptron dừng ở đường đầu tiên nó gặp.
+- **OR** hội tụ sau 4 epoch, ở $\mathbf{w} = [1, 1]^\top$, $b = -1$.
+- **XOR** sai 3, 3, rồi **4 mẫu ở mọi epoch** cho tới epoch thứ 20. Các trọng số cứ đổi qua đổi lại; lúc dừng là $\mathbf{w} = [-1, 0]^\top$, $b = 0$, dự đoán $[1, 1, 0, 0]$, chỉ đúng 2 trên 4 mẫu, không hơn đoán bừa. Đúng như chứng minh: không có bộ tham số nào để hội tụ tới.
+
+Ô thứ hai là mạng 2-2-1 giải XOR với trọng số đặt tay, dạng sigmoid: lớp ẩn có $\mathbf{W}^{[1]} = \begin{bmatrix} 6 & 6 \\ 6 & 6 \end{bmatrix}$, $\mathbf{b}^{[1]} = [-3, -9]^\top$; lớp ra có $\mathbf{W}^{[2]} = [10, -10]$, $b^{[2]} = -5$. Bốn mẫu được xếp thành bốn cột của $\mathbf{A}^{[0]}$, và lan truyền xuôi chạy đúng hai dòng $\mathbf{Z} = \mathbf{W}\mathbf{A} + \mathbf{b}$, $\mathbf{A} = \sigma(\mathbf{Z})$ cho mỗi lớp. Phần cuối bỏ hàm kích hoạt và kiểm tra rằng hai lớp tuyến tính bằng đúng một lớp $\mathbf{W}^{[2]}\mathbf{W}^{[1]}$.
+
+<PythonRunner code={xorForwardCode} title="MLP 2-2-1 giải XOR, lan truyền xuôi dạng ma trận" />
+
+Đầu ra là $[0.011, 0.983, 0.983, 0.011]$: lấy ngưỡng 0.5 thì khớp XOR. Hàng đầu của `A1` gần với OR, hàng thứ hai gần với AND, như thiết kế. Phần bỏ hàm kích hoạt in `same output: True`: hai lớp tuyến tính cho đúng kết quả của một lớp với $\mathbf{W} = [0, 0]$ và $b = 55$. Ở đây $\mathbf{W}$ bằng 0 vì hai hàng của $\mathbf{W}^{[1]}$ giống nhau; với trọng số khác thì $\mathbf{W}$ khác 0, nhưng vẫn chỉ là một lớp tuyến tính, nên vẫn không giải được XOR.
+
+Ô thứ ba huấn luyện một MLP 64-64-10 có ReLU trên bộ chữ số viết tay `load_digits` của scikit-learn: 1797 ảnh xám 8×8, tức 64 đầu vào, nhãn từ 0 tới 9. Mạng được viết bằng `nn.Sequential`: `nn.Linear(64, 64)` là một lớp $\mathbf{W}^{[1]}\mathbf{a} + \mathbf{b}^{[1]}$, `nn.ReLU()` là $g$. Hàm mất mát `nn.CrossEntropyLoss` nhận thẳng logit, và bộ tối ưu là gradient descent mini-batch (`torch.optim.SGD`, cỡ batch 32, $\eta = 0.2$, 30 epoch). Dòng `loss.backward()` tính gradient của $\mathcal{L}$ theo mọi tham số: tạm coi nó là một hộp đen, bài sau sẽ mở hộp này ra.
+
+<LocalCode
+  code={mlpDigitsCode}
+  title="MLP bằng PyTorch đọc chữ số viết tay"
+  packages={['torch', 'scikit-learn']}
+  hardware="CPU là đủ, không cần GPU. Khoảng 30 giây tới 3 phút trên máy phát triển, tùy máy đang bận cỡ nào"
+  sampleVaries={false}
+>
+
+```text
+parameters: 4810
+epoch  1  train loss 1.4863
+epoch  5  train loss 0.2110
+epoch 10  train loss 0.2626
+epoch 20  train loss 0.0631
+epoch 30  train loss 0.0416
+test accuracy: 0.9756 (450 images)
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Số tham số** 4810, khớp phép đếm $64 \times 65 + 10 \times 65$ ở mục Lý thuyết.
+- **Loss trên tập huấn luyện** đi từ 1.4863 sau epoch đầu xuống 0.0416 sau epoch 30. Mốc so sánh: mạng chưa học, đoán đều 10 lớp, có loss $\ln 10 \approx 2.303$. Loss ở epoch 10 (0.2626) cao hơn ở epoch 5 (0.2110): mỗi bước chỉ dùng 32 mẫu nên đường đi có nhiễu, như SGD ở bài [Gradient Descent](/vi/ml/gradient-descent/).
+- **Độ chính xác trên tập kiểm tra** là 0.9756, tức 439 trên 450 ảnh chưa thấy lúc huấn luyện. Để so, hồi quy softmax (`LogisticRegression` của scikit-learn) trên cùng cách chia đạt 0.9689 trong lần chạy thử của bài: bộ dữ liệu nhỏ và dễ, nên lớp ẩn chỉ giúp thêm một chút.
+
+Seed cố định nên mỗi lần chạy trên cùng máy cho cùng kết quả; trên máy khác hoặc bản PyTorch khác, các số có thể lệch đôi chút. Hãy thử đổi `nn.ReLU()` thành `nn.Tanh()` hoặc `nn.GELU()`, hoặc đổi số nơ-ron ẩn, rồi chạy lại.
+
+## Lỗi hay gặp
+
+:::caution[Quên hàm kích hoạt giữa các lớp]
+`nn.Sequential(nn.Linear(64, 64), nn.Linear(64, 10))` trông như một mạng hai lớp, nhưng theo mục Hàm kích hoạt, nó đúng bằng **một** lớp tuyến tính, tức hồi quy softmax với nhiều tham số thừa. Mã vẫn chạy, loss vẫn giảm, không có lỗi nào báo ra. Giữa hai lớp `nn.Linear` luôn phải có một hàm kích hoạt như `nn.ReLU()`. Riêng sau lớp cuối thì không đặt gì, xem hộp dưới.
+:::
+
+:::caution[Thêm softmax trước `nn.CrossEntropyLoss`]
+`nn.CrossEntropyLoss` của PyTorch nhận **logit** và tự làm softmax (dạng log-softmax, ổn định số học hơn) bên trong. Nếu mạng đã có `nn.Softmax` ở cuối, softmax bị làm hai lần. Lần thứ hai nhận các số trong $[0, 1]$, nên dù mạng tự tin tuyệt đối, xác suất cao nhất cũng chỉ là $e/(e + 9) \approx 0.232$ với 10 lớp, và loss không xuống dưới khoảng 1.46. Gradient cũng nhỏ đi, nên mạng học chậm hẳn. Để lớp cuối trả về logit; khi cần xác suất để hiển thị thì gọi `torch.softmax(logits, dim=1)` riêng. Còn chỉ cần lớp dự đoán thì lấy `argmax` thẳng trên logit, như ô code thứ ba, vì softmax không đổi thứ tự.
+:::
+
+:::caution[Đọc định lý xấp xỉ phổ quát thành "mạng một lớp ẩn là đủ"]
+Định lý nói một mạng như vậy **tồn tại**, không nói nó nhỏ, không nói gradient descent tìm ra nó, và không nói nó dự đoán tốt trên dữ liệu mới. Thêm nơ-ron vào một lớp ẩn cũng không tự giải quyết được chuyện ảnh có cấu trúc không gian hay câu có thứ tự. Đó là lý do người ta dùng mạng sâu, CNN cho ảnh và Transformer cho chuỗi, dù về lý thuyết một lớp ẩn đã "đủ".
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Một nơ-ron tính $z = \mathbf{w}^\top\mathbf{x} + b$ rồi $a = g(z)$. Perceptron dùng hàm bậc thang và luật học $\mathbf{w} \leftarrow \mathbf{w} + \eta(y - \hat{y})\mathbf{x}$; luật này chỉ hội tụ khi dữ liệu tách được tuyến tính, nên không học được XOR.
+- MLP xếp nơ-ron thành các lớp kết nối đầy đủ. Lan truyền xuôi: $\mathbf{a}^{[0]} = \mathbf{x}$, rồi $\mathbf{z}^{[l]} = \mathbf{W}^{[l]}\mathbf{a}^{[l-1]} + \mathbf{b}^{[l]}$, $\mathbf{a}^{[l]} = g^{[l]}(\mathbf{z}^{[l]})$, với $\mathbf{W}^{[l]}$ kích thước $n^{[l]} \times n^{[l-1]}$. Lớp ẩn học ra cách biểu diễn mới, trong đó bài toán dễ hơn.
+- Hàm kích hoạt phải phi tuyến, nếu không cả mạng chỉ là một lớp tuyến tính. ReLU là mặc định cho lớp ẩn; sigmoid và tanh bão hòa; Leaky ReLU tránh nơ-ron chết; GELU dùng trong Transformer.
+- Phân loại $K$ lớp dùng $K$ nơ-ron ra, softmax và cross-entropy $-\ln\hat{y}_c$. Định lý xấp xỉ phổ quát nói MLP một lớp ẩn đủ rộng xấp xỉ được mọi hàm liên tục, nhưng không nói cách tìm trọng số: đó là việc của lan truyền ngược, ở bài sau.
+
+**Đọc thêm:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Bài 9: Perceptron Learning Algorithm](https://machinelearningcoban.com/2017/01/21/perceptron/) và [Bài 14: Multi-layer Perceptron và Backpropagation](https://machinelearningcoban.com/2017/02/24/mlp/). Tiếng Việt, có chứng minh hội tụ của perceptron và ví dụ XOR. Ký hiệu khác: nhãn là $\pm 1$, và ma trận trọng số của lớp $l$ có kích thước $d^{(l-1)} \times d^{(l)}$, tức là chuyển vị của $\mathbf{W}^{[l]}$ trong bài này.
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. (2023). [*Dive into Deep Learning*, mục 5.1: Multilayer Perceptrons](https://d2l.ai/chapter_multilayer-perceptrons/mlp.html). Có đồ thị và đạo hàm của ReLU, sigmoid, tanh, kèm code. Sách xếp mẫu theo hàng ($\mathbf{X}\mathbf{W} + \mathbf{b}$), như PyTorch.
+- Goodfellow, I., Bengio, Y., Courville, A. (2016). [*Deep Learning*, chương 6: Deep Feedforward Networks](https://www.deeplearningbook.org/contents/mlp.html). Mục 6.1 giải XOR bằng một mạng ReLU nhỏ; mục 6.4.1 bàn định lý xấp xỉ phổ quát và vì sao độ sâu có ích.
+- Nielsen, M. (2015). [*Neural Networks and Deep Learning*, chương 4: A visual proof that neural nets can compute any function](http://neuralnetworksanddeeplearning.com/chap4.html). "Chứng minh bằng hình" của định lý xấp xỉ phổ quát, có hình tương tác.
+- Các bài gốc. Rosenblatt, F. (1958). [*The perceptron: A probabilistic model for information storage and organization in the brain*](https://doi.org/10.1037/h0042519). *Psychological Review* 65(6), 386–408. Cybenko, G. (1989). [*Approximation by superpositions of a sigmoidal function*](https://doi.org/10.1007/BF02551274). *Mathematics of Control, Signals and Systems* 2(4), 303–314. Hendrycks, D., Gimpel, K. (2016). [*Gaussian Error Linear Units (GELUs)*](https://arxiv.org/abs/1606.08415). arXiv:1606.08415.
+
+<LessonProgress />
