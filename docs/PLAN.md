@@ -255,6 +255,7 @@ ai-atlas/
 - [ ] Machine Learning (14 bài)
 - [ ] Deep Learning (8 bài)
 - [ ] NLP, CV, LLM (46 bài)
+  - [x] NLP (Phần 5a, 13 bài): xong bản vi, **chờ người dùng duyệt** trên PR riêng; bản en làm sau ([quyết định 70–75](decisions.md), thiết kế [docs/architecture/nlp-lessons.md](architecture/nlp-lessons.md))
   - [x] LLM (Phần 5c, 23 bài): xong bản vi, **chờ người dùng duyệt**; bản en làm sau ([quyết định 53](decisions.md))
 
 > **Trạng thái phần LLM (24/10/2026, nhánh `llm-lessons`, worktree `ai-atlas-llm`, chưa commit):** 23 bài vi theo biến thể template LLM ([quyết định 53, 54, 59–61](decisions.md), thiết kế [docs/architecture/llm-lessons.md](architecture/llm-lessons.md)). Có component `LocalCode` (code minh họa chạy trên máy người đọc), VIZ `SamplingViz` (bài `text-api`, `build-first-llm`), 9 hình tĩnh trên 14 bài, e2e chia 2 shard trong CI, khoảng 280 thuật ngữ mới trong glossary. Cổng kiểm tra: `npm run check` 0 lỗi 0 cảnh báo, `npm test` 1307/1307, `npm run build` 0 `[WARN]`, `npm run test:e2e` 1029 qua (201 bỏ qua có điều kiện), 0 lỗi. Báo cáo: [docs/progress/2026-10-24-llm.md](progress/2026-10-24-llm.md).

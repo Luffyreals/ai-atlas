@@ -1,0 +1,362 @@
+---
+title: Truy xuất thông tin (Information Retrieval)
+description: Tìm câu trả lời trong FAQ của một cửa hàng. Chỉ mục ngược, BM25, precision@k, MRR, nDCG, truy xuất dày, cross-encoder và truy xuất lai.
+quiz:
+  - question: 'Với BM25, $k_1 = 1.2$ và $b = 0$, một từ trong truy vấn xuất hiện 1 lần trong văn bản. Nếu từ đó xuất hiện 10 lần thì phần điểm của từ này (cùng idf) tăng khoảng bao nhiêu lần?'
+    options:
+      - '10 lần, vì điểm tỉ lệ với số lần xuất hiện'
+      - 'Khoảng 2 lần'
+      - 'Không đổi, vì BM25 chỉ xét từ có mặt hay không'
+    answer: 1
+    explanation: 'Với $b = 0$, phần tần suất là $\mathrm{tf}\,(k_1 + 1) / (\mathrm{tf} + k_1)$. Với $\mathrm{tf} = 1$ được $2.2 / 2.2 = 1$, với $\mathrm{tf} = 10$ được $22 / 11.2 \approx 1.96$. Đó là bão hòa: lần xuất hiện thêm vẫn cộng điểm, nhưng ngày càng ít, và không bao giờ vượt $k_1 + 1 = 2.2$. Chỉ khi $k_1 = 0$ thì BM25 mới bỏ hẳn tần suất.'
+  - question: 'Kho có 8 văn bản liên quan tới một truy vấn. Hệ thống trả về 10 văn bản, trong đó có 4 văn bản liên quan. Precision@10 và recall@10 là bao nhiêu?'
+    options:
+      - 'Precision@10 = 0.5, recall@10 = 0.4'
+      - 'Precision@10 = 0.4, recall@10 = 0.4'
+      - 'Precision@10 = 0.4, recall@10 = 0.5'
+      - 'Precision@10 = 1.0, recall@10 = 0.5'
+    answer: 2
+    explanation: 'Precision@10 chia số văn bản liên quan tìm được cho số văn bản đã trả về: $4/10 = 0.4$. Recall@10 chia cho số văn bản liên quan có trong kho: $4/8 = 0.5$. Hai độ đo có chung tử số, khác mẫu số. Đảo hai mẫu số là lỗi hay gặp.'
+  - question: 'Đánh giá ba truy vấn. Văn bản liên quan đầu tiên nằm ở vị trí 1 với truy vấn thứ nhất, vị trí 3 với truy vấn thứ hai, và không có trong danh sách với truy vấn thứ ba. MRR là bao nhiêu?'
+    options:
+      - 'Khoảng $0.44$'
+      - 'Khoảng $0.67$'
+      - '$1$, vì truy vấn thứ nhất đã đúng ngay vị trí đầu'
+    answer: 0
+    explanation: 'Reciprocal rank của từng truy vấn là $1$, $1/3$ và $0$ (không tìm thấy thì tính 0). MRR là trung bình: $(1 + 1/3 + 0)/3 \approx 0.44$. Đáp án $0.67$ là trung bình khi bỏ quên truy vấn thứ ba; bỏ truy vấn thất bại khỏi mẫu số làm hệ thống trông tốt hơn thực tế.'
+  - question: 'Khách nhắn: "đơn DH48213 giao tới đâu rồi". Kho có hàng triệu tin nhắn chăm sóc khách hàng, mỗi tin ghi một mã đơn, và hệ thống phải trả lời trong dưới một giây. Bộ truy xuất nào nhiều khả năng đưa đúng tin nhắn của đơn DH48213 lên đầu?'
+    options:
+      - 'Bộ truy xuất dày, vì nó hiểu nghĩa câu hỏi'
+      - 'Cross-encoder chấm toàn bộ kho, không cần bước lọc'
+      - 'Không bộ nào làm được, phải dùng truy xuất Boolean'
+      - 'BM25, vì mã đơn là một từ hiếm, khớp đúng chữ và có idf rất cao'
+    answer: 3
+    explanation: 'Mã DH48213 gần như chỉ xuất hiện trong vài tin nhắn, nên idf của nó rất lớn và BM25 đẩy đúng các tin đó lên. Embedding nén cả câu thành một vectơ, nên các mã đơn na ná nhau (DH48213, DH48231) dễ cho vectơ gần nhau. Boolean thì tìm được nhưng không xếp hạng. Cross-encoder có thể chính xác, nhưng chấm hàng triệu cặp (truy vấn, tin nhắn) thì không thể xong trong một giây.'
+  - question: 'Vì sao người ta không dùng cross-encoder để chấm thẳng mọi văn bản trong kho một triệu văn bản?'
+    options:
+      - 'Vì cross-encoder kém chính xác hơn bi-encoder'
+      - 'Vì cross-encoder phải chạy mô hình một lần cho mỗi cặp (truy vấn, văn bản) lúc người dùng hỏi, không tính trước được'
+      - 'Vì cross-encoder chỉ đọc được truy vấn, không đọc được văn bản'
+    answer: 1
+    explanation: 'Cross-encoder đọc truy vấn và văn bản cùng lúc, nên điểm chỉ có khi đã biết truy vấn: một triệu văn bản là một triệu lần chạy mô hình cho mỗi câu hỏi. Bi-encoder tính vectơ văn bản trước một lần, lúc hỏi chỉ còn một lần mã hóa truy vấn và một phép tìm láng giềng. Cross-encoder thường chính xác hơn, nên được dùng để xếp lại vài chục tới vài trăm ứng viên.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import bm25Code from '@code/nlp/information-retrieval/bm25.vi.py?raw';
+import metricsCode from '@code/nlp/information-retrieval/metrics.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu bài toán truy xuất thông tin (information retrieval): cho một truy vấn (query) và một kho văn bản, xếp hạng văn bản theo độ liên quan (relevance), và vì sao chỉ mục ngược (inverted index) làm việc này nhanh.
+- Đọc hiểu từng phần của công thức BM25: idf, bão hòa tần suất và chuẩn hóa độ dài, và tự tính được điểm của một từ.
+- Tính được tay và bằng code các độ đo precision@k, recall@k, MRR, AP và nDCG.
+- Nhận ra khi nào truy xuất thưa (BM25) thắng, khi nào truy xuất dày (bi-encoder, như DPR) thắng, và cách ghép chúng: cross-encoder xếp lại, truy xuất lai bằng Reciprocal Rank Fusion.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+## Trực giác
+
+Một cửa hàng điện thoại có trang câu hỏi thường gặp (FAQ) gồm 10 câu trả lời ngắn: giờ mở cửa, đổi trả, phí giao hàng, cách thanh toán, bảo hành, khuyến mãi tai nghe BT200, đặt hàng trực tuyến, đổi hàng lỗi, chỗ gửi xe, giảm giá cho học sinh. Một khách gõ vào ô tìm kiếm: "bt200 có giảm giá không".
+
+Với 10 câu, bạn liếc qua là thấy câu về khuyến mãi BT200. Máy cũng làm được y như vậy: so truy vấn với từng câu. Nhưng một trang thương mại điện tử có hàng triệu mô tả sản phẩm và câu hỏi đáp. So với **từng** văn bản cho **mỗi** lần khách gõ thì quá chậm.
+
+Còn một chuyện khó hơn: **xếp thứ tự**. Câu giảm giá cho học sinh ("học sinh sinh viên được giảm 5 phần trăm") cũng có chữ "giảm". Câu gửi xe ("cửa hàng có chỗ gửi xe") có chữ "có". Câu nào nên đứng trước? Chữ "có" xuất hiện ở khắp nơi, nên trùng chữ "có" chẳng nói lên gì. Chữ "bt200" thì hiếm, trùng nó gần như chắc chắn là đúng chỗ.
+
+Rồi một khách khác gõ "hàng bị hỏng thì làm sao". FAQ có câu "sản phẩm lỗi do nhà sản xuất được đổi mới trong 30 ngày đầu", đúng là câu trả lời, nhưng không chung chữ nào với truy vấn. Tìm theo chữ sẽ trượt. Và khi bạn sửa cách tìm, làm sao biết bản mới **tốt hơn** bản cũ, thay vì chỉ thử vài câu rồi đoán?
+
+Bài toán của bài này là: **cho một kho văn bản và một truy vấn, tìm thật nhanh các văn bản liên quan, xếp chúng theo thứ tự hợp lý, và đo được thứ tự đó tốt tới đâu.**
+
+## Lý thuyết
+
+### Phát biểu bài toán
+
+Bài toán trong bài gọi là **truy xuất ad hoc** (ad hoc retrieval): kho văn bản cố định, còn truy vấn thì mới với mỗi lần hỏi. Các ký hiệu:
+
+- Kho có $N$ văn bản (document), đánh số từ 0 như trong code. Một văn bản viết là $D$; $|D|$ là số từ của nó. Bài không dùng chữ $d$ cho văn bản, vì $d$ đã là số chiều của embedding.
+- Truy vấn $Q$ gồm các từ $w_1, \dots, w_t$.
+- $\mathrm{tf}(w, D)$ (term frequency) là số lần từ $w$ xuất hiện trong $D$. $n(w)$ là số văn bản có chứa $w$ (document frequency).
+- Hệ thống trả về một **danh sách xếp hạng**: các văn bản sắp theo điểm $\mathrm{score}(Q, D)$ giảm dần, thường chỉ lấy $k$ văn bản đầu.
+
+**Độ liên quan** là phán xét của người: văn bản có giúp người hỏi không. Nó không phải "có chung chữ hay không". Câu đổi hàng lỗi liên quan tới "hàng bị hỏng thì làm sao" dù không chung chữ nào. Mọi hàm điểm chỉ là cách **đoán** độ liên quan; mục Đánh giá sẽ so lời đoán với phán xét của người.
+
+Trong 10 câu FAQ của bài, các từ đã được tách theo âm tiết bằng khoảng trắng và viết thường. Cách tách từ tiếng Việt và vì sao nó quan trọng nằm ở bài [Tách từ](/vi/nlp/tokenization/).
+
+### Chỉ mục ngược: tra từ, không quét văn bản
+
+Cuối nhiều cuốn sách giáo khoa có trang **chỉ mục**: mỗi thuật ngữ kèm số các trang nhắc tới nó. Muốn tìm "đạo hàm", bạn không đọc lại cả cuốn, bạn tra chỉ mục. **Chỉ mục ngược** (inverted index) làm đúng như vậy cho kho văn bản:
+
+- **Từ vựng** (vocabulary): mọi từ xuất hiện trong kho. Kho FAQ của bài có 84 từ khác nhau.
+- Mỗi từ $w$ trỏ tới một **posting list** (danh sách văn bản chứa từ): các cặp (số thứ tự văn bản, $\mathrm{tf}$). Ví dụ "giảm" có posting list gồm văn bản 5 (1 lần) và văn bản 9 (1 lần).
+
+Gọi là "ngược" vì bình thường ta lưu văn bản → các từ của nó; chỉ mục lưu chiều ngược lại, từ → các văn bản. Chỉ mục được dựng **một lần** khi lập chỉ mục, rồi dùng cho mọi truy vấn.
+
+**Vì sao nhanh.** Với truy vấn "bt200 có giảm giá không", máy chỉ mở bốn posting list ("không" không có trong kho): 1 + 3 + 2 + 1 = 7 mục. Văn bản nào không nằm trong posting list nào thì điểm bằng 0, không cần đụng tới. Trong kho thật, phần lớn các từ là hiếm, nên posting list của chúng ngắn, và mỗi truy vấn chỉ chạm vào một phần rất nhỏ của kho. Những từ có posting list rất dài, như "có", "và", lại đóng góp ít điểm nhất, như mục BM25 sẽ cho thấy.
+
+### Truy xuất Boolean
+
+Cách dùng chỉ mục đơn giản nhất là **truy xuất Boolean** (Boolean retrieval): truy vấn là một biểu thức logic, kết quả là một **tập** văn bản.
+
+- `giảm AND giá`: **giao** hai posting list. Văn bản 5 và 9 có "giảm", chỉ văn bản 5 có "giá", nên kết quả là văn bản 5. Nếu mỗi posting list được sắp theo số thứ tự văn bản, máy giao chúng bằng hai con trỏ chạy song song, mỗi danh sách chỉ đi qua một lần.
+- `giảm OR thẻ`: **hợp** hai danh sách, được văn bản 3, 5, 9.
+- `giảm AND NOT thẻ`: bỏ những văn bản có "thẻ", còn văn bản 5.
+
+Boolean vẫn được dùng trong tra cứu pháp lý hay tìm bằng sáng chế, nơi người dùng là chuyên gia viết truy vấn cẩn thận. Với người dùng bình thường nó có hai nhược điểm. Một, **không xếp hạng**: văn bản trúng thì trúng, không có cái nào hơn cái nào. Hai, **quá chặt hoặc quá lỏng**: `bt200 AND có AND giảm AND giá AND không` trả về rỗng, vì không văn bản nào có "không"; còn dùng `OR` thì văn bản nào có chữ "có" cũng lọt vào, ngang hàng với câu về BT200. Ta cần một **điểm** cho mỗi văn bản.
+
+### Xếp hạng bằng TF-IDF và cosine
+
+Bài [Vector Semantics và Embeddings](/vi/nlp/vector-semantics-embeddings/) đã dựng cách chấm điểm đầu tiên: biểu diễn truy vấn và văn bản bằng vectơ TF-IDF, mỗi từ có trọng số lớn khi nó xuất hiện nhiều trong văn bản nhưng hiếm trong kho, rồi xếp theo độ tương tự cosine giữa hai vectơ. Ô code thứ nhất của bài vẫn tính TF-IDF cosine để so.
+
+TF-IDF với cosine chạy khá tốt, nhưng có hai chỗ chưa khéo khi dùng để tìm kiếm:
+
+- **Tần suất tăng tuyến tính.** Một văn bản nhắc "giảm" 10 lần có phần tf gấp 10 văn bản nhắc 1 lần. Nhưng nhắc lần thứ mười chẳng cho thêm bao nhiêu bằng chứng so với lần thứ hai.
+- **Độ dài xử lý cứng nhắc.** Cosine chia cho độ dài vectơ, nên một văn bản dài bị phạt dù nó dài vì bàn nhiều chuyện có ích.
+
+BM25 sửa đúng hai chỗ này.
+
+### BM25
+
+**BM25** (Best Matching 25, còn gọi là Okapi BM25) ra đời từ hệ thống Okapi ở đại học City, London, vào thập niên 1990, và được Robertson và Zaragoza (2009) tổng kết trong khung xác suất về độ liên quan. Đến nay nó vẫn là mốc so sánh quen thuộc của hầu hết nghiên cứu về tìm kiếm. Điểm của văn bản $D$ với truy vấn $Q$ là tổng điểm của từng từ trong truy vấn:
+
+$$
+\mathrm{score}(Q, D) = \sum_{i=1}^{t} \mathrm{idf}(w_i) \cdot \frac{\mathrm{tf}(w_i, D)\,(k_1 + 1)}{\mathrm{tf}(w_i, D) + k_1 \cdot B(D)}
+$$
+
+với hệ số độ dài
+
+$$
+B(D) = 1 - b + b \cdot \frac{|D|}{\mathrm{avgdl}}
+$$
+
+trong đó $\mathrm{avgdl}$ là độ dài trung bình của văn bản trong kho, còn $k_1 \ge 0$ và $0 \le b \le 1$ là hai tham số chọn tay. Từ không có trong $D$ có $\mathrm{tf} = 0$, nên phân số bằng 0 và từ đó không cộng gì. Vì vậy chỉ cần duyệt posting list. Ta đọc từng phần.
+
+**Phần 1: idf, độ hiếm của từ.**
+
+$$
+\mathrm{idf}(w) = \ln\left(1 + \frac{N - n(w) + 0.5}{n(w) + 0.5}\right)
+$$
+
+Phân số so số văn bản **không** chứa $w$ với số văn bản chứa $w$. Từ hiếm thì phân số lớn, từ phổ biến thì phân số nhỏ. Hai số $0.5$ là phần hiệu chỉnh khi ước lượng, thừa hưởng từ trọng số Robertson–Spärck Jones: chúng giữ cho phân số hữu hạn và khác 0 ở cả hai đầu, kể cả khi từ có ở mọi văn bản ($n(w) = N$). Trong kho FAQ, $N = 10$:
+
+- "bt200" chỉ có ở 1 văn bản: $\mathrm{idf} = \ln(1 + 9.5 / 1.5) = \ln 7.33 \approx 1.992$.
+- "giảm" có ở 2 văn bản: $\mathrm{idf} = \ln(1 + 8.5 / 2.5) = \ln 4.4 \approx 1.482$.
+- "hàng" có ở 6 văn bản: $\mathrm{idf} = \ln(1 + 4.5 / 6.5) \approx \ln 1.692 \approx 0.526$.
+
+Robertson và Zaragoza viết idf **không có** số $1 +$ bên trong: $\ln\frac{N - n(w) + 0.5}{n(w) + 0.5}$. Dạng đó âm khi từ có mặt ở hơn nửa kho: với "hàng" nó cho $\ln(4.5 / 6.5) \approx -0.368$, tức có chữ "hàng" lại bị **trừ** điểm. Nhiều thư viện, như Lucene (lõi của Elasticsearch), thêm $1 +$ để idf luôn dương. Code của bài dùng dạng có $1 +$.
+
+**Phần 2: bão hòa tần suất** (term frequency saturation). Tạm cho văn bản có độ dài đúng bằng trung bình, tức $B(D) = 1$. Phần tần suất còn là $\frac{\mathrm{tf}\,(k_1 + 1)}{\mathrm{tf} + k_1}$. Với $k_1 = 1.2$:
+
+| $\mathrm{tf}$ | 1 | 2 | 3 | 5 | 10 | 100 |
+|---|---:|---:|---:|---:|---:|---:|
+| Phần tần suất | 1.000 | 1.375 | 1.571 | 1.774 | 1.964 | 2.174 |
+
+Lần xuất hiện đầu tiên cho 1, lần thứ hai thêm 0.375, lần thứ ba thêm gần 0.2, rồi càng về sau càng thêm ít. Khi $\mathrm{tf}$ rất lớn, tử và mẫu đều gần bằng $\mathrm{tf}$ nhân một hằng số, nên phân số tiến tới $k_1 + 1 = 2.2$ mà không bao giờ vượt qua. Đây là ý "bão hòa": một văn bản không thể leo hạng chỉ bằng cách lặp một từ khóa nhiều lần. $k_1$ chỉnh độ cong: $k_1 = 0$ thì phần này luôn bằng 1 (chỉ xét từ có mặt hay không), $k_1$ rất lớn thì gần tuyến tính như TF-IDF.
+
+Thừa số $(k_1 + 1)$ ở tử chỉ làm cho một lần xuất hiện có phần tần suất bằng đúng 1. Nó nhân mọi điểm với cùng một hằng số, nên không đổi thứ hạng; Robertson và Zaragoza ghi rằng có bản BM25 bỏ thừa số này; Lucene là một ví dụ, nó tính phần tần suất không nhân $(k_1 + 1)$ ở tử.
+
+**Phần 3: chuẩn hóa độ dài** (length normalization). $B(D)$ bằng 1 khi văn bản dài đúng trung bình, lớn hơn 1 khi dài hơn, nhỏ hơn 1 khi ngắn hơn. Nó nằm ở mẫu số, cạnh $k_1$: văn bản dài cần nhiều lần xuất hiện hơn mới đạt cùng phần tần suất. Lý do: một văn bản dài có nhiều chỗ để nhắc một từ một cách tình cờ. $b$ chỉnh mức phạt: $b = 0$ thì bỏ hẳn chuẩn hóa, $b = 1$ thì chia hẳn theo độ dài. Robertson và Zaragoza ghi rằng các giá trị khoảng $0.5 < b < 0.8$ và $1.2 < k_1 < 2$ thường chạy tốt; bài dùng $k_1 = 1.2$, $b = 0.75$, một cặp mặc định hay gặp.
+
+**Tính tay một từ.** Truy vấn "hàng bị hỏng thì làm sao", văn bản 6 ("bạn có thể đặt hàng trực tuyến và nhận hàng tại cửa hàng"): $\mathrm{tf} = 3$, $|D| = 13$, và kho có $\mathrm{avgdl} = 13.1$.
+
+$$
+\begin{aligned}
+B &= 1 - 0.75 + 0.75 \cdot \frac{13}{13.1} \approx 0.994 \\
+\text{phần tần suất} &= \frac{3 \cdot 2.2}{3 + 1.2 \cdot 0.994} = \frac{6.6}{4.193} \approx 1.574 \\
+\text{điểm} &= 0.526 \cdot 1.574 \approx 0.828
+\end{aligned}
+$$
+
+Dòng một: văn bản ngắn hơn trung bình một chút nên $B$ hơi nhỏ hơn 1. Dòng hai: thay $\mathrm{tf} = 3$, $k_1 = 1.2$ và $B$ vào phần tần suất. Dòng ba: nhân với idf của "hàng". Văn bản 3 và văn bản 2 đều có "hàng" 2 lần, nhưng văn bản 3 dài 12 từ còn văn bản 2 dài 16 từ, nên văn bản 3 được 0.741 còn văn bản 2 chỉ được 0.681: cùng tần suất, văn bản ngắn hơn được điểm cao hơn. Ô code thứ nhất in đúng ba số 0.83, 0.74, 0.68 này.
+
+:::note[Ghi nhớ]
+Điểm BM25 là tổng, trên các từ của truy vấn, của idf (từ càng hiếm càng nặng) nhân phần tần suất. Phần tần suất tăng theo $\mathrm{tf}$ nhưng bão hòa ở $k_1 + 1$, và bị chia nhẹ theo độ dài văn bản so với trung bình, mức chia do $b$ quyết định.
+:::
+
+### Đánh giá: so thứ hạng với phán xét của người
+
+Muốn đo, bạn cần một **bộ đánh giá**: một tập truy vấn, và với mỗi truy vấn, danh sách văn bản liên quan do người chấm (relevance judgments). Có thể chấm hai mức (liên quan hay không) hoặc nhiều mức (0, 1, 2…). Bài [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/) dùng hit rate, độ đo đơn giản nhất: văn bản đúng có nằm trong top-$k$ không. Các độ đo dưới đây nói nhiều hơn thế.
+
+Lấy truy vấn "hàng bị hỏng thì làm sao". Người chấm cho: văn bản 7 (đổi hàng lỗi) mức 2, văn bản 1 (đổi trả) mức 1, văn bản 4 (bảo hành) mức 1, còn lại mức 0. Vậy có $R = 3$ văn bản liên quan. Một bộ truy xuất trả về top-5 là văn bản 7, 4, 6, 1, 3. Ta tính từng độ đo trên danh sách này.
+
+**Precision@k và recall@k.** Precision@k là tỉ lệ văn bản liên quan trong $k$ văn bản đầu; recall@k là tỉ lệ văn bản liên quan của cả kho đã lọt vào $k$ văn bản đầu:
+
+$$
+\mathrm{P@}k = \frac{\text{số văn bản liên quan trong top-}k}{k}, \qquad \mathrm{R@}k = \frac{\text{số văn bản liên quan trong top-}k}{R}
+$$
+
+Top-3 là 7, 4, 6, có hai văn bản liên quan, nên $\mathrm{P@}3 = 2/3 \approx 0.667$ và $\mathrm{R@}3 = 2/3$. Top-5 chứa đủ ba văn bản liên quan, nên $\mathrm{R@}5 = 1$. Hai độ đo kéo về hai phía: tăng $k$ thì recall không giảm, còn precision thường giảm. Cả hai đều **không quan tâm thứ tự bên trong** top-$k$.
+
+**Reciprocal rank và MRR.** Nhiều khi người dùng chỉ cần một câu trả lời đúng, càng sớm càng tốt. Reciprocal rank (RR) là $1 / \text{vị trí của văn bản liên quan đầu tiên}$, và bằng 0 nếu không có văn bản liên quan nào trong danh sách. Ở đây văn bản 7 đứng đầu nên $\mathrm{RR} = 1$. Nếu nó đứng thứ tư thì $\mathrm{RR} = 0.25$. **MRR** (mean reciprocal rank) là trung bình RR trên mọi truy vấn của bộ đánh giá.
+
+**Average precision và MAP.** AP thưởng cho việc đưa **mọi** văn bản liên quan lên sớm. Mỗi lần gặp một văn bản liên quan ở vị trí $i$, ghi lại precision tại đúng vị trí đó, rồi cộng lại và chia cho $R$. Văn bản liên quan không tìm thấy góp 0:
+
+$$
+\mathrm{AP} = \frac{1}{R} \sum_{i \,:\, \text{văn bản ở vị trí } i \text{ liên quan}} \mathrm{P@}i
+$$
+
+Văn bản liên quan nằm ở vị trí 1, 2 và 4, với precision tại các vị trí đó là $1/1$, $2/2$ và $3/4$. Vậy $\mathrm{AP} = (1 + 1 + 0.75)/3 \approx 0.917$. Vì sao chia cho $R$ chứ không chia cho số văn bản tìm được? Để hệ thống bỏ sót văn bản liên quan bị phạt. **MAP** (mean average precision) là trung bình AP trên mọi truy vấn.
+
+**nDCG@k** (normalized discounted cumulative gain, Järvelin và Kekäläinen, 2002) dùng được mức liên quan nhiều bậc. Gọi $g_i$ là mức liên quan của văn bản ở vị trí $i$. Mỗi văn bản đóng góp $g_i$, nhưng bị **chiết khấu** (discount) theo vị trí, vì người dùng ít khi đọc xuống dưới:
+
+$$
+\mathrm{DCG@}k = \sum_{i=1}^{k} \frac{g_i}{\log_2(i + 1)}
+$$
+
+Vị trí 1 chia cho $\log_2 2 = 1$, vị trí 2 chia cho $\log_2 3 \approx 1.585$, vị trí 5 chia cho $\log_2 6 \approx 2.585$. DCG của các truy vấn khác nhau không so được với nhau, vì truy vấn có nhiều văn bản liên quan thì DCG lớn sẵn. Nên ta chia cho **IDCG**, DCG của thứ tự lý tưởng (xếp mức liên quan giảm dần), để được một số trong $[0, 1]$:
+
+$$
+\begin{aligned}
+\mathrm{DCG@}5 &= \frac{2}{\log_2 2} + \frac{1}{\log_2 3} + \frac{0}{\log_2 4} + \frac{1}{\log_2 5} + \frac{0}{\log_2 6} \approx 2 + 0.631 + 0.431 = 3.062 \\
+\mathrm{IDCG@}5 &= \frac{2}{\log_2 2} + \frac{1}{\log_2 3} + \frac{1}{\log_2 4} \approx 2 + 0.631 + 0.5 = 3.131 \\
+\mathrm{nDCG@}5 &= 3.062 / 3.131 \approx 0.978
+\end{aligned}
+$$
+
+Dòng một cộng đóng góp của văn bản 7, 4, 6, 1, 3 với mức 2, 1, 0, 1, 0. Dòng hai là thứ tự lý tưởng: mức 2 trước, rồi hai văn bản mức 1. nDCG gần 1 vì danh sách gần lý tưởng; chỉ văn bản 1 bị đẩy xuống vị trí 4 thay vì 3. Có các biến thể khác: bài báo gốc của Järvelin và Kekäläinen chia cho $\log_b i$ từ vị trí $b$ trở đi, với $b$ là tham số (thường $b = 2$, nên hai vị trí đầu không bị chiết khấu); dạng $\log_2(i + 1)$ ở trên là dạng thông dụng về sau, còn nhiều thư viện dùng tử số $2^{g_i} - 1$ để nhấn mạnh văn bản rất liên quan. Khi so hai hệ thống, hãy dùng cùng một công thức.
+
+:::note[Ghi nhớ]
+Precision@k và recall@k đếm văn bản liên quan trong top-$k$, không xét thứ tự. MRR chỉ quan tâm văn bản liên quan đầu tiên. MAP thưởng cho việc đưa mọi văn bản liên quan lên sớm. nDCG dùng được mức liên quan nhiều bậc và chiết khấu theo vị trí. Mọi độ đo đều cần phán xét của người, và được lấy trung bình trên nhiều truy vấn.
+:::
+
+### Truy xuất dày: bi-encoder
+
+BM25 và TF-IDF là **truy xuất thưa** (sparse retrieval): vectơ của văn bản có một chiều cho mỗi từ trong từ vựng, gần như mọi chiều bằng 0. Chúng chỉ khớp được khi truy vấn và văn bản **dùng chung chữ**. "Hàng bị hỏng" và "sản phẩm lỗi" không chung chữ nào, nên BM25 bó tay.
+
+**Truy xuất dày** (dense retrieval) biểu diễn mỗi đoạn văn bằng một vectơ dày, vài trăm chiều, do một mạng học được, sao cho hai đoạn cùng nghĩa có vectơ gần nhau dù khác chữ. Đại diện tiêu biểu là DPR (Dense Passage Retriever, Karpukhin và cộng sự, 2020), một **bi-encoder** (bộ mã hóa đôi):
+
+$$
+\mathrm{score}(Q, D) = E_Q(Q)^\top E_D(D)
+$$
+
+$E_Q$ và $E_D$ là hai mạng [BERT](/vi/nlp/bert/), mỗi mạng biến một đoạn văn thành vectơ $D = 768$ chiều (vectơ của token `[CLS]`), và điểm là tích vô hướng của hai vectơ. Chữ "bi" nằm ở chỗ truy vấn và văn bản được mã hóa **riêng rẽ**. Nhờ vậy vectơ của mọi văn bản được tính trước một lần, lúc lập chỉ mục; lúc hỏi chỉ còn mã hóa truy vấn và tìm các vectơ có tích vô hướng lớn nhất.
+
+DPR được huấn luyện trên các cặp (câu hỏi, đoạn chứa câu trả lời). Với mỗi câu hỏi, đoạn đúng phải có điểm cao hơn các **đoạn âm** (negative): đoạn đúng của các câu hỏi khác trong cùng lô (in-batch negatives), cộng một đoạn BM25 xếp cao nhưng không chứa câu trả lời (hard negative). Trên các bộ hỏi đáp miền mở tiếng Anh, DPR hơn BM25 khoảng 9 tới 19 điểm phần trăm về độ chính xác top-20. Paper cũng ghi một ngoại lệ đáng nhớ: trên SQuAD, nơi người ra đề viết câu hỏi trong lúc nhìn đoạn văn nên mượn nhiều chữ của nó, BM25 vẫn hơn.
+
+**Tìm láng giềng gần đúng.** Với hàng triệu vectơ, tính tích vô hướng với từng vectơ vẫn chậm. Các thư viện tìm láng giềng gần đúng (approximate nearest neighbor, ANN) như [FAISS](https://arxiv.org/abs/1702.08734) (Johnson, Douze và Jégou; arXiv 2017, bản tạp chí IEEE Transactions on Big Data 2019) chia không gian thành cụm hay nén vectơ, chỉ so với một phần nhỏ của kho, đổi một chút recall lấy tốc độ. Phần kho vectơ và độ tương tự cosine được dùng thực tế ở bài [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/).
+
+### Cross-encoder xếp lại
+
+Bi-encoder nén cả văn bản thành một vectơ **trước khi biết truy vấn**, nên mất chi tiết. **Cross-encoder** làm ngược lại: ghép truy vấn và văn bản thành một chuỗi `[CLS] truy vấn [SEP] văn bản [SEP]`, cho qua BERT một lần, và đọc ra một điểm liên quan. Mọi lớp attention đều nhìn được cả hai phía cùng lúc, nên mô hình thấy chính xác từ nào của truy vấn ứng với chỗ nào của văn bản. Nogueira và Cho (2019) dùng cách này để xếp lại top-1000 đoạn của BM25 trên MS MARCO, và tăng MRR@10 khoảng 27% tương đối so với kết quả tốt nhất trước đó.
+
+Cái giá: điểm chỉ có khi đã có truy vấn, nên không tính trước được. Kho một triệu văn bản là một triệu lần chạy BERT cho mỗi câu hỏi. Vì vậy hệ thống thật chia hai tầng: một bộ truy xuất rẻ (BM25 hoặc bi-encoder) lấy vài chục tới vài trăm **ứng viên**, rồi cross-encoder **xếp lại** (rerank) các ứng viên đó. Tầng một lo recall, tầng hai lo thứ tự ở đầu danh sách.
+
+### Truy xuất lai: Reciprocal Rank Fusion
+
+Thưa và dày sai ở những chỗ khác nhau, nên ghép chúng thường tốt hơn từng cái. Khó khăn là điểm của hai bên không cùng thang: BM25 cho 5.48, TF-IDF cosine cho 0.44, còn cosine của embedding luôn nằm trong $[-1, 1]$. **Reciprocal Rank Fusion** (RRF, Cormack, Clarke và Büttcher, 2009) né chuyện này bằng cách chỉ dùng **thứ hạng**:
+
+$$
+\mathrm{RRF}(D) = \sum_{r} \frac{1}{c + \mathrm{rank}_r(D)}
+$$
+
+Tổng chạy qua các danh sách xếp hạng $r$; văn bản không có mặt trong một danh sách thì danh sách đó góp 0. Hằng số $c$ làm dịu khoảng cách giữa hạng 1 và hạng 2, để một hệ thống "lệch" không áp đảo; bài báo chọn $c = 60$ qua thử nghiệm và ghi rằng giá trị chính xác không quá quan trọng.
+
+Ghép hai danh sách của ví dụ đánh giá ở trên: BM25 cho 6, 3, 2, 4, 8, còn bộ truy xuất dày cho 7, 4, 6, 1, 3. Văn bản 6 được $1/61 + 1/63 \approx 0.0323$, văn bản 4 được $1/64 + 1/62 \approx 0.0318$, văn bản 3 được $1/62 + 1/65 \approx 0.0315$, còn văn bản 7 chỉ được $1/61 \approx 0.0164$ và rơi xuống hạng 4. RRF đưa lên đầu những văn bản **cả hai bên** cùng thấy. Ở đây BM25 sai gần hết, nên ghép vào làm kết quả tệ đi so với chỉ dùng bộ dày. Truy xuất lai giúp khi cả hai thành phần đều khá; luôn đo trên bộ đánh giá của bạn trước khi tin.
+
+### Thưa hay dày?
+
+| Tình huống | Thường thắng | Vì sao |
+|---|---|---|
+| Mã sản phẩm, mã đơn, số hiệu, tên riêng hiếm ("bt200") | Thưa (BM25) | Khớp đúng chữ, từ hiếm có idf cao; embedding hay làm nhòe các mã na ná nhau |
+| Người hỏi dùng chữ khác người viết ("hàng hỏng" và "sản phẩm lỗi") | Dày | Học được từ đồng nghĩa và cách diễn đạt khác |
+| Miền mới, không có dữ liệu huấn luyện, cần chạy ngay | Thưa | Không cần huấn luyện; bộ dày học ở miền khác có thể kém đi |
+| Cần giải thích vì sao văn bản được chọn | Thưa | Điểm là tổng theo từng từ, chỉ ra được |
+| Câu hỏi dài, tự nhiên, nhiều cách nói | Dày | So nghĩa cả câu, không chỉ từng chữ |
+
+Khi không chắc, hệ thống thật thường chạy cả hai, ghép bằng RRF, rồi xếp lại bằng cross-encoder.
+
+### Giới hạn
+
+- **Chất lượng tách từ quyết định chỉ mục.** Truy vấn và văn bản phải đi qua đúng cùng một bước tách từ và chuẩn hóa; xem hộp đầu tiên ở mục Lỗi hay gặp.
+- **Bộ đánh giá tốn công.** Không có phán xét của người thì không tính được độ đo nào. Bài [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/) bàn cách sinh câu hỏi tổng hợp và cái bẫy của nó.
+- **Truy xuất chỉ trả về văn bản, không trả lời.** Trích đúng câu trả lời từ đoạn văn là việc của bài [Hỏi đáp (Question Answering)](/vi/nlp/question-answering/), nơi bộ truy xuất của bài này trở thành tầng đầu.
+
+## Minh họa
+
+Bảng dưới là một phần chỉ mục ngược mà ô code thứ nhất dựng từ 10 câu FAQ. Hãy nhìn cột thứ hai: từ nằm ở càng nhiều văn bản thì idf càng nhỏ, và chú ý "sản" có 2 lần ở văn bản 7 vì văn bản đó có cả "sản phẩm" lẫn "sản xuất".
+
+| Từ | Số văn bản chứa từ $n(w)$ | Posting list (văn bản: số lần) | idf BM25 |
+|---|---:|---|---:|
+| hàng | 6 | 0: 1, 2: 2, 3: 2, 4: 1, 6: 3, 8: 1 | 0.526 |
+| cửa | 5 | 0: 2, 3: 1, 4: 1, 6: 1, 8: 1 | 0.693 |
+| có | 3 | 1: 1, 6: 1, 8: 1 | 1.145 |
+| đổi | 2 | 1: 1, 7: 1 | 1.482 |
+| sản | 2 | 1: 1, 7: 2 | 1.482 |
+| giảm | 2 | 5: 1, 9: 1 | 1.482 |
+| lỗi | 1 | 7: 1 | 1.992 |
+| bt200 | 1 | 5: 1 | 1.992 |
+
+Văn bản được đánh số từ 0 như trong code: văn bản 0 là câu giờ mở cửa, văn bản 5 là câu về tai nghe BT200, văn bản 9 là câu giảm giá cho học sinh. Truy vấn "bt200 có giảm giá không" chỉ cần đọc các hàng "bt200", "có", "giảm" và "giá" (posting list của "giá" chỉ có văn bản 5); mọi văn bản khác không bao giờ bị đụng tới.
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026 trên Pyodide 314.0.7 (Python 3.14). Cả hai ô chỉ dùng thư viện có sẵn của Python, chạy ngay trên trang và chạy độc lập với nhau.
+
+### Chỉ mục ngược, BM25 và TF-IDF
+
+Ô này dựng chỉ mục ngược cho 10 câu FAQ, in posting list của vài từ, rồi xếp hạng ba truy vấn bằng BM25 ($k_1 = 1.2$, $b = 0.75$, idf dạng có $1 +$). Để so, nó tính thêm TF-IDF cosine theo công thức idf và chuẩn hóa mặc định của `TfidfVectorizer` trong scikit-learn (idf làm trơn $\ln\frac{1 + N}{1 + n(w)} + 1$, rồi chuẩn hóa vectơ về độ dài 1). Chỉ khác ở bước tách từ: ô này tách theo khoảng trắng nên giữ cả token một ký tự như "8", còn `token_pattern` mặc định của scikit-learn bỏ chúng, viết lại bằng Python thuần để ô chạy tức thì. Mỗi kết quả là một cặp (số thứ tự văn bản, điểm); chỉ in văn bản có điểm dương.
+
+<PythonRunner code={bm25Code} title="Chỉ mục ngược và BM25 trên 10 câu FAQ" />
+
+Đọc kết quả:
+
+- `N = 10, avgdl = 13.1`: 10 văn bản, trung bình 13.1 từ mỗi văn bản. Posting list in ra khớp bảng ở mục Minh họa.
+- **"đổi trả sản phẩm lỗi"**: cả hai cách đều xếp văn bản 7 (đổi hàng lỗi, 6.82) trên văn bản 1 (đổi trả, 6.26). Hai văn bản cùng có "đổi", "sản", "phẩm"; văn bản 1 có "trả", văn bản 7 có "lỗi", hai từ cùng hiếm như nhau. Chênh lệch đến từ "sản": văn bản 7 có nó 2 lần, nhưng lần thứ hai là "sản" của "sản xuất", không phải "sản phẩm". Tách theo âm tiết làm chỉ mục không phân biệt được hai từ này.
+- **"bt200 có giảm giá không"**: văn bản 5 đứng đầu rất xa (5.48), vì nó khớp ba từ, trong đó "bt200" và "giá" chỉ có ở văn bản này. Văn bản 9 (1.49) chỉ khớp "giảm". Văn bản 8 (1.23) lọt top-3 chỉ nhờ chữ "có", một từ gần như vô nghĩa ở đây.
+- **"hàng bị hỏng thì làm sao"**: cả hai cách đều trượt. Chỉ "hàng" có trong kho, nên văn bản có nhiều chữ "hàng" nhất (văn bản 6, đặt hàng trực tuyến) đứng đầu, rồi tới văn bản 3 và 2, đúng như phép tính tay ở mục BM25. Văn bản 7 trả lời đúng câu hỏi lại không có điểm. Đây là giới hạn của truy xuất thưa mà truy xuất dày giải quyết.
+
+Trên kho nhỏ này BM25 và TF-IDF cho cùng thứ tự top-3 ở cả ba truy vấn. Khác biệt của BM25 (bão hòa, chuẩn hóa độ dài có tham số) hiện rõ hơn trên kho thật, nơi văn bản dài ngắn chênh nhau nhiều.
+
+### Các độ đo xếp hạng
+
+Ô này tính các độ đo của mục Đánh giá cho truy vấn "hàng bị hỏng thì làm sao", với hai danh sách top-5. Danh sách A là đúng kết quả BM25 của ô trên (ô trên chỉ in top-3; vị trí 4 và 5 là văn bản 4 và 8, cùng 0.56, nên thứ tự của chúng là thứ tự trong chỉ mục). Danh sách B là kết quả **giả định** của một bộ truy xuất dày, đặt tay để minh họa, không phải đầu ra của một mô hình thật.
+
+<PythonRunner code={metricsCode} title="Precision@k, recall@k, RR, AP và nDCG@k" />
+
+Dòng của B khớp phép tính tay ở mục Đánh giá: P@3 = 0.667, R@5 = 1.000, RR = 1.000, AP = 0.917, nDCG@5 = 0.978. Dòng của A cho thấy BM25 tệ tới đâu trên truy vấn này: không văn bản liên quan nào trong top-3 (P@3 = R@3 = 0), văn bản liên quan đầu tiên là văn bản 4 ở vị trí 4 (RR = 0.250), chỉ tìm được một trong ba văn bản liên quan (R@5 = 0.333), nên AP = 0.083 và nDCG@5 = 0.138. Ở đây mọi độ đo cùng nói một điều; trên bộ đánh giá thật, chúng có thể bất đồng, và chọn độ đo nào là chọn điều người dùng của bạn quan tâm.
+
+## Lỗi hay gặp
+
+:::caution[Truy vấn và văn bản đi qua hai cách tách từ khác nhau]
+Chỉ mục chỉ khớp được chuỗi y hệt nhau. Nếu văn bản được viết thường còn truy vấn giữ chữ hoa, "BT200" sẽ không khớp "bt200". Nếu văn bản được tách từ ("sản_phẩm") còn truy vấn tách âm tiết ("sản phẩm"), không từ nào khớp. Nếu kho có "hoà" kiểu cũ còn khách gõ "hòa" kiểu mới, hai chuỗi khác nhau ở mức Unicode. Hãy viết **một** hàm tiền xử lý (chữ thường, chuẩn hóa Unicode, tách từ) và gọi nó cho cả lúc lập chỉ mục lẫn lúc hỏi; xem bài [Chuẩn hóa văn bản](/vi/nlp/text-normalization/).
+:::
+
+:::caution[Có truy xuất dày rồi thì bỏ BM25]
+Bộ dày khớp nghĩa tốt nhưng hay trượt chính những thứ người dùng gõ chính xác nhất: mã sản phẩm, mã đơn, số hiệu văn bản, tên riêng hiếm. Nó cũng có thể kém đi khi miền dữ liệu khác miền huấn luyện. BM25 rẻ, không cần huấn luyện, và làm mốc để biết bộ dày có thật sự hơn không. Hãy đo cả hai trên cùng bộ đánh giá, và cân nhắc truy xuất lai.
+:::
+
+:::caution[Đánh giá bằng vài truy vấn tự nghĩ ra]
+Thử năm câu, thấy kết quả "trông ổn", rồi kết luận bản mới tốt hơn: cách này không phát hiện được hệ thống tệ đi ở những truy vấn bạn không nghĩ tới. Hãy lập một bộ truy vấn thật (lấy từ nhật ký tìm kiếm khi có), chấm độ liên quan, và tính độ đo trung bình. Khi tính recall@k hay AP, mẫu số là **mọi** văn bản liên quan trong kho, không chỉ những văn bản hệ thống tìm được; chia sai mẫu số làm hệ thống bỏ sót trông như hoàn hảo.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Truy xuất ad hoc: cho truy vấn và kho văn bản, trả về danh sách xếp hạng theo độ liên quan do người phán xét. Chỉ mục ngược lưu từ → posting list, nên mỗi truy vấn chỉ chạm vào các văn bản có chung từ với nó.
+- BM25 cộng, trên từng từ của truy vấn, idf nhân phần tần suất $\frac{\mathrm{tf}\,(k_1 + 1)}{\mathrm{tf} + k_1 (1 - b + b\,|D|/\mathrm{avgdl})}$: từ hiếm nặng hơn, lặp từ thì bão hòa, văn bản dài bị chia nhẹ.
+- Precision@k và recall@k đếm trong top-$k$; MRR nhìn văn bản liên quan đầu tiên; MAP thưởng cho đưa mọi văn bản liên quan lên sớm; nDCG dùng mức liên quan nhiều bậc với chiết khấu $1/\log_2(i + 1)$.
+- Bi-encoder (DPR) tính trước vectơ văn bản và khớp theo nghĩa; cross-encoder chính xác hơn nhưng chỉ đủ nhanh để xếp lại ứng viên; RRF ghép nhiều danh sách bằng thứ hạng. Thưa thắng ở từ khóa hiếm, dày thắng khi người hỏi diễn đạt khác.
+
+**Đọc thêm:**
+
+- Manning, C. D., Raghavan, P., Schütze, H. (2008). [*Introduction to Information Retrieval*](https://nlp.stanford.edu/IR-book/). Cambridge University Press, bản đọc miễn phí trên mạng. Chương 1 (chỉ mục ngược, Boolean), chương 6 (TF-IDF), chương 8 (đánh giá), chương 11 (mục Okapi BM25). Giáo trình chuẩn của ngành, dễ đọc.
+- Jurafsky, D., Martin, J. H. [*Speech and Language Processing*](https://web.stanford.edu/~jurafsky/slp3/), bản nháp lần 3 (8/2026), chương 11 "Information Retrieval and RAG". Đi từ TF-IDF, BM25 tới truy xuất dày và RAG, cùng mạch với bài này.
+- Robertson, S., Zaragoza, H. (2009). [*The Probabilistic Relevance Framework: BM25 and Beyond*](https://www.nowpublishers.com/article/Details/INR-019). Foundations and Trends in Information Retrieval 3(4). Mục 3.4–3.5 dẫn ra bão hòa, chuẩn hóa độ dài và các biến thể của BM25.
+- Järvelin, K., Kekäläinen, J. (2002). [*Cumulated Gain-Based Evaluation of IR Techniques*](https://doi.org/10.1145/582415.582418). ACM Transactions on Information Systems 20(4). Paper đề xuất DCG và nDCG cho mức liên quan nhiều bậc.
+- Karpukhin, V., Oğuz, B., Min, S. và cộng sự (2020). [*Dense Passage Retrieval for Open-Domain Question Answering*](https://arxiv.org/abs/2004.04906). EMNLP 2020. Bi-encoder, đoạn âm trong lô, so với BM25. Đọc kèm Nogueira, R., Cho, K. (2019), [*Passage Re-ranking with BERT*](https://arxiv.org/abs/1901.04085), cho cross-encoder, và Cormack, G. V., Clarke, C. L. A., Büttcher, S. (2009), [*Reciprocal Rank Fusion Outperforms Condorcet and Individual Rank Learning Methods*](https://doi.org/10.1145/1571941.1572114), SIGIR 2009, cho RRF.
+
+<LessonProgress />

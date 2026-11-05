@@ -282,7 +282,7 @@ Dữ liệu pre-train, fine-tune, học từ ưa thích của người, huấn l
 | Mảng hậu tố | Suffix array | Dịch. Mảng vị trí các hậu tố của một chuỗi, xếp theo thứ tự từ điển; giúp tìm nhanh các đoạn lặp nguyên văn |
 | Mặt nạ chéo tài liệu | Cross-document attention mask | Dịch. Chặn token nhìn sang tài liệu khác trong cùng một chuỗi đóng gói |
 | MFU | Model FLOPs utilization | Giữ, lần đầu có thể ghi "tỉ lệ khai thác tính toán". Tỉ lệ giữa số FLOPs mô hình thực sự dùng mỗi giây và mức tối đa của phần cứng |
-| Micro-batch | Micro-batch | Giữ. Phần nhỏ của một lô, nối đuôi nhau qua các giai đoạn của song song pipeline |
+| Micro-batch | Micro-batch | Giữ. Phần nhỏ của một lô: nối đuôi nhau qua các giai đoạn của song song pipeline, hoặc lần lượt cộng dồn gradient khi tích lũy gradient |
 | MinHash | MinHash | Giữ. Chữ ký ngắn của một tập; tỉ lệ vị trí trùng giữa hai chữ ký ước lượng độ giống Jaccard |
 | Mô hình Bradley–Terry | Bradley–Terry model | Dịch "mô hình", giữ tên riêng. $P(\mathbf{y}_w \succ \mathbf{y}_l) = \sigma(r_w - r_l)$: xác suất người chọn câu thắng chỉ phụ thuộc hiệu điểm |
 | Mô hình phần thưởng | Reward model (RM) | Dịch, viết tắt RM. Chấm điểm $r$ cho câu trả lời, học từ các cặp mà người đã so sánh |
@@ -433,6 +433,146 @@ Truy xuất tài liệu, đồ thị tri thức, agent và công cụ.
 | Thông lượng | Throughput | Dịch. Lượng việc xong trong một đơn vị thời gian: số yêu cầu mỗi giây ($R = m/\Delta t$) khi đo server, hay tổng số token mỗi giây khi phục vụ LLM. Thường đánh đổi với độ trễ |
 | TPOT | Time per output token | Giữ. Thời gian trung bình để sinh mỗi token sau token đầu |
 | TTFT | Time to first token | Giữ. Thời gian từ lúc gửi yêu cầu tới khi nhận token đầu tiên; phần lớn là prefill |
+
+## NLP
+
+Thuật ngữ của Phần 5a (13 bài NLP, quyết định 70–75). Bài NLP dùng $V$ cho tập từ vựng và $|V|$ cho cỡ (theo Jurafsky & Martin); phần LLM giữ $\mathcal{V}$ và $V$. "Truy xuất dày" và "dense retrieval" là cùng một khái niệm (xem nhóm RAG).
+
+| Tiếng Việt | Tiếng Anh | Cách dùng |
+|---|---|---|
+| ALiBi | Attention with Linear Biases | Giữ. Cộng −m_h(i − j) vào điểm attention, độ dốc cố định theo đầu |
+| AP, MAP | (Mean) average precision | Giữ |
+| Attention cửa sổ trượt | Sliding window attention | Dịch. Mỗi token chỉ nhìn w token gần nhất |
+| Attention toàn cục | Global attention | Dịch. Vài token nhìn mọi token (Longformer, BigBird) |
+| Attention tuyến tính | Linear attention | Dịch. Thay softmax bằng φ(q)ᵀφ(k), chi phí tuyến tính theo L |
+| Bi-encoder | Bi-encoder | Giữ. Mã hóa truy vấn và văn bản riêng rẽ |
+| BIO (IOB2), IOB1, BIOES | BIO / IOB2, IOB1, BIOES tagging | Giữ tên lược đồ |
+| Biểu thức chính quy | Regular expression (regex) | Dịch, viết tắt regex |
+| BM25 | BM25 (Okapi BM25) | Giữ. idf nhân phần tần suất có bão hòa ($k_1$) và chuẩn hóa độ dài ($b$) |
+| BPE | Byte pair encoding | Giữ. Gộp dần cặp ký hiệu kề nhau hay gặp nhất |
+| Byte-level BPE | Byte-level BPE | Giữ. Bắt đầu từ 256 byte, không cần `[UNK]` |
+| CBOW | Continuous bag-of-words | Giữ viết tắt. Đoán từ giữa từ trung bình vectơ ngữ cảnh |
+| Che động | Dynamic masking | Dịch. Chọn lại vị trí che mỗi lần (RoBERTa) |
+| Chiến lược giải mã | Decoding strategy | Dịch. Quy tắc chọn token từ phân phối của mô hình |
+| Chuẩn hóa Unicode; dạng chuẩn | Unicode normalization; normalization form (NFC, NFD, NFKC, NFKD) | Dịch, giữ tên NFC… |
+| Chuẩn hóa văn bản | Text normalization | Dịch. Đưa các cách viết của cùng một thứ về một dạng. Khác "chuẩn hóa đặc trưng" |
+| Chuỗi thô | Raw string | Dịch. `r"..."` |
+| Chỉ mục ngược | Inverted index | Dịch. Từ → danh sách văn bản chứa từ |
+| Code point | Code point | Giữ. Số Unicode của một ký tự, viết U+XXXX |
+| Cross-encoder | Cross-encoder | Giữ. Đọc truy vấn và văn bản cùng lúc; dùng để xếp lại |
+| Cửa sổ (đồng xuất hiện) | Window | Dịch. Khoảng ±s từ quanh từ đích khi đếm đồng xuất hiện. Khác "cửa sổ ngữ cảnh" (context window) của LLM |
+| Dãy con chung dài nhất | Longest common subsequence (LCS) | Dịch |
+| Dấu tổ hợp | Combining mark | Dịch |
+| Dự đoán câu kế tiếp | Next sentence prediction (NSP) | Dịch |
+| Dự đoán thứ tự câu | Sentence-order prediction (SOP) | Dịch. ALBERT dùng thay NSP |
+| Embedding tĩnh, embedding theo ngữ cảnh | Static, contextual embedding | Giữ "embedding" |
+| Embedding đoạn | Segment embedding | Giữ "embedding", dịch "đoạn". Báo token thuộc câu A hay B |
+| Encoder-only, decoder-only | Encoder-only, decoder-only | Giữ, lần đầu ghi "chỉ có encoder"/"chỉ có decoder" |
+| F1 macro | Macro-averaged F1 | Giữ. Trung bình không trọng số F1 của từng lớp |
+| FlashAttention | FlashAttention | Giữ. Attention chính xác, tính theo khối, không ghi ma trận L×L ra bộ nhớ chính |
+| Gazetteer | Gazetteer | Giữ, lần đầu ghi "từ điển tên" |
+| Giả thuyết phân bố | Distributional hypothesis | Dịch |
+| Gán nhãn chuỗi | Sequence labeling | Dịch. Mỗi phần tử của chuỗi nhận một nhãn |
+| Gán nhãn token | Token classification | Dịch. Một bộ phân loại trên vectơ của mỗi token |
+| Huấn luyện phân tán | Distributed training | Dịch |
+| Kho văn bản | Corpus | Dịch, lần đầu kèm "corpus" |
+| Khớp dài nhất | Maximum matching | Dịch |
+| Ký tự dựng sẵn | Precomposed character | Dịch |
+| Ký tự tổ hợp | Combining character | Dịch. Dấu đứng riêng sau chữ cái ở dạng NFD |
+| Lemmatization; dạng từ điển | Lemmatization; lemma | Giữ "lemmatization", lemma dịch "dạng từ điển" |
+| Liên kết thực thể | Entity linking | Dịch |
+| Lookaround | Lookahead, lookbehind | Giữ "lookaround", dịch "nhìn trước", "nhìn sau" |
+| Loss scaling | Loss scaling | Giữ |
+| LSA | Latent semantic analysis | Giữ, lần đầu ghi "phân tích ngữ nghĩa tiềm ẩn" |
+| Làm hỏng đoạn | Span corruption | Dịch. Mục tiêu của T5 |
+| Luật lũy thừa | Power law | Dịch. Quan hệ $y \propto x^{a}$; scaling laws có dạng này |
+| Lô hiệu dụng | Effective batch size | Dịch. Micro-batch × số bước tích lũy × số GPU |
+| Lũy đẳng | Idempotent | Dịch. $f(f(a)) = f(a)$ |
+| Lượng từ | Quantifier | Dịch. `*`, `+`, `?`, `{m,n}` |
+| Lệch lớp | Class imbalance | Dịch |
+| Lớp ký tự | Character class | Dịch. `[0-9]`, `\w` |
+| Ma trận nhầm lẫn | Confusion matrix | Dịch. Hàng là nhãn thật, cột là nhãn dự đoán |
+| Ma trận từ–ngữ cảnh, ma trận đồng xuất hiện | Word-context matrix, co-occurrence matrix | Dịch. Ô đếm số lần c nằm trong cửa sổ ±s quanh w |
+| Ma trận từ–văn bản | Term-document matrix | Dịch |
+| MRR | Mean reciprocal rank | Giữ |
+| Mô hình ngôn ngữ có che | Masked language model (MLM) | Dịch, viết tắt MLM. Che khoảng 15% token rồi đoán lại từ ngữ cảnh hai phía |
+| Mô hình ngôn ngữ nhân quả | Causal language model | Dịch. Học $p(x_t \mid x_{<t})$, mỗi dự đoán chỉ dựa vào quá khứ, như GPT |
+| Mẫu (regex) | Pattern | Dịch. Chuỗi mô tả tập các chuỗi cần khớp. Khác "Mẫu (Sample)" của phần dữ liệu |
+| Mỉa mai | Sarcasm | Dịch |
+| Mức thực thể, mức token | Entity-level, token-level | Dịch. Cách tính precision/recall/F1 |
+| N-gram ký tự | Character n-gram | Dịch "ký tự". Đơn vị của FastText |
+| Naive Bayes | Naive Bayes | Giữ |
+| nDCG | Normalized discounted cumulative gain | Giữ |
+| Negative sampling, mẫu âm | Negative sampling, negative sample | Giữ "negative sampling", dịch "mẫu âm". SGNS: skip-gram with negative sampling |
+| Neo | Anchor | Dịch. `^`, `$` |
+| Ngôn ngữ chính quy | Regular language | Dịch |
+| Ngôn ngữ đơn lập | Isolating language | Dịch |
+| Ngữ nghĩa vectơ | Vector semantics | Dịch. Biểu diễn nghĩa của từ bằng một điểm trong không gian vectơ |
+| Nhóm bắt / nhóm không bắt | Capturing / non-capturing group | Dịch |
+| Nhận dạng thực thể có tên | Named entity recognition (NER) | Dịch, viết tắt NER |
+| Nhập nhằng chồng lấp | Overlapping ambiguity | Dịch |
+| Phân tích cảm xúc | Sentiment analysis | Dịch. Phân loại văn bản theo thái độ của người viết |
+| Phân tích cảm xúc theo khía cạnh | Aspect-based sentiment analysis (ABSA) | Dịch, viết tắt ABSA |
+| Phép gộp | Merge (rule) | Dịch |
+| Phép tương tự | (Word) analogy | Dịch |
+| Phạt lặp | Repetition penalty | Dịch |
+| PMI, PPMI | Pointwise mutual information, positive PMI | Giữ viết tắt, lần đầu ghi "thông tin tương hỗ điểm" |
+| Posting list | Posting list | Giữ. Danh sách (văn bản, tf) của một từ |
+| Precision, recall, F1 | Precision, recall, F1 | Giữ |
+| Precision@k, recall@k | Precision@k, recall@k | Giữ |
+| Quay lui thảm họa | Catastrophic backtracking | Dịch |
+| Ranh giới từ | Word boundary | Dịch. `\b` |
+| Reciprocal Rank Fusion | Reciprocal Rank Fusion (RRF) | Giữ |
+| ReDoS | Regular expression denial of service | Giữ |
+| Reduce-scatter, all-gather | Reduce-scatter, all-gather | Giữ. Hai pha của ring all-reduce |
+| Ring all-reduce | Ring all-reduce | Giữ. Mỗi worker gửi khoảng $\frac{2(N-1)}{N}$ lần kích thước gradient |
+| ROUGE | ROUGE (ROUGE-N, ROUGE-L) | Giữ. Đếm n-gram trùng hoặc LCS giữa bản máy và bản tham chiếu |
+| Sao Kleene | Kleene star | Dịch |
+| Scaling laws | Scaling laws | Giữ |
+| SentencePiece | SentencePiece | Giữ. Học từ câu thô, dấu cách thành `▁` |
+| Shard | Shard | Giữ. Phần lô mà một worker xử lý trong song song dữ liệu |
+| Sinh câu bị bỏ | Gap sentences generation (GSG) | Dịch. Mục tiêu pre-train của PEGASUS |
+| Skip-gram | Skip-gram | Giữ. Đoán từng từ ngữ cảnh từ từ giữa |
+| Softmax phân cấp | Hierarchical softmax | Dịch |
+| Stemming | Stemming | Giữ. Cắt hậu tố theo luật (Porter) |
+| Stopword | Stopword | Giữ |
+| Subsampling | Subsampling of frequent words | Giữ |
+| Subword | Subword | Giữ, lần đầu có thể ghi "mảnh từ" |
+| SVD rút gọn | Truncated SVD | Giữ "SVD", lần đầu ghi "phân tích giá trị suy biến" |
+| TF-IDF | Term frequency–inverse document frequency | Giữ. Tần suất từ nhân với nghịch đảo tần suất văn bản |
+| Tham chiếu ngược | Backreference | Dịch. `\1` |
+| Tham lam / lười | Greedy / lazy (non-greedy) | Dịch |
+| Thực thể có tên | Named entity | Dịch |
+| Token giữ chỗ | Placeholder token | Dịch. `<url>`, `<num>` |
+| Token đánh dấu | Sentinel token | Dịch, giữ "token". Token riêng cho mỗi đoạn bị bỏ trong span corruption |
+| Token đặc biệt | Special token | Dịch, giữ "token" |
+| Trung thực (với nguồn) | Faithfulness | Dịch |
+| Truy vấn | Query | Dịch |
+| Truy xuất ad hoc | Ad hoc retrieval | Dịch. Kho văn bản cố định, mỗi lần hỏi là một truy vấn mới |
+| Truy xuất lai | Hybrid retrieval | Dịch. Ghép thưa và dày |
+| Truy xuất thưa, truy xuất dày | Sparse retrieval, dense retrieval | Dịch |
+| Trường ngẫu nhiên có điều kiện | Conditional random field (CRF) | Dịch, viết tắt CRF |
+| Tách sơ bộ | Pre-tokenization | Dịch |
+| Tách từ tiếng Việt | (Vietnamese) word segmentation | Dịch. Khác "tách từ" (tokenization): gom âm tiết thành từ |
+| Tìm láng giềng gần đúng | Approximate nearest neighbor (ANN) | Dịch |
+| Tích lũy gradient | Gradient accumulation | Dịch |
+| Tóm tắt trích xuất | Extractive summarization | Dịch. Chọn câu nguyên văn của nguồn |
+| Tóm tắt tóm lược | Abstractive summarization | Dịch. Viết lại bằng câu mới |
+| Từ chưa gặp | Out-of-vocabulary (OOV) word | Dịch |
+| Từ điển cảm xúc | Sentiment lexicon | Dịch. Bảng gán điểm cảm xúc cho từng từ |
+| Từ đích, từ ngữ cảnh | Target word, context word | Dịch. Ký hiệu $w$, $c$ |
+| Unigram LM | Unigram language model | Giữ. Bỏ dần mảnh từ một từ vựng lớn |
+| Vectơ dày | Dense vector | Dịch. Ngược với vectơ thưa |
+| Vectơ one-hot | One-hot vector | Giữ "one-hot". Dài $|V|$, chỉ một số 1 |
+| Văn bản thoái hóa | Neural text degeneration | Dịch. Văn bản nhạt, lặp vòng hoặc rời rạc |
+| Vị trí tương đối | Relative position | Dịch. Đưa khoảng cách j − i vào điểm attention |
+| WordPiece | WordPiece | Giữ. Gộp theo likelihood, tiền tố `##` |
+| Worker | Worker | Giữ. Một tiến trình hoặc GPU tham gia huấn luyện |
+| Xếp lại | Re-ranking | Dịch |
+| Âm tiết | Syllable | Dịch |
+| Ôtômat hữu hạn | Finite automaton | Dịch |
+| Điền đoạn | Text infilling | Dịch. Mục tiêu của BART |
+| Độ liên quan | Relevance | Dịch. Văn bản có giúp người hỏi không, khác với có chung chữ |
 
 ## Toán
 

@@ -1,0 +1,378 @@
+---
+title: Nhận dạng thực thể (NER)
+description: Tìm tên người, nơi chốn, tổ chức trong câu. Gán nhãn chuỗi, mã hóa BIO, CRF, BERT gán nhãn token, căn nhãn với subword và F1 mức thực thể.
+quiz:
+  - question: 'Một câu có 6 từ được gán dãy nhãn `O I-ORG I-ORG O B-LOC I-ORG`. Giải mã theo quy ước của bài (giống conlleval), bạn được những thực thể nào?'
+    options:
+      - 'Hai thực thể: ORG (từ 2–3) và LOC (từ 5–6)'
+      - 'Ba thực thể: ORG (từ 2–3), LOC (từ 5) và ORG (từ 6)'
+      - 'Không giải mã được, vì dãy không hợp lệ'
+      - 'Hai thực thể: LOC (từ 5) và ORG (từ 6); hai I-ORG đầu bị bỏ vì không có B-ORG'
+    answer: 1
+    explanation: 'Theo quy ước của bài, I- đứng sau O vẫn mở một thực thể mới, nên từ 2–3 là một ORG. Ở từ 6, I-ORG khác loại với LOC đang mở, nên LOC đóng lại ở từ 5 và một ORG mới bắt đầu. Phương án "LOC từ 5–6" sai vì I- chỉ nối dài thực thể cùng loại. Chế độ strict của seqeval thì bỏ mọi I- mồ côi, ở đây là cả hai I-ORG đầu lẫn I-ORG ở từ 6 (nó đứng sau B-LOC), nên chỉ còn LOC ở từ 5. Hai quy ước cho kết quả khác nhau; hãy luôn nói rõ mình dùng quy ước nào.'
+  - question: 'Tập kiểm tra có 10 thực thể. Mô hình đưa ra 8 thực thể, trong đó 6 khớp đúng cả biên lẫn loại, 1 đúng loại nhưng thiếu một từ ở đầu, 1 sai loại. Precision, recall và F1 mức thực thể là bao nhiêu?'
+    options:
+      - '$P = 0.875$, $R = 0.7$, vì thực thể thiếu một từ vẫn đúng loại'
+      - '$P = 0.6$, $R = 0.75$'
+      - '$P = 0.75$, $R = 0.6$, $F_1 = 0.8$'
+      - '$P = 0.75$, $R = 0.6$, $F_1 \approx 0.667$'
+    answer: 3
+    explanation: 'Mức thực thể chỉ tính khớp đúng cả biên và loại, nên số đúng là 6. $P = 6/8 = 0.75$ (chia cho số dự đoán), $R = 6/10 = 0.6$ (chia cho số thực thể thật), $F_1 = 2 \cdot 6/(8 + 10) \approx 0.667$. Thực thể thiếu một từ không được điểm nào: nó vừa là một dự đoán sai, vừa là một thực thể bị bỏ sót. $F_1 = 0.8$ là trung bình cộng nhầm, không phải trung bình điều hòa.'
+  - question: 'Bạn fine-tune BERT cho NER và gán nhãn cho mọi subword bằng cách chép nhãn của từ: cả 5 mảnh `V ##iet ##comb ##an ##k` của "Vietcombank" đều nhận `B-ORG`. Chuyện gì xảy ra?'
+    options:
+      - 'Lúc giải mã, mỗi mảnh mở một thực thể ORG mới, nên một tên thành 5 thực thể; trong loss, từ này cũng nặng gấp 5 lần từ chỉ có một mảnh'
+      - 'Không sao, chỉ huấn luyện chậm hơn một chút'
+      - 'PyTorch báo lỗi vì số nhãn khác số token'
+      - 'BERT không đọc được các mảnh `##` nên bỏ qua chúng'
+    answer: 0
+    explanation: 'Mỗi B- là một lần mở thực thể, nên 5 nhãn B-ORG liền nhau giải mã thành 5 thực thể. Muốn chép nhãn thì mảnh sau phải đổi thành I-ORG. Ngoài ra, từ bị cắt nhiều mảnh (thường là tên riêng lạ) chiếm nhiều số hạng trong loss hơn từ thường. BERT gốc chỉ chấm mảnh đầu; với PyTorch và Hugging Face, việc này làm bằng cách đặt `-100` cho các mảnh sau. Số nhãn vẫn bằng số token, nên không có lỗi kích thước.'
+  - question: 'Trên một tập kiểm tra, 85% token có nhãn đúng là O. Một mô hình lười luôn đoán O cho mọi token. Độ chính xác mức token và F1 mức thực thể của nó là bao nhiêu?'
+    options:
+      - 'Độ chính xác 0.85, F1 cũng 0.85'
+      - 'Độ chính xác 0, F1 0'
+      - 'Độ chính xác 0.85, F1 bằng 0'
+      - 'Độ chính xác 0.15, F1 không xác định'
+    answer: 2
+    explanation: 'Mọi token O đều đoán đúng, nên độ chính xác mức token là 0.85. Nhưng mô hình không tìm ra thực thể nào: recall bằng 0, nên F1 bằng 0 (precision là $0/0$, các công cụ như seqeval quy về 0). Đây là lý do NER báo F1 mức thực thể: độ chính xác mức token thưởng cho việc đoán đúng chữ O, thứ chiếm phần lớn văn bản.'
+  - question: 'Một bộ phân loại độc lập trên từng token dự đoán `B-PER I-LOC I-LOC` cho "Nguyễn Văn An". Đặt thêm một lớp CRF lên trên giúp được gì?'
+    options:
+      - 'Làm softmax của từng token sắc hơn, nên mỗi token tự đúng hơn'
+      - 'CRF tách từ tiếng Việt trước khi gán nhãn'
+      - 'CRF chấm điểm cả dãy nhãn, có điểm chuyển giữa hai nhãn liền nhau, nên nó học được rằng B-PER rồi I-LOC gần như không xảy ra và chọn dãy có tổng điểm cao nhất'
+      - 'CRF đổi BIO thành BIOES nên biết được chỗ kết thúc thực thể'
+    answer: 2
+    explanation: 'Bộ phân loại độc lập quyết định từng token riêng rẽ, nên không có gì ngăn nó ghép B-PER với I-LOC. CRF cộng thêm điểm chuyển $A_{y_{i-1}, y_i}$ cho từng cặp nhãn kề nhau và tìm dãy tốt nhất bằng Viterbi. Điểm chuyển của B-PER sang I-LOC rất âm, nên dãy B-PER I-PER I-PER thắng nếu điểm từng token của nó không quá thấp. CRF không đổi điểm từng token, cũng không tách từ hay đổi lược đồ nhãn.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import bioEvalCode from '@code/nlp/named-entity-recognition/bio-eval.vi.py?raw';
+import nerPipelineCode from '@code/nlp/named-entity-recognition/ner-pipeline.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu nhận dạng thực thể có tên (named entity recognition, NER) là một bài toán gán nhãn chuỗi (sequence labeling), và vì sao chỉ tra từ điển tên là không đủ.
+- Mã hóa được thực thể bằng nhãn BIO, giải thích vì sao cần nhãn B-, và giải mã ngược nhãn thành các đoạn thực thể.
+- Giải thích được CRF ở mức ý tưởng, cách BERT gán nhãn cho từng token, và cách căn nhãn với subword bằng giá trị `-100`.
+- Tính được precision, recall và F1 mức thực thể, và nhận ra vì sao độ chính xác mức token làm điểm đẹp hơn thật.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+## Trực giác
+
+### Ai, ở đâu, tổ chức nào
+
+Đọc câu sau:
+
+> Ông Nguyễn Văn An đến Hà Nội làm việc cho Vietcombank từ tháng 3/2024.
+
+Bạn thấy ngay: "Nguyễn Văn An" là một **người**, "Hà Nội" là một **nơi chốn**, "Vietcombank" là một **tổ chức**, "tháng 3/2024" là một **mốc thời gian**. Những cụm gọi tên một đối tượng cụ thể như vậy là **thực thể có tên** (named entity). Tìm ra chúng, đúng ranh giới và đúng loại, là việc của NER.
+
+Việc này nghe nhỏ nhưng nằm dưới rất nhiều hệ thống. Báo điện tử gắn thẻ người và công ty cho từng bài. Ngân hàng đọc hồ sơ để lấy tên, địa chỉ. Hệ thống hỏi đáp cần biết câu hỏi "ai" thì câu trả lời phải là một người.
+
+### Tra từ điển tên có đủ không?
+
+Cách đầu tiên ai cũng nghĩ tới: lập một danh sách tên người, tên địa danh, tên công ty, rồi tìm trong câu. Danh sách như vậy gọi là **gazetteer** (từ điển tên). Nó hữu ích, nhưng vỡ ở ba chỗ:
+
+- **Cùng một chuỗi, khác loại.** "Hà Nội" trong "đến Hà Nội" là nơi chốn. Trong "Chị Mai chuyển từ Bia Hà Nội sang Vinamilk", "Hà Nội" chỉ là một phần của tên công ty "Bia Hà Nội". Danh sách không biết ngữ cảnh.
+- **Tên trùng từ thường.** Tên người Việt hay là từ thường: Mai, Lan, Hoa, An, Hải. "Chị Mai" là người, "sáng mai" thì không. "Ông An" là người, "bình an" thì không.
+- **Tên mới xuất hiện mỗi ngày.** Công ty mới, người mới nổi tiếng, sản phẩm mới. Danh sách luôn chậm hơn thực tế.
+
+Dấu hiệu thật sự nằm ở **ngữ cảnh**: "Ông" hay "Chị" đứng trước, "làm việc cho" đứng trước, "đến" đứng trước. Một mô hình cần nhìn cả câu để quyết định cho từng từ.
+
+### Mỗi từ một nhãn
+
+Nếu mỗi từ được gắn một nhãn cho biết nó thuộc thực thể nào, ta đọc ngược ra được thực thể. Nhưng một thực thể có thể dài nhiều từ, và hai thực thể có thể nằm sát nhau, như trong tít báo "Trận Việt Nam Thái Lan". Nhãn phải đủ để biết **chỗ một thực thể bắt đầu**.
+
+Bài toán của bài này là: **gán cho mỗi từ trong câu một nhãn, sao cho từ dãy nhãn đọc lại được mọi thực thể với đúng ranh giới và đúng loại; rồi đo xem mô hình tìm đúng bao nhiêu thực thể.**
+
+## Lý thuyết
+
+### Các loại thực thể
+
+Mỗi bộ dữ liệu chọn một tập loại thực thể. Bộ phổ biến nhất cho tiếng Anh là **CoNLL-2003** (Tjong Kim Sang và De Meulder, 2003), lấy từ tin tức Reuters, với bốn loại:
+
+| Loại | Nghĩa | Ví dụ |
+|---|---|---|
+| `PER` | người | Nguyễn Văn An, Angela Merkel |
+| `LOC` | nơi chốn | Hà Nội, sông Mê Kông |
+| `ORG` | tổ chức | Vietcombank, Liên Hợp Quốc |
+| `MISC` | tên riêng khác | World Cup, tính từ quốc tịch như German |
+
+Phần tiếng Anh của CoNLL-2003 có tập huấn luyện khoảng 203 nghìn token và 23.5 nghìn thực thể. Với tiếng Việt, có hai cuộc thi chung (Nguyễn Thị Minh Huyền và cộng sự, 2018): **VLSP 2016** (dữ liệu dạng cột kiểu CoNLL, đã tách từ) và **VLSP 2018** (văn bản thô gắn thẻ XML, có thực thể lồng nhau). Cả hai dùng các loại chính `PER`, `LOC`, `ORG`, cùng một loại `MISC` nhỏ.
+
+Còn "tháng 3/2024"? Bốn loại trên không có thời gian. Bộ khác, như OntoNotes, thêm `DATE`, `TIME`, `MONEY` và nhiều loại nữa. Chọn tập loại nào là quyết định của bài toán cụ thể, không có đáp án chung. Bài này dùng `PER`, `LOC`, `ORG` cho mọi ví dụ.
+
+### NER là gán nhãn chuỗi
+
+Gọi câu là dãy từ $\mathbf{x} = (x_1, \dots, x_L)$, với $L$ là độ dài câu. NER gán cho mỗi từ $x_i$ một nhãn $y_i$, được dãy nhãn $\mathbf{y} = (y_1, \dots, y_L)$ cùng độ dài. Đây là **gán nhãn chuỗi**: đầu ra dài đúng bằng đầu vào và thẳng hàng với nó. Gán nhãn từ loại (part-of-speech tagging: danh từ, động từ…) cũng là bài toán dạng này. Khác với dịch máy ở bài [Seq2Seq](/vi/llm/seq2seq/), ở đây không có chuyện độ dài hay trật tự đổi đi.
+
+### Mã hóa BIO
+
+Cách đơn giản nhất là gắn mỗi từ thẳng loại của nó: `PER`, `LOC`, hoặc `O` (outside, ngoài mọi thực thể). Thử với tít báo:
+
+| Từ | Trận | Việt | Nam | Thái | Lan |
+|---|---|---|---|---|---|
+| Chỉ ghi loại | O | LOC | LOC | LOC | LOC |
+| BIO | O | B-LOC | I-LOC | B-LOC | I-LOC |
+
+Ở đây tên nước được coi là nơi chốn. Có bộ hướng dẫn gán nhãn coi đội bóng là tổ chức; chọn loại nào thì hai tên vẫn cùng loại và đứng sát nhau. Hàng "chỉ ghi loại" không phân biệt được "Việt Nam" + "Thái Lan" với một địa danh dài bốn từ "Việt Nam Thái Lan". Thông tin bị mất là **chỗ bắt đầu**.
+
+**Mã hóa BIO** sửa đúng chỗ đó. Mỗi nhãn là một tiền tố cộng một loại:
+
+- `B-X` (begin): từ đầu tiên của một thực thể loại X.
+- `I-X` (inside): từ thứ hai trở đi của thực thể loại X đang mở.
+- `O`: ngoài mọi thực thể.
+
+Với $K$ loại thực thể, tập nhãn có $2K + 1$ phần tử. CoNLL-2003 có $K = 4$ nên có 9 nhãn. Ý tưởng này đến từ bài toán tách cụm danh từ của Ramshaw và Marcus (1995). Có hai biến thể dễ lẫn. Trong **IOB1**, dạng của tệp CoNLL-2003 gốc, mọi từ trong thực thể đều mang `I-`, chỉ khi hai thực thể cùng loại đứng sát nhau thì từ đầu của thực thể thứ hai mới mang `B-`. Trong **IOB2**, dạng mà bài này và hầu hết thư viện ngày nay dùng, mọi thực thể đều mở bằng `B-`. Người ta thường gọi IOB2 là "BIO".
+
+Một biến thể giàu thông tin hơn là **BIOES** (còn gọi IOBES): thêm `E-X` cho từ cuối và `S-X` cho thực thể chỉ có một từ. "Nguyễn Văn An" thành `B-PER I-PER E-PER`, "Vietcombank" thành `S-ORG`. Lample và cộng sự (2016) dùng BIOES, nhưng ghi nhận nó không hơn BIO đáng kể trong thí nghiệm của họ.
+
+**Giải mã ngược**: đọc dãy nhãn từ trái sang phải. `B-X` mở một thực thể mới. `I-X` nối dài thực thể đang mở nếu nó cùng loại X. `O`, hoặc `I-` khác loại, đóng thực thể đang mở. Còn một trường hợp mô hình hay sinh ra mà dữ liệu đúng (trong IOB2) không bao giờ có: `I-X` không đứng ngay sau `B-X` hay `I-X`, tức là ở đầu câu, sau `O`, hoặc sau một nhãn khác loại. Ta gọi nó là **I- mồ côi**. Bài này theo quy ước của công cụ chấm điểm `conlleval` (dùng ở CoNLL) và chế độ mặc định của thư viện `seqeval`: I- mồ côi **mở một thực thể mới**. Chế độ strict của `seqeval` thì coi nó là sai và bỏ đi. Hai quy ước cho điểm khác nhau, nên khi báo điểm hãy ghi rõ mình dùng quy ước nào.
+
+### Từ đặc trưng thủ công tới CRF
+
+Trước học sâu, một hệ NER điển hình mô tả mỗi từ bằng các **đặc trưng** (feature) do người thiết kế: từ có viết hoa không, có số không, có nằm trong gazetteer không, từ đứng trước là gì ("Ông", "tại", "công ty"), từ đứng sau là gì. Sau đó một mô hình học xem đặc trưng nào báo hiệu nhãn nào.
+
+Nếu phân loại **từng từ một cách độc lập**, mô hình có thể sinh ra dãy vô lý như `O I-PER` hay `B-PER I-LOC`. Nó không có cách nào biết nhãn của từ bên cạnh. Các mô hình chuỗi trước đó như HMM và MEMM đã chấm điểm cả dãy nhãn, nhưng HMM cần giả định các từ độc lập với nhau khi biết nhãn, còn MEMM mắc lỗi thiên lệch nhãn (label bias). **Trường ngẫu nhiên có điều kiện** (conditional random field, CRF) của Lafferty, McCallum và Pereira (2001) chấm điểm **cả dãy nhãn** một lần mà tránh được cả hai vấn đề đó. Dạng thường dùng cho NER cộng hai loại điểm:
+
+$$
+s(\mathbf{x}, \mathbf{y}) = \sum_{i=1}^{L} \psi_i(y_i) + \sum_{i=2}^{L} A_{y_{i-1}, y_i}
+$$
+
+- $\psi_i(y_i)$ là **điểm tại chỗ**: từ thứ $i$, nhìn đặc trưng của nó và của các từ xung quanh, hợp với nhãn $y_i$ tới đâu.
+- $A_{y_{i-1}, y_i}$ là **điểm chuyển** (transition score), lấy từ một ma trận $\mathbf{A}$ học được, mỗi ô ứng với một cặp (nhãn trước, nhãn sau). Khi huấn luyện trên dữ liệu IOB2, ô (O, I-PER) học được giá trị rất âm, vì trong dữ liệu đó `I-PER` không bao giờ đứng ngay sau `O`.
+
+Điểm được đổi thành xác suất bằng cách lấy mũ rồi chia cho tổng trên **mọi** dãy nhãn có thể có, ký hiệu $\mathbf{y}'$:
+
+$$
+p(\mathbf{y} \mid \mathbf{x}) = \frac{\exp s(\mathbf{x}, \mathbf{y})}{\sum_{\mathbf{y}'} \exp s(\mathbf{x}, \mathbf{y}')}
+$$
+
+Đây là softmax, chỉ khác ở chỗ các "lớp" bây giờ là cả dãy nhãn. Số dãy nhãn tăng theo hàm mũ của $L$ (9 nhãn, câu 20 từ là $9^{20}$ dãy), nhưng vì điểm chỉ phụ thuộc từng cặp nhãn kề nhau, cả tổng ở mẫu số lẫn dãy có điểm cao nhất đều tính được bằng quy hoạch động. Tổng ở mẫu số tính bằng **thuật toán forward**, dãy tốt nhất tìm bằng **Viterbi**. Muốn **cấm hẳn** một chuyển, ta đặt ô tương ứng của $\mathbf{A}$ bằng $-\infty$: mọi dãy chứa chuyển đó có $\exp s = 0$.
+
+Năm 2016, Lample và cộng sự thay đặc trưng thủ công bằng một mạng **BiLSTM** (mạng hồi tiếp đọc câu cả hai chiều) để tính $\psi_i$, giữ lớp CRF ở trên. Mô hình **BiLSTM-CRF** này đạt F1 90.94 trên CoNLL-2003 tiếng Anh mà không cần gazetteer.
+
+### BERT gán nhãn cho từng token
+
+Với [BERT](/vi/nlp/bert/), cách làm đơn giản hơn nữa. Đưa câu vào BERT, bạn nhận được một vectơ $\mathbf{h}_i \in \mathbb{R}^{D}$ cho **mỗi** token, với $D$ là số chiều ẩn, đã trộn thông tin của cả câu theo hai chiều. Lưu ý: ở mục này, chỉ số $i$ chạy trên các token subword của BERT, không phải trên từ như ở phần CRF; mục sau nói cách nối hai cách đếm này. Đặt lên trên một lớp tuyến tính dùng chung cho mọi vị trí:
+
+$$
+\mathbf{z}_i = \mathbf{W} \mathbf{h}_i + \mathbf{b}, \qquad
+p(y_i = k \mid \mathbf{x}) = \mathrm{softmax}(\mathbf{z}_i)_k
+$$
+
+Ở đây $\mathbf{W} \in \mathbb{R}^{K' \times D}$, $\mathbf{b} \in \mathbb{R}^{K'}$ là tham số mới, với $K' = 2K + 1$ là số nhãn BIO. Mỗi $\mathbf{z}_i$ là một vectơ logit, mỗi nhãn một số. Đây chỉ là **một bộ phân loại trên mỗi vectơ đầu ra**, gọi là **gán nhãn token** (token classification). Khi fine-tune, cả BERT lẫn lớp mới cùng được cập nhật. Hàm mất mát là cross-entropy trung bình trên các vị trí có nhãn, gọi tập các vị trí đó là $\mathcal{M}$:
+
+$$
+\mathcal{L} = -\frac{1}{|\mathcal{M}|} \sum_{i \in \mathcal{M}} \ln p(y_i \mid \mathbf{x})
+$$
+
+Devlin và cộng sự (2019) làm đúng như vậy, không dùng CRF, và đạt F1 92.4 (BERT-base) và 92.8 (BERT-large) trên tập kiểm tra CoNLL-2003. Lý do CRF ít cần hơn: mỗi $\mathbf{h}_i$ đã "thấy" cả câu, nên gián tiếp biết từ bên cạnh nhiều khả năng mang nhãn gì, và lỗi kiểu `O I-PER` hiếm đi. Hiếm, chứ không hết: ô code ở dưới sẽ cho thấy một lỗi như vậy.
+
+### Căn nhãn với subword
+
+Dữ liệu NER gán nhãn theo **từ**, còn BERT đọc theo **subword**. Như bài [Tách từ](/vi/nlp/tokenization/) đã nói, WordPiece cắt từ lạ thành nhiều mảnh, mảnh sau có tiền tố `##`. Đây là cách bộ tách từ của model trong ô code cắt câu "Nguyen Thi Lan works for Vietcombank" (lấy từ lần chạy thật):
+
+| Token | `[CLS]` | `Ng` | `##uy` | `##en` | `T` | `##hi` | `La` | `##n` | `works` | `for` | `V` | `##iet` | `##comb` | `##an` | `##k` | `[SEP]` |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Từ số | – | 0 | 0 | 0 | 1 | 1 | 2 | 2 | 3 | 4 | 5 | 5 | 5 | 5 | 5 | – |
+| Nhãn | -100 | B-PER | -100 | -100 | I-PER | -100 | I-PER | -100 | O | O | B-ORG | -100 | -100 | -100 | -100 | -100 |
+
+Sáu từ thành 16 token. Cách của BERT gốc, và của hướng dẫn token classification trên Hugging Face: **chỉ mảnh đầu của mỗi từ mang nhãn của từ**. Các mảnh sau và token đặc biệt `[CLS]`, `[SEP]` nhận giá trị `-100`. Vì sao là `-100`? Hàm cross-entropy của PyTorch có tham số `ignore_index`, mặc định bằng `-100`: vị trí mang nhãn này không vào tập $\mathcal{M}$, không đóng góp vào loss.
+
+Vì sao không chép nhãn của từ cho mọi mảnh?
+
+- **Chép nguyên `B-ORG`** cho cả 5 mảnh của "Vietcombank" thì lúc giải mã, mỗi `B-` mở một thực thể mới: một tên thành năm thực thể.
+- **Chép rồi đổi mảnh sau thành `I-`** thì hợp lệ, nhưng từ có 5 mảnh chiếm 5 số hạng trong loss, từ "for" chỉ 1. Tên riêng lạ (đúng thứ ta cần tìm) bị cắt vụn nhiều nhất, nên được tính trọng số lệch đi so với cách chấm điểm theo từ.
+- **Điểm số được chấm theo từ.** Ta cần đúng một dự đoán cho mỗi từ, và mảnh đầu là chỗ tự nhiên để lấy nó.
+
+Hệ quả cần nhớ: nếu model được huấn luyện theo cách `-100`, nhãn nó đoán cho các mảnh `##` **chưa bao giờ được dạy**. Lúc dùng, hãy đọc nhãn ở mảnh đầu của mỗi từ.
+
+:::note[Ghi nhớ]
+NER = gán một nhãn BIO cho mỗi từ. BERT làm việc này bằng một lớp tuyến tính trên vectơ của mỗi token. Nhãn của từ đặt ở subword đầu, các subword sau và token đặc biệt nhận `-100` để bị bỏ khỏi loss.
+:::
+
+### Đánh giá mức thực thể
+
+Một thực thể dự đoán chỉ được tính là đúng khi **khớp chính xác** (exact match) với một thực thể thật: cùng điểm đầu, cùng điểm cuối, cùng loại. Đây là cách chấm của CoNLL-2003, và của `seqeval`. Gọi $N_{\text{pred}}$ là số thực thể mô hình đưa ra, $N_{\text{gold}}$ là số thực thể thật, $N_{\text{ok}}$ là số khớp chính xác:
+
+$$
+P = \frac{N_{\text{ok}}}{N_{\text{pred}}}, \qquad
+R = \frac{N_{\text{ok}}}{N_{\text{gold}}}, \qquad
+F_1 = \frac{2PR}{P + R}
+$$
+
+**Precision** $P$ trả lời: trong những gì mô hình đưa ra, bao nhiêu phần đúng. **Recall** $R$ trả lời: trong những gì có thật, mô hình tìm được bao nhiêu phần. $F_1$ là trung bình điều hòa của hai số. Thay $P$ và $R$ vào rồi rút gọn $N_{\text{ok}}$ ở tử và mẫu, ta được một dạng dễ nhớ:
+
+$$
+F_1 = \frac{2 \cdot \frac{N_{\text{ok}}}{N_{\text{pred}}} \cdot \frac{N_{\text{ok}}}{N_{\text{gold}}}}{\frac{N_{\text{ok}}}{N_{\text{pred}}} + \frac{N_{\text{ok}}}{N_{\text{gold}}}}
+= \frac{2 N_{\text{ok}}}{N_{\text{pred}} + N_{\text{gold}}}
+$$
+
+(Nhân cả tử và mẫu với $N_{\text{pred}} N_{\text{gold}} / N_{\text{ok}}$: tử còn $2 N_{\text{ok}}$, mẫu còn $N_{\text{gold}} + N_{\text{pred}}$.)
+
+Luật "khớp chính xác" rất khắt khe. Mô hình đoán "Văn An" thay vì "Nguyễn Văn An" thì bị tính **hai lần lỗi**: một dự đoán sai (giảm $P$) và một thực thể bỏ sót (giảm $R$). Ở mức token, cùng lỗi đó chỉ sai một hai trên mười mấy token. Hơn nữa, phần lớn token trong văn bản là `O`, nên một mô hình đoán `O` khắp nơi vẫn có độ chính xác mức token cao mà không tìm ra thực thể nào. Ô code đầu tiên đo cả hai con số trên cùng dữ liệu.
+
+### Thách thức của tiếng Việt
+
+- **Âm tiết hay từ.** Chữ Việt viết cách nhau theo âm tiết: "Hà Nội" là hai âm tiết nhưng một từ. Nhiều bộ dữ liệu và mô hình (như PhoBERT của Nguyễn Đạt Quốc và Nguyễn Tuấn Anh, 2020) làm việc trên văn bản **đã tách từ**, viết "Hà_Nội". Lỗi tách từ thì kéo theo lỗi biên thực thể. Ví dụ trong bài gán nhãn theo âm tiết cho đơn giản.
+- **Viết hoa không đáng tin.** Tiếng Việt viết hoa cả chữ đầu câu, danh xưng ("Ông", "Chủ tịch") và nhiều từ không phải tên. Trên mạng xã hội thì ngược lại: "di ha noi voi lan", không hoa, không dấu. Mô hình học trên báo chí chuẩn sẽ hụt mạnh trên kiểu văn bản này.
+- **Tên trùng từ thường** như đã thấy ở phần Trực giác, và tên viết không dấu thì càng mơ hồ.
+
+### Giới hạn
+
+- **Thực thể lồng nhau.** "Đại học Quốc gia Hà Nội" là tổ chức chứa một nơi chốn. BIO chỉ biểu diễn được một tầng; CoNLL-2003 thường chỉ gán tầng ngoài cùng.
+- **Phụ thuộc miền.** Model học trên tin tức Reuters không biết tên thuốc, tên linh kiện. Đổi miền thì cần dữ liệu gán nhãn mới, xem hộp thứ ba ở mục Lỗi hay gặp.
+- **Nhận dạng chưa phải hiểu.** NER tìm ra "Vietcombank" nhưng không biết đó là ngân hàng nào trong cơ sở tri thức. Việc nối tên với một mục cụ thể là bài toán khác, gọi là liên kết thực thể (entity linking).
+
+## Minh họa
+
+Bảng dưới là câu đầu tiên trong ô code, với nhãn đúng và nhãn mà một mô hình giả định dự đoán. Hãy nhìn vào cột "Nguyễn" và "Văn": mô hình chỉ lệch một vị trí ở đầu thực thể.
+
+| Từ | Nhãn đúng | Nhãn dự đoán | Khớp? |
+|---|---|---|---|
+| Ông | O | O | ✓ |
+| Nguyễn | **B-PER** | **O** | ✗ |
+| Văn | **I-PER** | **B-PER** | ✗ |
+| An | I-PER | I-PER | ✓ |
+| đến | O | O | ✓ |
+| Hà | B-LOC | B-LOC | ✓ |
+| Nội | I-LOC | I-LOC | ✓ |
+| làm | O | O | ✓ |
+| việc | O | O | ✓ |
+| cho | O | O | ✓ |
+| Vietcombank | B-ORG | B-ORG | ✓ |
+| từ | O | O | ✓ |
+| tháng | O | O | ✓ |
+| 3/2024 | O | O | ✓ |
+
+Mức token: 12 trên 14 token đúng, khoảng 0.86. Mức thực thể: giải mã nhãn đúng ra ba thực thể `PER` "Nguyễn Văn An", `LOC` "Hà Nội", `ORG` "Vietcombank". Giải mã nhãn dự đoán ra `PER` "Văn An", `LOC` "Hà Nội", `ORG` "Vietcombank". "Văn An" không khớp chính xác với "Nguyễn Văn An", nên chỉ 2 trên 3 thực thể đúng, và người tên Nguyễn Văn An coi như **không được tìm thấy**. Đổi nhãn thì thành một tên người khác hẳn.
+
+Câu thứ tư trong ô code cho thấy vì sao cần `B-`. Mô hình giả định ở đây quên mở thực thể mới ở "Thái":
+
+| Từ | Trận | Việt | Nam | Thái | Lan | … | Mỹ | Đình |
+|---|---|---|---|---|---|---|---|---|
+| Nhãn đúng | O | B-LOC | I-LOC | **B-LOC** | I-LOC | … | B-LOC | I-LOC |
+| Nhãn dự đoán | O | B-LOC | I-LOC | **I-LOC** | I-LOC | … | O | O |
+
+Chỉ một nhãn khác ở "Thái", nhưng giải mã ra một thực thể dài "Việt Nam Thái Lan" thay vì hai. Cả hai thực thể thật bị tính là bỏ sót, cộng thêm một dự đoán sai.
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: ô chấm điểm với Python 3.14 trên Pyodide (chỉ Python thuần), ô BERT với Python 3.14, `transformers` 5.22 và PyTorch 2.14 trên CPU. Ô chấm điểm chạy ngay trên trang và độc lập với ô kia. Ô BERT cần PyTorch và tải model nên chạy trên máy bạn.
+
+Ô đầu tiên cài hàm giải mã BIO thành tập thực thể, theo quy ước ở phần Lý thuyết, rồi chấm bốn câu tiếng Việt. Mỗi thực thể là một bộ (loại, đầu, cuối) với điểm cuối không tính, như lát cắt của Python. Nhờ vậy "khớp chính xác" chỉ là phép giao hai tập: `G & P`.
+
+<PythonRunner code={bioEvalCode} title="Giải mã BIO, F1 mức thực thể và độ chính xác mức token" />
+
+Đọc kết quả:
+
+- **Câu 1** (lỗi biên): `missed: PER Nguyễn Văn An` và `wrong: PER Văn An`, đúng như bảng ở mục Minh họa.
+- **Câu 2** (lỗi biên và loại): mô hình thấy "Hà Nội" là nơi chốn, mất cả tổ chức "Bia Hà Nội". Đây chính là chỗ nhập nhằng mà gazetteer cũng mắc.
+- **Câu 3** (I- mồ côi): nhãn dự đoán bắt đầu bằng `I-ORG` sau `O`. Theo quy ước conlleval, nó vẫn mở thực thể, nhưng ra "hàng Ngoại thương", thiếu chữ "Ngân", nên vẫn sai.
+- **Câu 4** (thiếu `B-`): ba thực thể thật bị bỏ sót (hai nước bị gộp, "Mỹ Đình" không được tìm), cộng một dự đoán sai "Việt Nam Thái Lan".
+
+Tổng lại có 11 thực thể thật, mô hình đưa ra 9, khớp chính xác 5. Vậy $P = 5/9 \approx 0.556$, $R = 5/11 \approx 0.455$, và $F_1 = 2 \cdot 5 / (9 + 11) = 0.500$, khớp với dòng `entity`. Trong khi đó độ chính xác mức token là 34/43, khoảng 0.791: nghe như mô hình đúng gần 80%, nhưng thật ra nó chỉ tìm đúng chưa tới một nửa số thực thể. Dòng cuối là một mô hình đoán `O` cho mọi token: độ chính xác 0.488 mà không tìm được thực thể nào. Bốn câu ở đây dày đặc tên riêng; trong văn bản thật, tỉ lệ `O` cao hơn nhiều, nên khoảng cách giữa hai cách đo còn lớn hơn.
+
+Thử sửa nhãn dự đoán của câu 1 thành giống nhãn đúng rồi chạy lại: `missed` của câu 1 biến mất, $N_{\text{ok}}$ lên 6.
+
+Ô thứ hai chạy một model BERT đã fine-tune cho NER: [`dslim/bert-base-NER`](https://huggingface.co/dslim/bert-base-NER). Theo model card, đó là `bert-base-cased` (Devlin và cộng sự, 2019) fine-tune trên phần tiếng Anh của CoNLL-2003, nên nhận bốn loại `PER`, `LOC`, `ORG`, `MISC` và đọc câu tiếng Anh. Ô in nhãn trên từng token trước, rồi gộp token thành thực thể theo hai cách.
+
+<LocalCode
+  code={nerPipelineCode}
+  title="Pipeline NER với BERT, trên từng token và sau khi gộp"
+  packages={['transformers', 'torch']}
+  hardware="CPU là đủ. Lần đầu tải model khoảng 433 MB; mỗi lần chạy sau mất chừng một phút trên máy phát triển, phần lớn là nạp thư viện và model"
+  sampleVaries={false}
+>
+
+```text
+B-PER  1.000 Sun
+I-PER  0.581 ##dar
+I-PER  1.000 Pi
+I-PER  0.997 ##cha
+I-PER  0.595 ##i
+B-PER  0.999 Ng
+I-PER  0.973 ##uy
+B-PER  0.991 ##en
+I-PER  0.999 T
+I-PER  0.957 ##hi
+I-PER  0.990 La
+--- simple
+PER  0.834 [ 0, 13) Sundar Pichai
+PER  0.986 [18, 22) Nguy
+PER  0.977 [22, 32) en Thi Lan
+ORG  0.978 [40, 51) Vietcombank
+LOC  0.999 [62, 67) Hanoi
+LOC  1.000 [85, 91) Berlin
+--- first
+PER  1.000 [ 0, 13) Sundar Pichai
+PER  0.996 [18, 32) Nguyen Thi Lan
+ORG  0.993 [40, 51) Vietcombank
+LOC  0.999 [62, 67) Hanoi
+LOC  1.000 [85, 91) Berlin
+```
+
+</LocalCode>
+
+Ngoài các dòng trên, thư viện còn in ra vài dòng báo cáo nạp trọng số, trong đó hai tham số `bert.pooler` được ghi `UNEXPECTED`. Lớp pooler chỉ dùng cho phân loại cả câu, bộ gán nhãn token không cần nó, nên bỏ qua được.
+
+Đọc kết quả:
+
+- **Phần không gộp** (`aggregation_strategy="none"`) trả về các token không mang nhãn `O`, và ô chỉ in 11 token đầu tiên trong số đó. "Nguyen" bị cắt thành `Ng ##uy ##en`, và mảnh `##en` nhận `B-PER`, một nhãn vô lý giữa một từ. Nhiều khả năng model được huấn luyện theo cách mảnh đầu như bài báo BERT, nên nhãn ở `##en` không đáng tin. Model card không nói rõ cách huấn luyện, chỉ cảnh báo model đôi khi gán nhãn thực thể cho các mảnh subword.
+- **Gộp kiểu `simple`** nối các token liền nhau theo nhãn của **từng token**. `B-PER` ở `##en` mở một thực thể mới, nên một người thành hai mẩu vô nghĩa "Nguy" và "en Thi Lan". Đây là lỗi biên mà F1 mức thực thể sẽ phạt hai lần.
+- **Gộp kiểu `first`** lấy nhãn ở **mảnh đầu** của mỗi từ, khớp với cách huấn luyện phổ biến. "Nguyen Thi Lan" ra trọn một `PER`. Mọi thực thể khác có cùng biên và loại như kiểu `simple`, chỉ điểm là khác.
+- Hai số trong ngoặc là vị trí ký tự đầu và cuối (cuối không tính) trong chuỗi gốc, nên `text[18:32]` là "Nguyen Thi Lan". Điểm là xác suất softmax của nhãn, lấy trung bình trên các token (hoặc các từ) của thực thể.
+
+Model không có ngẫu nhiên khi dự đoán, nên mỗi lần chạy trên cùng máy cho cùng kết quả; bản thư viện khác có thể lệch ở chữ số cuối của điểm. Thử thay `text` bằng một câu tiếng Việt có dấu: model chỉ học tiếng Anh nên sẽ hụt nhiều, lý do có ở hộp cuối của mục dưới.
+
+## Lỗi hay gặp
+
+:::caution[Báo độ chính xác mức token thay cho F1 mức thực thể]
+Phần lớn token là `O`, và một lỗi biên chỉ làm sai một hai token. Ở ô code đầu, độ chính xác mức token là 0.791 trong khi F1 mức thực thể chỉ 0.500; mô hình đoán `O` khắp nơi vẫn được 0.488. Khi báo kết quả NER, dùng precision, recall và F1 mức thực thể với luật khớp chính xác, qua `seqeval` hoặc `conlleval`. Ghi rõ quy ước với I- mồ côi (mặc định hay strict), vì nó đổi điểm.
+:::
+
+:::caution[Đọc nhãn ở mọi subword, hoặc gộp bằng `simple`]
+Nếu model được huấn luyện với `-100` ở các mảnh sau, nhãn nó đoán cho mảnh `##` không có ý nghĩa. Ô BERT ở trên cho thấy `##en` mang `B-PER` và kiểu gộp `simple` cắt đôi tên người. Khi dùng pipeline, chọn `aggregation_strategy="first"` (hoặc tự lấy nhãn ở mảnh đầu, dùng `word_ids()` trên kết quả của bộ tách từ). Khi huấn luyện, căn nhãn và gộp lúc dùng phải theo cùng một quy ước.
+:::
+
+:::caution[Dùng model NER tiếng Anh cho văn bản tiếng Việt, hay model báo chí cho bình luận mạng]
+`dslim/bert-base-NER` học trên tin tức tiếng Anh. Với tiếng Việt, nó không biết "Ông", "Chị" báo hiệu tên người, và bộ tách từ cắt vụn chữ có dấu. Ngay cả model tiếng Việt học trên báo chí cũng hụt trên bình luận không dấu, không hoa. Hãy chọn model học trên đúng ngôn ngữ và miền (ví dụ dùng dữ liệu VLSP cho tiếng Việt), và đo F1 trên một mẫu nhỏ được gán nhãn từ chính dữ liệu của bạn trước khi tin vào nó.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- NER tìm các cụm gọi tên người, nơi chốn, tổ chức… với đúng ranh giới và loại. Nó là bài toán gán nhãn chuỗi: mỗi từ một nhãn. Gazetteer không đủ vì cùng một chuỗi đổi loại theo ngữ cảnh, và tên hay trùng từ thường.
+- Mã hóa BIO dùng `B-X`, `I-X`, `O` ($2K + 1$ nhãn); `B-` cần để tách hai thực thể cùng loại đứng sát nhau. Giải mã ngược thì phải chọn một quy ước cho I- mồ côi.
+- CRF chấm điểm cả dãy nhãn bằng điểm tại chỗ cộng điểm chuyển, nên tránh được dãy vô lý; BiLSTM-CRF thay đặc trưng thủ công bằng mạng. BERT chỉ cần một lớp tuyến tính trên vectơ mỗi token; nhãn đặt ở subword đầu, các mảnh sau nhận `-100` để bỏ khỏi loss.
+- Đánh giá bằng F1 mức thực thể với luật khớp chính xác, $F_1 = 2 N_{\text{ok}} / (N_{\text{pred}} + N_{\text{gold}})$. Độ chính xác mức token làm điểm đẹp hơn thật vì đa số token là `O`.
+
+**Đọc thêm:**
+
+- Nguyễn Thị Minh Huyền, Ngô Thế Quyền, Vũ Xuân Lương, Trần Mai Vũ, Nguyễn Thị Thu Hiền (2018). [*VLSP Shared Task: Named Entity Recognition*](https://vjs.ac.vn/jcc/article/view/13161), *Journal of Computer Science and Cybernetics* 34(4), tr. 283–294. Mô tả dữ liệu và kết quả hai cuộc thi chung NER tiếng Việt VLSP 2016 và 2018.
+- Jurafsky, D., Martin, J. H. (bản nháp 2026). [*Speech and Language Processing*](https://web.stanford.edu/~jurafsky/slp3/), ấn bản 3, chương 18 "Sequence Labeling for Parts of Speech and Named Entities". Trình bày gán nhãn chuỗi, BIO, CRF, Viterbi và cách đánh giá NER.
+- Tjong Kim Sang, E. F., De Meulder, F. (2003). [*Introduction to the CoNLL-2003 Shared Task: Language-Independent Named Entity Recognition*](https://aclanthology.org/W03-0419/), CoNLL 2003, mục 2 và 4. Bộ dữ liệu chuẩn, lược đồ nhãn IOB1 và luật khớp chính xác khi chấm điểm.
+- Lafferty, J., McCallum, A., Pereira, F. (2001). [*Conditional Random Fields: Probabilistic Models for Segmenting and Labeling Sequence Data*](https://repository.upenn.edu/cis_papers/159), ICML 2001. Bài gốc của CRF. Bài báo dùng dạng tổng quát với hàm đặc trưng; điểm tại chỗ cộng ma trận chuyển trong bài này là một trường hợp riêng.
+- Lample, G. và cộng sự (2016). [*Neural Architectures for Named Entity Recognition*](https://aclanthology.org/N16-1030/), NAACL 2016, mục 2. BiLSTM-CRF với embedding ký tự, có giải thích vì sao cần ma trận chuyển và so BIO với BIOES.
+- Devlin, J. và cộng sự (2019). [*BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding*](https://aclanthology.org/N19-1423/), NAACL 2019, mục 5.3. NER trên CoNLL-2003 bằng bộ phân loại trên subword đầu, không CRF.
+- Hugging Face. [*Token classification*](https://huggingface.co/docs/transformers/tasks/token_classification), tài liệu `transformers`. Hướng dẫn fine-tune cho NER, có hàm căn nhãn với `word_ids()` và `-100`, chấm điểm bằng `seqeval`.
+
+<LessonProgress />

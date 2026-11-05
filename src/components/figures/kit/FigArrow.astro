@@ -6,6 +6,8 @@
 // tone "alt" (docs/architecture/llm-lessons.md, section 2.9.1): a dashed blue line and head, for a link of the
 // second group (a frozen copy, "the same model"), like the dashed border of FigNode tone="alt".
 // head={false}: a plain link with no direction; the line then runs to `to`.
+// tone "accent" (docs/architecture/nlp-lessons.md, "Lô FIG NLP"): a 2px accent line and head, when the arrows
+// themselves are the point (the four separate guesses of skip-gram), like the 2px border of FigNode tone="accent".
 import { arrowParts, type Pt } from '@lib/figures/geometry';
 
 interface Props {
@@ -13,7 +15,7 @@ interface Props {
   to: Pt;
   /** Bends, in order. */
   via?: readonly Pt[];
-  tone?: 'plain' | 'alt';
+  tone?: 'plain' | 'alt' | 'accent';
   /** Draw the head at `to` (default). */
   head?: boolean;
 }

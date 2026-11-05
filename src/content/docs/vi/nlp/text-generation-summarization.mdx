@@ -1,0 +1,373 @@
+---
+title: Sinh văn bản và tóm tắt văn bản
+description: Rút gọn một bản tin thành hai câu. Tham lam, beam, lấy mẫu, top-k, top-p, phạt lặp; tóm tắt trích xuất và tóm lược; ROUGE và hallucination.
+quiz:
+  - question: 'Tham chiếu là "Huế mưa lớn suốt ba ngày", bản máy là "mưa lớn ở Huế ba ngày" (mỗi âm tiết là một từ, không phân biệt hoa thường). ROUGE-1, ROUGE-2 và ROUGE-L (F1) lần lượt bằng bao nhiêu?'
+    options:
+      - '$0.833$, $0.833$, $0.833$'
+      - '$1.000$, $0.400$, $0.667$'
+      - '$0.833$, $0.400$, $0.667$'
+      - '$0.833$, $0.200$, $0.500$'
+    answer: 2
+    explanation: 'Mỗi bên có 6 âm tiết, trùng 5 (trừ "suốt" và "ở"), nên ROUGE-1 có $P = R = 5/6$, F1 $= 0.833$. Mỗi bên có 5 bigram, chỉ "mưa lớn" và "ba ngày" trùng: $P = R = 2/5$, F1 $= 0.4$. Dãy con chung dài nhất là "mưa lớn ba ngày", 4 từ, nên ROUGE-L $= 4/6 = 0.667$. ROUGE-1 không bằng 1, vì "ở" và "suốt" không có ở bên kia.'
+  - question: 'Bạn dùng phạt lặp $\theta = 1.5$ kiểu Hugging Face. Một token đã xuất hiện có logit $-2.0$. Logit mới là bao nhiêu, và vì sao không đơn giản chia cho $\theta$ như bài báo CTRL?'
+    options:
+      - '$-1.33$: chia cho $\theta$ luôn làm logit nhỏ đi'
+      - '$-3.0$: chia một số âm cho $\theta > 1$ sẽ kéo nó về gần 0, tức tăng xác suất'
+      - '$-2.0$: phạt lặp chỉ áp vào logit dương'
+      - '$0$: token đã xuất hiện bị cấm hẳn'
+    answer: 1
+    explanation: 'Với logit âm, $-2.0 / 1.5 = -1.33$ lớn hơn $-2.0$, nên token đã lặp lại được ưu tiên hơn, ngược với ý định. Vì vậy cài đặt của Hugging Face nhân logit âm với $\theta$ ($-2.0 \times 1.5 = -3.0$) và chỉ chia logit dương. Cấm hẳn là việc của `no_repeat_ngram_size`, không phải của phạt lặp.'
+  - question: 'Bạn cần hai việc: (a) tóm tắt một hợp đồng thuê nhà cho khách đọc, (b) gợi ý 20 câu khẩu hiệu khác nhau cho một quán cà phê. Cách giải mã nào hợp lý nhất?'
+    options:
+      - '(a) beam search hoặc tham lam; (b) lấy mẫu top-p, nhiệt độ khoảng 1'
+      - '(a) lấy mẫu nhiệt độ cao; (b) beam search $B = 20$'
+      - 'Cả hai dùng tham lam, vì nó cho câu xác suất cao nhất'
+      - 'Cả hai dùng lấy mẫu thuần trên toàn bộ từ vựng'
+    answer: 0
+    explanation: 'Tóm tắt là sinh có định hướng: đầu ra bị đầu vào ràng buộc chặt, cần đúng và ổn định, nên giải mã theo xác suất cao (beam, tham lam) hợp. Khẩu hiệu là sinh mở: cần đa dạng, nên lấy mẫu có cắt đuôi. Beam $B = 20$ cho 20 câu gần như giống nhau. Tham lam cũng không bảo đảm câu có xác suất cao nhất, và lặp nhiều khi viết dài.'
+  - question: 'Văn bản nguồn viết "Đà Nẵng mở tuyến xe buýt điện đầu tiên". Bản tóm tắt A viết "Đà Nẵng mở tuyến xe buýt điện thứ hai". Bản B viết "Đà Nẵng mở tuyến xe buýt điện đầu tiên do một công ty Nhật vận hành" (nguồn không nhắc ai vận hành). Theo cách chia của Maynez và cộng sự (2020), đây là gì?'
+    options:
+      - 'A và B đều là hallucination ngoại sinh'
+      - 'A trung thực vì vẫn đúng chủ đề; B là hallucination nội sinh'
+      - 'Chỉ B là hallucination, vì A có ROUGE-1 cao'
+      - 'A là hallucination nội sinh, B là hallucination ngoại sinh'
+    answer: 3
+    explanation: 'A dùng thông tin có trong nguồn nhưng bóp méo nó ("đầu tiên" thành "thứ hai"): nội sinh. B thêm một chi tiết nguồn không có: ngoại sinh, dù có thể tình cờ đúng ngoài đời, nó vẫn không trung thực với nguồn. ROUGE-1 của A cao ($0.778$ trong bảng ở mục Minh họa) chính là lý do không dùng ROUGE để bắt lỗi sai sự thật.'
+  - question: 'Trong ô tóm tắt trích xuất, bạn thay điểm câu bằng "trung bình idf của các từ trong câu" (không so với vectơ cả bài). Điều gì dễ xảy ra?'
+    options:
+      - 'Kết quả không đổi, vì idf đã có trong TF-IDF'
+      - 'Câu chứa nhiều từ chỉ xuất hiện một lần (giá vé, chi tiết lẻ) được chọn, thay cho câu nói về ý chính'
+      - 'Luôn chọn được câu đầu tiên'
+      - 'ROUGE chắc chắn tăng, vì từ hiếm mang nhiều thông tin hơn'
+    answer: 1
+    explanation: 'idf cao nghĩa là từ hiếm trong bài, nên trung bình idf thưởng cho câu "lạc" khỏi phần còn lại. Ý chính của một bản tin thường được nhắc lại ở nhiều câu ("xe buýt điện"), nên so với vectơ của cả bài mới tìm ra câu đại diện. Khi thử trên đoạn tin của bài, cách trung bình idf chọn câu 1 và câu 3 (giá vé), ROUGE-1 chỉ $0.508$ so với $0.667$ của cách so với vectơ cả bài.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import SamplingViz from '@components/viz/SamplingViz.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import extractiveCode from '@code/nlp/text-generation-summarization/extractive-rouge.vi.py?raw';
+import t5Code from '@code/nlp/text-generation-summarization/t5-summarize.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Đặt cạnh nhau các chiến lược giải mã (decoding strategy): tham lam, beam search, lấy mẫu (sampling), nhiệt độ (temperature), top-k, top-p và phạt lặp (repetition penalty), và chọn được cách hợp cho từng việc.
+- Phân biệt tóm tắt trích xuất (extractive summarization) với tóm tắt tóm lược (abstractive summarization), và biết BART, T5, PEGASUS học tóm tắt bằng cách nào.
+- Tự tính được ROUGE-1, ROUGE-2, ROUGE-L, và biết ROUGE đo được gì, không đo được gì.
+- Nhận ra hallucination (bịa thông tin) trong bản tóm tắt, phân biệt hallucination nội sinh và ngoại sinh, và biết vài cách giảm.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+## Trực giác
+
+### Bút dạ quang hay tự viết lại
+
+Sáng nay bạn đọc một bản tin bảy câu: Đà Nẵng mở tuyến xe buýt điện đầu tiên, tuyến dài bao nhiêu, giá vé, tháng đầu miễn phí, mỗi xe chạy được bao xa sau một lần sạc, người dân khen gì, năm sau mở thêm mấy tuyến. Sếp nhờ bạn rút gọn còn hai câu. Bạn có hai cách.
+
+**Cách thứ nhất: cầm bút dạ quang.** Tô hai câu quan trọng nhất rồi chép nguyên văn. Không bao giờ viết sai điều bài báo nói, vì chữ nào cũng là chữ của bài báo. Nhưng hai câu chép rời có thể cụt: câu "Tuyến dài 18 km" đứng một mình thì người đọc không biết "tuyến" nào.
+
+**Cách thứ hai: tự viết lại.** "Đà Nẵng mở tuyến xe buýt điện đầu tiên nối sân bay với biển Mỹ Khê. Tháng đầu miễn phí vé, năm sau mở thêm ba tuyến." Gọn và trôi chảy hơn. Nhưng giờ bạn **viết**, nên bạn có thể viết sai: nhầm "đầu tiên" thành "thứ hai", hay thêm một chi tiết bài báo không hề nói.
+
+Máy làm cách thứ hai bằng cách **sinh văn bản** từng token một. Ở mỗi bước, mô hình cho một phân phối xác suất trên mọi token, và ta phải **chọn** một token. Chọn token chắc nhất, hay rút thăm cho đa dạng? Với tóm tắt, ta muốn đúng và ổn định. Với viết truyện, ta lại muốn bất ngờ.
+
+Còn một câu hỏi nữa: làm sao biết bản tóm tắt nào tốt hơn, khi có cả nghìn bản cần chấm và không đủ người đọc?
+
+Bài toán của bài này là: **chọn token thế nào khi sinh văn bản; chọn câu hay viết lại khi tóm tắt; và chấm một bản tóm tắt bằng máy mà không bị đánh lừa.**
+
+## Lý thuyết
+
+### Sinh văn bản là một vòng lặp
+
+Như ở bài [GPT và huấn luyện phân tán](/vi/nlp/gpt-distributed-training/), một mô hình ngôn ngữ nhân quả học $p(x_t \mid x_{<t})$: xác suất của token kế tiếp khi biết mọi token trước nó. Mô hình encoder–decoder như T5 học $p(y_i \mid y_{<i}, \mathbf{x})$, thêm điều kiện là văn bản nguồn $\mathbf{x}$ (bài [Mô hình chuỗi sang chuỗi](/vi/llm/seq2seq/)). Cả hai sinh văn bản theo cùng một vòng lặp **tự hồi quy** (autoregressive):
+
+1. Đưa các token đã có vào mô hình, lấy logit $z_i$ cho mỗi token $i$ trong từ vựng.
+2. Biến logit thành một phân phối, rồi **chọn** một token theo một quy tắc.
+3. Nối token vừa chọn vào cuối, quay lại bước 1. Dừng khi gặp `<EOS>` hoặc đủ số token tối đa.
+
+Mô hình chỉ làm bước 1. **Chiến lược giải mã** là quy tắc ở bước 2. Cùng một mô hình, đổi quy tắc là đổi hẳn văn bản ra.
+
+### Các chiến lược giải mã đặt cạnh nhau
+
+Bảng dưới gom các chiến lược hay gặp. Công thức của nhiệt độ, top-k và top-p, kèm ví dụ tính tay, có ở bài [Sử dụng API văn bản](/vi/llm/text-api/). Beam search và phạt độ dài có ở bài [Mô hình chuỗi sang chuỗi](/vi/llm/seq2seq/). Ở đây ta chỉ so chúng với nhau.
+
+| Chiến lược | Chọn token thế nào | Tham số (tên trong `generate`) | Mạnh | Yếu |
+|---|---|---|---|---|
+| Tham lam (greedy) | Token xác suất cao nhất | `num_beams=1`, `do_sample=False` | Nhanh, tất định | Không xem lại lựa chọn sớm; dễ lặp khi viết dài |
+| Beam search | Giữ $B$ chuỗi có tổng log-xác suất cao nhất | `num_beams`, `length_penalty` | Tìm được chuỗi xác suất cao hơn tham lam | Văn nhạt, lặp với sinh mở; tốn $B$ lần tính |
+| Lấy mẫu thuần | Rút token theo đúng phân phối của mô hình | `do_sample=True`, `top_k=0` | Đa dạng nhất | Thỉnh thoảng rút trúng đuôi vô nghĩa |
+| Nhiệt độ $T$ | Chia logit cho $T$ trước softmax, rồi rút | `temperature` | Một núm vặn giữa chắc chắn và đa dạng | Không tự cắt đuôi |
+| Top-k | Chỉ rút trong $k$ token đầu | `top_k` | Chặn đuôi | $k$ cố định, không theo độ chắc của mô hình |
+| Top-p (nucleus) | Chỉ rút trong tập nhỏ nhất có tổng xác suất $\ge p$ | `top_p` | Số token giữ lại co giãn theo độ chắc | Vẫn ngẫu nhiên, khó tái lập |
+
+Top-k được Fan, Lewis và Dauphin (2018) dùng để sinh truyện: mỗi bước rút trong $k = 10$ token đầu. Họ thấy cách này tốt hơn hẳn beam search, vốn hay cho ra những cụm từ phổ biến và lặp lại. Top-p là đề xuất của Holtzman và cộng sự (2020), lý do nằm ở mục ngay sau.
+
+### Văn bản thoái hóa
+
+Mô hình tốt cho văn bản tốt xác suất cao, vậy chọn văn bản xác suất cao nhất phải tốt nhất? Thực tế thì không. Holtzman và cộng sự (2020) cho GPT-2 Large viết tiếp 5 000 đoạn văn (tối đa 200 token mỗi đoạn) rồi đo tỉ lệ đoạn bị "kẹt" trong một vòng lặp (một cụm từ lặp ít nhất ba lần ở cuối):
+
+| Cách giải mã | Tỉ lệ bị lặp (%) |
+|---|---:|
+| Văn bản của người | 0.28 |
+| Tham lam | 73.66 |
+| Beam search, $B = 16$ | 28.94 |
+| Lấy mẫu thuần | 0.22 |
+| Top-p, $p = 0.95$ | 0.36 |
+
+Vì sao tham lam lặp nhiều như vậy? Họ thấy xác suất của một cụm từ lặp lại **tăng lên** sau mỗi lần lặp. Đã lặp một lần thì lần sau còn "chắc" hơn, thành một vòng phản hồi dương. Văn bản của người thì khác: nó thường xuyên rẽ sang những token xác suất thấp hơn nhưng mang nhiều thông tin hơn.
+
+Lấy mẫu thuần thì gần như không lặp, nhưng lại hỏng theo kiểu khác: văn bản rời rạc, có khi bịa ra từ không có thật. Thủ phạm là **cái đuôi không đáng tin** của phân phối: hàng chục nghìn token, mỗi token xác suất nhỏ, nhưng cộng lại thì không nhỏ. Top-p cắt cái đuôi đó đi. Nó không phải cách ít lặp nhất trong bảng (lấy mẫu thuần còn ít hơn), nhưng xét chung perplexity và HUSE (một thước đo kết hợp người chấm và thống kê), top-p cho văn bản gần văn bản của người nhất.
+
+Holtzman và cộng sự gọi chung hai kiểu hỏng này (văn nhạt, lặp vòng khi chọn theo xác suất cao nhất; văn rời rạc khi rút từ cả đuôi) là **văn bản thoái hóa** (neural text degeneration).
+
+### Phạt lặp
+
+Một cách chặn lặp trực tiếp là hạ điểm của những token đã xuất hiện. Keskar và cộng sự (2019), trong bài báo về mô hình CTRL, đề xuất **lấy mẫu có phạt** (penalized sampling). Gọi $g$ là danh sách token đã sinh. Phân phối của token kế tiếp là:
+
+$$
+p_i = \frac{\exp\big(z_i / (T \cdot I(i \in g))\big)}{\sum_j \exp\big(z_j / (T \cdot I(j \in g))\big)},
+\qquad
+I(c) = \begin{cases} \theta & \text{nếu } c \text{ đúng} \\ 1 & \text{nếu không} \end{cases}
+$$
+
+Đọc từng phần:
+
+- Token **chưa** xuất hiện: $I = 1$, logit chỉ chia cho $T$ như softmax có nhiệt độ thường.
+- Token **đã** xuất hiện: logit bị chia thêm cho $\theta$. Với $\theta > 1$ và logit dương, logit nhỏ đi, nên xác suất giảm.
+- $\theta = 1$ là không phạt. Các tác giả thấy giải mã gần như tham lam với $\theta \approx 1.2$ cân bằng tốt giữa viết đúng và không lặp.
+
+**Một cái bẫy với logit âm.** Chia một số âm cho $\theta > 1$ làm nó **gần 0 hơn**, tức **lớn hơn**: $-1.0 / 1.2 \approx -0.83$. Token đã lặp lại được ưu tiên hơn, ngược với ý định. Vì vậy `repetition_penalty` của Hugging Face Transformers chia logit dương cho $\theta$ nhưng **nhân** logit âm với $\theta$. Với $\theta = 1.2$: logit $2.0$ thành $2.0 / 1.2 \approx 1.67$, logit $-1.0$ thành $-1.0 \times 1.2 = -1.2$. Cả hai đều giảm.
+
+Một cách cứng hơn là `no_repeat_ngram_size=n`: cấm hẳn mọi $n$-gram đã xuất hiện. Cả hai cách đều phạt luôn những lần lặp **đúng**. Bản tóm tắt về xe buýt điện có thể cần nhắc "xe buýt điện" hai lần, mà `no_repeat_ngram_size=3` thì không cho.
+
+### Khi nào dùng cách nào
+
+Holtzman và cộng sự chia việc sinh văn bản làm hai loại:
+
+- **Sinh có định hướng** (directed generation): đầu ra bị đầu vào ràng buộc chặt, như dịch máy, tóm tắt, sinh văn bản từ bảng dữ liệu. Beam search (hoặc tham lam) là lựa chọn thường dùng. Ở đây lặp và nhạt ít là vấn đề, vì đầu vào đã quyết gần hết nội dung, còn sự ổn định và trung thành với nguồn thì quan trọng.
+- **Sinh mở** (open-ended generation): viết tiếp truyện, hội thoại, gợi ý ý tưởng. Lấy mẫu có cắt đuôi (top-p, hay top-k kèm nhiệt độ) cho văn bản đa dạng và tự nhiên hơn.
+
+Đây là điểm xuất phát, không phải luật. File cấu hình của T5-small có ghi sẵn một cấu hình cho tóm tắt trong `config.task_specific_params`: beam $B = 4$ cùng `no_repeat_ngram_size=3`, tức beam search kèm cấm lặp. `generate` không tự áp cấu hình này: gọi `generate` mà không truyền gì thì vẫn là tham lam, như dòng `greedy` ở ô T5 bên dưới.
+
+:::note[Ghi nhớ]
+Mô hình cho phân phối, chiến lược giải mã chọn token. Giải mã theo xác suất cao nhất (tham lam, beam) ổn định nhưng dễ lặp khi viết dài. Lấy mẫu thuần thì đa dạng nhưng dễ lạc vào đuôi vô nghĩa. Top-p cắt đuôi theo độ chắc của mô hình. Phạt lặp chia logit dương (nhân logit âm) của token đã xuất hiện cho $\theta$. Tóm tắt và dịch thường dùng beam; viết sáng tạo dùng lấy mẫu.
+:::
+
+### Tóm tắt trích xuất: chọn câu
+
+Tóm tắt trích xuất chấm điểm từng câu của văn bản rồi giữ vài câu điểm cao nhất, **theo thứ tự xuất hiện** để mạch văn không đảo lộn. Có ba cách chấm từ đơn giản tới phức tạp.
+
+**Lấy vài câu đầu (lead).** Tin tức thường viết theo kiểu "kim tự tháp ngược": ý chính đặt ở đầu. Vì vậy chỉ lấy $k$ câu đầu đã là một mốc so sánh khó vượt với tin tức. Nhưng nó vô dụng với loại văn bản không viết như vậy, như bài khoa học, email hay biên bản họp.
+
+**So với vectơ của cả bài, bằng TF-IDF.** Coi mỗi câu là một "văn bản" trong một kho nhỏ $N$ câu. Mỗi câu $j$ thành một vectơ $\mathbf{s}_j$ có trọng số TF-IDF như ở bài [Ngữ nghĩa vectơ và embedding](/vi/nlp/vector-semantics-embeddings/): số lần từ $t$ xuất hiện trong câu nhân với $\mathrm{idf}_t = \ln\frac{1 + N}{1 + \mathrm{df}_t} + 1$, với $\mathrm{df}_t$ là số câu chứa $t$. Cộng mọi vectơ câu được một vectơ đại diện cho cả bài:
+
+$$
+\mathbf{c} = \sum_{j=1}^{N} \mathbf{s}_j, \qquad
+\mathrm{score}_j = \cos(\mathbf{s}_j, \mathbf{c}) = \frac{\mathbf{s}_j^\top \mathbf{c}}{\lVert \mathbf{s}_j \rVert \, \lVert \mathbf{c} \rVert}
+$$
+
+Câu có điểm cao là câu "giống cả bài nhất": nó chứa những từ vừa được nhắc nhiều trong bài, vừa không có mặt ở mọi câu. Cosine chia cho độ dài, nên câu dài không tự động thắng.
+
+**TextRank.** Mihalcea và Tarau (2004) biến văn bản thành một đồ thị: mỗi câu là một đỉnh, hai câu nối nhau bằng một cạnh có trọng số bằng số từ chung, chia cho $\log |S_i| + \log |S_j|$ (với $|S_i|$ là số từ của câu $i$) để câu dài không được lợi. Sau đó họ chạy một thuật toán xếp hạng kiểu PageRank (hệ số tắt dần $d = 0.85$). Ý tưởng là **bỏ phiếu**: một câu quan trọng khi nó giống nhiều câu khác, nhất là giống những câu cũng quan trọng. Trên 567 bản tin của DUC 2002, mỗi bản tóm tắt 100 từ, TextRank không cần dữ liệu có nhãn mà vẫn cạnh tranh được với các hệ thống tốt nhất tham gia đánh giá năm đó.
+
+Tóm tắt trích xuất **không bịa câu mới**, vì mọi câu đều lấy từ nguồn, nhưng một câu tách khỏi ngữ cảnh vẫn có thể gây hiểu sai. Đổi lại, nó không gộp được ý của hai câu, không bỏ được phần thừa trong một câu dài, và có thể để lại những câu cụt như "Tuyến dài 18 km".
+
+### Tóm tắt tóm lược: viết lại
+
+Tóm tắt tóm lược dùng một mô hình chuỗi sang chuỗi: encoder đọc văn bản, decoder sinh bản tóm tắt từng token, với một trong các chiến lược giải mã ở trên. Phần khó là dạy mô hình **viết lại** mà không cần hàng triệu cặp (văn bản, tóm tắt). Cách chung là pre-train bằng một mục tiêu khử nhiễu (denoising), rồi fine-tune trên dữ liệu tóm tắt.
+
+- **BART** (Lewis và cộng sự, 2020) và **T5** (Raffel và cộng sự, 2020) là hai mô hình encoder–decoder pre-train bằng khử nhiễu. Cách chúng làm hỏng văn bản có ở bài [Transformer nâng cao](/vi/nlp/advanced-transformers/). T5 nói tác vụ bằng tiền tố `summarize: `. Bản T5 công bố được pre-train trên hỗn hợp nhiều tác vụ, trong đó có tóm tắt tin CNN/Daily Mail, nên gõ tiền tố đó là T5-small tóm tắt được ngay.
+- **PEGASUS** (Zhang và cộng sự, 2020) thiết kế mục tiêu pre-train **riêng cho tóm tắt**, gọi là **sinh câu bị bỏ** (gap sentences generation). Họ bỏ khỏi văn bản những câu **quan trọng**, thay mỗi câu bằng một token `[MASK1]`, rồi bắt decoder viết lại các câu đó từ phần còn lại. Câu quan trọng là câu có ROUGE-1 F1 cao nhất khi so với phần còn lại của văn bản; trong các thí nghiệm so sánh, họ bỏ 30% số câu. Như vậy việc pre-train đã rất giống tóm tắt. Bản lớn nhất đạt kết quả tốt nhất thời đó trên cả 12 bộ dữ liệu tóm tắt họ thử, và chỉ với 1000 cặp fine-tune đã vượt kết quả tốt nhất trước đó trên 6 bộ.
+- **LLM qua prompt.** Một mô hình decoder-only đã được tinh chỉnh theo chỉ dẫn tóm tắt được khi bạn viết "Tóm tắt văn bản sau trong hai câu" (bài [Prompt Engineering](/vi/llm/prompt-engineering/)). Không cần fine-tune, độ dài và giọng văn đổi được bằng lời, nhưng chi phí và nguy cơ hallucination vẫn còn đó.
+
+Với tiếng Việt, **ViT5** (Phan và cộng sự, 2022) là một T5 pre-train trên văn bản tiếng Việt. Các tác giả báo cáo kết quả tốt nhất thời đó cho tóm tắt tóm lược trên hai bộ Vietnews và WikiLingua.
+
+| Tiêu chí | Trích xuất | Tóm lược |
+|---|---|---|
+| Đầu ra | Câu nguyên văn của nguồn | Câu mới, có thể dùng từ không có trong nguồn |
+| Bịa thông tin | Không bịa câu mới, nhưng câu tách khỏi ngữ cảnh có thể gây hiểu sai | Có thể |
+| Văn phong | Có thể rời rạc, câu cụt | Trôi chảy, gộp được ý |
+| Cần gì | Không cần huấn luyện (lead, TF-IDF, TextRank) | Mô hình encoder–decoder đã pre-train, hoặc LLM |
+
+### Chấm điểm bằng ROUGE
+
+Lin (2004) đưa ra **ROUGE** (Recall-Oriented Understudy for Gisting Evaluation): so bản tóm tắt của máy với một hay nhiều bản tóm tắt **tham chiếu** do người viết, bằng cách đếm các đơn vị trùng nhau. Gọi bản của máy là $\hat{\mathbf{y}}$, bản tham chiếu là $\mathbf{y}$, cả hai là dãy từ.
+
+**ROUGE-N** đếm các $n$-gram (cụm $n$ từ liền nhau) trùng nhau. Với mỗi $n$-gram $g$, gọi $\mathrm{cnt}_{\hat{\mathbf{y}}}(g)$ và $\mathrm{cnt}_{\mathbf{y}}(g)$ là số lần nó xuất hiện ở mỗi bên. Số lần trùng là:
+
+$$
+\mathrm{hit}_n = \sum_{g} \min\big(\mathrm{cnt}_{\hat{\mathbf{y}}}(g),\ \mathrm{cnt}_{\mathbf{y}}(g)\big)
+$$
+
+Lấy $\min$ để một $n$-gram lặp lại nhiều lần trong bản máy không được tính quá số lần nó có trong tham chiếu. Từ đó có ba con số:
+
+$$
+P_n = \frac{\mathrm{hit}_n}{\text{số } n\text{-gram của } \hat{\mathbf{y}}}, \qquad
+R_n = \frac{\mathrm{hit}_n}{\text{số } n\text{-gram của } \mathbf{y}}, \qquad
+F_n = \frac{2 P_n R_n}{P_n + R_n}
+$$
+
+- **Precision** $P_n$: trong những gì máy viết, bao nhiêu phần có trong tham chiếu. Viết dài lan man thì $P_n$ thấp.
+- **Recall** $R_n$: trong tham chiếu, bao nhiêu phần máy viết lại được. Viết quá ngắn thì $R_n$ thấp.
+- **F1** $F_n$ là trung bình điều hòa của hai số: chỉ cao khi cả hai cùng cao.
+
+ROUGE gốc của Lin là **recall** (đúng như chữ R trong tên); các bài báo ngày nay thường báo cáo F1. Khi đọc một con số ROUGE, hãy xem nó là loại nào.
+
+**ROUGE-L** dùng **dãy con chung dài nhất** (longest common subsequence, LCS): dãy từ xuất hiện ở cả hai bên **theo cùng thứ tự**, nhưng không cần liền nhau. Gọi độ dài của nó là $\mathrm{LCS}(\hat{\mathbf{y}}, \mathbf{y})$, thì $P = \mathrm{LCS} / |\hat{\mathbf{y}}|$ và $R = \mathrm{LCS} / |\mathbf{y}|$, rồi tính F1 như trên. ROUGE-L thưởng cho việc giữ đúng trật tự mà không đòi các từ phải đứng sát nhau. (Lin dùng một dạng F có trọng số $\beta$; ở DUC, $\beta$ được đặt rất lớn, nên thực chất chỉ còn recall. Khi bản tóm tắt có nhiều câu, ông dùng "LCS hợp" trên từng câu tham chiếu; ô code bên dưới coi cả bản tóm tắt là một dãy cho gọn.)
+
+**Ví dụ tính tay.** Tham chiếu "trời hôm nay rất đẹp" (5 từ), bản máy "hôm nay trời đẹp" (4 từ). Mỗi âm tiết là một từ.
+
+- **ROUGE-1.** Trùng 4 từ: trời, hôm, nay, đẹp. $P_1 = 4/4 = 1$, $R_1 = 4/5 = 0.8$, $F_1 = 2 \cdot 1 \cdot 0.8 / 1.8 \approx 0.889$.
+- **ROUGE-2.** Tham chiếu có 4 bigram (trời hôm, hôm nay, nay rất, rất đẹp), bản máy có 3 (hôm nay, nay trời, trời đẹp). Chỉ "hôm nay" trùng. $P_2 = 1/3$, $R_2 = 1/4$, $F_2 = 2 \cdot \frac{1}{12} / \frac{7}{12} = 2/7 \approx 0.286$.
+- **ROUGE-L.** Dãy con chung dài nhất là "hôm nay đẹp", dài 3 ("trời" đứng ở hai vị trí khác nhau nên không ghép thêm được). $P = 3/4$, $R = 3/5$, F1 $= 2 \cdot 0.45 / 1.35 \approx 0.667$.
+
+Đổi trật tự từ làm ROUGE-2 và ROUGE-L tụt, còn ROUGE-1 gần như không thấy.
+
+### ROUGE không đo được gì
+
+- **Ý nghĩa bị đảo.** Tham chiếu "mèo đuổi chuột", bản máy "chuột đuổi mèo": ROUGE-1 bằng 1, dù nghĩa ngược hẳn. ROUGE-2 bằng 0, ROUGE-L bằng $1/3$.
+- **Từ đồng nghĩa.** "khai trương" và "mở" cùng nghĩa nhưng không trùng chữ nào, nên không được điểm.
+- **Đúng hay sai.** Đổi "đầu tiên" thành "thứ hai" chỉ làm mất vài từ trùng; bản tóm tắt sai sự thật vẫn có thể có ROUGE cao hơn một bản viết lại đúng. Bảng ở mục Minh họa cho thấy rõ điều này.
+- **Cách tách từ.** Với tiếng Việt, tách theo âm tiết ("xe", "buýt") hay theo từ ("xe_buýt") cho số khác nhau (bài [Tách từ](/vi/nlp/tokenization/)). Chỉ so ROUGE giữa các hệ thống chấm cùng một cách.
+
+ROUGE hữu ích để so nhanh nhiều hệ thống trên cùng một bộ dữ liệu. Lin cho thấy nó tương quan tốt với điểm của người trên dữ liệu DUC. Nó không thay được người đọc khi cần biết bản tóm tắt có **đúng** không.
+
+### Hallucination và tính trung thực
+
+Một bản tóm tắt **trung thực** (faithful) với nguồn khi mọi điều nó nói đều được nguồn ủng hộ. Phần không được nguồn ủng hộ gọi là **hallucination** (bịa thông tin). Maynez và cộng sự (2020) chia làm hai loại:
+
+- **Hallucination nội sinh** (intrinsic): dùng thông tin **có** trong nguồn nhưng bóp méo nó, ví dụ ghép sai tên với chức vụ, hay "đầu tiên" thành "thứ hai".
+- **Hallucination ngoại sinh** (extrinsic): thêm thông tin **không có** trong nguồn, ví dụ một năm, một cái tên mà bài báo không hề nhắc.
+
+Họ cho người đọc chấm bản tóm tắt một câu của 500 bản tin trong bộ XSum. Hơn 70% bản tóm tắt của mọi hệ thống có hallucination, phần lớn là ngoại sinh, và hơn 90% chỗ hallucination ngoại sinh là **sai** chứ không phải kiến thức nền đúng. Đáng chú ý: chính các bản tham chiếu của XSum cũng có 76.9% chứa hallucination, gần hết là ngoại sinh (73.1%), vì đó là câu mở đầu do phóng viên viết, có thêm thông tin không nằm trong bài. Mô hình học từ những cặp như vậy thì học luôn thói "thêm thắt". Hai kết quả khác: các mô hình đã pre-train vừa có ROUGE cao hơn vừa trung thực hơn, và một thước đo dựa trên **suy diễn văn bản** (textual entailment: nguồn có suy ra được bản tóm tắt không) khớp với đánh giá trung thực của người tốt hơn ROUGE.
+
+Một số cách giảm hallucination hay dùng trong thực hành:
+
+- **Dữ liệu sạch hơn**: bỏ những cặp có bản tham chiếu chứa thông tin ngoài nguồn trước khi fine-tune.
+- **Giải mã thận trọng**: beam hay tham lam thay cho lấy mẫu nhiệt độ cao khi cần chính xác.
+- **Kiểm tra sau khi sinh**: dùng một mô hình suy diễn văn bản kiểm từng câu, hay so từng con số và tên riêng với nguồn.
+- **Lai hai cách**: trích các câu chính trước, rồi chỉ viết lại từ những câu đó; hay yêu cầu LLM trích dẫn câu nguồn cho mỗi ý.
+
+### Giới hạn
+
+- **Văn bản rất dài**: mô hình encoder–decoder có giới hạn số token đầu vào; phần vượt quá phải cắt bớt hoặc tóm tắt từng đoạn rồi gộp lại.
+- **Nhiều văn bản một lúc** (multi-document summarization): bài này chỉ xét một văn bản.
+- **Đánh giá**: ROUGE không đo được tính trung thực hay độ dễ đọc; các thước đo dựa trên suy diễn văn bản hay chấm bằng LLM cũng có sai số. Hộp thứ hai ở mục Lỗi hay gặp nói thêm.
+
+## Minh họa
+
+Hình dưới là phân phối của token kế tiếp sau "Hôm nay trời rất", với 10 ứng viên. Bài [Sử dụng API văn bản](/vi/llm/text-api/) đã dùng hình này để dạy từng thanh trượt ($T$, top-k, top-p). Ở đây, hãy nhìn hai đầu của nó như hai chiến lược giải mã trong bảng ở mục Lý thuyết:
+
+1. Kéo $T$ về 0 rồi bấm "Lấy 100 mẫu": "đẹp" có xác suất 1, ra 100 lần "đẹp". Đó là giải mã tham lam: chạy lại bao nhiêu lần cũng ra một câu.
+2. Đặt $T = 1$, tắt top-k và top-p, rồi bấm "Lấy 100 mẫu" vài lần: đó là lấy mẫu thuần. "đẹp" chỉ có 0.38, và cả những token cuối bảng như "tối" thỉnh thoảng cũng được rút. Ở từ vựng thật, đuôi này dài hàng chục nghìn token; top-k và top-p nằm giữa hai đầu này, cắt bớt đuôi.
+
+{/* VIZ: logit của mô hình không đổi; T làm phân phối nhọn hay phẳng, top-k và top-p cắt đuôi rồi chuẩn hóa lại, rồi mới rút một token; T về 0 là giải mã tham lam. */}
+<SamplingViz />
+
+Bảng thứ hai cho thấy ROUGE nhìn thấy gì và bỏ sót gì. Tham chiếu là "Đà Nẵng mở tuyến xe buýt điện đầu tiên"; mỗi hàng là một bản máy khác nhau, điểm là F1, mỗi âm tiết là một từ (tính bằng các hàm ROUGE của ô code đầu tiên). Hãy so hàng "viết lại cùng nghĩa" với hai hàng sai sự thật.
+
+| Bản máy | Đúng nghĩa? | ROUGE-1 | ROUGE-2 | ROUGE-L |
+|---|---|---:|---:|---:|
+| Đà Nẵng mở tuyến xe buýt điện đầu tiên | Đúng, chép y nguyên | 1.000 | 1.000 | 1.000 |
+| Tuyến xe buýt điện đầu tiên mở ở Đà Nẵng | Đúng, đảo trật tự | 0.947 | 0.706 | 0.632 |
+| Đà Nẵng khai trương tuyến buýt chạy điện đầu tiên | Đúng, viết lại | 0.737 | 0.353 | 0.737 |
+| Đà Nẵng mở tuyến xe buýt điện thứ hai | Sai | 0.778 | 0.750 | 0.778 |
+| Đà Nẵng đóng tuyến xe buýt điện đầu tiên | Sai, nghĩa ngược | 0.889 | 0.750 | 0.889 |
+
+Câu "đóng tuyến" nói ngược hẳn nguồn mà có ROUGE-1 0.889, cao hơn câu viết lại đúng (0.737). ROUGE đo mức **trùng chữ**, không đo mức **đúng**.
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: ô tóm tắt trích xuất với Python 3.14 trên Pyodide (chỉ dùng thư viện chuẩn), ô T5 với Python 3.14, `transformers` 5.22 và PyTorch 2.14 trên CPU. Ô thứ nhất chạy ngay trên trang. Ô thứ hai cần PyTorch và tải mô hình từ Hugging Face Hub, nên chạy trên máy bạn.
+
+### Tóm tắt trích xuất và ROUGE
+
+Ô dưới làm lại hai phần của mục Lý thuyết trên bản tin xe buýt điện (bảy câu, tự viết cho bài này). Phần đầu chấm mỗi câu bằng cosine giữa vectơ TF-IDF của câu và vectơ của cả bài, rồi giữ hai câu điểm cao nhất theo thứ tự xuất hiện. Phần sau cài ROUGE-1, ROUGE-2, ROUGE-L (F1) từ đầu, rồi so hai bản tóm tắt với một bản tham chiếu tự viết: bản TF-IDF, và bản "lead-2" lấy hai câu đầu.
+
+<PythonRunner code={extractiveCode} title="Tóm tắt trích xuất bằng TF-IDF và ROUGE" />
+
+Đọc kết quả:
+
+- **Điểm bảy câu** là 0.520, 0.473, 0.405, 0.466, 0.431, 0.360, 0.484. Câu 1 (mở tuyến đầu tiên) và câu 7 (năm sau mở thêm ba tuyến) cao nhất: cả hai nhắc "tuyến xe buýt điện", cụm từ của cả bài. Câu 6 (người dân khen xe êm) thấp nhất, vì phần lớn từ của nó không có ở câu khác.
+- **Bản TF-IDF chọn câu 1 và 7**, được ROUGE-1 0.667, ROUGE-2 0.557, ROUGE-L 0.603. Bản lead-2 chỉ được 0.492, 0.413, 0.492: câu 2 nói độ dài tuyến và giờ chạy, mà bản tham chiếu không nhắc.
+- **Tính lại ROUGE-1 của bản TF-IDF**: bản máy có 36 từ, tham chiếu 27 từ, trùng 21. $P = 21/36 \approx 0.583$, $R = 21/27 \approx 0.778$, F1 $\approx 0.667$. Precision thấp hơn recall vì hai câu chép nguyên văn còn kéo theo "Sáng 3/11", "đưa vào hoạt động", "dự kiến".
+- Ý "tháng đầu miễn phí vé" trong tham chiếu nằm ở câu 4 (0.466), xếp thứ ba nên bị bỏ. Muốn có nó thì phải giữ ba câu, hoặc viết lại.
+
+Thử đổi `[:2]` thành `[:3]` ở dòng chọn câu: câu 4 vào bản tóm tắt. Hay thử thay điểm cosine bằng trung bình idf của các từ trong câu, rồi xem câu nào được chọn.
+
+### Tóm tắt bằng T5-small, ba cách giải mã
+
+File dưới tóm tắt một bản tin tiếng Anh tự viết (mưa lớn ở Huế) bằng `google-t5/t5-small` (Raffel và cộng sự, 2020), khoảng 60 triệu tham số. Code gọi thẳng `AutoTokenizer` và `AutoModelForSeq2SeqLM.generate`, để bạn thấy rõ các tham số giải mã. Cùng một mô hình, cùng một đầu vào, ba cấu hình: tham lam, beam $B = 4$, và lấy mẫu top-p 0.9 (đặt `top_k=0`, vì khi lấy mẫu `generate` mặc định còn bật top-k 50). Trước mỗi lần sinh, `set_seed(0)` cố định bộ sinh số ngẫu nhiên.
+
+<LocalCode
+  code={t5Code}
+  title="Tóm tắt bằng T5-small: tham lam, beam, top-p"
+  packages={['transformers', 'torch']}
+  hardware="CPU là đủ. Lần chạy đầu tải khoảng 244 MB (trọng số mô hình 242 MB và tokenizer). Khi đã có mô hình trong máy, cả file chạy khoảng 10–20 giây trên CPU; máy bận có thể mất vài phút"
+>
+
+```text
+input tokens: 83
+[greedy] heavy rain hits central city of Hue on Monday, flooding more than 2,000 homes and closing 40 schools. the river rose 1.5 metres overnight, the highest level since 2020.
+[beam 4] heavy rain hit central city of Hue on Monday, flooding more than 2,000 homes and closing 40 schools. the river rose 1.5 metres overnight, the highest level since 2020. no deaths have been reported.
+[top-p 0.9] heavy rain hit the central city of Hue on monday. about 3,000 people are moved to safer areas, and no deaths have been reported. the river rose 1.5 metres overnight, the highest level since 2020.
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Cả ba bản gần như là trích xuất**: phần lớn câu chép từ nguồn, chỉ bỏ bớt vài từ ("Local officials said"). Bài báo T5 có ghi rằng trên CNN/Daily Mail, dữ liệu tóm tắt mà T5 đã học, các cách thuần trích xuất cũng làm tốt. Có lẽ vì vậy mô hình học được rằng chép là an toàn. Chữ thường ở đầu câu ("the river", "monday") có lẽ cũng là dấu vết của dữ liệu đó, vốn đã được đổi về chữ thường.
+- **Tham lam** dừng sau hai ý và đổi "hit" thành "hits". **Beam 4** tìm được một chuỗi dài hơn, thêm "no deaths have been reported", một ý quan trọng. Hai bản này lần nào chạy cũng giống nhau.
+- **Top-p 0.9** chọn khác: thêm 3 000 người được sơ tán, bỏ số nhà bị ngập, và đổi "were moved" thành "are moved". Không có chi tiết nào bịa ra ở đây, nhưng mỗi lần đổi seed là một bản khác. Với tóm tắt, sự đa dạng này ít khi là thứ bạn cần.
+
+Seed cố định nên trên cùng máy, cùng phiên bản thư viện, kết quả lặp lại được. Ở máy hay phiên bản khác, dòng `top-p` có thể khác. T5-small chỉ được pre-train trên tiếng Anh, nên đừng đưa bản tin tiếng Việt vào nó; với tiếng Việt, hãy tìm hiểu ViT5.
+
+## Lỗi hay gặp
+
+:::caution[Dùng một cách giải mã cho mọi việc]
+Lấy mẫu với nhiệt độ cao để tóm tắt hợp đồng thì mỗi lần chạy ra một bản, và dễ đổi một con số. Beam search để viết truyện thì văn nhạt và hay lặp: trong thí nghiệm của Holtzman và cộng sự, 28.94% đoạn sinh bằng beam $B = 16$ bị kẹt trong vòng lặp. Hãy chọn theo loại việc: sinh có định hướng (tóm tắt, dịch, trích xuất) dùng beam hoặc tham lam; sinh mở dùng top-p hay top-k kèm nhiệt độ. Rồi đọc thử vài chục đầu ra trước khi chốt.
+:::
+
+:::caution[Tin rằng ROUGE cao nghĩa là bản tóm tắt đúng]
+Ở bảng của mục Minh họa, "Đà Nẵng đóng tuyến xe buýt điện đầu tiên" có ROUGE-1 0.889, cao hơn một bản viết lại đúng nghĩa. ROUGE đếm chữ trùng, không kiểm sự thật. Dùng ROUGE để so nhanh các hệ thống trên cùng một bộ dữ liệu, cùng một cách tách từ. Muốn biết bản tóm tắt có trung thực không, hãy kiểm thêm: so số liệu và tên riêng với nguồn, dùng một mô hình suy diễn văn bản, và đọc một mẫu ngẫu nhiên bằng mắt.
+:::
+
+:::caution[Đặt phạt lặp quá mạnh]
+`repetition_penalty` lớn hay `no_repeat_ngram_size` nhỏ chặn luôn những lần lặp cần thiết. Bản tóm tắt về một công ty phải nhắc tên công ty nhiều lần; bản về xe buýt điện có thể cần "xe buýt điện" hai lần, mà `no_repeat_ngram_size=3` thì cấm. Khi đó mô hình buộc phải viết vòng, có khi đổi sang một từ sai. Keskar và cộng sự dùng $\theta \approx 1.2$. Hãy tăng từ từ và đọc đầu ra, đừng đặt một giá trị lớn "cho chắc".
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Sinh văn bản là vòng lặp tự hồi quy: mô hình cho phân phối của token kế tiếp, chiến lược giải mã chọn token. Tham lam và beam search ổn định nhưng dễ lặp khi viết dài (văn bản thoái hóa); lấy mẫu thuần đa dạng nhưng dễ lạc vào đuôi; top-k và top-p cắt đuôi, top-p theo độ chắc của mô hình. Phạt lặp chia logit dương (nhân logit âm) của token đã xuất hiện cho $\theta$.
+- Tóm tắt trích xuất chọn câu nguyên văn (lead, cosine TF-IDF với vectơ cả bài, TextRank): không bịa được, nhưng có thể rời rạc. Tóm tắt tóm lược viết lại bằng encoder–decoder đã pre-train (BART, T5, PEGASUS với mục tiêu sinh câu bị bỏ) hay bằng LLM qua prompt: trôi chảy, nhưng có thể có hallucination.
+- ROUGE-N đếm $n$-gram trùng (lấy $\min$ hai bên), ROUGE-L dùng dãy con chung dài nhất; $P$ chia cho bản máy, $R$ chia cho tham chiếu, F1 là trung bình điều hòa. ROUGE không thấy đồng nghĩa và không đo đúng sai.
+- Hallucination nội sinh bóp méo thông tin của nguồn, hallucination ngoại sinh thêm thông tin nguồn không có. Maynez và cộng sự thấy hơn 70% bản tóm tắt một câu trên XSum có hallucination. Giảm bằng dữ liệu sạch, giải mã thận trọng, kiểm tra bằng suy diễn văn bản, và cách lai trích xuất rồi viết lại.
+
+**Đọc thêm:**
+
+- Holtzman, A., Buys, J., Du, L., Forbes, M., Choi, Y. (2020). [*The Curious Case of Neural Text Degeneration*](https://arxiv.org/abs/1904.09751), ICLR 2020, mục 1, 2 và 5. Vì sao giải mã theo xác suất cao nhất làm văn lặp, và top-p sửa điều đó thế nào; có bảng số đo độ lặp của từng cách giải mã.
+- Lin, C.-Y. (2004). [*ROUGE: A Package for Automatic Evaluation of Summaries*](https://aclanthology.org/W04-1013/), Text Summarization Branches Out, mục 2 và 3. Định nghĩa gốc của ROUGE-N và ROUGE-L. Bài báo gọi bản tham chiếu là $X$ và bản máy là $Y$, chỗ bài này viết $\mathbf{y}$ và $\hat{\mathbf{y}}$.
+- Maynez, J., Narayan, S., Bohnet, B., McDonald, R. (2020). [*On Faithfulness and Factuality in Abstractive Summarization*](https://aclanthology.org/2020.acl-main.173/), ACL 2020, mục 2 và 3. Hallucination nội sinh và ngoại sinh, kèm số liệu từ người chấm.
+- Zhang, J., Zhao, Y., Saleh, M., Liu, P. J. (2020). [*PEGASUS: Pre-training with Extracted Gap-sentences for Abstractive Summarization*](https://arxiv.org/abs/1912.08777), ICML 2020, mục 3. Mục tiêu sinh câu bị bỏ và các cách chọn câu quan trọng.
+- Phan, L., Tran, H., Nguyen, H., Trinh, T. H. (2022). [*ViT5: Pretrained Text-to-Text Transformer for Vietnamese Language Generation*](https://aclanthology.org/2022.naacl-srw.18/), NAACL 2022 Student Research Workshop, trang 136–142. T5 cho tiếng Việt, có kết quả tóm tắt tóm lược trên Vietnews và WikiLingua.
+- Hugging Face (2026). [*Generation strategies*](https://huggingface.co/docs/transformers/v5.22.1/en/generation_strategies), tài liệu Transformers 5.22.1. Các cách giải mã cơ bản và tham số `num_beams`, `do_sample` dùng trong ô T5. Danh sách đủ tham số (`top_k`, `top_p`, `repetition_penalty`, `no_repeat_ngram_size`…) có ở trang [*Generation*](https://huggingface.co/docs/transformers/v5.22.1/en/main_classes/text_generation), mục `GenerationConfig`.
+
+<LessonProgress />

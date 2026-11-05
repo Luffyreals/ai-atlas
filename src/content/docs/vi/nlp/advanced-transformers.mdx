@@ -1,0 +1,320 @@
+---
+title: Transformers nâng cao
+description: 'Vì sao cùng khối Transformer lại thành BERT, GPT, T5? Ba họ kiến trúc, mã hóa vị trí từ sin/cos tới ALiBi, Pre-LN, và cách vượt chi phí L² của attention.'
+quiz:
+  - question: 'Một mô hình dùng ALiBi với 8 đầu. Truy vấn ở vị trí 100 xét khóa ở vị trí 20. Bias cộng vào điểm của cặp này ở đầu 1 ($m_1 = 1/2$) và ở đầu 8 ($m_8 = 1/256$) là bao nhiêu, và điều đó nói gì?'
+    options:
+      - '$-40$ ở cả hai đầu, vì khoảng cách giữa hai token như nhau'
+      - '$+40$ và $+0.3125$: token xa được cộng điểm để mô hình nhớ được ngữ cảnh dài'
+      - '$-40$ và $-0.3125$: đầu 1 gần như chỉ nhìn token gần, đầu 8 vẫn nhìn được token xa'
+      - '$0$ ở cả hai đầu, vì ALiBi chỉ phạt các token nằm ngoài độ dài lúc huấn luyện'
+    answer: 2
+    explanation: 'Bias là $-m_h (i - j)$ với $i - j = 80$: đầu 1 được $-80/2 = -40$, đầu 8 được $-80/256 = -0.3125$. Sau softmax, $-40$ làm trọng số gần như bằng 0, còn $-0.3125$ chỉ giảm nhẹ. Độ dốc khác nhau theo đầu, nên khoảng cách như nhau vẫn cho bias khác nhau. Bias luôn không dương: ALiBi phạt token xa, không thưởng.'
+  - question: 'Một decoder có 3 lớp, lớp nào cũng dùng attention cửa sổ trượt $w = 4$: mỗi token nhìn chính nó và 3 token ngay trước. Ở đầu ra lớp thứ 3, token ở vị trí 20 có thể mang thông tin của token xa nhất ở vị trí nào?'
+    options:
+      - 'Vị trí 17'
+      - 'Vị trí 11'
+      - 'Vị trí 8'
+      - 'Vị trí 1, vì attention nhìn được cả chuỗi'
+    answer: 1
+    explanation: 'Mỗi lớp kéo thông tin về thêm $w - 1 = 3$ vị trí. Lớp 1 cho vị trí 20 thấy tới 17; ở lớp 2, vị trí 17 đã mang thông tin tới 14; ở lớp 3 là tới 11, tức $20 - 3 \cdot 3$. Vị trí 17 là tầm nhìn của một lớp. Vị trí 8 là lấy $w = 4$ thay cho $w - 1$ ở mỗi lớp.'
+  - question: 'So với cách cài attention thông thường, FlashAttention thay đổi điều gì?'
+    options:
+      - 'Bỏ các cặp vị trí ở xa, nên số điểm phải tính chỉ còn khoảng $L \cdot w$'
+      - 'Thay softmax bằng $\phi(\mathbf{q})^\top\phi(\mathbf{k})$ để chi phí tăng tuyến tính theo $L$'
+      - 'Xấp xỉ ma trận attention bằng một ma trận hạng thấp, nhanh hơn nhưng kém chính xác'
+      - 'Cho cùng kết quả (chỉ khác sai số làm tròn), nhưng tính theo từng khối trong bộ nhớ nhanh trên chip, không ghi cả ma trận $L \times L$ ra bộ nhớ chính của GPU'
+    answer: 3
+    explanation: 'FlashAttention là attention chính xác: vẫn tính mọi cặp, nên số phép nhân vẫn tỉ lệ $L^2$. Nó nhanh vì đọc ghi bộ nhớ chính ít hơn, và tốn bộ nhớ tỉ lệ $L$ vì không giữ ma trận $L \times L$. Phương án thứ nhất là cửa sổ trượt, phương án thứ hai là attention tuyến tính: cả hai đổi kết quả.'
+  - question: 'Bạn cần gán nhãn từng token (tên người, địa danh) cho 50 000 câu tin tức, máy chỉ có CPU. Họ Transformer nào là điểm khởi đầu hợp nhất?'
+    options:
+      - 'Encoder-only như BERT: mỗi token nhìn cả hai phía, ra một vectơ cho từng token, chỉ cần gắn thêm một lớp phân loại'
+      - 'Decoder-only, vì các mô hình sinh văn bản lớn hơn nên luôn chính xác hơn'
+      - 'Encoder–decoder, vì phải sinh ra một chuỗi nhãn mới'
+      - 'Họ nào cũng như nhau, vì cả ba dùng cùng một khối Transformer'
+    answer: 0
+    explanation: 'Gán nhãn token cần một đầu ra cho mỗi token, và nhãn của một từ phụ thuộc cả từ phía sau ("Trường Sa" là địa danh, còn trong "Trường nói" thì "Trường" là tên người). Encoder-only cho đúng thứ đó, lại nhỏ nên chạy được trên CPU. Decoder-only chỉ nhìn về trước, và mô hình lớn tốn hơn nhiều. Encoder–decoder làm được nhưng thừa cả một decoder. Ba họ cùng khối nhưng khác mặt nạ và mục tiêu huấn luyện, nên không như nhau.'
+  - question: 'Một Transformer Post-LN 48 lớp có loss thành NaN sau vài trăm bước khi bạn bỏ warmup. Theo Xiong và cộng sự (2020), thay đổi kiến trúc nào nhắm thẳng vào nguyên nhân?'
+    options:
+      - 'Bỏ kết nối tắt để gradient không bị cộng dồn qua các lớp'
+      - 'Chuyển chuẩn hóa lớp vào trước mỗi khối con (Pre-LN), để kết nối tắt chỉ còn phép cộng'
+      - 'Tăng tốc độ học để mô hình ra khỏi vùng xấu nhanh hơn'
+      - 'Đổi embedding vị trí học được sang ALiBi'
+    answer: 1
+    explanation: 'Ở Post-LN, gradient của các tham số gần đầu ra lớn lúc khởi tạo, nên tốc độ học lớn ngay từ đầu làm huấn luyện mất ổn định; warmup là cách chữa triệu chứng. Pre-LN giữ kết nối tắt là phép cộng thuần, gradient lúc khởi tạo nhỏ và đều hơn, nên Xiong và cộng sự bỏ được warmup. Bỏ kết nối tắt làm mạng sâu khó học hơn nhiều. Mã hóa vị trí không liên quan tới chuyện này.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import masksCode from '@code/nlp/advanced-transformers/masks-alibi.vi.py?raw';
+import costCode from '@code/nlp/advanced-transformers/attention-cost.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Đặt được BERT, GPT, T5 và BART vào ba họ Transformer: **encoder-only** (chỉ có encoder), **decoder-only** (chỉ có decoder) và **encoder–decoder**, và giải thích mỗi họ hợp việc gì nhờ mặt nạ và mục tiêu huấn luyện của nó.
+- So sánh được các cách mã hóa vị trí: sin/cos, embedding vị trí học được, vị trí tương đối, RoPE (rotary position embedding, mã hóa vị trí xoay) và **ALiBi** (attention with linear biases), nhất là khả năng **ngoại suy** (extrapolation) của mỗi cách: dùng cho chuỗi dài hơn lúc huấn luyện.
+- Giải thích được vì sao đặt chuẩn hóa lớp (layer normalization) trước khối con (**Pre-LN**) dễ huấn luyện mô hình sâu hơn đặt sau (**Post-LN**).
+- Tính được chi phí $L^2$ của attention, và nhận ra mỗi hướng giảm nó đánh đổi gì: **attention cửa sổ trượt** (sliding window attention), **attention tuyến tính** (linear attention), **FlashAttention**, KV cache với MQA (multi-query attention) và GQA (grouped-query attention, attention truy vấn theo nhóm).
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Như ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/), mỗi đầu attention tính **truy vấn** (query) $\mathbf{Q}$, **khóa** (key) $\mathbf{K}$ và **giá trị** (value) $\mathbf{V}$, mỗi ma trận $L \times d$, rồi lấy $\mathrm{softmax}(\mathbf{Q}\mathbf{K}^\top/\sqrt{d} + \mathbf{M})\,\mathbf{V}$. **Mặt nạ** $\mathbf{M}$ có số 0 ở ô được nhìn và $-\infty$ ở ô bị che. BERT dùng mặt nạ toàn số 0 (mỗi token nhìn cả hai phía), GPT dùng **mặt nạ nhân quả** (causal mask: chỉ nhìn về trước). Bài này viết $i$ cho vị trí của truy vấn (hàng) và $j$ cho vị trí của khóa (cột).
+:::
+
+## Trực giác
+
+### Một bộ khung, ba kiểu nhà
+
+Transformer gốc (Vaswani và cộng sự, 2017) là một mô hình dịch máy: encoder đọc câu nguồn, decoder viết câu đích. Chỉ hai năm sau, cùng bộ linh kiện đó đã thành ba họ rất khác nhau:
+
+- **BERT** (2019) chỉ giữ encoder. Nó đọc cả câu một lần, mỗi từ nhìn cả hai phía, rồi trả về một vectơ cho từng từ. Hợp để **hiểu**: phân loại câu, tìm tên riêng.
+- **GPT** (2018 trở đi) chỉ giữ decoder. Nó đọc từ trái sang phải và đoán token kế tiếp. Hợp để **viết tiếp**.
+- **T5** và **BART** (2020) giữ cả hai nửa. Hợp để **biến** một văn bản thành văn bản khác: dịch, tóm tắt.
+
+Giống ba ngôi nhà xây từ cùng một loại gạch: khác nhau ở chỗ đặt tường (mặt nạ) và ở việc ngôi nhà được dùng để làm gì (mục tiêu huấn luyện).
+
+### Từ 512 token tới hơn 128 nghìn token
+
+BERT chỉ đọc được tối đa 512 token, khoảng một trang giấy. Llama 3 (bản 3.1, 2024) đọc được 128K token, cỡ một cuốn sách (xem bài [Họ LLaMA](/vi/llm/llama-family/)). Hai chỗ phải thay đổi để đi được quãng đường đó:
+
+1. **Vị trí.** BERT học một vectơ riêng cho mỗi vị trí từ 0 tới 511. Đưa vào token thứ 600 thì không có vectơ nào cho nó. Cần một cách mã hóa vị trí dùng được cho cả những độ dài chưa gặp.
+2. **Chi phí.** Self-attention chấm điểm **mọi cặp** token. Gấp đôi độ dài thì số cặp gấp bốn. Với 128K token, chỉ riêng ma trận điểm của một đầu ở một lớp đã khoảng 34 GB nếu lưu đủ (ô code ở dưới sẽ tính).
+
+Còn một chuyện nữa: mô hình càng sâu thì càng khó huấn luyện. Vị trí đặt một lớp chuẩn hóa hóa ra quan trọng hơn bạn tưởng.
+
+Bài toán của bài này là: **cùng một khối Transformer, vì sao lại có ba họ mô hình, và cần thay những linh kiện nào (mã hóa vị trí, chỗ đặt chuẩn hóa lớp, cách tính attention) để mô hình sâu hơn và đọc được văn bản dài hơn nhiều lần?**
+
+## Lý thuyết
+
+### Ba họ Transformer
+
+Ba họ khác nhau ở hai thứ: **mặt nạ** quyết định token nào nhìn được token nào, và **mục tiêu huấn luyện** quyết định mô hình học đoán cái gì.
+
+**Encoder-only.** Mặt nạ toàn số 0: mỗi token nhìn mọi token. Không thể huấn luyện bằng cách đoán token kế tiếp, vì token kế tiếp đã nằm ngay trong tầm nhìn. BERT vì vậy che một số token rồi bắt mô hình đoán lại (mô hình ngôn ngữ có che, masked language modeling, MLM). Chi tiết ở bài [BERT](/vi/nlp/bert/).
+
+**Decoder-only.** Mặt nạ nhân quả. Mục tiêu là đoán token kế tiếp ở mọi vị trí. Mọi việc, kể cả dịch hay phân loại, được viết thành "đọc phần đầu, viết tiếp phần sau". Chi tiết ở bài [GPT và huấn luyện phân tán](/vi/nlp/gpt-distributed-training/).
+
+**Encoder–decoder.** Encoder không có mặt nạ, decoder có mặt nạ nhân quả và nhìn sang encoder qua cross-attention, như ở bài [Mô hình chuỗi sang chuỗi (Seq2Seq)](/vi/llm/seq2seq/). Hai mô hình nổi tiếng nhất của họ này khác nhau ở cách **làm hỏng** văn bản khi pre-train, một kiểu **khử nhiễu** (denoising):
+
+- **T5** (Raffel và cộng sự, 2020) dùng **làm hỏng đoạn** (span corruption). Chọn ngẫu nhiên 15% token, độ dài đoạn trung bình 3 (cấu hình cuối của bài báo). Mỗi đoạn liền nhau bị thay bằng **một token đánh dấu** (sentinel) riêng, ví dụ `<X>`, `<Y>`. Đầu ra chỉ gồm các đoạn bị bỏ, mỗi đoạn đứng sau token đánh dấu của nó, cộng một token đánh dấu cuối.
+- **BART** (Lewis và cộng sự, 2020) thử nhiều kiểu làm hỏng. Bản cuối dùng **điền đoạn** (text infilling): các đoạn có độ dài lấy theo phân phối Poisson với $\lambda = 3$ bị thay bằng **một** token `[MASK]`, tổng cộng 30% token bị che; thêm vào đó các câu trong văn bản bị **xáo thứ tự**. Decoder phải viết lại **toàn bộ** văn bản gốc. Vì mỗi đoạn chỉ còn một `[MASK]`, mô hình còn phải đoán đoạn bị mất dài bao nhiêu.
+
+Một ví dụ tự đặt, tách theo âm tiết cho dễ đọc. Câu gốc: "Hà Nội là thủ đô của Việt Nam".
+
+| Mục tiêu | Đầu vào encoder | Đích của decoder |
+|---|---|---|
+| T5, làm hỏng đoạn | Hà Nội `<X>` đô của `<Y>` Nam | `<X>` là thủ `<Y>` Việt `<Z>` |
+| BART, điền đoạn | Hà Nội `[MASK]` đô của `[MASK]` Nam | Hà Nội là thủ đô của Việt Nam |
+
+Đích của T5 ngắn hơn nhiều, nên mỗi bước huấn luyện rẻ hơn. Phép so ba kiến trúc trong bài báo T5 có ở bài [Seq2Seq](/vi/llm/seq2seq/).
+
+### Thông tin vị trí
+
+Self-attention không biết thứ tự. Không có mặt nạ, đổi chỗ hai token trong đầu vào thì đầu ra chỉ đổi chỗ theo, các giá trị giữ nguyên: "chó cắn người" và "người cắn chó" là cùng một **tập** token. Phải đưa vị trí vào từ bên ngoài. Có hai chỗ để đưa vào: **cộng vào embedding** ở đầu vào, hoặc **sửa điểm attention** ở mọi lớp.
+
+**Sin/cos (Vaswani và cộng sự, 2017).** Vị trí $p$ được mã hóa thành một vectơ $D$ chiều, với $D$ là số chiều của mô hình, rồi cộng vào embedding. Cặp chiều thứ $k$ là một sóng sin và cos:
+
+$$
+\mathrm{PE}_{(p,\,2k)} = \sin\!\left(\frac{p}{10\,000^{2k/D}}\right), \qquad
+\mathrm{PE}_{(p,\,2k+1)} = \cos\!\left(\frac{p}{10\,000^{2k/D}}\right)
+$$
+
+Mỗi cặp chiều quay một tốc độ: cặp đầu đổi nhanh theo $p$, cặp cuối đổi rất chậm, như kim giây và kim giờ. Công thức tính được cho mọi $p$, không có tham số học.
+
+**Embedding vị trí học được.** Thay công thức bằng một bảng $L_{\max} \times D$ học cùng mô hình. Vaswani và cộng sự thử cả hai và thấy kết quả gần như như nhau; họ chọn sin/cos vì hy vọng nó dùng được cho chuỗi dài hơn lúc huấn luyện. BERT dùng bảng học được với $L_{\max} = 512$, GPT-2 với $L_{\max} = 1\,024$. Đây là gốc của giới hạn 512 token: vị trí 512 trở đi không có hàng nào trong bảng.
+
+**Vị trí tương đối.** Hai cách trên cho mỗi token một nhãn tuyệt đối. Nhưng điều thường quan trọng là **khoảng cách** $j - i$: "mèo" đứng ngay trước "đuổi" thì ý nghĩa như nhau dù câu nằm ở đầu hay giữa văn bản. Shaw, Uszkoreit và Vaswani (2018) thêm vào khóa, và cả vào giá trị, một vectơ học được theo $j - i$, cắt ở $\pm k$ (họ dùng $k = 16$): mọi khoảng cách xa hơn $k$ dùng chung một vectơ. T5 làm gọn hơn nữa: **cộng một số** $b_h(j - i)$ vào điểm attention. Mỗi đầu $h$ có bộ số riêng, dùng chung cho mọi lớp; khoảng cách được gom vào 32 nhóm, rộng dần theo thang logarit tới 128, xa hơn nữa thì chung một nhóm.
+
+**RoPE** (Su và cộng sự, 2021) xoay $\mathbf{q}$ và $\mathbf{k}$ một góc tỉ lệ với vị trí, ở mọi lớp. Nhờ tính chất của phép xoay, điểm $\mathbf{q}^\top\mathbf{k}$ sau khi xoay chỉ phụ thuộc vị trí qua độ lệch. Phép dẫn và ô NumPy kiểm chứng có ở bài [Họ LLaMA](/vi/llm/llama-family/).
+
+**ALiBi** (Press, Smith và Lewis, 2022) bỏ hết vectơ vị trí. Nó chỉ cộng vào điểm attention một bias **cố định, không học**, tỉ lệ với khoảng cách:
+
+$$
+s_{ij} = \frac{\mathbf{q}_i^\top \mathbf{k}_j}{\sqrt{d}} - m_h\,(i - j), \qquad j \le i
+$$
+
+- $s_{ij}$ là điểm trước softmax của truy vấn $i$ với khóa $j$. ALiBi được thiết kế cho mô hình nhân quả, nên chỉ xét $j \le i$; ô $j > i$ vẫn bị mặt nạ che.
+- $i - j \ge 0$ là khoảng cách. Token càng xa, điểm bị trừ càng nhiều. Khoảng cách 0 (chính nó) không bị trừ.
+- $m_h > 0$ là **độ dốc** (slope) của đầu $h$. Ở đây $m_h$ là tên của bài báo, không phải số mẫu $m$ như quy ước chung của site.
+
+**Độ dốc chọn thế nào?** Với $H$ đầu, các độ dốc là cấp số nhân có số hạng đầu và công bội cùng bằng $2^{-8/H}$ (cách tính này dành cho $H$ là lũy thừa của 2, như 8 hay 16). Với $H = 8$, đó là $\tfrac{1}{2}, \tfrac{1}{4}, \dots, \tfrac{1}{256}$. Đầu có $m_h = 1/2$ trừ 5 điểm cho token cách 10 vị trí, nên gần như chỉ nhìn vài token gần. Đầu có $m_h = 1/256$ chỉ trừ khoảng 0.04, nên vẫn nhìn xa được. Các tác giả thử cho độ dốc học được nhưng kết quả ngoại suy không tốt, nên giữ cố định.
+
+**Vì sao ALiBi ngoại suy được?** Không có tham số nào gắn với một vị trí cụ thể. Ở độ dài mới, mọi thứ mô hình thấy vẫn là "điểm nội dung trừ một khoản theo khoảng cách", đúng loại tín hiệu nó đã quen. Bài báo cho số đo: mô hình 1.3 tỉ tham số huấn luyện ở $L = 1\,024$, dùng ở $L = 2\,048$, đạt cùng perplexity với mô hình sin/cos huấn luyện thẳng ở $2\,048$, mà huấn luyện nhanh hơn 11% và tốn ít hơn 11% bộ nhớ. Trên WikiText-103, perplexity của ALiBi tốt nhất quanh $2L$ tới $3L$, và vẫn giữ tốt khi đánh giá tới hơn 10 000 token, kể cả với mô hình huấn luyện ở $L = 512$. Cũng trong bài báo đó, sin/cos ngoại suy rất kém dù về lý thuyết tính được cho mọi vị trí; RoPE khá hơn nhưng vẫn tụt; bias của T5 ngoại suy tốt nhưng chậm hơn hẳn.
+
+| Cách | Vị trí đưa vào đâu | Tham số học | Dùng ở | Chuỗi dài hơn lúc huấn luyện |
+|---|---|---|---|---|
+| Sin/cos | Cộng vào embedding đầu vào | Không | Transformer gốc | Tính được, nhưng chất lượng tụt nhanh |
+| Học được | Cộng vào embedding đầu vào | Bảng $L_{\max} \times D$ | BERT, GPT-2 | Không có vectơ cho vị trí $\ge L_{\max}$ |
+| Tương đối (bias T5) | Cộng vào điểm, mọi lớp | Một số cho mỗi nhóm khoảng cách, mỗi đầu | T5 | Khá tốt, nhưng chậm |
+| RoPE | Xoay $\mathbf{q}$, $\mathbf{k}$, mọi lớp | Không | Họ Llama | Tụt khi vượt xa; cần huấn luyện thêm để mở rộng |
+| ALiBi | Cộng $-m_h(i - j)$ vào điểm, mọi lớp | Không | Mô hình của bài báo ALiBi | Tốt nhất quanh $2L$, giữ tốt tới hơn 10 000 token |
+
+### Post-LN và Pre-LN
+
+Mỗi khối Transformer có hai khối con, attention và mạng truyền thẳng (feed-forward network, FFN). Gọi chung một khối con là $F$. Có hai chỗ đặt chuẩn hóa lớp $\mathrm{LN}$:
+
+$$
+\text{Post-LN:}\quad \mathbf{H} \leftarrow \mathrm{LN}\big(\mathbf{H} + F(\mathbf{H})\big)
+\qquad\qquad
+\text{Pre-LN:}\quad \mathbf{H} \leftarrow \mathbf{H} + F\big(\mathrm{LN}(\mathbf{H})\big)
+$$
+
+Transformer gốc và BERT dùng Post-LN. GPT-2 dùng Pre-LN, cộng thêm một $\mathrm{LN}$ ở cuối chồng khối. T5 và họ Llama cũng đặt chuẩn hóa trước (pre-norm), nhưng với biến thể chỉ co giãn: T5 bỏ vectơ dịch của LN, Llama dùng RMSNorm.
+
+**Nhìn đường đi của gradient.** Gọi $\mathbf{H}_l$ là đầu ra sau khối con thứ $l$, có $N$ khối con; mỗi lớp có hai khối con nên $N = 2N_{\text{layer}}$, với $N_{\text{layer}}$ là số lớp. Với Pre-LN, mỗi bước chỉ **cộng thêm** một phần hiệu chỉnh, nên trải hết các bước ta có:
+
+$$
+\mathbf{H}_N = \mathbf{H}_l + \sum_{k=l+1}^{N} F_k\big(\mathrm{LN}(\mathbf{H}_{k-1})\big)
+$$
+
+Đạo hàm của $\mathbf{H}_N$ theo $\mathbf{H}_l$ vì vậy là **ma trận đơn vị cộng với** đạo hàm của tổng. Phần đơn vị đến từ **kết nối tắt** (residual connection) và là một đường thẳng từ đầu ra về mọi lớp: gradient về tới lớp $l$ mà không phải đi qua một phép biến đổi nào. Với Post-LN, $\mathrm{LN}$ nằm ngay trên đường chính, nên gradient từ đầu ra phải đi qua $\mathrm{LN}$ của mọi khối phía trên.
+
+Xiong và cộng sự (2020) phân tích chuyện này lúc khởi tạo. Với Post-LN, gradient của các tham số ở lớp cuối có độ lớn cỡ $O(D\sqrt{\ln D})$, với $D$ là số chiều của mô hình, không giảm khi thêm lớp, và lớn hơn hẳn gradient ở các lớp đầu. Với Pre-LN, nó cỡ $O(D\sqrt{\ln D / N_{\text{layer}}})$, nhỏ đi khi mô hình sâu thêm, và đều giữa các lớp. Gradient lớn ở lớp cuối cộng với tốc độ học lớn ngay bước đầu làm huấn luyện Post-LN mất ổn định, nên Post-LN cần **khởi động tốc độ học** (warmup: tăng dần tốc độ học trong các bước đầu, xem bài [Debug mô hình ngôn ngữ](/vi/llm/debugging-language-models/)). Với Pre-LN, các tác giả bỏ được warmup mà vẫn đạt kết quả tương đương, với ít thời gian huấn luyện hơn.
+
+:::note[Ghi nhớ]
+Ba họ Transformer khác nhau ở mặt nạ (hai chiều, nhân quả, hay cả hai cộng cross-attention) và mục tiêu huấn luyện (MLM, đoán token kế, khử nhiễu). Vị trí có thể cộng vào embedding (sin/cos, học được) hoặc đưa vào điểm attention ở mọi lớp (tương đối, RoPE, ALiBi); cách thứ hai dùng được tốt hơn ở độ dài chưa gặp. Pre-LN giữ kết nối tắt là phép cộng thuần, nên mô hình sâu dễ huấn luyện hơn.
+:::
+
+### Chi phí $L^2$ của attention
+
+Ma trận điểm $\mathbf{Q}\mathbf{K}^\top$ có $L \times L$ ô, mỗi ô là một tích vô hướng $d$ chiều. Vậy mỗi đầu ở mỗi lớp tốn khoảng $L^2 d$ phép nhân cho điểm, thêm $L^2 d$ cho bước nhân với $\mathbf{V}$, và $L^2$ số nếu lưu cả ma trận. Gấp đôi $L$ thì cả hai gấp bốn. Ở 512 token, đó là chuyện nhỏ; ở 128K token thì không. Có bốn hướng xử lý, mỗi hướng đánh đổi một thứ khác.
+
+**1. Attention thưa: chỉ tính một phần các cặp.** Mỗi token chỉ nhìn $w$ token gần nhất, gọi là **cửa sổ trượt**. Với mặt nạ nhân quả, token $i$ nhìn các vị trí $j$ với $i - w < j \le i$. Số ô mỗi hàng không quá $w$, nên chi phí khoảng $L \cdot w$, tăng tuyến tính theo $L$.
+
+- Một token không nhìn thẳng được token cách xa hơn $w - 1$, nhưng các lớp chồng lên nhau mở rộng tầm nhìn: sau $N_{\text{layer}}$ lớp, thông tin có thể đi xa tới khoảng $N_{\text{layer}} (w - 1)$ vị trí, như các lớp tích chập chồng nhau. Mistral 7B (Jiang và cộng sự, 2023) dùng $w = 4\,096$ với 32 lớp và tính tầm nhìn lý thuyết khoảng 131K token. Cửa sổ còn giới hạn KV cache: chỉ cần giữ khóa và giá trị của $w$ token gần nhất.
+- **Longformer** (Beltagy, Peters và Cohan, 2020) là một encoder: cửa sổ hai chiều, mỗi token nhìn $w/2$ token mỗi bên ($w = 512$), có thể **giãn** (dilated: chừa khoảng trống trong cửa sổ để nhìn xa hơn). Thêm vào đó vài token có **attention toàn cục** (global attention) do người dùng chọn theo tác vụ, ví dụ `[CLS]` hay các token của câu hỏi: chúng nhìn mọi token và mọi token nhìn chúng. Longformer đọc được 4 096 token, gấp 8 lần BERT.
+- **BigBird** (Zaheer và cộng sự, 2020) ghép ba kiểu: cửa sổ, vài token toàn cục, và vài cặp **ngẫu nhiên**. Các tác giả chứng minh mẫu thưa này vẫn giữ được sức biểu diễn của attention đầy đủ, và đọc được chuỗi dài gấp khoảng 8 lần trên cùng phần cứng.
+
+**2. Attention tuyến tính: đổi thứ tự phép nhân.** Viết hàng $i$ của attention dưới dạng trung bình có trọng số, với hàm độ giống $\mathrm{sim}(\mathbf{q}, \mathbf{k}) = \exp(\mathbf{q}^\top\mathbf{k}/\sqrt{d})$:
+
+$$
+\mathbf{o}_i = \frac{\sum_{j} \mathrm{sim}(\mathbf{q}_i, \mathbf{k}_j)\, \mathbf{v}_j}{\sum_{j} \mathrm{sim}(\mathbf{q}_i, \mathbf{k}_j)}
+$$
+
+Katharopoulos và cộng sự (2020) thay $\mathrm{sim}$ bằng một tích vô hướng của hai vectơ đặc trưng, $\mathrm{sim}(\mathbf{q}, \mathbf{k}) = \phi(\mathbf{q})^\top\phi(\mathbf{k})$, với $\phi(x) = \mathrm{elu}(x) + 1$ áp từng thành phần, luôn dương. Thay vào, rồi đưa $\phi(\mathbf{q}_i)$ ra ngoài tổng vì nó không phụ thuộc $j$:
+
+$$
+\mathbf{o}_i = \frac{\sum_{j} \phi(\mathbf{q}_i)^\top\phi(\mathbf{k}_j)\, \mathbf{v}_j}{\sum_{j} \phi(\mathbf{q}_i)^\top\phi(\mathbf{k}_j)}
+= \frac{\phi(\mathbf{q}_i)^\top \Big(\sum_{j} \phi(\mathbf{k}_j)\,\mathbf{v}_j^\top\Big)}{\phi(\mathbf{q}_i)^\top \Big(\sum_{j} \phi(\mathbf{k}_j)\Big)}
+$$
+
+Hai tổng trong ngoặc **không phụ thuộc $i$**. Tổng ở tử là một ma trận $d \times d$, tổng ở mẫu là một vectơ $d$ chiều. Tính chúng một lần, mỗi hàng chỉ còn vài tích với $\phi(\mathbf{q}_i)$: tổng chi phí cỡ $L d^2$ thay vì $L^2 d$, và không bao giờ có ma trận $L \times L$. Với mặt nạ nhân quả, hai tổng thành tổng cộng dồn tới $i$, cập nhật mỗi bước như trạng thái ẩn của một mạng hồi tiếp; vì vậy bài báo có tên "Transformers are RNNs". Cái giá: đây là một **dạng attention khác**, không cho cùng kết quả với softmax, và mô hình phải được huấn luyện với chính dạng này.
+
+**3. FlashAttention: tính đúng như cũ, đọc ghi bộ nhớ ít đi.** Dao và cộng sự (2022) để ý rằng trên GPU, attention thường bị chặn bởi việc **đọc ghi bộ nhớ** hơn là số phép nhân. GPU có bộ nhớ chính lớn nhưng chậm (HBM, hàng chục GB) và bộ nhớ trên chip nhanh nhưng nhỏ (SRAM, khoảng 20 MB trên A100). Cách cài thường ghi ma trận điểm $L \times L$ ra HBM, đọc lại để làm softmax, ghi kết quả, rồi đọc lại lần nữa để nhân với $\mathbf{V}$.
+
+FlashAttention chia $\mathbf{Q}$, $\mathbf{K}$, $\mathbf{V}$ thành từng khối vừa SRAM và làm hết các bước cho một khối trước khi ghi ra. Khó khăn là softmax cần cả hàng. Mẹo là giữ cho mỗi hàng hai số chạy: điểm lớn nhất $\mu$ và tổng $\ell = \sum_j e^{s_{ij} - \mu}$ trên các khối đã đi qua. Khi gặp khối mới có điểm lớn nhất $\mu' > \mu$, tổng cũ chỉ cần nhân với $e^{\mu - \mu'}$ để đổi về mốc mới, vì $e^{s - \mu} \cdot e^{\mu - \mu'} = e^{s - \mu'}$; phần đầu ra đã cộng dồn cũng được nhân với cùng hệ số. Khi lan truyền ngược, FlashAttention tính lại các khối thay vì lưu ma trận.
+
+Kết quả là **attention chính xác**: cùng đầu ra (chỉ khác sai số làm tròn), cùng bậc $L^2$ phép nhân, nhưng bộ nhớ chỉ tăng tuyến tính theo $L$ và chạy nhanh hơn. Bài báo đo được huấn luyện GPT-2 với $L = 1\,024$ nhanh gấp 3 lần cách cài chuẩn, và BERT-large với $L = 512$ nhanh hơn 15% so với kỷ lục MLPerf 1.1. Vì không đổi kết quả, nó dùng được ngay cho mô hình đã huấn luyện.
+
+**4. Khi sinh văn bản: KV cache, MQA, GQA.** Khi sinh, khóa và giá trị của mọi token đã có được lưu lại (**KV cache**), và cache lớn lên theo $L$. MQA (Shazeer, 2019) cho mọi đầu truy vấn dùng chung một cặp khóa, giá trị; GQA (Ainslie và cộng sự, 2023) chia đầu truy vấn thành nhóm, mỗi nhóm chung một cặp. Chi tiết ở bài [Họ LLaMA](/vi/llm/llama-family/) và [Deploy LLM: nhiều GPU, phân tán](/vi/llm/llm-deployment/).
+
+Các hướng này cộng được với nhau: Mistral 7B dùng cùng lúc cửa sổ trượt, GQA và FlashAttention.
+
+### Giới hạn
+
+- **Ngoại suy có giới hạn.** Perplexity của ALiBi tốt nhất quanh $2L$; RoPE cần huấn luyện thêm để mở rộng ngữ cảnh. Hộp thứ hai ở mục Lỗi hay gặp nói rõ hơn.
+- **Ngữ cảnh dài không có nghĩa là dùng tốt ngữ cảnh dài.** Đọc được 128K token không bảo đảm mô hình tìm đúng chi tiết ở giữa văn bản; Liu và cộng sự (2023) thấy mô hình dùng thông tin ở đầu và cuối ngữ cảnh tốt hơn ở giữa (xem bài [Chatbot RAG](/vi/llm/rag-chatbot/)).
+- **Bài này chỉ dừng ở ý tưởng.** Phép dẫn RoPE, RMSNorm, SwiGLU và GQA chi tiết ở bài [Họ LLaMA](/vi/llm/llama-family/); mixture of experts và MLA ở bài [Họ DeepSeek](/vi/llm/deepseek-family/).
+
+## Minh họa
+
+Bảng dưới đặt ba họ cạnh nhau. Hãy đọc theo từng cột: mặt nạ và mục tiêu huấn luyện ở hai hàng đầu quyết định đầu ra và việc hợp ở các hàng sau.
+
+| Tiêu chí | Encoder-only | Decoder-only | Encoder–decoder |
+|---|---|---|---|
+| Mặt nạ | Hai chiều: mọi token nhìn mọi token | Nhân quả: chỉ nhìn về trước | Encoder hai chiều; decoder nhân quả, cộng cross-attention sang encoder |
+| Mục tiêu pre-train | Che token rồi đoán lại (MLM) | Đoán token kế tiếp | Khử nhiễu: làm hỏng đoạn (T5), điền đoạn và xáo câu (BART) |
+| Đầu ra | Một vectơ cho mỗi token | Phân phối của token kế tiếp, sinh từng token | Một chuỗi mới, sinh từng token |
+| Hợp với | Phân loại, gán nhãn token, QA trích xuất, embedding cho truy xuất | Sinh văn bản, chat; gần như mọi việc qua prompt | Dịch, tóm tắt, biến văn bản này thành văn bản khác |
+| Ví dụ | BERT (2019), RoBERTa, PhoBERT | GPT (2018–2020), Llama | T5 (2020), BART (2020) |
+
+Bảng thứ hai tóm lại các hướng làm attention rẻ hơn. Cột cuối là thứ bạn phải trả.
+
+| Hướng | Ý chính | Số điểm phải tính | Bộ nhớ cho điểm | Kết quả so với attention đầy đủ | Đánh đổi |
+|---|---|---|---|---|---|
+| Đầy đủ | Mọi cặp | $L^2$ | $L^2$ | Gốc | |
+| Cửa sổ trượt (Longformer, BigBird) | Chỉ $w$ token gần, cộng vài token toàn cục (BigBird thêm cặp ngẫu nhiên) | khoảng $L w$ | khoảng $L w$ | Khác | Không nhìn thẳng được token xa |
+| Attention tuyến tính | Đổi thứ tự nhân, bỏ softmax | Không có ma trận điểm, chi phí $L d^2$ | $d^2$ | Khác | Là mô hình khác, phải huấn luyện lại |
+| FlashAttention | Tính từng khối trong SRAM | $L^2$ | $L$ | Giống (trừ làm tròn) | Phải viết kernel GPU riêng |
+| MQA, GQA | Đầu truy vấn dùng chung khóa, giá trị | Như đầy đủ | Như đầy đủ; KV cache nhỏ hơn | Khác | Có thể giảm chất lượng một chút |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026, với Python 3.14 và NumPy 2.4 (bản có trong Pyodide). Cả hai ô chạy ngay trên trang và chạy độc lập: ô nào cũng tự import và tự tạo dữ liệu.
+
+### Mặt nạ và bias ALiBi
+
+Ô đầu tiên dựng ba ma trận cho một chuỗi $L = 6$ token: mặt nạ nhân quả, mặt nạ cửa sổ trượt $w = 3$, và bias ALiBi của đầu thứ nhất. Số 1 nghĩa là ô được nhìn. Rồi ô cộng bias vào điểm attention của $\mathbf{Q}$, $\mathbf{K}$ ngẫu nhiên (hạt giống 0) và kiểm tra softmax.
+
+<PythonRunner code={masksCode} title="Mặt nạ nhân quả, cửa sổ trượt và bias ALiBi" />
+
+Đọc kết quả:
+
+- **Mặt nạ nhân quả** là tam giác dưới: hàng $i$ có $i + 1$ số 1 (đếm hàng từ 0).
+- **Cửa sổ trượt** giống hệt ở ba hàng đầu. Từ hàng 3, mỗi hàng chỉ còn đúng 3 số 1, và dải số 1 trượt sang phải theo hàng. Hàng cuối nhìn vị trí 3, 4, 5, không còn nhìn vị trí 0.
+- **Độ dốc** của 8 đầu là `0.5 0.25 0.125 ... 0.004` (máy in làm tròn tới 3 chữ số; số cuối là $1/256 \approx 0.0039$).
+- **Bias của đầu 1** bằng 0 trên đường chéo, giảm 0.5 mỗi bước sang trái, và là `-inf` ở phía trên đường chéo (ô bị mặt nạ che). Hàng cuối là $-2.5, -2, \dots, 0$. Cùng hàng đó ở đầu 8 chỉ là $-0.02, -0.016, \dots, 0$: gần như không phạt.
+- **Trọng số hàng cuối** là `0.03 0.072 0.107 0.116 0.448 0.228`, và **mọi hàng cộng lại bằng 1**. Bias chỉ dịch điểm trước softmax, nên mỗi hàng vẫn là một phân phối xác suất. Ở đây $\mathbf{Q}$, $\mathbf{K}$ ngẫu nhiên nên trọng số không giảm đều theo khoảng cách, nhưng token xa nhất (vị trí 0) bị trừ nhiều nhất và có trọng số nhỏ nhất.
+
+### Chi phí theo $L$ và attention tuyến tính
+
+Ô thứ hai đếm số ô điểm phải tính trong attention nhân quả của một đầu ở một lớp, theo hai cách: đầy đủ ($L(L+1)/2$ ô) và cửa sổ trượt $w = 512$. Cột `GB` là dung lượng nếu lưu cả ma trận $L \times L$ ở 2 byte mỗi số, như cách cài thường. Phần sau làm phép đổi thứ tự nhân của attention tuyến tính với $L = 1\,000$, $d = 16$, rồi so hai cách tính.
+
+<PythonRunner code={costCode} title="Chi phí L² và mẹo đổi thứ tự nhân" />
+
+Đọc kết quả:
+
+- **Ở $L = 512$**, hai cách bằng nhau (131 328 ô), vì cửa sổ đã bao cả chuỗi.
+- **Mỗi lần $L$ gấp 4**, số ô đầy đủ gấp khoảng 16, còn cửa sổ gấp khoảng 4 khi $L$ đã lớn hơn nhiều so với $w$ (từ 512 lên 2 048 thì vẫn gấp 7.0, vì ở 512 cửa sổ đã bao cả chuỗi). Ở $L = 131\,072$ (128K), attention đầy đủ cần khoảng 8.6 tỉ ô, cửa sổ chỉ khoảng 67 triệu, ít hơn 128.3 lần. Tỉ lệ này xấp xỉ $L / (2w) = 131\,072 / 1\,024 = 128$, vì đầy đủ có khoảng $L^2/2$ ô còn cửa sổ có khoảng $L w$.
+- **Cột `GB`** đi từ 0.001 ở 512 token tới 34.360 ở 128K token, cho **một** đầu ở **một** lớp. Đây là lý do FlashAttention không bao giờ lưu cả ma trận.
+- **`same output: True`**: hai thứ tự nhân cho cùng kết quả, đúng như phép biến đổi ở mục Lý thuyết. Số phép nhân là 32 000 000 khi đi qua ma trận $L \times L$, và 512 000 khi tính $\sum_j \phi(\mathbf{k}_j)\mathbf{v}_j^\top$ trước, ít hơn $L/d = 62.5$ lần.
+
+Hãy thử đổi `w = 512` thành `w = 4096` trong ô thứ hai: ở 2 048 token hai cột bằng nhau, còn ở 128K token tỉ lệ chỉ còn 16.3 lần. Cửa sổ càng rộng, mô hình nhìn được càng xa trong một lớp, và phần tiết kiệm càng nhỏ.
+
+## Lỗi hay gặp
+
+:::caution[Đưa văn bản dài hơn 512 token vào BERT]
+BERT học embedding vị trí cho đúng 512 vị trí. Văn bản dài hơn thì bộ tách từ cắt bớt nếu bạn bật cắt (`truncation=True`), còn không thì mô hình báo lỗi vì không có hàng nào cho vị trí 512. Phần bị cắt mất hẳn, không có cảnh báo nào trên kết quả. Với văn bản dài, chia thành các đoạn chồng lên nhau rồi gộp kết quả, hoặc dùng một mô hình được huấn luyện cho chuỗi dài như Longformer.
+:::
+
+:::caution[Thấy perplexity không tăng ở chuỗi dài rồi tin mô hình dùng được thông tin ở xa]
+Mô hình ALiBi giữ perplexity tốt khi đánh giá trên chuỗi dài gấp nhiều lần lúc huấn luyện. Nhưng phụ lục B của chính bài báo cho thấy phần hơn so với sin/cos phần lớn đến từ việc tránh **lời nguyền token đầu** (early token curse): khi văn bản đánh giá bị cắt thành các đoạn, token ở đầu mỗi đoạn có rất ít ngữ cảnh, và đoạn càng dài thì càng ít token chịu cảnh đó. Khi đánh giá bằng cửa sổ trượt, dự đoán nào cũng đủ ngữ cảnh, và perplexity gần như không đổi khi tăng độ dài. Vậy "không tệ đi" chưa có nghĩa là "dùng được thông tin ở xa": ở phần lớn các đầu, ALiBi phạt token xa rất mạnh. Chuyện mở rộng ngữ cảnh với RoPE có ở bài [Họ LLaMA](/vi/llm/llama-family/). Trước khi tin mô hình đọc được 100 trang, hãy thử nó trên đúng việc cần tìm thông tin ở xa.
+:::
+
+:::caution[Nghĩ hướng làm attention nhanh nào cũng cho cùng kết quả]
+Chỉ FlashAttention là chính xác: đổi sang nó cho mô hình đã huấn luyện thì kết quả giữ nguyên, chỉ khác sai số làm tròn. Cửa sổ trượt, attention thưa và attention tuyến tính **đổi chính phép tính**: lắp chúng vào một mô hình huấn luyện với attention đầy đủ thì kết quả sẽ khác. Cũng đừng nhầm hai kiểu cửa sổ: cửa sổ của Longformer (encoder) nhìn hai phía, cửa sổ của decoder như Mistral chỉ nhìn về trước, như mặt nạ trong ô code thứ nhất.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Cùng khối Transformer, ba họ khác nhau ở mặt nạ và mục tiêu: encoder-only (hai chiều, MLM, như BERT) để hiểu; decoder-only (nhân quả, đoán token kế, như GPT) để sinh; encoder–decoder (khử nhiễu: làm hỏng đoạn của T5, điền đoạn của BART) để biến văn bản này thành văn bản khác.
+- Vị trí đưa vào embedding (sin/cos, bảng học được, giới hạn 512 của BERT) hoặc vào điểm attention ở mọi lớp (bias tương đối của T5, RoPE, ALiBi). ALiBi cộng $-m_h(i - j)$ với độ dốc cố định $\tfrac{1}{2}, \dots, \tfrac{1}{256}$ cho 8 đầu, và huấn luyện ở $L$ vẫn giữ perplexity tốt ở chuỗi dài hơn nhiều, dù chưa chắc đã dùng được thông tin ở xa.
+- Pre-LN, $\mathbf{H} \leftarrow \mathbf{H} + F(\mathrm{LN}(\mathbf{H}))$, giữ kết nối tắt là phép cộng thuần, gradient lúc khởi tạo đều giữa các lớp, nên mô hình sâu học ổn định và không cần warmup như Post-LN.
+- Attention tốn $L^2$ ô cho mỗi đầu, mỗi lớp. Cửa sổ trượt giảm còn $L w$ nhưng không nhìn thẳng ra xa; attention tuyến tính đổi thứ tự nhân, còn $L d^2$, nhưng là mô hình khác; FlashAttention giữ đúng kết quả, chỉ bớt đọc ghi bộ nhớ; MQA/GQA thu nhỏ KV cache khi sinh.
+
+**Đọc thêm:**
+
+- Tay, Y., Dehghani, M., Bahri, D., Metzler, D. (2022). [*Efficient Transformers: A Survey*](https://arxiv.org/abs/2009.06732), *ACM Computing Surveys* 55(6), [doi:10.1145/3530811](https://doi.org/10.1145/3530811), mục 3. Bản đồ các hướng làm attention rẻ hơn, xếp theo nhóm: mẫu cố định, mẫu học được, hạng thấp, kernel, bộ nhớ.
+- Raffel, C. và cộng sự (2020). [*Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer*](https://jmlr.org/papers/v21/20-074.html), *JMLR* 21(140), mục 2.1, 3.2 và 3.3; và Lewis, M. và cộng sự (2020). [*BART: Denoising Sequence-to-Sequence Pre-training for Natural Language Generation, Translation, and Comprehension*](https://aclanthology.org/2020.acl-main.703/), ACL 2020, mục 2 và 4. Bias vị trí tương đối và làm hỏng đoạn của T5; các kiểu làm hỏng văn bản của BART và phép so giữa chúng.
+- Press, O., Smith, N. A., Lewis, M. (2022). [*Train Short, Test Long: Attention with Linear Biases Enables Input Length Extrapolation*](https://arxiv.org/abs/2108.12409), ICLR 2022, mục 2 và 3. ALiBi, và phép so ngoại suy của sin/cos, RoPE, bias T5 trên cùng một mô hình. Bài báo viết độ dốc là $m$, chỗ bài này viết $m_h$.
+- Xiong, R. và cộng sự (2020). [*On Layer Normalization in the Transformer Architecture*](https://arxiv.org/abs/2002.04745), ICML 2020, mục 3. Phân tích gradient lúc khởi tạo của Post-LN và Pre-LN, và thí nghiệm bỏ warmup.
+- Dao, T., Fu, D. Y., Ermon, S., Rudra, A., Ré, C. (2022). [*FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness*](https://arxiv.org/abs/2205.14135), NeurIPS 2022, mục 2 và 3.1. Cách chia khối và softmax chạy từng phần. Thêm về attention thưa và tuyến tính: Beltagy, I., Peters, M. E., Cohan, A. (2020). [*Longformer: The Long-Document Transformer*](https://arxiv.org/abs/2004.05150), arXiv:2004.05150; Zaheer, M. và cộng sự (2020). [*Big Bird: Transformers for Longer Sequences*](https://arxiv.org/abs/2007.14062), NeurIPS 2020; Katharopoulos, A. và cộng sự (2020). [*Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention*](https://arxiv.org/abs/2006.16236), ICML 2020.
+
+<LessonProgress />

@@ -1,0 +1,86 @@
+---
+// nlp/word2vec-glove-fasttext, "Minh họa": CBOW gathers the context to guess the centre word once; skip-gram
+// guesses each context word from the centre word, on the same sentence. Read top-down: the sentence (centre
+// word accent, the ±2 window plain under a bracket, the two words outside it "off"), then CBOW (four context
+// boxes converge on the accent "average" box, one arrow down to the guessed word), then skip-gram (the centre
+// word fans out to the four context words with four accent arrows: the separate guesses are the point).
+// CBOW above skip-gram, not side by side: two columns of four boxes do not fit 360 units with 15-unit words.
+// Narrow layout only (the content column reaches 640px only from about 1440px, llm-lessons.md 2.9.1).
+// Words: src/data/figures/word2-vec.ts.
+import { WORD2VEC, WORD2VEC_CENTRE, WORD2VEC_WINDOW } from '@data/figures/word2-vec';
+import { anchor, spread, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = WORD2VEC[getPageLocale(Astro.locals.starlightRoute)];
+const l = t.labels;
+const words = [l.t0, l.t1, l.t2, l.t3, l.t4, l.t5, l.t6];
+const context = words.filter((_, i) => i !== WORD2VEC_CENTRE && Math.abs(i - WORD2VEC_CENTRE) <= WORD2VEC_WINDOW);
+
+// The sentence: 7 equal boxes across the width.
+const SENTENCE = { y: 8, height: 36 } as const;
+const cells = spread(8, 352, words.length, 3);
+const sentence = cells.starts.map((x): Box => ({ x, y: SENTENCE.y, width: cells.size, height: SENTENCE.height }));
+const toneOf = (i: number) =>
+  i === WORD2VEC_CENTRE ? 'accent' : Math.abs(i - WORD2VEC_CENTRE) <= WORD2VEC_WINDOW ? 'plain' : 'off';
+const first = sentence[WORD2VEC_CENTRE - WORD2VEC_WINDOW]!;
+const last = sentence[WORD2VEC_CENTRE + WORD2VEC_WINDOW]!;
+const outside = sentence.slice(0, WORD2VEC_CENTRE - WORD2VEC_WINDOW);
+const BRACKET = { top: 50, line: 56, label: 70 } as const;
+
+// A row of the four context words, used by both architectures.
+const row = spread(8, 352, context.length, 8);
+const contextRow = (y: number) => row.starts.map((x): Box => ({ x, y, width: row.size, height: 36 }));
+const mid = (box: Box) => box.x + box.width / 2;
+const at = (i: number) => 0.2 + (0.6 * i) / (context.length - 1); // where the four arrows meet a box
+
+// CBOW: context row, average (focus), guessed word.
+const CBOW_TITLE = 98;
+const cbowRow = contextRow(114);
+const average: Box = { x: 90, y: 182, width: 180, height: 36 };
+const guessed: Box = { x: 140, y: 248, width: 80, height: 36 };
+
+// Skip-gram: centre word, then the four context words it guesses.
+const SKIP_TITLE = 318;
+const centre: Box = { x: 140, y: 334, width: 80, height: 36 };
+const skipRow = contextRow(418);
+const height = (skipRow[0]?.y ?? 0) + 36 + 8;
+---
+
+<FigureFrame id="word2-vec" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    {sentence.map((box, i) => <FigNode {...box} lines={words[i]!} tone={toneOf(i)} />)}
+    <FigArrow
+      from={[first.x, BRACKET.top]}
+      via={[[first.x, BRACKET.line], [last.x + last.width, BRACKET.line]]}
+      to={[last.x + last.width, BRACKET.top]}
+      head={false}
+    />
+    <FigText x={mid(sentence[WORD2VEC_CENTRE]!)} y={BRACKET.label} lines={l.window} size="small" />
+    <FigText
+      x={(outside[0]!.x + outside[outside.length - 1]!.x + outside[outside.length - 1]!.width) / 2}
+      y={BRACKET.label}
+      lines={l.outside}
+      size="small"
+    />
+
+    <FigText x={8} y={CBOW_TITLE} lines={l.cbow} anchor="start" />
+    <FigText x={352} y={CBOW_TITLE} lines={l.cbowNote} size="small" anchor="end" />
+    {cbowRow.map((box, i) => <FigNode {...box} lines={context[i]!} />)}
+    {cbowRow.map((box, i) => <FigArrow from={anchor(box, 'bottom')} to={anchor(average, 'top', at(i))} />)}
+    <FigNode {...average} lines={l.average} tone="accent" />
+    <FigArrow from={anchor(average, 'bottom')} to={anchor(guessed, 'top')} />
+    <FigText x={mid(average) + 8} y={(average.y + average.height + guessed.y) / 2} lines={l.guess} size="small" anchor="start" />
+    <FigNode {...guessed} lines={l.t4} />
+
+    <FigText x={8} y={SKIP_TITLE} lines={l.skipgram} anchor="start" />
+    <FigText x={352} y={SKIP_TITLE} lines={l.skipgramNote} size="small" anchor="end" />
+    <FigNode {...centre} lines={l.t4} />
+    {skipRow.map((box, i) => <FigArrow from={anchor(centre, 'bottom', at(i))} to={anchor(box, 'top')} tone="accent" />)}
+    <FigText x={8} y={centre.y + centre.height / 2} lines={l.guesses} size="small" anchor="start" />
+    {skipRow.map((box, i) => <FigNode {...box} lines={context[i]!} />)}
+  </Fragment>
+</FigureFrame>
