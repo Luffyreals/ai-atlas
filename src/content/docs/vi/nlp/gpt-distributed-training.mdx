@@ -1,0 +1,391 @@
+---
+title: GPT và huấn luyện phân tán
+description: GPT học đoán token kế tiếp ở mọi vị trí cùng lúc. Khi một GPU không đủ thì dùng data parallel, ring all-reduce, tích lũy gradient, mixed precision.
+quiz:
+  - question: 'Bạn cắt một đoạn 513 token thành đầu vào 512 token và nhãn 512 token (nhãn là đầu vào dịch đi một vị trí). Một lần lan truyền xuôi của GPT cho bao nhiêu số hạng trong loss? Với BERT che 15% của một chuỗi 512 token thì khoảng bao nhiêu?'
+    options:
+      - 'GPT 1, BERT 1'
+      - 'GPT 1, BERT khoảng 77'
+      - 'GPT 512, BERT khoảng 77'
+      - 'GPT 512, BERT 512'
+    answer: 2
+    explanation: 'Nhờ mặt nạ nhân quả, vị trí $t$ chỉ nhìn được $x_1, \dots, x_t$, nên dự đoán ở cả 512 vị trí đều hợp lệ và đều vào loss. BERT nhìn hai chiều, mỗi vị trí thấy luôn token của chính nó, nên chỉ tính loss ở các vị trí bị che: $0.15 \times 512 \approx 77$. GPT 1 là nhầm với lúc sinh văn bản, khi chỉ dùng logit ở vị trí cuối.'
+  - question: 'Hai worker cùng tính gradient cho một lô 40 mẫu. Worker 1 có 30 mẫu, gradient của loss trung bình trên phần của nó là $\mathbf{g}_1$. Worker 2 có 10 mẫu, gradient là $\mathbf{g}_2$. Gradient của loss trung bình trên cả 40 mẫu là gì?'
+    options:
+      - '$\frac{1}{2}(\mathbf{g}_1 + \mathbf{g}_2)$'
+      - '$0.75\,\mathbf{g}_1 + 0.25\,\mathbf{g}_2$'
+      - '$\mathbf{g}_1 + \mathbf{g}_2$'
+      - '$30\,\mathbf{g}_1 + 10\,\mathbf{g}_2$'
+    answer: 1
+    explanation: 'Tổng gradient của 30 mẫu là $30\,\mathbf{g}_1$, của 10 mẫu là $10\,\mathbf{g}_2$. Chia cho 40 được $0.75\,\mathbf{g}_1 + 0.25\,\mathbf{g}_2$. Trung bình đơn giản chỉ đúng khi hai phần bằng nhau; ở đây nó cho 10 mẫu nặng ngang 30 mẫu. Phương án cuối là tổng, chưa chia cho 40.'
+  - question: 'Bạn huấn luyện bằng DDP trên 16 GPU. Mỗi GPU chạy micro-batch 8 chuỗi, tích lũy gradient qua 4 micro-batch rồi mới cập nhật. Một bước cập nhật dùng gradient của bao nhiêu chuỗi?'
+    options: ['8', '32', '128', '512']
+    answer: 3
+    explanation: 'Mỗi GPU gom $8 \times 4 = 32$ chuỗi trước khi cập nhật, và all-reduce lấy trung bình trên 16 GPU, nên lô hiệu dụng là $32 \times 16 = 512$ chuỗi. 128 là quên phần tích lũy, 32 là quên các GPU khác. Lô hiệu dụng mới là con số cần nhớ khi chọn tốc độ học.'
+  - question: 'Gradient của một mô hình chiếm 2 GB. Với ring all-reduce trên 8 GPU, mỗi GPU gửi đi khoảng bao nhiêu dữ liệu cho một lần all-reduce? Lên 64 GPU thì sao?'
+    options:
+      - 'Khoảng 3.5 GB; lên 64 GPU thì khoảng 3.94 GB, gần như không đổi'
+      - 'Khoảng 14 GB; lên 64 GPU thì gấp 8 lần'
+      - 'Đúng 2 GB, ở mọi số GPU'
+      - 'Khoảng 0.25 GB; lên 64 GPU thì nhỏ đi 8 lần'
+    answer: 0
+    explanation: 'Mỗi GPU gửi $\frac{2(N-1)}{N}$ lần kích thước gradient: $\frac{2 \cdot 7}{8} \times 2 = 3.5$ GB với $N = 8$, và $\frac{2 \cdot 63}{64} \times 2 \approx 3.94$ GB với $N = 64$. Con số gần như không đổi khi thêm GPU, vì vậy cách làm vòng mở rộng được. 14 GB là cách gửi cả gradient cho từng GPU kia. 0.25 GB chỉ là một mảnh, chưa nhân với $2(N-1)$ bước.'
+  - question: 'Mô hình 7 tỉ tham số, huấn luyện bằng Adam với độ chính xác hỗn hợp (16 byte mỗi tham số, chưa kể kích hoạt). Bạn có 8 GPU 80 GB. Điều nào đúng?'
+    options:
+      - 'Data parallel thông thường là đủ: 112 GB chia cho 8 GPU còn 14 GB mỗi GPU'
+      - 'Dùng tích lũy gradient với micro-batch thật nhỏ là vừa một GPU'
+      - 'Data parallel thông thường không vừa, vì GPU nào cũng giữ đủ 112 GB; ZeRO stage 3 hay FSDP chia ra còn khoảng 14 GB mỗi GPU'
+      - 'Không có cách nào chạy trên 8 GPU này'
+    answer: 2
+    explanation: 'Data parallel thông thường chép nguyên mô hình, gradient và trạng thái bộ tối ưu lên từng GPU, nên mỗi GPU cần $16 \times 7 = 112$ GB, quá 80 GB. Phương án đầu là hiểu nhầm hay gặp nhất: data parallel chia lô, không chia mô hình. ZeRO stage 3 hay FSDP chia cả ba thứ ra 8 phần, còn $112/8 = 14$ GB. Tích lũy gradient chỉ làm nhỏ phần kích hoạt; 112 GB kia không phụ thuộc cỡ micro-batch.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import ParallelismFigure from '@components/figures/ParallelismFigure.astro';
+import shardCode from '@code/nlp/gpt-distributed-training/shard-gradients.vi.py?raw';
+import ringCode from '@code/nlp/gpt-distributed-training/ring-allreduce.vi.py?raw';
+import ddpCode from '@code/nlp/gpt-distributed-training/ddp.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu GPT là **mô hình ngôn ngữ nhân quả** (causal language model): Transformer chỉ có decoder (decoder-only), học $p(x_t \mid x_{<t})$, và nhờ mặt nạ mà một lần chạy cho loss ở mọi vị trí. Biết GPT-1, GPT-2, GPT-3 khác nhau ở đâu, và **scaling laws** nói gì.
+- Tính được bộ nhớ và thời gian huấn luyện một mô hình lớn, để thấy vì sao phải **huấn luyện phân tán** (distributed training).
+- Tự dẫn được vì sao trong **song song dữ liệu** (data parallelism), trung bình gradient của các phần lô bằng gradient của cả lô, và khi nào điều đó sai. Hiểu **ring all-reduce** và chi phí $\frac{2(N-1)}{N}$ của nó.
+- Dùng được **tích lũy gradient** (gradient accumulation), **độ chính xác hỗn hợp** (mixed precision) và `DistributedDataParallel` của PyTorch. Nhận ra khi nào phải chuyển sang tensor parallel, pipeline parallel hay ZeRO/FSDP.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+**Self-attention** cho mỗi vị trí nhìn các vị trí khác: chấm điểm từng cặp vị trí bằng tích vô hướng giữa **truy vấn** (query) và **khóa** (key), đổi điểm thành trọng số bằng softmax, rồi lấy trung bình có trọng số của các **giá trị** (value). **Mặt nạ nhân quả** (causal mask) cộng $-\infty$ vào điểm của mọi cặp mà vị trí được nhìn đứng sau vị trí đang xét, nên vị trí $t$ chỉ thấy các token từ 1 tới $t$. Một **khối decoder** của GPT gồm self-attention có mặt nạ và một mạng truyền thẳng (FFN), mỗi phần có chuẩn hóa lớp (layer normalization) và kết nối tắt (residual connection). Bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/) đã dựng các phần này bằng PyTorch, kèm cross-entropy và một GPT nhỏ trên Truyện Kiều.
+:::
+
+## Trực giác
+
+### Một mô hình, một việc: viết tiếp
+
+Che chữ cuối của câu "Trăm năm trong cõi người ..." rồi đoán. Đó là toàn bộ việc GPT học khi pre-train: cho đoạn văn phía trước, đoán token kế tiếp. Không có nhãn nào do người gán. Văn bản tự làm nhãn cho chính nó, nên bạn có bao nhiêu văn bản thì có bấy nhiêu dữ liệu huấn luyện.
+
+Điều bất ngờ của các năm 2018–2020 là chỉ cần làm việc đó **to hơn**: nhiều tham số hơn, nhiều văn bản hơn. GPT-2 có 1.5 tỉ tham số. GPT-3 có 175 tỉ, học trên 300 tỉ token.
+
+### Một GPU không đủ
+
+Thử tính cho GPT-2 bản lớn nhất, 1.5 tỉ tham số. Khi huấn luyện bằng Adam với độ chính xác hỗn hợp, mỗi tham số cần khoảng 16 byte (mục Lý thuyết sẽ đếm). Vậy chỉ riêng tham số, gradient và trạng thái bộ tối ưu đã là $16 \times 1.5 \times 10^9 = 24 \times 10^9$ byte, tức 24 GB (tự tính). Một GPU 24 GB vừa khít, không còn chỗ cho kích hoạt (activation: giá trị trung gian của các lớp, phải giữ lại cho lan truyền ngược).
+
+Với GPT-3, bài báo ghi tổng sức tính khoảng $3.14 \times 10^{23}$ phép tính dấu phẩy động. Một GPU A100 tính tối đa khoảng $312 \times 10^{12}$ phép mỗi giây ở 16 bit. Chạy liên tục ở mức tối đa lý thuyết đó, nó cần khoảng $10^9$ giây, tức **gần 32 năm** (tự tính). Thực tế còn lâu hơn, vì không GPU nào chạy hết công suất.
+
+### Chia việc như chia bài khảo sát
+
+Bạn muốn biết điểm hài lòng trung bình của 100 khách hàng. Một người hỏi cả 100 thì lâu. Bốn người, mỗi người hỏi 25 khách, tính trung bình phần mình, rồi gặp nhau lấy trung bình của bốn con số. Kết quả **đúng bằng** trung bình của 100 người, vì mỗi người hỏi số khách bằng nhau. Nếu một người hỏi 70 khách còn ba người kia mỗi người 10, thì trung bình của bốn con số sẽ lệch: nhóm 10 khách được tính nặng ngang nhóm 70.
+
+Song song dữ liệu làm đúng như vậy với gradient. Mỗi GPU giữ một bản mô hình, tính gradient trên phần lô của mình, rồi các GPU "gặp nhau" để lấy trung bình. Câu hỏi là gặp nhau thế nào cho nhanh, khi mỗi gradient nặng hàng GB.
+
+Bài toán của bài này là: **GPT học gì, và vì sao một lần chạy học được ở mọi vị trí? Khi mô hình và dữ liệu quá lớn cho một GPU, làm sao chia việc huấn luyện ra nhiều GPU mà kết quả vẫn đúng như khi học trên một máy?**
+
+## Lý thuyết
+
+### GPT: mô hình ngôn ngữ nhân quả
+
+Gọi một đoạn văn là dãy token $x_1, \dots, x_L$. Theo quy tắc nhân xác suất, $p(x_1, \dots, x_L) = \prod_{t=1}^{L} p(x_t \mid x_{<t})$. GPT ước lượng từng thừa số $p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$ bằng một chồng khối decoder. Vì mỗi dự đoán chỉ dựa vào quá khứ, ta gọi đó là mô hình ngôn ngữ **nhân quả**.
+
+Loss là cross-entropy trung bình trên các vị trí:
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = -\frac{1}{L} \sum_{t=1}^{L} \ln p_{\boldsymbol{\theta}}(x_{t+1} \mid x_1, \dots, x_t)
+$$
+
+Ở đây đầu vào là $x_1, \dots, x_L$ và nhãn là $x_2, \dots, x_{L+1}$: lấy một đoạn $L + 1$ token, nhãn chính là đầu vào **dịch đi một vị trí**. Đầu ra ở vị trí $t$ dự đoán token $t + 1$.
+
+Vì sao một lần chạy cho cả $L$ số hạng? Mặt nạ nhân quả bảo đảm biểu diễn ở vị trí $t$ chỉ phụ thuộc $x_1, \dots, x_t$. Vậy dự đoán ở vị trí $t$ không "nhìn trộm" được đáp án $x_{t+1}$, và cả $L$ dự đoán đều là bài kiểm tra hợp lệ. Một đoạn 1 024 token cho 1 024 tín hiệu học chỉ với một lần lan truyền xuôi và một lần lan truyền ngược. Khi sinh văn bản thì khác: chỉ dùng logit ở vị trí cuối, rồi nối token vừa chọn vào và chạy tiếp. Cách cài đặt từng dòng có ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+### Từ GPT-1 tới GPT-3
+
+| Mô hình | Năm | Cỡ | Dữ liệu | Ý chính |
+|---|---|---|---|---|
+| GPT-1 (Radford và cộng sự) | 2018 | 12 khối, $D = 768$, ngữ cảnh 512 | BooksCorpus, hơn 7 000 cuốn sách | Pre-train rồi fine-tune riêng từng tác vụ |
+| GPT-2 (Radford và cộng sự) | 2019 | tới 1.5 tỉ tham số, ngữ cảnh 1 024 | WebText, khoảng 40 GB | Ghi tác vụ ngay trong văn bản, đo zero-shot (không ví dụ) |
+| GPT-3 (Brown và cộng sự) | 2020 | 175 tỉ tham số, ngữ cảnh 2 048 | 300 tỉ token | Học trong ngữ cảnh: zero-shot, one-shot, few-shot, không cập nhật tham số |
+
+Kiến trúc gần như giữ nguyên qua ba đời. Thứ thay đổi là quy mô, và cách dùng mô hình: từ fine-tune từng tác vụ sang chỉ viết yêu cầu vào prompt. Bài [Họ GPT và fine-tune đa nhiệm](/vi/llm/gpt-family-finetuning/) kể chi tiết con đường này và bước instruction tuning sau đó. Riêng GPT-3, paper ghi rằng để mô hình lớn không tràn bộ nhớ, họ dùng kết hợp song song bên trong từng phép nhân ma trận và song song giữa các lớp (mục 2.3), tức hai kiểu song song ở cuối mục này.
+
+**Scaling laws.** Kaplan và cộng sự (2020) đo hàng loạt mô hình và thấy loss giảm theo **luật lũy thừa** (power law) khi tăng số tham số, lượng dữ liệu hay sức tính, đều đặn qua nhiều bậc độ lớn. Họ cũng dùng một phép ước lượng hay gặp: huấn luyện tốn khoảng $6\Psi$ phép tính cho mỗi token, với $\Psi$ là số tham số. Kiểm lại với GPT-3: $6 \times 175 \times 10^9 \times 300 \times 10^9 \approx 3.15 \times 10^{23}$, khớp con số $3.14 \times 10^{23}$ của bài báo (tự tính).
+
+Hoffmann và cộng sự (2022) hỏi tiếp: với một ngân sách tính cố định, nên chia cho mô hình to hơn hay cho nhiều token hơn? Câu trả lời của họ là tăng **đều cả hai**. Mô hình Chinchilla 70 tỉ tham số học 1.4 nghìn tỉ token, tức khoảng 20 token cho mỗi tham số (tự tính), và vượt Gopher 280 tỉ tham số được huấn luyện với cùng sức tính. Theo thước đo đó, GPT-3 với khoảng 1.7 token mỗi tham số (tự tính) là mô hình quá to so với lượng dữ liệu nó học.
+
+**GPT và BERT.** BERT (bài [BERT](/vi/nlp/bert/)) là Transformer chỉ có encoder, attention nhìn hai chiều, học bằng cách đoán các token bị che. Mỗi vị trí nhìn thấy cả hai phía nên biểu diễn giàu ngữ cảnh hơn, hợp với phân loại, gán nhãn, trích câu trả lời. Đổi lại, BERT chỉ tính loss ở khoảng 15% vị trí bị che, và không sinh văn bản từ trái sang phải một cách tự nhiên. GPT tính loss ở mọi vị trí, và sinh văn bản chính là việc nó được huấn luyện để làm. Bản đồ đầy đủ các họ Transformer ở bài [Transformers nâng cao](/vi/nlp/advanced-transformers/).
+
+### Bộ nhớ đi đâu
+
+Bảng này đã được đếm ở bài [Họ LLaMA](/vi/llm/llama-family/); nhắc lại ở đây. Theo cách đếm của bài báo ZeRO (Rajbhandari và cộng sự, 2020), khi huấn luyện bằng Adam với độ chính xác hỗn hợp, mỗi tham số cần:
+
+| Thứ cần lưu | Byte mỗi tham số |
+|---|---:|
+| Tham số 16 bit | 2 |
+| Gradient 16 bit | 2 |
+| Bản FP32 của tham số | 4 |
+| Momentum của Adam (FP32) | 4 |
+| Phương sai của Adam (FP32) | 4 |
+| **Tổng** | **16** |
+
+Ba dòng FP32 là **trạng thái bộ tối ưu** (optimizer state). Mô hình $\Psi$ tham số cần $16\Psi$ byte, chưa kể kích hoạt. Với GPT-2 1.5 tỉ là 24 GB, với GPT-3 175 tỉ là khoảng 2.8 TB (tự tính), tức ít nhất 35 GPU 80 GB chỉ để chứa.
+
+Có hai vấn đề tách biệt: **chậm** (một GPU tính không kịp) và **không vừa** (một GPU không chứa nổi). Song song dữ liệu giải quyết vấn đề thứ nhất. Vấn đề thứ hai cần chia chính mô hình, ở cuối mục.
+
+### Song song dữ liệu: trung bình gradient bằng gradient cả lô
+
+Có $N$ GPU, ta gọi chung là $N$ worker, đánh số $k = 1, \dots, N$. Mỗi worker giữ **một bản đầy đủ** của tham số $\boldsymbol{\theta}$, giống hệt nhau. Một lô $m$ mẫu được chia thành $N$ phần $S_1, \dots, S_N$ (gọi là shard), mỗi phần $B = m/N$ mẫu. Với GPT, một mẫu là một đoạn văn bản.
+
+Gọi $\ell_i(\boldsymbol{\theta})$ là loss của mẫu $i$. Loss của cả lô là trung bình:
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = \frac{1}{m} \sum_{i=1}^{m} \ell_i(\boldsymbol{\theta})
+$$
+
+Worker $k$ chỉ thấy phần của mình. Nó tính loss trung bình trên phần đó và gradient tương ứng:
+
+$$
+\mathcal{L}_k = \frac{1}{B} \sum_{i \in S_k} \ell_i, \qquad \mathbf{g}_k = \nabla \mathcal{L}_k = \frac{1}{B} \sum_{i \in S_k} \nabla \ell_i
+$$
+
+Ta muốn chứng minh rằng trung bình của các $\mathbf{g}_k$ chính là $\nabla \mathcal{L}$.
+
+**Bước 1: gradient của tổng là tổng các gradient.** Đạo hàm là phép tuyến tính, nên
+
+$$
+\nabla \mathcal{L} = \frac{1}{m} \sum_{i=1}^{m} \nabla \ell_i
+$$
+
+**Bước 2: nhóm tổng theo shard.** Mỗi mẫu nằm trong đúng một shard, nên tổng trên $m$ mẫu bằng tổng của $N$ tổng con:
+
+$$
+\nabla \mathcal{L} = \frac{1}{m} \sum_{k=1}^{N} \sum_{i \in S_k} \nabla \ell_i
+$$
+
+**Bước 3: thay mỗi tổng con bằng gradient của worker.** Từ định nghĩa của $\mathbf{g}_k$, tổng con $\sum_{i \in S_k} \nabla \ell_i$ bằng $B\,\mathbf{g}_k$. Thay vào, rồi dùng $B/m = 1/N$:
+
+$$
+\begin{aligned}
+\nabla \mathcal{L} &= \frac{1}{m} \sum_{k=1}^{N} B\,\mathbf{g}_k \\
+&= \frac{B}{m} \sum_{k=1}^{N} \mathbf{g}_k \\
+&= \frac{1}{N} \sum_{k=1}^{N} \mathbf{g}_k
+\end{aligned}
+$$
+
+Vậy chỉ cần các worker trao đổi để mỗi worker có **trung bình** của $N$ gradient. Sau đó mỗi worker chạy cùng một bước Adam, từ cùng tham số, với cùng gradient, nên tham số vẫn giống hệt nhau. Kết quả đúng như một máy học cả lô $m$ mẫu, chỉ khác sai số làm tròn.
+
+**Khi các shard không bằng nhau**, gọi $B_k$ là số mẫu của shard $k$. Bước 3 cho $\sum_{i \in S_k} \nabla \ell_i = B_k\,\mathbf{g}_k$, nên
+
+$$
+\nabla \mathcal{L} = \sum_{k=1}^{N} \frac{B_k}{m}\,\mathbf{g}_k
+$$
+
+Đây là trung bình **có trọng số**, trọng số là tỉ lệ mẫu của từng shard. Trung bình đơn giản $\frac{1}{N}\sum_k \mathbf{g}_k$ chỉ đúng khi mọi $B_k$ bằng nhau, như bài khảo sát ở mục Trực giác. `DistributedSampler` của PyTorch mặc định thêm vài chỉ số lặp lại để mọi worker có cùng số mẫu (và cùng số bước). Nhờ vậy các shard bằng nhau, đổi lại vài mẫu được tính hai lần. Với mô hình ngôn ngữ còn một chỗ tinh tế: nếu mỗi mẫu là loss trung bình trên các token, mà các shard có số token thật (không tính phần đệm) khác nhau, thì "bằng nhau" phải tính theo token chứ không theo số chuỗi.
+
+### All-reduce và cách làm vòng
+
+Phép "mỗi worker có tổng (hay trung bình) của mọi gradient" gọi là **all-reduce**. Cách ngây thơ là gửi hết về một máy trung tâm, cộng lại, rồi gửi về. Gọi $G$ là kích thước gradient. Máy trung tâm phải nhận $(N-1)G$ rồi gửi đi $(N-1)G$: càng nhiều worker, máy đó càng nghẽn.
+
+**Ring all-reduce** xếp $N$ worker thành vòng, mỗi worker chỉ gửi cho hàng xóm bên phải. Gradient của mỗi worker được cắt thành $N$ mảnh, mỗi mảnh $G/N$.
+
+1. **Reduce-scatter**, $N - 1$ bước. Ở mỗi bước, mọi worker cùng lúc gửi một mảnh sang phải, và bên nhận cộng mảnh đó vào mảnh cùng số của mình. Các mảnh đi vòng và tích dần tổng. Sau $N - 1$ bước, mỗi worker giữ **tổng đầy đủ** của đúng một mảnh.
+2. **All-gather**, $N - 1$ bước nữa. Mỗi worker chuyền mảnh đã đủ tổng sang phải, bên nhận chép đè. Sau $N - 1$ bước, ai cũng có đủ $N$ mảnh.
+
+Với 3 GPU và ba mảnh A, B, C, viết A0 là mảnh A của GPU 0, A01 là A0 + A1, A012 là tổng đủ:
+
+| Bước | GPU 0 gửi | GPU 1 gửi | GPU 2 gửi | Sau bước này |
+|---|---|---|---|---|
+| Reduce-scatter 1 | A0 | B1 | C2 | GPU 1 có A01, GPU 2 có B12, GPU 0 có C20 |
+| Reduce-scatter 2 | C20 | A01 | B12 | GPU 0 có B012, GPU 1 có C012, GPU 2 có A012 |
+| All-gather 1 | B012 | C012 | A012 | Mỗi GPU có hai mảnh đủ tổng |
+| All-gather 2 | A012 | B012 | C012 | Mỗi GPU có cả ba mảnh đủ tổng |
+
+**Đếm lượng gửi.** Có $2(N-1)$ bước, mỗi bước một worker gửi một mảnh $G/N$. Tổng lượng mỗi worker gửi là
+
+$$
+2(N-1) \cdot \frac{G}{N} = \frac{2(N-1)}{N}\,G
+$$
+
+Con số này nhỏ hơn $2G$ và gần như **không tăng** khi thêm worker: $1.5\,G$ với $N = 4$, $1.97\,G$ với $N = 64$. Mọi worker cùng gửi và cùng nhận ở mọi bước, nên không có máy nào nghẽn. Theo Horovod, Patarasuk và Yuan (2009) chỉ ra cách này tối ưu về băng thông khi gradient đủ lớn. Baidu (Gibiansky, 2017) đưa ring all-reduce vào học sâu, và Horovod (Sergeev và Del Balso, 2018) phổ biến nó cho TensorFlow.
+
+Thử với GPT-2 1.5 tỉ tham số, gradient 16 bit là 3 GB. Trên 64 GPU nối mạng 100 Gb/s (12.5 GB/s), mỗi GPU gửi khoảng $1.97 \times 3 \approx 5.9$ GB, mất khoảng 0.47 giây mỗi bước. Cách máy trung tâm phải nhận $63 \times 3 = 189$ GB qua cùng đường truyền, khoảng 15 giây (tự tính, bỏ qua độ trễ). Số bước $2(N-1)$ thì tăng theo $N$, nên với rất nhiều GPU, độ trễ của từng bước bắt đầu đáng kể; thư viện như NCCL có thêm các cách xếp khác (dạng cây) cho trường hợp đó.
+
+`DistributedDataParallel` (DDP) của PyTorch còn **giấu** thời gian trao đổi: nó gom gradient thành các nhóm (bucket), và ngay khi lan truyền ngược tính xong một nhóm thì all-reduce nhóm đó, trong lúc các lớp phía trước còn đang tính (Li và cộng sự, 2020).
+
+### Tích lũy gradient
+
+Lô lớn có thể không vừa bộ nhớ của một GPU, vì kích hoạt tăng theo số mẫu. Phép dẫn ở trên cho một lối ra mà không cần thêm GPU: chia lô thành $A$ **micro-batch** chạy **nối tiếp** trên cùng một GPU, cộng dồn $\frac{1}{A}\mathbf{g}_a$ của từng micro-batch, rồi mới cập nhật một lần. Đó là đúng công thức trung bình của song song dữ liệu, chỉ thay "các worker cùng lúc" bằng "các micro-batch lần lượt". Đổi lại là thời gian: $A$ lần chạy thay vì một.
+
+Ghép hai cách, **lô hiệu dụng** (effective batch size) của một bước cập nhật là
+
+$$
+\text{lô hiệu dụng} = (\text{micro-batch mỗi GPU}) \times A \times N
+$$
+
+Trong PyTorch, `loss.backward()` **cộng dồn** vào `.grad`, nên tích lũy chỉ là gọi `backward()` $A$ lần trước một lần `step()`, với loss đã chia cho $A$. Dùng cùng DDP thì bọc $A - 1$ micro-batch đầu trong `model.no_sync()` để chỉ all-reduce một lần, ở micro-batch cuối.
+
+### Độ chính xác hỗn hợp
+
+Tính bằng số 16 bit nhanh hơn và tốn một nửa bộ nhớ so với 32 bit, trên GPU có lõi tính 16 bit. Nhưng số 16 bit có hai giới hạn:
+
+- **FP16** (5 bit mũ, 10 bit phần định trị) chỉ biểu diễn được số dương nhỏ nhất khoảng $6 \times 10^{-8}$ và lớn nhất 65 504. Gradient $10^{-8}$ bị làm tròn thành 0.
+- Khoảng cách giữa 1 và số FP16 kế tiếp là khoảng $0.001$. Cộng một bước cập nhật $10^{-4}$ vào trọng số bằng 1 thì kết quả vẫn là 1: bước cập nhật biến mất (đã thử bằng NumPy).
+
+Micikevicius và cộng sự (2017; ICLR 2018) vẫn tính lan truyền xuôi và ngược ở 16 bit, và đưa ra ba kỹ thuật để giữ độ chính xác, nay là chuẩn:
+
+1. **Bản trọng số chính** (master weights) ở FP32: phép cập nhật làm trên bản này, nên bước nhỏ không mất. Bản 16 bit dùng để tính được chép lại từ bản chính sau mỗi bước.
+2. **Loss scaling:** nhân loss với một hệ số $s$, ví dụ $s = 1024$, trước khi lan truyền ngược. Theo quy tắc dây chuyền, mọi gradient cũng được nhân $s$, nên $10^{-8}$ thành khoảng $10^{-5}$, nằm trong vùng FP16 biểu diễn được. Trước khi cập nhật thì chia lại cho $s$ ở FP32.
+3. **Cộng dồn ở FP32:** tích các số FP16 (trong phép nhân ma trận, tích vô hướng) được cộng dồn vào một biến FP32, rồi mới làm tròn về 16 bit.
+
+Bài báo dùng hệ số $s$ cố định, và ở phần kết luận gợi ý chọn $s$ tự động. Cách các thư viện làm ngày nay là loss scaling động: thấy gradient bị tràn (`inf`, `nan`) thì bỏ bước đó và giảm $s$, lâu không tràn thì tăng $s$.
+
+**BF16** (8 bit mũ, 7 bit phần định trị) có cùng số bit mũ với FP32, nên phạm vi số gần như FP32 và thường không cần loss scaling. Đổi lại, nó chỉ giữ khoảng 2 đến 3 chữ số có nghĩa, nên bản chính FP32 vẫn cần. Trong PyTorch, phần tính 16 bit là `torch.autocast`, phần loss scaling là `torch.amp.GradScaler`.
+
+### Khi mô hình không vừa một GPU
+
+Song song dữ liệu chép **cả** mô hình lên mỗi GPU, nên không giúp gì khi $16\Psi$ byte lớn hơn bộ nhớ một GPU. Khi đó phải chia chính mô hình, hoặc chia trạng thái. Ba cách dưới đây được bài [Họ LLaMA](/vi/llm/llama-family/) trình bày chi tiết, có công thức và ví dụ số; ở đây chỉ nêu ý chính.
+
+- **Song song tensor** (tensor parallelism; Megatron-LM, Shoeybi và cộng sự, 2019): chia các **ma trận trong một lớp** ra nhiều GPU, ví dụ mỗi GPU giữ một nửa số cột của ma trận đầu tiên trong FFN. Phải trao đổi ở mọi lớp, nên cần đường truyền rất nhanh, thường là các GPU trong cùng một máy.
+- **Song song pipeline** (pipeline parallelism; GPipe, Huang và cộng sự, 2019): chia mô hình **theo chiều sâu**, mỗi GPU một nhóm lớp liên tiếp. Lô được cắt thành micro-batch nối đuôi nhau để các GPU cùng bận, nhưng vẫn còn **bong bóng** (pipeline bubble): lúc đầu GPU sau chờ, lúc cuối GPU trước chờ.
+- **ZeRO** (Rajbhandari và cộng sự, 2020) và **FSDP** (Fully Sharded Data Parallel, cách cài đặt của PyTorch): vẫn là song song dữ liệu, nhưng thay vì $N$ bản giống nhau, chia trạng thái bộ tối ưu, rồi gradient, rồi cả tham số ra $N$ phần. Ở mức chia nhiều nhất, mỗi GPU còn khoảng $16\Psi/N$ byte; GPU cần tham số của lớp nào thì gom các mảnh về, dùng xong thì bỏ.
+
+Các hệ thống lớn ghép nhiều cách: tensor trong một máy, pipeline giữa vài máy, và song song dữ liệu hay FSDP ở ngoài cùng.
+
+:::note[Ghi nhớ]
+GPT học $p(x_t \mid x_{<t})$; mặt nạ nhân quả cho loss ở mọi vị trí trong một lần chạy, với nhãn là đầu vào dịch một vị trí. Trong song song dữ liệu, $\nabla\mathcal{L} = \sum_k \frac{B_k}{m}\mathbf{g}_k$, bằng $\frac{1}{N}\sum_k \mathbf{g}_k$ khi các shard bằng nhau. Ring all-reduce cho mỗi worker gửi $\frac{2(N-1)}{N}G$, gần như không đổi khi thêm worker. Tích lũy gradient là cùng phép trung bình, làm lần lượt. Mixed precision tính ở 16 bit, giữ bản chính FP32, và nhân loss với $s$ khi dùng FP16. Mô hình không vừa một GPU thì chia ma trận (tensor), chia lớp (pipeline) hoặc chia trạng thái (ZeRO/FSDP).
+:::
+
+### Giới hạn
+
+- **Lô càng lớn chưa chắc càng tốt.** Song song dữ liệu bảo toàn gradient của một lô, nhưng thêm GPU là tăng lô hiệu dụng. Lô lớn thường cần chỉnh tốc độ học và **khởi động tốc độ học** (warmup), tức tăng $\eta$ dần trong các bước đầu (hộp đầu tiên ở mục Lỗi hay gặp).
+- **Ô code chỉ chạy trên CPU, 2 tiến trình.** Nó cho thấy cơ chế, không cho thấy tốc độ. Chạy mô hình lớn trên nhiều GPU khi phục vụ người dùng thuộc bài [Deploy LLM: nhiều GPU, phân tán](/vi/llm/llm-deployment/).
+- **Bài không bàn kiến trúc mới.** Các cải tiến sau GPT (RoPE, attention hiệu quả, KV cache) ở bài [Transformers nâng cao](/vi/nlp/advanced-transformers/) và [Họ LLaMA](/vi/llm/llama-family/).
+
+## Minh họa
+
+Hình dưới đặt ba kiểu song song cạnh nhau, trên cùng một mô hình 4 lớp và 2 GPU. Bài này đi sâu vào hàng đầu tiên, song song dữ liệu: hãy để ý mỗi GPU giữ **đủ 4 lớp** và chỉ trao đổi gradient, còn hai hàng dưới thì chính các lớp bị cắt ra.
+
+{/* FIG: song song dữ liệu, tensor và pipeline chia ba thứ khác nhau: lô dữ liệu, ma trận trong một lớp, các lớp. */}
+<ParallelismFigure />
+
+Bảng dưới gom lại thứ mỗi cách chia và thứ phải trao đổi:
+
+| Cách | Mỗi GPU giữ | Trao đổi gì, khi nào | Giải quyết |
+|---|---|---|---|
+| Song song dữ liệu (DDP) | Cả mô hình, một phần lô | All-reduce gradient, một lần mỗi bước | Chậm |
+| Tích lũy gradient | Cả mô hình, một micro-batch mỗi lần | Không trao đổi (một GPU) | Lô không vừa bộ nhớ |
+| ZeRO / FSDP | Một phần tham số, gradient, trạng thái | Gom tham số từng lớp, chia gradient | Mô hình không vừa, vẫn chia lô |
+| Song song tensor | Một phần ma trận của mọi lớp | Kết quả của từng lớp, mọi lớp | Lớp quá lớn |
+| Song song pipeline | Một nhóm lớp liên tiếp | Kích hoạt và gradient giữa các nhóm | Mô hình không vừa (chia theo chiều sâu) |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: hai ô NumPy với Python 3.14 và NumPy 2.4 (bản có trong Pyodide), ô DDP với Python 3.14 và PyTorch 2.14 trên CPU, Windows 11. Hai ô NumPy chạy ngay trên trang, độc lập với nhau. Ô DDP cần PyTorch và nhiều tiến trình nên chạy trên máy bạn.
+
+### Trung bình gradient của các shard
+
+Ô dưới đây dựng một bài hồi quy tuyến tính nhỏ: lô 32 mẫu, 3 đặc trưng, loss MSE trung bình như bài [Hồi quy tuyến tính](/vi/ml/linear-regression/). Nó so gradient cả lô với ba cách: 4 worker mỗi worker 8 mẫu rồi lấy trung bình; một máy chạy 4 micro-batch nối tiếp và cộng dồn $\mathbf{g}/4$; và 4 shard không đều (20, 4, 4, 4 mẫu).
+
+<PythonRunner code={shardCode} title="Gradient của các shard so với gradient cả lô" />
+
+Đọc kết quả:
+
+- **Data parallel** và **tích lũy gradient** đều lệch gradient cả lô khoảng $4.4 \times 10^{-16}$, tức chỉ sai số làm tròn của số `float64`. Đúng như ba bước dẫn ở mục Lý thuyết.
+- **Shard không đều, trung bình đơn giản:** lệch tới 0.629, trong khi thành phần lớn nhất của gradient (dòng cuối) chỉ khoảng 4.940. Sai cỡ 13% độ lớn đó không phải sai số làm tròn: gradient descent sẽ đi theo một hướng khác.
+- **Shard không đều, trung bình có trọng số** $\frac{B_k}{m}$: lại về sai số làm tròn, $8.9 \times 10^{-16}$.
+
+### Ring all-reduce
+
+Ô này mô phỏng 4 worker, mỗi worker một gradient 12 số nguyên, cắt thành 4 mảnh 3 số. Hàm `ring_step` cho mọi worker cùng gửi một mảnh sang phải; pha 1 cộng, pha 2 chép đè. Ô đếm số phần tử worker 0 đã gửi.
+
+<PythonRunner code={ringCode} title="Ring all-reduce với 4 worker" />
+
+Sau pha reduce-scatter, worker 0 giữ mảnh số 1 (đếm từ 0) là `[13 20 12]`, đúng bằng phần tương ứng của tổng cần có. Sau pha all-gather, cả 4 worker đều có đủ tổng. Worker 0 đã gửi 18 số, bằng 1.50 lần kích thước gradient, khớp $\frac{2(N-1)}{N} = \frac{2 \cdot 3}{4}$. Bốn dòng cuối cho thấy tỉ lệ này chỉ tăng từ 1.00 lên 1.97 khi số worker tăng từ 2 lên 64.
+
+### DDP với hai tiến trình
+
+File dưới đây chạy **song song dữ liệu thật** bằng `torch.distributed`, trên CPU, không cần GPU:
+
+- `mp.spawn` tạo 2 tiến trình, mỗi tiến trình đóng vai một GPU và chạy hàm `worker(rank)` với `rank` là 0 hoặc 1. Lời gọi `mp.spawn` phải nằm trong `if __name__ == "__main__":`, vì mỗi tiến trình con nạp lại file từ đầu; thiếu dòng đó, tiến trình con lại gọi `mp.spawn` và Python báo lỗi `RuntimeError`.
+- `init_process_group("gloo", init_method="tcp://127.0.0.1:29500", ...)` nối hai tiến trình qua cổng 29500 trên chính máy bạn. Backend `gloo` chạy trên CPU và có trên cả Windows; với GPU NVIDIA thì người ta dùng `nccl`.
+- Dữ liệu là 4 câu đầu Truyện Kiều, 130 ký tự, cắt thành 114 đoạn dài 17 ký tự. Mô hình là một GPT ký tự tí hon: embedding, một khối Transformer có mặt nạ nhân quả, lớp đầu ra. Hàm `forward` nhận đoạn 17 ký tự, lấy 16 ký tự đầu làm đầu vào, 16 ký tự sau làm nhãn, và trả về luôn loss.
+- `DistributedSampler` chia 114 đoạn thành hai nửa, mỗi tiến trình 57 đoạn, xáo trộn lại mỗi epoch nhờ `set_epoch`.
+- Mỗi tiến trình **cố ý** khởi tạo bằng seed khác nhau (`torch.manual_seed(rank)`). Khi bọc mô hình, `DDP(...)` chép tham số của rank 0 sang các rank khác, nên hai bên bắt đầu giống nhau. Trong `loss.backward()`, DDP all-reduce và lấy trung bình gradient.
+- Sau 30 epoch, `all_gather` gom vectơ tham số của hai tiến trình về để so.
+
+<LocalCode
+  code={ddpCode}
+  title="DDP: 2 tiến trình CPU cùng huấn luyện một GPT tí hon"
+  packages={['torch']}
+  hardware="CPU là đủ, không cần GPU. Khoảng 1 phút trên máy phát triển, phần lớn là thời gian mỗi tiến trình nạp PyTorch"
+  sampleVaries={false}
+>
+
+```text
+rank 1 epoch 10 loss 1.615
+rank 1 epoch 20 loss 0.649
+rank 1 epoch 30 loss 0.261
+rank 0 epoch 10 loss 1.692
+rank 0 epoch 20 loss 0.611
+rank 0 epoch 30 loss 0.276
+57 windows/rank, 15751 params
+max |rank0 - rank1| = 0.0e+00
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Loss của hai rank khác nhau** (1.692 và 1.615 ở epoch 10), vì mỗi rank in loss trên micro-batch cuối của **phần dữ liệu riêng** của nó. Lúc khởi tạo, loss kỳ vọng ở khoảng $\ln 39 \approx 3.66$, mức đoán đều trên 39 ký tự; tới epoch 30, cả hai xuống dưới 0.3: với 130 ký tự, mô hình gần như học thuộc.
+- **Tham số của hai rank giống hệt nhau**, sai khác lớn nhất đúng 0, sau 30 epoch và 120 bước cập nhật, dù chúng khởi tạo khác nhau và không bao giờ thấy cùng một dữ liệu. Đó là hai việc của DDP: phát tham số của rank 0 lúc đầu, và all-reduce gradient ở mỗi bước.
+- Thứ tự các dòng có thể khác mỗi lần chạy, vì hai tiến trình in song song. Trên Windows, bạn có thể thấy 2 dòng cảnh báo `[c10d] The client socket has failed to connect to [tên-máy]:29500`; kết nối sau đó vẫn thành công nên các dòng này vô hại. Nếu cổng 29500 đang bận, đổi sang một số cổng khác trong `ADDR`.
+
+Thử đổi dòng tạo mô hình thành `model = TinyGPT(len(chars))`, tức bỏ DDP, giữ nguyên phần còn lại. Hai tiến trình khi đó học độc lập, mỗi bên trên nửa dữ liệu của mình. Ở lần chạy thử của bài, loss ở epoch 30 là 0.466 và 0.509, còn sai khác tham số lớn nhất lên tới 5.3: cuối cùng bạn có hai mô hình khác hẳn nhau, không phải một.
+
+## Lỗi hay gặp
+
+:::caution[Thêm GPU mà giữ nguyên tốc độ học]
+Với DDP, thêm GPU là tăng lô hiệu dụng: 8 GPU, mỗi GPU 32 mẫu thì một bước dùng 256 mẫu, không phải 32. Mỗi epoch vì thế chỉ còn số bước cập nhật bằng $1/N$ so với một GPU, nên giữ nguyên tốc độ học $\eta$ thì mô hình học chậm đi tính theo số mẫu đã xem. Gradient của lô lớn ít nhiễu hơn, và đó là lý do được phép bước dài hơn, tức tăng $\eta$. Goyal và cộng sự (2017) dùng quy tắc tăng $\eta$ tỉ lệ với cỡ lô, kèm khởi động tốc độ học (warmup) trong vài epoch đầu, để huấn luyện ResNet-50 với lô 8 192 ảnh. Quy tắc này không đúng mãi khi lô rất lớn. Luôn ghi lô hiệu dụng (micro-batch × số bước tích lũy × số GPU) cạnh $\eta$ khi so các lần chạy.
+:::
+
+:::caution[Tích lũy gradient mà quên chia loss]
+`loss.backward()` cộng dồn vào `.grad`. Tích lũy 4 micro-batch mà không chia loss cho 4 thì gradient lớn gấp 4 lần, tức tốc độ học bị nhân 4 mà bạn không hay. Tương tự, khi các micro-batch có số token thật khác nhau (do đệm), lấy trung bình loss của từng micro-batch rồi cộng lại không bằng loss trung bình trên mọi token: đây là trường hợp "shard không đều" của ô NumPy thứ nhất. Cách đúng là cộng tổng loss theo token rồi chia cho tổng số token của cả lô hiệu dụng.
+:::
+
+:::caution[Nghĩ data parallel giúp mô hình vừa bộ nhớ]
+Song song dữ liệu chép cả mô hình, gradient và trạng thái bộ tối ưu lên **mỗi** GPU. Mô hình cần 112 GB thì trên 8 GPU vẫn cần 112 GB mỗi GPU. Muốn vừa thì dùng ZeRO/FSDP, tensor hoặc pipeline parallel. Cũng đừng quên `sampler.set_epoch(epoch)`: thiếu nó, `DistributedSampler` xáo trộn giống hệt nhau ở mọi epoch.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- GPT là Transformer chỉ có decoder, học $p(x_t \mid x_{<t})$. Nhãn là đầu vào dịch một vị trí, và mặt nạ nhân quả cho loss ở mọi vị trí trong một lần chạy. GPT-1, 2, 3 giữ kiến trúc, tăng quy mô; scaling laws cho thấy loss giảm đều theo luật lũy thừa, và Chinchilla khuyên khoảng 20 token cho mỗi tham số.
+- Huấn luyện bằng Adam với độ chính xác hỗn hợp tốn khoảng $16\Psi$ byte, chưa kể kích hoạt. Hai vấn đề riêng: chậm, và không vừa.
+- Song song dữ liệu: mỗi GPU một bản mô hình, một phần lô; $\nabla\mathcal{L} = \sum_k \frac{B_k}{m}\mathbf{g}_k$, bằng trung bình đơn giản khi các shard bằng nhau. Ring all-reduce cho mỗi GPU gửi $\frac{2(N-1)}{N}G$, với $G$ là kích thước gradient. Tích lũy gradient là cùng phép trung bình làm lần lượt.
+- Mixed precision tính ở 16 bit, giữ bản chính FP32, nhân loss với $s$ khi dùng FP16. Mô hình không vừa thì chia ma trận (tensor), chia lớp (pipeline) hoặc chia trạng thái (ZeRO/FSDP).
+
+**Đọc thêm:**
+
+- Brown, T. B., Mann, B., Ryder, N., và cộng sự (2020). [*Language Models are Few-Shot Learners*](https://arxiv.org/abs/2005.14165), arXiv:2005.14165, mục 2.1–2.3 và phụ lục D. GPT-3: cỡ các mô hình, dữ liệu, cách huấn luyện song song, và sức tính đã dùng.
+- Kaplan, J., McCandlish, S., Henighan, T., và cộng sự (2020). [*Scaling Laws for Neural Language Models*](https://arxiv.org/abs/2001.08361), arXiv:2001.08361; Hoffmann, J., Borgeaud, S., Mensch, A., và cộng sự (2022). [*Training Compute-Optimal Large Language Models*](https://arxiv.org/abs/2203.15556), arXiv:2203.15556. Hai bài về scaling laws; bài thứ hai là Chinchilla. Kaplan viết $N$ cho số tham số, chỗ bài này viết $\Psi$.
+- Sergeev, A., Del Balso, M. (2018). [*Horovod: fast and easy distributed deep learning in TensorFlow*](https://arxiv.org/abs/1802.05799), arXiv:1802.05799, mục 3. Ring all-reduce giải thích ngắn gọn, có hình.
+- Li, S., Zhao, Y., Varma, R., và cộng sự (2020). [*PyTorch Distributed: Experiences on Accelerating Data Parallel Training*](https://arxiv.org/abs/2006.15704), arXiv:2006.15704, VLDB 2020. Thiết kế của DDP: phát tham số lúc đầu, gom gradient thành nhóm, chồng trao đổi lên lan truyền ngược, `no_sync`.
+- Micikevicius, P., Narang, S., Alben, J., và cộng sự (2017). [*Mixed Precision Training*](https://arxiv.org/abs/1710.03740), arXiv:1710.03740, ICLR 2018, mục 3. Bản trọng số chính FP32, loss scaling, cộng dồn ở FP32, và vì sao cần chúng.
+- PyTorch. [*Distributed Data Parallel*](https://docs.pytorch.org/docs/2.14/notes/ddp.html) và [*torch.utils.data*](https://docs.pytorch.org/docs/2.14/data.html), mục `DistributedSampler` (PyTorch 2.14), tài liệu chính thức, đọc tháng 11/2026. Cách DDP hoạt động bên trong, và cách sampler chia dữ liệu.
+
+<LessonProgress />

@@ -2,6 +2,7 @@
 // name of <Name>Figure.astro without "Figure", the name of its words file here, and the element ids
 // fig-<id>, fig-<id>-desc. tests/unit/viz/figure-conventions.test.ts keeps components, files and keys in step.
 import { AGENT_LOOP } from './agent-loop';
+import { ATTENTION_MASK } from './attention-mask';
 import { CONTAINER_IMAGE } from './container-image';
 import { ENCODER_DECODER } from './encoder-decoder';
 import { LORA } from './lora';
@@ -12,8 +13,10 @@ import { MULTIMODAL } from './multimodal';
 import { PARALLELISM } from './parallelism';
 import { RAG_PIPELINE } from './rag-pipeline';
 import { REGULARIZATION_GEOMETRY } from './regularization-geometry';
+import { RETRIEVER_READER } from './retriever-reader';
 import { RLHF_STAGES } from './rlhf-stages';
 import type { FigureText } from './types';
+import { WORD2VEC } from './word2-vec';
 
 export const FIGURES = {
   'ml-families': ML_FAMILIES,
@@ -28,5 +31,8 @@ export const FIGURES = {
   multimodal: MULTIMODAL,
   parallelism: PARALLELISM,
   'container-image': CONTAINER_IMAGE,
+  'word2-vec': WORD2VEC,
+  'attention-mask': ATTENTION_MASK,
+  'retriever-reader': RETRIEVER_READER,
 } as const satisfies Record<string, FigureText<string>>;
 export type FigureId = keyof typeof FIGURES;

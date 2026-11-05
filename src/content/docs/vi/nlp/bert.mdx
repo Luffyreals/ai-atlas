@@ -1,0 +1,362 @@
+---
+title: BERT
+description: Chữ "bay" trong "chim bay" và "máy bay" cần hai vectơ khác nhau. BERT đọc hai phía của câu, học bằng cách che token, rồi fine-tune cho nhiều việc.
+quiz:
+  - question: 'Một lô dữ liệu pre-train có $10\,000$ token thường (không tính `[CLS]`, `[SEP]`). Theo cách che của BERT, trung bình bao nhiêu vị trí góp vào loss MLM, và ở bao nhiêu vị trí mô hình thật sự thấy token `[MASK]`?'
+    options:
+      - '$10\,000$ vị trí góp vào loss, $1\,500$ vị trí thấy `[MASK]`'
+      - '$1\,500$ vị trí góp vào loss, $1\,500$ vị trí thấy `[MASK]`'
+      - '$1\,500$ vị trí góp vào loss, $1\,200$ vị trí thấy `[MASK]`'
+      - '$1\,200$ vị trí góp vào loss, $1\,200$ vị trí thấy `[MASK]`'
+    answer: 2
+    explanation: 'BERT chọn 15% vị trí, tức $1\,500$, và chỉ các vị trí này góp vào loss, kể cả những vị trí bị thay bằng token ngẫu nhiên hay được giữ nguyên. Trong số được chọn, chỉ 80% bị thay bằng `[MASK]`: $0.8 \times 1\,500 = 1\,200$. Phương án "$1\,500$ và $1\,500$" quên mất hai nhánh 10%; phương án "$1\,200$ và $1\,200$" quên rằng các vị trí giữ nguyên hay bị thay ngẫu nhiên vẫn phải đoán lại token gốc.'
+  - question: 'Vì sao BERT không thay mọi vị trí được chọn bằng `[MASK]`?'
+    options:
+      - 'Vì `[MASK]` không bao giờ xuất hiện khi fine-tune và khi dùng, nên mô hình cần biểu diễn tốt cả token thật mà nó nhìn thấy, không chỉ chỗ có `[MASK]`'
+      - 'Để tiết kiệm tính toán: vị trí giữ nguyên thì không cần tính loss'
+      - 'Để mô hình tập sinh văn bản từ trái sang phải như GPT'
+      - 'Vì thêm token `[MASK]` vào từ vựng làm tăng đáng kể số tham số'
+    answer: 0
+    explanation: 'Nếu luôn là `[MASK]`, mô hình chỉ cần cố gắng ở các ô `[MASK]`; còn ở token thật, nó biết chắc không bị hỏi nên không cần biểu diễn kỹ. Lúc fine-tune không còn `[MASK]` nào, nên hai giai đoạn lệch nhau. Nhánh ngẫu nhiên và nhánh giữ nguyên buộc mô hình nghi ngờ mọi token. Vị trí giữ nguyên vẫn tính loss, nên phương án tiết kiệm tính toán sai. Trong bảng thí nghiệm của bài báo, che 100% bằng `[MASK]` làm NER kiểu trích đặc trưng tụt từ 94.9 xuống 94.0.'
+  - question: 'Vì sao không thể pre-train BERT bằng dự đoán token kế tiếp như GPT?'
+    options:
+      - 'Vì BERT không có lớp softmax trên từ vựng'
+      - 'Vì BERT dùng WordPiece còn GPT dùng BPE'
+      - 'Vì dự đoán token kế tiếp cần nhiều dữ liệu hơn mức BERT có'
+      - 'Vì attention của BERT không có mặt nạ: vị trí $i$ đã nhìn thấy token $i + 1$, nên mô hình chỉ cần chép lại'
+    answer: 3
+    explanation: 'Mỗi vị trí trong encoder nhìn được mọi vị trí khác. Nếu nhãn của vị trí $i$ là token $i + 1$, đáp án đã nằm sẵn trong đầu vào, và mô hình học cách chép thay vì học hiểu câu. Vì vậy BERT phải giấu chính các token cần đoán (che đi), rồi đoán lại từ ngữ cảnh hai phía. BERT có softmax trên từ vựng (đầu MLM), và cách tách từ không liên quan tới chuyện này.'
+  - question: 'Cho một câu hỏi "Hàng giao ngày nào?" và một email dài. Đáp án là một đoạn liền nằm trong email. Khi fine-tune BERT cho việc này, đầu ra hợp nhất là gì?'
+    options:
+      - 'Vectơ của `[CLS]` qua một lớp phân loại $K$ lớp'
+      - 'Hai vectơ học được chấm điểm từng token làm điểm đầu và điểm cuối, rồi chọn cặp $(i, j)$ với $j \ge i$ có tổng điểm cao nhất'
+      - 'Sinh từng token của câu trả lời từ trái sang phải, như GPT'
+      - 'Embedding token ở lớp đầu vào, chưa qua các lớp encoder'
+    answer: 1
+    explanation: 'Đây là bài toán dự đoán span: đáp án là đoạn từ token $i$ tới token $j$ trong văn bản. BERT chỉ thêm hai vectơ $\mathbf{w}_{\text{start}}$ và $\mathbf{w}_{\text{end}}$, chấm mỗi $\mathbf{h}_i$ để được điểm làm đầu và làm cuối. `[CLS]` chỉ cho một nhãn cho cả chuỗi, không chỉ ra được vị trí. BERT không sinh văn bản. Embedding ở lớp đầu vào chưa biết gì về câu hỏi.'
+  - question: 'Bảng embedding word2vec có một dòng cho token "bay". Cosine giữa vectơ word2vec của "bay" trong "Con chim bay qua sông" và trong "Máy bay hạ cánh" bằng bao nhiêu?'
+    options:
+      - 'Khoảng $0.56$, như BERT ở ô code của bài'
+      - 'Gần $0$, vì hai nghĩa khác hẳn nhau'
+      - '$1$, vì cả hai lần đều tra cùng một dòng của bảng'
+      - 'Không xác định, vì word2vec cần cả câu mới cho ra vectơ'
+    answer: 2
+    explanation: 'Embedding tĩnh là một bảng tra: cùng token thì cùng vectơ, bất kể câu xung quanh, nên cosine bằng 1. BERT thì khác: vectơ của "bay" ở lớp cuối phụ thuộc mọi token trong câu, nên ở ô code của bài, cặp "chim bay" và "máy bay" chỉ còn cosine 0.562. Con số $0.56$ là của BERT, không phải của word2vec.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import maskingCode from '@code/nlp/bert/masking.vi.py?raw';
+import fillMaskCode from '@code/nlp/bert/fill-mask.vi.py?raw';
+import AttentionMaskFigure from '@components/figures/AttentionMaskFigure.astro';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu vì sao cần **embedding theo ngữ cảnh** (contextual embedding), và vì sao BERT là một Transformer **encoder-only** (chỉ có encoder) đọc cả hai phía của câu.
+- Giải thích được hai nhiệm vụ pre-train: **mô hình ngôn ngữ có che** (masked language model, MLM) với quy tắc 15% và 80/10/10, và **dự đoán câu kế tiếp** (next sentence prediction, NSP).
+- Biết cách fine-tune BERT cho ba kiểu đầu ra: phân loại cả chuỗi từ `[CLS]`, gán nhãn từng token, và dự đoán một đoạn (span) trong văn bản.
+- Cài đặt được bước che token bằng NumPy, và dùng được `pipeline("fill-mask")` để xem BERT điền chỗ trống.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+**Self-attention** cho mỗi vị trí lấy trung bình có trọng số của thông tin ở các vị trí trong cùng chuỗi. Mỗi token được chiếu thành **truy vấn** (query), **khóa** (key) và **giá trị** (value); xếp thành ma trận $\mathbf{Q}$, $\mathbf{K}$, $\mathbf{V}$, ta có $\mathrm{softmax}(\mathbf{Q}\mathbf{K}^\top/\sqrt{d})\,\mathbf{V}$, với $d$ là số chiều của khóa trong một đầu và softmax lấy theo từng hàng. **Attention nhiều đầu** (multi-head attention) chạy $H$ phép như vậy song song rồi ghép lại. Một **khối encoder** gồm self-attention rồi **mạng truyền thẳng** (FFN), mỗi phần có **kết nối tắt** (residual connection) và **chuẩn hóa lớp** (layer normalization). Self-attention không biết thứ tự token, nên mỗi token được cộng thêm một **embedding vị trí** (position embedding). Encoder–decoder có ở bài [Mô hình chuỗi sang chuỗi](/vi/llm/seq2seq/), còn khối decoder có mặt nạ nhân quả có ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+:::
+
+## Trực giác
+
+### Một chữ, nhiều nghĩa
+
+Đọc ba câu sau:
+
+| Câu | "bay" nghĩa là |
+|---|---|
+| Con chim **bay** qua sông. | chuyển động trên không |
+| Máy **bay** hạ cánh lúc tám giờ. | một phần của tên phương tiện |
+| Anh thợ cầm cái **bay** trát vữa. | dụng cụ của thợ xây |
+
+Ở bài [Word2Vec, GloVe, FastText](/vi/nlp/word2vec-glove-fasttext/), mỗi token có **đúng một dòng** trong bảng embedding. Cả ba chữ "bay" ở trên đều tra cùng một dòng, nên nhận cùng một vectơ. Vectơ đó là một kiểu trung bình của mọi nghĩa mà "bay" từng có trong dữ liệu. Ta gọi đó là **embedding tĩnh** (static embedding).
+
+Người đọc thì không bao giờ hiểu "bay" một mình. Ta hiểu nó nhờ các chữ xung quanh. Điều ta muốn là một vectơ **cho mỗi lần xuất hiện**, tính từ cả câu.
+
+### Đọc cả hai phía
+
+Che một chữ và đoán thử: "Hà Nội là \_\_\_ đô của Việt Nam."
+
+Nếu chỉ đọc bên trái, "Hà Nội là \_\_\_" có thể là "một", "nơi", "thành"... Chữ "đô" ở **bên phải** mới làm đáp án gần như chắc chắn là "thủ". Nhiều chữ cần ngữ cảnh phía sau: "máy" trong "máy bay" hay "máy giặt", "bàn" trong "bàn tay" hay "bàn học".
+
+GPT đọc từ trái sang phải: khi tính vectơ cho một vị trí, nó chỉ thấy các token đứng trước. Như vậy là đúng cho việc sinh văn bản, vì lúc sinh, phần bên phải chưa tồn tại. Nhưng với việc **hiểu** một câu đã có sẵn (phân loại nhận xét, tìm tên người, trả lời câu hỏi dựa trên đoạn văn), bỏ phí nửa bên phải là thiệt.
+
+### Nhưng nhìn hai phía thì học bằng gì?
+
+GPT học bằng cách đoán token kế tiếp. Nếu mỗi vị trí đã nhìn thấy cả câu, cách học này hỏng: token kế tiếp nằm ngay trong tầm nhìn, mô hình chỉ cần chép.
+
+Lời giải của BERT giống bài tập điền từ ở trường: **giấu đi vài chữ**, rồi bắt mô hình đoán lại từ ngữ cảnh hai bên. Devlin và cộng sự (2019) gọi đây là mô hình ngôn ngữ có che, và ghi rằng nó lấy cảm hứng từ dạng bài điền chỗ trống (cloze) của Taylor (1953).
+
+Bài toán của bài này là: **học một mô hình cho mỗi token một vectơ phụ thuộc cả câu, từ văn bản thô không có nhãn, bằng cách che bớt token rồi đoán lại; sau đó dùng mô hình đó làm điểm khởi đầu cho các bài toán có nhãn.**
+
+## Lý thuyết
+
+### Kiến trúc: một chồng khối encoder
+
+BERT (Bidirectional Encoder Representations from Transformers) là phần encoder của Transformer (Vaswani và cộng sự, 2017), không có decoder, không có cross-attention. Self-attention **không có mặt nạ nhân quả**: mỗi vị trí nhìn mọi vị trí trong chuỗi, ở mọi lớp. Bài báo gọi số lớp là $L$, số chiều ẩn là $H$, số đầu là $A$; bài này giữ quy ước của phần LLM: $D$ là số chiều ẩn, $H$ là số đầu, mỗi đầu có $d = D/H$ chiều.
+
+| Thông số | BERT-base | BERT-large |
+|---|---:|---:|
+| Số khối encoder | 12 | 24 |
+| Số chiều ẩn $D$ | 768 | 1024 |
+| Số đầu attention $H$ | 12 | 16 |
+| Số chiều mỗi đầu $d$ | 64 | 64 |
+| Số tham số (bài báo, làm tròn) | 110 triệu | 340 triệu |
+
+Mạng truyền thẳng trong mỗi khối có $4D$ chiều ẩn (3072 với BERT-base), hàm kích hoạt GELU. Tự đếm cho BERT-base với từ vựng 30 522 token (tệp từ vựng thật; bài báo ghi tròn 30 000):
+
+- **Embedding:** $30\,522 \times 768 + 512 \times 768 + 2 \times 768$ cho token, vị trí và đoạn, cộng chuẩn hóa lớp: khoảng 23.8 triệu.
+- **Một khối encoder:** 4 ma trận $768 \times 768$ của attention (cả hệ số tự do) là 2.36 triệu; FFN $768 \to 3072 \to 768$ là 4.72 triệu; cộng hai lớp chuẩn hóa (3 072 số), tổng khoảng 7.09 triệu. Nhân 12 khối được 85.1 triệu.
+- **Lớp pooler** trên `[CLS]` (một lớp $768 \times 768$, dùng cho NSP): khoảng 0.59 triệu.
+
+Tổng là 109 482 240, đúng cỡ "110 triệu" của bài báo. Đếm cùng cách cho BERT-large được khoảng 335.1 triệu; bài báo ALBERT ghi 334 triệu, còn bài báo BERT làm tròn thành 340 triệu. Phần lớn tham số nằm trong các khối encoder; bảng embedding chiếm khoảng một phần năm.
+
+### Đầu vào: token, đoạn và vị trí
+
+BERT nhận **một** hoặc **hai** đoạn văn bản, gọi là câu A và câu B (thật ra là hai đoạn, có thể dài hơn một câu). Văn bản được tách bằng WordPiece (bài [Tách từ](/vi/nlp/tokenization/)), rồi thêm hai token đặc biệt:
+
+- `[CLS]` luôn đứng đầu. Nó là một **token lớp** (class token): vectơ của nó ở lớp cuối được dùng làm đại diện cho cả chuỗi, khi cần một nhãn cho cả chuỗi.
+- `[SEP]` đứng cuối mỗi đoạn, để phân tách A và B.
+
+Ví dụ cặp câu "trời mưa" và "đường ngập", giả sử mỗi âm tiết là một token:
+
+| Vị trí $i$ | Token | Đoạn $s_i$ |
+|---:|---|---|
+| 0 | `[CLS]` | A |
+| 1 | trời | A |
+| 2 | mưa | A |
+| 3 | `[SEP]` | A |
+| 4 | đường | B |
+| 5 | ngập | B |
+| 6 | `[SEP]` | B |
+
+Vectơ đầu vào của vị trí $i$ là **tổng của ba embedding**:
+
+$$
+\mathbf{e}_i = \mathbf{E}^{\text{tok}}[x_i] + \mathbf{E}^{\text{seg}}[s_i] + \mathbf{E}^{\text{pos}}[i]
+$$
+
+- $\mathbf{E}^{\text{tok}}$ có $|V|$ hàng, mỗi token một hàng; $x_i$ là số thứ tự của token ở vị trí $i$. Đây chính là bảng embedding tĩnh.
+- $\mathbf{E}^{\text{seg}}$ chỉ có 2 hàng: một cho A, một cho B. Nó là **embedding đoạn** (segment embedding), cho mô hình biết token thuộc câu nào ngoài dấu `[SEP]`.
+- $\mathbf{E}^{\text{pos}}$ có 512 hàng, học được, nên BERT đọc tối đa 512 token mỗi chuỗi.
+
+Mỗi bảng có $D$ cột. Sau 12 khối encoder, vị trí $i$ có vectơ $\mathbf{h}_i \in \mathbb{R}^{D}$ (bài báo viết $T_i$, và $C$ cho vectơ của `[CLS]`). $\mathbf{e}_i$ chỉ biết token $x_i$; $\mathbf{h}_i$ đã trộn thông tin của cả chuỗi qua 12 lần self-attention. **$\mathbf{h}_i$ chính là embedding theo ngữ cảnh** mà phần Trực giác cần. Lưu ý ký hiệu: ở bài Word2Vec, $d$ là số chiều của embedding tĩnh; ở bài này, $D$ là số chiều của các vectơ ẩn (768), còn $d$ là số chiều của một đầu attention.
+
+### Mô hình ngôn ngữ có che (MLM)
+
+**Bước 1: chọn vị trí.** Với mỗi chuỗi, chọn ngẫu nhiên 15% số vị trí (không chọn `[CLS]`, `[SEP]`). Gọi tập vị trí được chọn là $\mathcal{M}$. Mã gốc của Google chọn khoảng đúng 15% số vị trí mỗi chuỗi; thư viện `transformers` chọn từng token độc lập với xác suất 0.15, nên số vị trí dao động quanh 15%.
+
+**Bước 2: làm hỏng đầu vào.** Với mỗi $i \in \mathcal{M}$, tung một đồng xu ba mặt:
+
+- 80%: thay token bằng `[MASK]`;
+- 10%: thay bằng một token ngẫu nhiên trong từ vựng;
+- 10%: giữ nguyên.
+
+Gọi chuỗi sau khi làm hỏng là $\tilde{\mathbf{x}}$.
+
+**Bước 3: đoán lại token gốc ở các vị trí được chọn.** Cho $\tilde{\mathbf{x}}$ qua encoder, được $\mathbf{h}_i$. Một đầu MLM (một lớp nhỏ rồi một lớp tuyến tính ra $|V|$ logit) cộng softmax cho phân phối $p_{\boldsymbol{\theta}}(\cdot \mid \tilde{\mathbf{x}})$ trên từ vựng ở vị trí $i$. Hàm mất mát là cross-entropy, **chỉ lấy trung bình trên $\mathcal{M}$**:
+
+$$
+\mathcal{L}_{\text{MLM}}(\boldsymbol{\theta}) = -\frac{1}{|\mathcal{M}|} \sum_{i \in \mathcal{M}} \ln p_{\boldsymbol{\theta}}(x_i \mid \tilde{\mathbf{x}})
+$$
+
+Ở đây $x_i$ là token **gốc**, không phải token trong $\tilde{\mathbf{x}}$. Các vị trí ngoài $\mathcal{M}$ không góp gì vào loss: mô hình không bị hỏi về chúng.
+
+So với GPT: GPT tính loss ở **mọi** vị trí, mỗi vị trí có điều kiện là phần bên trái. BERT chỉ tính ở khoảng 15% vị trí, nhưng mỗi vị trí có điều kiện là cả chuỗi (đã bị làm hỏng). Mỗi câu vì vậy cho ít tín hiệu học hơn. Bài báo ghi nhận MLM hội tụ chậm hơn mô hình trái sang phải một chút, nhưng vượt nó về độ chính xác rất sớm.
+
+**Vì sao không thay hết bằng `[MASK]`?** Token `[MASK]` chỉ có trong lúc pre-train. Khi fine-tune và khi dùng, đầu vào là văn bản thật, không có `[MASK]` nào. Nếu luôn che bằng `[MASK]`, mô hình học được một mẹo: chỉ chỗ nào có `[MASK]` mới cần đoán, còn token thật thì cứ tin. Hai nhánh 10% phá mẹo này:
+
+- **Nhánh ngẫu nhiên:** một token thật cũng có thể là token sai, nên mô hình phải kiểm tra mọi token bằng ngữ cảnh.
+- **Nhánh giữ nguyên:** đôi khi đáp án chính là token đang thấy, nên biểu diễn của token thật được kéo về phía nghĩa thật của nó.
+
+Mô hình không biết vị trí nào đang bị hỏi, nên phải giữ một biểu diễn tốt cho **mọi** token. Tính trên toàn bộ token, $0.15 \times 0.8 = 12\%$ thấy `[MASK]`, $0.15 \times 0.1 = 1.5\%$ thấy token ngẫu nhiên, $1.5\%$ được giữ nguyên nhưng vẫn bị hỏi. Bài báo cho rằng 1.5% token ngẫu nhiên đủ ít để không làm hại khả năng hiểu ngôn ngữ.
+
+Phụ lục của bài báo có thí nghiệm đổi tỉ lệ. Khi fine-tune, kết quả gần như không đổi (MNLI 84.2 với 80/10/10, 84.3 với 100% `[MASK]`). Nhưng khi giữ BERT cố định và chỉ lấy vectơ làm đặc trưng cho bài nhận dạng thực thể, 100% `[MASK]` cho F1 94.0, kém 80/10/10 (94.9). Đúng chỗ mà độ lệch giữa pre-train và lúc dùng bị phóng to.
+
+### Dự đoán câu kế tiếp (NSP)
+
+Nhiều bài toán xét quan hệ giữa **hai** câu: câu B có suy ra từ câu A không, đoạn văn có chứa câu trả lời cho câu hỏi không. MLM không dạy trực tiếp điều này. BERT thêm nhiệm vụ thứ hai: lấy câu A, rồi 50% lấy B là đoạn **thật sự** đi sau A trong văn bản (nhãn `IsNext`), 50% lấy B là một đoạn ngẫu nhiên từ chỗ khác (nhãn `NotNext`). Vectơ $\mathbf{h}_{\text{CLS}}$ đi qua một lớp phân loại hai lớp. Loss pre-train là tổng của loss MLM và loss NSP.
+
+Trong thí nghiệm của bài báo, bỏ NSP làm điểm tụt trên QNLI (88.4 xuống 84.9) và vài tác vụ khác. Nhưng RoBERTa (Liu và cộng sự, 2019) huấn luyện lại BERT cẩn thận hơn và thấy ngược lại: bỏ NSP, thay bằng các chuỗi liền mạch dài tới 512 token, cho kết quả **ngang hoặc nhỉnh hơn**. Họ cho rằng bản thí nghiệm gốc có thể chỉ bỏ loss NSP mà vẫn giữ định dạng cặp đoạn A/B. ALBERT (Lan và cộng sự, 2020) giải thích thêm: một đoạn ngẫu nhiên thường khác **chủ đề** với A, nên NSP dễ đoán chỉ nhờ chủ đề. ALBERT thay NSP bằng **dự đoán thứ tự câu** (sentence-order prediction, SOP): hai đoạn liền nhau, đúng thứ tự hoặc bị đảo.
+
+:::note[Ghi nhớ]
+BERT là một chồng khối encoder, attention không có mặt nạ. Đầu vào là tổng embedding token, đoạn và vị trí, có `[CLS]` ở đầu và `[SEP]` sau mỗi đoạn. MLM chọn 15% vị trí; trong đó 80% thay bằng `[MASK]`, 10% thay bằng token ngẫu nhiên, 10% giữ nguyên; loss chỉ tính ở các vị trí được chọn, so với token gốc. NSP phân loại từ `[CLS]` xem B có đi sau A không, và các mô hình sau đã bỏ nó.
+:::
+
+### Fine-tune: ba kiểu đầu ra
+
+Sau pre-train, ta có $\mathbf{h}_1, \dots, \mathbf{h}_L$ cho mọi token của một chuỗi dài $L$. Fine-tune thêm một lớp nhỏ phía trên rồi huấn luyện **toàn bộ** mô hình (cả BERT lẫn lớp mới) trên dữ liệu có nhãn, thường chỉ vài epoch. Có ba kiểu:
+
+**1. Một nhãn cho cả chuỗi.** Phân loại cảm xúc, phát hiện thư rác, hay xét quan hệ của một cặp câu. Với $K$ lớp, chỉ thêm ma trận $\mathbf{W} \in \mathbb{R}^{K \times D}$:
+
+$$
+\hat{\mathbf{y}} = \mathrm{softmax}(\mathbf{W}\mathbf{h}_{\text{CLS}})
+$$
+
+Vì sao lấy `[CLS]`? Nó không mang nghĩa riêng nào, ở mọi lớp nó nhìn được mọi token, và NSP đã tập cho nó tóm tắt cả chuỗi. Bài [Phân tích cảm xúc](/vi/nlp/sentiment-analysis/) dùng kiểu này.
+
+**2. Một nhãn cho mỗi token.** Nhận dạng thực thể: "Nguyễn Du quê ở Hà Tĩnh" cần nhãn người cho "Nguyễn Du", nhãn địa danh cho "Hà Tĩnh". Cùng một lớp $\mathbf{W}$ áp lên từng $\mathbf{h}_i$. Một từ bị WordPiece chia thành nhiều mảnh thì bài báo chỉ đưa vectơ của mảnh đầu vào lớp phân loại. Chi tiết ở bài [Nhận dạng thực thể](/vi/nlp/named-entity-recognition/).
+
+**3. Một đoạn trong văn bản.** Hỏi đáp trích xuất: câu hỏi là A, đoạn văn là B, đáp án là một đoạn liền của B. Chỉ thêm hai vectơ $\mathbf{w}_{\text{start}}, \mathbf{w}_{\text{end}} \in \mathbb{R}^{D}$. Xác suất token $i$ là điểm đầu của đáp án:
+
+$$
+p_{\text{start}}(i) = \frac{\exp(\mathbf{w}_{\text{start}}^\top \mathbf{h}_i)}{\sum_{k} \exp(\mathbf{w}_{\text{start}}^\top \mathbf{h}_k)}
+$$
+
+với tổng lấy trên các token của đoạn văn; điểm cuối tính giống vậy bằng $\mathbf{w}_{\text{end}}$. Khi dùng, chọn cặp $(i, j)$ với $j \ge i$ có $\mathbf{w}_{\text{start}}^\top \mathbf{h}_i + \mathbf{w}_{\text{end}}^\top \mathbf{h}_j$ lớn nhất. Chi tiết ở bài [Hỏi đáp](/vi/nlp/question-answering/).
+
+Điểm chung: phần lớn tri thức nằm trong BERT đã pre-train, phần thêm vào rất nhỏ ($K \times D$ hay $2D$ số). Đó là lý do một mô hình pre-train một lần dùng lại được cho nhiều bài toán. Khi ra mắt (cuối 2018), BERT-large đạt 80.5 điểm GLUE (hơn kết quả tốt nhất trước đó 7.7 điểm) và F1 93.2 trên SQuAD v1.1.
+
+### Họ BERT
+
+Sau BERT có nhiều biến thể, mỗi cái sửa một điểm:
+
+| Mô hình | Năm, tác giả | Thay đổi chính |
+|---|---|---|
+| RoBERTa | 2019, [Liu và cộng sự](https://arxiv.org/abs/1907.11692) | Bỏ NSP; che **động** (chọn lại vị trí che mỗi lần chuỗi được đưa vào, thay vì cố định từ trước); lô lớn hơn, huấn luyện lâu hơn, hơn 160 GB văn bản; BPE theo byte |
+| ALBERT | 2020, [Lan và cộng sự](https://arxiv.org/abs/1909.11942) | Tách bảng embedding thành hai ma trận nhỏ ($\lvert V \rvert \times E$ rồi $E \times D$, với $E$ nhỏ hơn $D$); **dùng chung tham số** giữa mọi lớp; thay NSP bằng SOP. ALBERT-large có 18 triệu tham số, so với 334 triệu của BERT-large (theo cách đếm của bài báo ALBERT). Ít tham số nhưng không ít phép tính, vì mỗi lớp vẫn phải chạy đủ; trong bảng so sánh của bài báo, bản large kém BERT-large (điểm trung bình 82.4 so với 85.2); bản xlarge (60 triệu) chỉ nhỉnh hơn (85.5) nhưng chậm hơn; bản xxlarge (235 triệu) vượt rõ (88.7) nhưng chạy chậm khoảng 3 lần |
+| DistilBERT | 2019, [Sanh và cộng sự](https://arxiv.org/abs/1910.01108) | **Chắt lọc tri thức** (knowledge distillation) từ BERT-base: 6 lớp thay vì 12, khoảng 66 triệu tham số, nhỏ hơn 40%, nhanh hơn 60%, giữ khoảng 97% khả năng hiểu ngôn ngữ (đo trên GLUE) |
+| ELECTRA | 2020, [Clark và cộng sự](https://arxiv.org/abs/2003.10555) | Một mô hình nhỏ (generator) thay vài token bằng token hợp lý; mô hình chính (discriminator) đoán **từng** token là gốc hay bị thay. Học từ mọi token chứ không chỉ 15%, và không có `[MASK]` trong đầu vào của mô hình chính |
+
+### BERT cho tiếng Việt
+
+Có hai hướng:
+
+- **Mô hình đa ngôn ngữ.** **mBERT** (BERT-Base Multilingual Cased của Google) học trên Wikipedia của 104 ngôn ngữ, với một từ vựng WordPiece chung khoảng 119 nghìn token. Tự đếm từ tệp cấu hình: khoảng 178 triệu tham số, hơn một nửa (91.8 triệu) nằm ở bảng embedding token. **XLM-R** ([Conneau và cộng sự, 2020](https://aclanthology.org/2020.acl-main.747/)) học trên hơn 2 TB văn bản CommonCrawl của 100 ngôn ngữ, và vượt mBERT rõ rệt (cao hơn trung bình 14.6 điểm trên XNLI).
+- **Mô hình riêng cho tiếng Việt.** **PhoBERT** (Nguyen và Nguyen, 2020) có bản base (135 triệu tham số) và large (370 triệu), học theo quy trình của RoBERTa trên 20 GB văn bản tiếng Việt. Điểm riêng: tiếng Việt dùng dấu cách giữa các **âm tiết**, không phải giữa các **từ**, nên "thủ đô" là hai âm tiết nhưng một từ. PhoBERT **tách từ tiếng Việt** (word segmentation: gộp âm tiết thành từ) trước, bằng RDRSegmenter của VnCoreNLP ("Hà_Nội là thủ_đô của Việt_Nam"), rồi mới tách subword bằng BPE. Vì vậy văn bản đưa vào PhoBERT **phải được tách từ theo cùng cách**. Trên các bài gán nhãn từ loại, phân tích cú pháp, nhận dạng thực thể và suy luận ngôn ngữ tiếng Việt, PhoBERT vượt XLM-R dù ít tham số hơn, và dù kho văn bản của XLM-R có tới 137 GB tiếng Việt, gấp khoảng 7 lần.
+
+### Giới hạn
+
+- **BERT không sinh văn bản tự nhiên.** Nó điền chỗ trống trong một câu đã có, không viết tiếp từ trái sang phải. Việc sinh là của GPT (bài [GPT và huấn luyện phân tán](/vi/nlp/gpt-distributed-training/)) và các mô hình encoder–decoder.
+- **Tối đa 512 token.** Văn bản dài hơn phải cắt thành nhiều đoạn. Chi phí self-attention tăng theo bình phương độ dài; các cách xử lý ở bài [Transformers nâng cao](/vi/nlp/advanced-transformers/).
+- **Vectơ thô chưa phải embedding câu tốt.** Xem hộp thứ ba ở mục Lỗi hay gặp.
+
+## Minh họa
+
+Khác biệt cốt lõi giữa BERT và GPT nằm ở mặt nạ attention. Trong hình dưới, mỗi hàng là token đang được tính, mỗi cột là token mà nó được nhìn. Hãy so hai ô ở hàng "chim", cột "bay": BERT được nhìn, GPT bị che.
+
+{/* FIG: encoder của BERT cho mọi token nhìn mọi token (lưới đầy), decoder của GPT chỉ cho nhìn chính nó và các token đứng trước (tam giác dưới). */}
+<AttentionMaskFigure />
+
+Hàng cuối của lưới GPT là hàng duy nhất nhìn đủ cả câu: chỉ token cuối mới biết mọi thứ. Ở lưới BERT, hàng nào cũng nhìn đủ, kể cả hàng đầu. Cái giá: lưới đầy thì không thể dạy bằng cách đoán token kế tiếp, nên BERT cần MLM.
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: ô che token với Python 3.14 và NumPy 2.4 (bản có trong Pyodide), ô BERT với Python 3.14, `transformers` 5.22 và PyTorch 2.14 trên CPU. Ô che token chạy ngay trên trang. Ô BERT cần PyTorch và tải mô hình từ Hugging Face Hub, nên chạy trên máy bạn.
+
+### Che token theo quy tắc 15% và 80/10/10
+
+Ô dưới làm lại Bước 1 và Bước 2 của MLM trên một câu tiếng Việt, tách theo âm tiết cho dễ đọc (BERT thật dùng WordPiece). Mỗi token thường được chọn với xác suất 0.15, giống cách thư viện `transformers` làm, nên số vị trí được chọn trong một câu dao động quanh 15%. Phần sau đếm tỉ lệ trên 2000 câu giả lập, mỗi câu 126 token, để thấy các con số hiện ra.
+
+<PythonRunner code={maskingCode} title="Chọn và che token cho MLM" />
+
+Đọc kết quả:
+
+- **Câu mẫu có 24 token thường, 3 vị trí được chọn** (12.5%, vì một câu ngắn dao động nhiều quanh 15%). Vị trí 3 ("là") và vị trí 18 ("và") thành `[MASK]`. Vị trí 11 ("có") bị thay bằng "năm": câu thành "nơi năm hơn một nghìn năm", sai nhưng trông vẫn như chữ thật. Mô hình phải nhận ra và đoán lại "có".
+- **Loss chỉ tính ở 3 vị trí này**, với nhãn là "là", "có", "và". 21 vị trí còn lại không bị hỏi.
+- **Trên 2000 câu**, tỉ lệ được chọn là 0.1507; trong số được chọn, 0.797 thành `[MASK]`, 0.101 thành token ngẫu nhiên, 0.102 giữ nguyên. Đúng 15% và 80/10/10 như lý thuyết, cộng sai số ngẫu nhiên.
+
+Câu mẫu không có vị trí nào rơi vào nhánh giữ nguyên. Với một vị trí như vậy, đầu vào và nhãn giống nhau, nhưng mô hình không biết điều đó, và vẫn phải đoán.
+
+### Điền chỗ trống bằng BERT đa ngôn ngữ
+
+File dưới dùng mBERT (`google-bert/bert-base-multilingual-cased`), vì nó đọc được cả tiếng Việt lẫn tiếng Anh. Phần đầu gọi `pipeline("fill-mask")` cho hai câu có `[MASK]`, in 5 token có xác suất cao nhất. Phần sau nạp riêng encoder (`AutoModel`, không có đầu MLM), lấy `last_hidden_state` (các vectơ $\mathbf{h}_i$) cho ba câu có chữ "bay", và tính cosine giữa các vectơ của "bay".
+
+<LocalCode
+  code={fillMaskCode}
+  title="fill-mask và vectơ theo ngữ cảnh với mBERT"
+  packages={['transformers', 'torch']}
+  hardware="CPU là đủ. Lần đầu tải khoảng 717 MB (tệp trọng số 714 MB). Trên máy phát triển, cả file chạy khoảng một phút, phần lớn là thời gian nạp mô hình"
+  sampleVaries={false}
+>
+
+```text
+Hà Nội là [MASK] đô của Việt Nam.
+  thủ      0.935
+  Thủ      0.031
+  kinh     0.012
+  đô       0.004
+  đại      0.002
+I drink a cup of [MASK] every morning.
+  coffee   0.664
+  drink    0.093
+  milk     0.056
+  wine     0.052
+  beer     0.021
+(8, 768) ['[CLS]', 'Con', 'chim', 'bay', 'qua', 'sông', '.', '[SEP]']
+(10, 768) ['[CLS]', 'Đà', '##n', 'chim', 'bay', 'về', 'phía', 'nam', '.', '[SEP]']
+(12, 768) ['[CLS]', 'Má', '##y', 'bay', 'hạ', 'cánh', 'lúc', 'tá', '##m', 'giờ', '.', '[SEP]']
+cos(bird flies, birds fly) = 0.729
+cos(bird flies, airplane)  = 0.562
+cos(birds fly, airplane)   = 0.539
+cos(bay, ve)               = 0.542
+mean cos, any token pair   = 0.325
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Câu tiếng Việt:** "thủ" được 0.935. Đây đúng là câu ở phần Trực giác: đáp án chắc chắn nhờ chữ "đô" ở **bên phải**. Phương án thứ hai "Thủ" chỉ khác chữ hoa, vì đây là mô hình phân biệt hoa thường (cased). "kinh" (0.012) cũng hợp lý: "kinh đô".
+- **Câu tiếng Anh:** "coffee" được 0.664. Hạng hai lại là "drink" (0.093): mô hình chép lại một chữ có sẵn trong câu, mà "a cup of drink" thì không chỉ một đồ uống cụ thể nào. Sau đó mới tới "milk", "wine", "beer". Phương án đầu hợp lý không có nghĩa mọi phương án trong top-5 đều hợp lý.
+- **Hình dạng `(8, 768)`:** câu đầu có 8 token tính cả `[CLS]` và `[SEP]`, mỗi token một vectơ 768 chiều. Bộ tách từ (tokenizer) của mBERT cắt một số âm tiết tiếng Việt thành mảnh: "Máy" thành `Má` và `##y`, "tám" thành `tá` và `##m`. Bài [Tách từ](/vi/nlp/tokenization/) giải thích vì sao.
+- **Cosine:** "bay" trong hai câu về chim gần nhau nhất (0.729). "bay" của "chim bay" và của "máy bay" xa hơn (0.562 và 0.539). Với embedding tĩnh, cả ba con số này đều bằng 1, vì cùng một dòng của bảng.
+- **Hai mốc để đọc các con số trên.** "bay" của câu 1 so với một chữ khác hẳn, "về" của câu 2, được 0.542: gần bằng 0.562 của cặp "chim bay" và "máy bay". Tức là với mô hình, chữ "bay" trong "máy bay" cách chữ "bay" của "chim bay" xa cỡ như một chữ khác. Mốc nền, trung bình cosine giữa mọi cặp token của câu 1 và câu 3 (kể cả `[CLS]`, `[SEP]` và dấu chấm), là 0.325.
+
+Hai lưu ý trung thực. Thứ nhất, vectơ của BERT **không đẳng hướng** (anisotropic): chúng chụm về một vùng hẹp, nên cosine giữa hai token bất kỳ đã dương đáng kể ([Ethayarajh, 2019](https://arxiv.org/abs/1909.00512)); mốc nền 0.325 ở trên cho thấy điều đó. Vì vậy hãy so các con số **với nhau và với mốc**, đừng đọc riêng một con số. Thứ hai, ba câu chưa đủ để kết luận chung. Đây là một minh họa, không phải phép đo.
+
+Khi chạy, `transformers` còn in ra (ở luồng lỗi) **hai** báo cáo nạp trọng số, liệt kê các tham số `UNEXPECTED`: có trong checkpoint nhưng lớp mô hình không dùng. Lần thứ nhất, `pipeline` nạp `BertForMaskedLM` và bỏ qua `bert.pooler.*` (lớp pooler) cùng `cls.seq_relationship.*` (đầu NSP), vì điền chỗ trống chỉ cần đầu MLM. Lần thứ hai, `AutoModel` nạp `BertModel` (encoder cùng lớp pooler) và bỏ qua `cls.predictions.*`, tức chính đầu MLM, cùng `cls.seq_relationship.*`, vì ở bước này ta chỉ cần encoder. Checkpoint giữ mọi đầu từ lúc pre-train; mỗi lớp mô hình lấy phần nó cần. Đây không phải lỗi.
+
+## Lỗi hay gặp
+
+:::caution[Dùng BERT để viết tiếp văn bản]
+BERT không có mặt nạ nhân quả và không được học đoán token kế tiếp. Thêm `[MASK]` vào cuối câu rồi điền lặp lại thì ra chữ, nhưng kém và chậm: mỗi lần điền phải chạy lại cả chuỗi, và mô hình chưa từng tập viết một đoạn dài. Muốn sinh văn bản, hãy dùng mô hình decoder-only như GPT hoặc encoder–decoder như T5. BERT mạnh ở chỗ **hiểu** văn bản có sẵn: phân loại, gán nhãn, tìm đáp án trong đoạn văn.
+:::
+
+:::caution[Đưa văn bản chưa tách từ vào PhoBERT]
+PhoBERT được pre-train trên văn bản đã tách từ, ví dụ "thủ_đô", "Việt_Nam". Đưa vào "thủ đô" (hai âm tiết rời) thì mô hình nhận các token nó ít khi thấy lúc pre-train, và kết quả kém đi mà không báo lỗi gì. Hãy tách từ bằng đúng công cụ mà PhoBERT dùng (RDRSegmenter của VnCoreNLP, cần Java) trước khi gọi tokenizer. Tương tự, mỗi mô hình có token che riêng: BERT và mBERT dùng `[MASK]`, RoBERTa, XLM-R và PhoBERT dùng `<mask>`. Hãy lấy nó từ `tokenizer.mask_token` thay vì gõ tay.
+:::
+
+:::caution[Lấy vectơ `[CLS]` của BERT chưa fine-tune làm embedding câu]
+`[CLS]` chỉ được tập để tóm tắt cả chuỗi cho NSP, và chỉ thật sự hữu ích sau khi fine-tune. [Reimers và Gurevych (2019)](https://arxiv.org/abs/1908.10084) đo trên các bộ chấm độ giống nhau của hai câu (STS): dùng thẳng vectơ `[CLS]` hay trung bình các vectơ của BERT gốc rồi so bằng cosine cho kết quả **kém hơn cả trung bình embedding GloVe**. Muốn tìm câu giống nhau hay làm truy xuất, hãy dùng mô hình được huấn luyện riêng cho embedding câu (như Sentence-BERT), xem bài [Truy xuất thông tin](/vi/nlp/information-retrieval/).
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Embedding tĩnh cho mỗi token một vectơ. BERT cho mỗi **lần xuất hiện** một vectơ $\mathbf{h}_i$, tính từ cả câu qua một chồng khối encoder có attention hai chiều (BERT-base: 12 lớp, $D = 768$, 12 đầu, khoảng 110 triệu tham số).
+- Đầu vào là tổng embedding token, đoạn và vị trí, có `[CLS]` ở đầu và `[SEP]` sau mỗi đoạn, tối đa 512 token.
+- MLM chọn 15% vị trí; trong đó 80% thành `[MASK]`, 10% thành token ngẫu nhiên, 10% giữ nguyên, để giảm độ lệch giữa pre-train và lúc dùng. Loss $\mathcal{L}_{\text{MLM}}$ chỉ tính ở các vị trí được chọn, so với token gốc. NSP thêm vào lúc đầu, RoBERTa cho thấy bỏ đi không thiệt.
+- Fine-tune thêm một lớp nhỏ: phân loại từ $\mathbf{h}_{\text{CLS}}$, gán nhãn từ từng $\mathbf{h}_i$, hoặc chọn span bằng hai vectơ đầu và cuối. Cho tiếng Việt, có mBERT, XLM-R và PhoBERT (cần tách từ trước).
+
+**Đọc thêm:**
+
+- Nguyen, D. Q., Nguyen, A. T. (2020). [*PhoBERT: Pre-trained language models for Vietnamese*](https://aclanthology.org/2020.findings-emnlp.92/), Findings of EMNLP 2020, mục 2 và 3. Vì sao tiếng Việt cần tách từ trước khi pre-train, dữ liệu 20 GB, và so sánh với XLM-R trên bốn bài toán tiếng Việt.
+- Devlin, J., Chang, M.-W., Lee, K., Toutanova, K. (2019). [*BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding*](https://aclanthology.org/N19-1423/), NAACL 2019, mục 3, 5.1 và phụ lục A.1, C.2. Bài gốc: kiến trúc, MLM, NSP, cách fine-tune, và các thí nghiệm bỏ NSP, đổi tỉ lệ che. Bài báo viết $T_i$ cho vectơ chỗ bài này viết $\mathbf{h}_i$, và $H$ cho số chiều ẩn chỗ bài này viết $D$.
+- Liu, Y. và cộng sự (2019). [*RoBERTa: A Robustly Optimized BERT Pretraining Approach*](https://arxiv.org/abs/1907.11692), arXiv:1907.11692, mục 4. Che động, bỏ NSP, lô lớn: BERT được huấn luyện "chưa tới" như thế nào.
+- Clark, K., Luong, M.-T., Le, Q. V., Manning, C. D. (2020). [*ELECTRA: Pre-training Text Encoders as Discriminators Rather Than Generators*](https://arxiv.org/abs/2003.10555), ICLR 2020, mục 1 và 2. Vì sao học từ 15% token là lãng phí, và cách học từ mọi token.
+- Hugging Face. [*Pipelines*](https://huggingface.co/docs/transformers/main_classes/pipelines), tài liệu `transformers`, mục `FillMaskPipeline`. Các tham số `top_k`, `targets` và các trường của kết quả.
+
+<LessonProgress />

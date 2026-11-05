@@ -1,0 +1,379 @@
+---
+title: Hỏi đáp (Question Answering)
+description: 'Tìm câu trả lời "năm nào?" nằm sẵn trong một đoạn văn. QA trích xuất kiểu SQuAD, logit đầu/cuối, câu không có đáp án, EM và F1, retriever–reader và RAG.'
+quiz:
+  - question: 'Một đoạn văn có 5 token (vị trí 1 tới 5). Logit đầu là $s = (0.5, 3.0, 1.0, 0.2, 3.5)$, logit cuối là $e = (0.1, 2.0, 4.0, 0.5, 0.3)$, độ dài span tối đa $K = 3$ token. Mô hình nên trả lời span nào?'
+    options:
+      - 'Từ vị trí 5 tới vị trí 3, vì đó là argmax của từng bên'
+      - 'Chỉ vị trí 5, vì logit đầu ở đó lớn nhất'
+      - 'Từ vị trí 2 tới vị trí 3, điểm $3.0 + 4.0 = 7.0$'
+      - 'Chỉ vị trí 3, vì logit cuối ở đó lớn nhất'
+    answer: 2
+    explanation: 'Argmax riêng cho đầu ở 5, cuối ở 3: span ngược, không phải câu trả lời. Phải xét các cặp $i \le j < i + K$ và lấy tổng $s_i + e_j$ lớn nhất. Cặp $(2, 3)$ được $7.0$, hơn $(3, 3)$ được $5.0$ và $(5, 5)$ được $3.8$. Logit đầu lớn nhất ở vị trí 5 không cứu được, vì không có logit cuối lớn nào từ 5 trở đi.'
+  - question: 'Bạn có một mô hình chỉ fine-tune trên SQuAD 1.1 (mọi câu hỏi đều có đáp án) và muốn nó biết nói "không có trong đoạn văn". Cách nào hợp lý nhất?'
+    options:
+      - 'So điểm span tốt nhất với điểm của `[CLS]` như SQuAD 2.0, với $\tau = 0$'
+      - 'Tăng độ dài span tối đa để mô hình có nhiều lựa chọn hơn'
+      - 'Chọn đầu và cuối bằng argmax riêng từng bên, span ngược thì coi là không có đáp án'
+      - 'Fine-tune thêm trên dữ liệu có câu không có đáp án (nhãn trỏ vào `[CLS]`), rồi chọn ngưỡng $\tau$ trên tập dev'
+    answer: 3
+    explanation: 'Điểm của `[CLS]` chỉ có nghĩa khi mô hình đã được dạy trỏ vào `[CLS]` cho câu không có đáp án. Mô hình SQuAD 1.1 chưa từng học điều đó: ở ô DistilBERT của bài, điểm `[CLS]` của câu hỏi không có đáp án là $-14.37$, thấp hơn hẳn span bừa của nó ($1.38$). Span ngược chỉ là hệ quả của cách giải mã sai, không phải tín hiệu "không biết".'
+  - question: 'Đáp án mẫu là "Quảng Ninh", mô hình trả lời "tỉnh Quảng Ninh". Chuẩn hóa kiểu SQuAD cho tiếng Việt (chữ thường, bỏ dấu câu, gộp khoảng trắng). EM và F1 bằng bao nhiêu?'
+    options:
+      - 'EM = 0, F1 = 0.8'
+      - 'EM = 1, F1 = 1, vì chuẩn hóa bỏ chữ thừa'
+      - 'EM = 0, F1 = 0.667'
+      - 'EM = 0, F1 = 0'
+    answer: 0
+    explanation: 'Chuẩn hóa chỉ đổi chữ hoa và bỏ dấu câu, không bỏ "tỉnh" (bước bỏ mạo từ tiếng Anh cũng không đụng tới chữ này), nên hai chuỗi khác nhau và EM = 0. Dự đoán có 3 token, đáp án 2 token, chung 2: precision $2/3$, recall $1$, F1 $= 2 \cdot \frac{2}{3} \cdot 1 / (\frac{2}{3} + 1) = 0.8$. Đáp án $0.667$ là của ca "năm 1994" so với "1994" trong bài, nơi dự đoán có 2 token chứ không phải 3.'
+  - question: 'Hệ thống hỏi đáp miền mở của bạn: retriever lấy top-5 đoạn, và chỉ 60% câu hỏi có đoạn chứa đáp án trong top-5. Khi được đưa đúng đoạn, reader trả lời đúng 85%. Nên cải thiện phần nào trước?'
+    options:
+      - 'Reader, vì 85% vẫn còn xa 100%'
+      - 'Retriever: dù reader hoàn hảo, hệ thống cũng không vượt quá 60%'
+      - 'Không phần nào, vì $0.6 \times 0.85 = 0.51$ là mức tối đa của mọi hệ thống'
+    answer: 1
+    explanation: 'Reader chỉ đọc những gì retriever đưa. Với 40% câu hỏi, đáp án không nằm trong đoạn nào được đưa, nên reader giỏi mấy cũng chịu. Trần của cả hệ thống là 60%; nâng reader lên 100% cũng chỉ đưa hệ thống từ khoảng 51% lên 60%. Tăng tỉ lệ có đáp án trong top-5 (đổi sang truy xuất dày, tăng $k$, xếp lại) nâng chính cái trần đó.'
+  - question: 'Đoạn văn dài 1 000 token, mô hình nhận tối đa 384 token. Vì sao các cửa sổ cắt ra nên gối lên nhau (stride) thay vì cắt liền nhau?'
+    options:
+      - 'Để câu trả lời nằm sát chỗ cắt vẫn trọn vẹn trong ít nhất một cửa sổ'
+      - 'Để mô hình chạy nhanh hơn, vì mỗi cửa sổ ngắn hơn'
+      - 'Để mỗi cửa sổ có đủ 384 token, vì mô hình không nhận chuỗi ngắn hơn'
+    answer: 0
+    explanation: 'Cắt liền nhau thì một câu trả lời nằm vắt qua chỗ cắt bị chia đôi, và không cửa sổ nào chứa trọn nó, nên không span nào đúng. Gối đầu làm số cửa sổ tăng lên, tức chậm hơn chứ không nhanh hơn. Mô hình vẫn nhận chuỗi ngắn hơn giới hạn, phần thiếu được đệm.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import spanCode from '@code/nlp/question-answering/span.vi.py?raw';
+import emF1Code from '@code/nlp/question-answering/em-f1.vi.py?raw';
+import readerCode from '@code/nlp/question-answering/reader.vi.py?raw';
+import RetrieverReaderFigure from '@components/figures/RetrieverReaderFigure.astro';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Phân biệt được các loại hỏi đáp (question answering, QA): trích xuất từ đoạn văn, miền mở, sinh câu trả lời, và dựa trên cơ sở tri thức.
+- Hiểu cách một mô hình kiểu BERT làm QA trích xuất (extractive QA): chấm điểm đầu và cuối cho từng token, rồi chọn span tốt nhất có ràng buộc, kể cả khi câu hỏi không có đáp án.
+- Cài đặt được việc chọn span và hai độ đo chuẩn của SQuAD: khớp hoàn toàn (exact match, EM) và F1 mức token.
+- Nhận ra vì sao trong hệ thống retriever–reader, lỗi của retriever đặt trần cho cả hệ thống.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+## Trực giác
+
+Bạn hỏi: "Vịnh Hạ Long được UNESCO công nhận là di sản thiên nhiên thế giới lần đầu năm nào?". Trên tay bạn có một đoạn văn:
+
+> Vịnh Hạ Long được UNESCO công nhận là di sản thiên nhiên thế giới lần đầu năm 1994 và lần thứ hai năm 2000.
+
+(Năm 2023, di sản được mở rộng thành "Vịnh Hạ Long – Quần đảo Cát Bà". Đoạn văn trên chỉ nói hai lần đầu, và bài chỉ cần chừng đó.)
+
+Bạn không cần "nghĩ ra" câu trả lời. Nó nằm sẵn trong đoạn văn. Việc của bạn là **chỉ tay vào đúng chỗ**: từ chữ nào tới chữ nào. Ở đây là đúng một chữ, "1994".
+
+Nghe dễ, nhưng có bẫy. Đoạn văn có **hai** năm. Câu hỏi hỏi "lần đầu", nên "2000" sai dù trông rất giống một câu trả lời. Người đọc phải hiểu quan hệ giữa "lần đầu" và "1994", không chỉ tìm một con số.
+
+Bẫy thứ hai: hỏi "Vịnh Hạ Long rộng bao nhiêu ki-lô-mét vuông?". Đoạn văn không nói. Một người đọc cẩn thận sẽ trả lời "đoạn này không có thông tin đó", chứ không chỉ bừa vào "1994" chỉ vì đó là một con số trông có vẻ hợp.
+
+Bẫy thứ ba: ngoài đời bạn hiếm khi được đưa sẵn đúng đoạn văn. Bạn có cả một kho, như toàn bộ Wikipedia tiếng Việt, và phải **tìm đoạn** trước khi **tìm câu trả lời trong đoạn**.
+
+Bài toán của bài này là: **cho một câu hỏi và một đoạn văn, chỉ ra đoạn trích (từ token nào tới token nào) trả lời câu hỏi, hoặc nói rằng không có; rồi mở rộng ra khi đoạn văn phải tự tìm trong một kho lớn.**
+
+## Lý thuyết
+
+### Các loại hỏi đáp
+
+"Hỏi đáp" là tên chung của nhiều bài toán khác nhau. Chúng khác nhau ở chỗ câu trả lời đến từ đâu.
+
+| Loại | Đầu vào | Câu trả lời | Ví dụ |
+|---|---|---|---|
+| Trích xuất (extractive), còn gọi là đọc hiểu máy (machine reading comprehension) | Câu hỏi và **một** đoạn văn | Một đoạn trích nguyên văn (span) của đoạn văn | SQuAD |
+| Miền mở (open-domain) | Câu hỏi và **một kho** văn bản | Tìm đoạn liên quan, rồi trích hoặc sinh câu trả lời | DrQA, DPR |
+| Sinh câu trả lời (generative, abstractive) | Câu hỏi, có thể kèm đoạn văn | Câu do mô hình tự viết, không nhất thiết có nguyên văn trong đoạn | T5, RAG, chatbot |
+| Dựa trên cơ sở tri thức (knowledge-base QA) | Câu hỏi và một cơ sở tri thức có cấu trúc | Đổi câu hỏi thành truy vấn, chạy truy vấn | "Thủ đô của Việt Nam?" thành tra (Việt Nam, thủ đô, ?) |
+
+Bài này đi sâu vào loại thứ nhất, vì nó là viên gạch của loại thứ hai. Loại thứ ba bài chỉ nói ý chính và trỏ sang bài RAG. Loại thứ tư gần với bài [Graph RAG](/vi/llm/graph-rag/), nơi tri thức lưu thành đồ thị.
+
+### SQuAD: hỏi đáp trích xuất thành một bộ dữ liệu
+
+[Rajpurkar và cộng sự (2016)](https://arxiv.org/abs/1606.05250) dựng **SQuAD** (Stanford Question Answering Dataset): hơn 100 000 câu hỏi do người viết trên các đoạn văn Wikipedia tiếng Anh. Luật chơi rất rõ: **câu trả lời luôn là một đoạn trích liền mạch của đoạn văn**. Nhờ vậy, đáp án của mỗi câu chỉ là hai con số: vị trí bắt đầu và vị trí kết thúc.
+
+Đây là điểm mấu chốt. Thay vì bắt mô hình viết ra câu trả lời, ta chỉ bắt nó **chỉ vào** hai vị trí. Bài toán sinh văn bản khó nhằn biến thành hai bài toán phân loại: "token nào là điểm đầu?" và "token nào là điểm cuối?".
+
+Với tiếng Việt, có bộ **UIT-ViQuAD** ([Nguyen và cộng sự, 2020](https://aclanthology.org/2020.coling-main.233/)), cùng kiểu với SQuAD: khoảng 23 000 cặp câu hỏi và câu trả lời trên 5 109 đoạn văn của 174 bài Wikipedia tiếng Việt.
+
+### Mô hình: hai vectơ cho điểm đầu và điểm cuối
+
+Cách làm dưới đây theo paper BERT ([Devlin và cộng sự, 2019](https://arxiv.org/abs/1810.04805), mục 4.2). Bạn đã gặp BERT, `[CLS]`, `[SEP]` và cách fine-tune ở bài [BERT](/vi/nlp/bert/).
+
+**Bước 1: ghép câu hỏi và đoạn văn thành một chuỗi.**
+
+```text
+[CLS] câu hỏi [SEP] đoạn văn [SEP]
+```
+
+BERT đọc cả chuỗi bằng self-attention hai chiều, nên mỗi token của đoạn văn "nhìn thấy" câu hỏi và ngược lại. Ra khỏi lớp cuối, token ở vị trí $i$ có một vectơ $\mathbf{h}_i \in \mathbb{R}^D$, với $D$ là số chiều ẩn ($D = 768$ ở BERT-Base).
+
+**Bước 2: thêm hai vectơ học được.** Gọi chúng là $\mathbf{w}_{\text{start}}$ và $\mathbf{w}_{\text{end}}$, mỗi vectơ $D$ chiều. Đây là **toàn bộ** tham số mới khi fine-tune; mọi thứ khác lấy từ BERT đã pre-train. Mỗi token nhận hai điểm, là hai logit:
+
+$$
+s_i = \mathbf{w}_{\text{start}}^\top \mathbf{h}_i, \qquad e_i = \mathbf{w}_{\text{end}}^\top \mathbf{h}_i
+$$
+
+$s_i$ lớn nghĩa là "token $i$ trông giống điểm đầu của câu trả lời", $e_i$ lớn nghĩa là "trông giống điểm cuối". Trong thư viện, hai vectơ này là một lớp tuyến tính từ $D$ chiều ra 2 số (có thêm hệ số tự do), áp lên mọi token.
+
+**Bước 3: softmax trên các vị trí.** Đổi logit thành xác suất, nhưng lần này softmax chạy **trên các vị trí** trong chuỗi, không phải trên từ vựng:
+
+$$
+p_{\text{start}}(i) = \frac{\exp(s_i)}{\sum_{k} \exp(s_k)}, \qquad p_{\text{end}}(j) = \frac{\exp(e_j)}{\sum_{k} \exp(e_k)}
+$$
+
+Ở SQuAD 1.1, paper BERT lấy tổng qua các token của **đoạn văn**. Cài đặt của Hugging Face lấy softmax trên **cả chuỗi**, gồm cả `[CLS]`, để học được nhãn "không có đáp án" trỏ vào `[CLS]` (mục SQuAD 2.0 bên dưới). Bài viết $\exp(\cdot)$ thay cho $e^{(\cdot)}$ để khỏi lẫn với logit cuối $e_j$. Như vậy mô hình là hai bộ phân loại, mỗi bộ có số "lớp" bằng số vị trí được xét.
+
+**Bước 4: hàm mất mát.** Gọi $i^\star$, $j^\star$ là vị trí đầu và cuối đúng. Mỗi bên là một bài phân loại, nên dùng cross-entropy cho từng bên rồi cộng lại:
+
+$$
+\mathcal{L} = -\ln p_{\text{start}}(i^\star) - \ln p_{\text{end}}(j^\star)
+$$
+
+Paper BERT viết "tổng log-likelihood của vị trí đầu và cuối đúng", chính là $-\mathcal{L}$. Hugging Face lấy trung bình hai khoản (chia 2), chỉ khác một hằng số nhân.
+
+### Chọn span: vì sao không lấy argmax từng bên
+
+Lúc dùng, cách nghĩ đầu tiên là lấy $i = \arg\max_i s_i$ và $j = \arg\max_j e_j$. Cách này hỏng, vì **hai bên được chọn độc lập**. Không có gì bảo đảm $i \le j$, cũng không có gì ngăn span dài cả trăm token.
+
+Bảng dưới là logit giả định (tự đặt, không phải của mô hình thật) cho câu hỏi "lần đầu năm nào?". Mọi vị trí khác có logit $-2$. Token đánh số từ 0, với `[CLS]` ở vị trí 0, như ô code đầu tiên của bài; chuỗi bỏ phần câu hỏi cho gọn, nên đoạn văn bắt đầu ngay ở vị trí 1.
+
+| Vị trí | 17 | 18 | 24 |
+|---|---:|---:|---:|
+| Token | năm | 1994 | 2000 |
+| $s_i$ (logit đầu) | 2.0 | 3.9 | **4.2** |
+| $e_i$ (logit cuối) | $-2.0$ | **4.5** | 3.0 |
+
+Argmax riêng chọn đầu ở 24 ("2000") và cuối ở 18 ("1994"): span **ngược**, vô nghĩa. Mô hình hơi phân vân ở điểm đầu giữa hai năm, và argmax riêng phóng đại sự phân vân đó thành một lỗi.
+
+**Cách đúng: chấm điểm từng cặp.** Điểm của span từ $i$ tới $j$ là $s_i + e_j$. Vì sao là tổng logit? Lấy log xác suất của cặp, coi hai bên độc lập:
+
+$$
+\begin{aligned}
+\ln\big(p_{\text{start}}(i) \, p_{\text{end}}(j)\big)
+&= \ln p_{\text{start}}(i) + \ln p_{\text{end}}(j) \\
+&= \Big(s_i - \ln \textstyle\sum_k \exp(s_k)\Big) + \Big(e_j - \ln \textstyle\sum_k \exp(e_k)\Big)
+\end{aligned}
+$$
+
+Dòng thứ nhất: log của tích bằng tổng các log. Dòng thứ hai: thay công thức softmax vào, log của một phân số là log tử trừ log mẫu, và $\ln \exp(s_i) = s_i$. Hai khoản $\ln \sum$ không phụ thuộc $i$ hay $j$, nên cặp nào có $s_i + e_j$ lớn nhất cũng là cặp có xác suất lớn nhất. Khỏi cần tính softmax.
+
+Rồi chỉ xét các cặp hợp lệ, với $K$ là độ dài tối đa của câu trả lời (tính bằng token):
+
+$$
+(\hat{i}, \hat{j}) = \arg\max_{i \le j < i + K} \; (s_i + e_j)
+$$
+
+Ràng buộc $i \le j$ bỏ span ngược. Ràng buộc $j < i + K$ bỏ span quá dài: câu trả lời kiểu SQuAD thường chỉ vài từ. Ngoài ra, $i$ và $j$ chỉ chạy trên token của **đoạn văn**, không trên câu hỏi hay token đặc biệt. Với $L$ token và giới hạn $K$, chỉ có khoảng $L \cdot K$ cặp, rất rẻ.
+
+Với bảng trên và $K = 5$: cặp $(18, 18)$ được $3.9 + 4.5 = 8.4$, hơn "2000" một mình $(24, 24)$ được $4.2 + 3.0 = 7.2$, và hơn "năm 1994" $(17, 18)$ được $2.0 + 4.5 = 6.5$. Câu trả lời là "1994". Paper BERT viết đúng quy tắc này: chọn span có $s_i + e_j$ lớn nhất với $j \ge i$.
+
+:::note[Ghi nhớ]
+QA trích xuất cho mỗi token hai logit, $s_i$ cho điểm đầu và $e_i$ cho điểm cuối. Huấn luyện bằng tổng cross-entropy của hai bên. Lúc dùng, chọn cặp $i \le j < i + K$ có $s_i + e_j$ lớn nhất, không lấy argmax riêng từng bên.
+:::
+
+### Khi câu hỏi không có đáp án: SQuAD 2.0
+
+Mô hình trên **luôn** trả về một span, kể cả khi đoạn văn không có câu trả lời. [Rajpurkar, Jia và Liang (2018)](https://arxiv.org/abs/1806.03822) làm SQuAD 2.0: thêm hơn 50 000 câu hỏi không có đáp án, do người viết cố tình cho giống câu có đáp án. Một mô hình mạnh đạt 86% F1 trên SQuAD 1.1 chỉ còn 66% F1 trên SQuAD 2.0 (số trong paper, ở thời điểm 2018).
+
+Cách xử lý của BERT (mục 4.3 của paper) dùng lại token `[CLS]` ở vị trí 0:
+
+- **Khi huấn luyện**, câu không có đáp án được gán nhãn $i^\star = j^\star = 0$: "span" bắt đầu và kết thúc ở `[CLS]`.
+- **Khi dùng**, tính điểm "không có đáp án" $s_{\text{null}} = s_0 + e_0$, rồi so với span tốt nhất $\hat{s} = s_{\hat{i}} + e_{\hat{j}}$. Chỉ trả lời khi
+
+$$
+\hat{s} > s_{\text{null}} + \tau
+$$
+
+Ngưỡng $\tau$ chọn trên tập dev sao cho F1 lớn nhất. $\tau$ lớn thì mô hình hay từ chối; $\tau$ nhỏ (âm) thì mô hình hay trả lời bừa. Ở ô code đầu tiên, với câu hỏi về diện tích, span tốt nhất được 5.0 còn $s_{\text{null}} = 6.2$: với $\tau = 0$ mô hình từ chối, với $\tau = -1.5$ nó trả lời "1994", sai.
+
+### Đoạn văn dài hơn mô hình đọc được
+
+BERT nhận tối đa 512 token. Một bài Wikipedia dài hơn nhiều. Cách thường dùng là **cửa sổ trượt** (sliding window): cắt đoạn văn thành nhiều cửa sổ, mỗi cửa sổ ghép với câu hỏi thành một đầu vào riêng. Hai cửa sổ liền nhau **gối lên nhau** một phần. Không gối thì câu trả lời nằm vắt qua chỗ cắt bị chia đôi, và không cửa sổ nào chứa trọn nó.
+
+Ví dụ: script mẫu của Hugging Face dùng tối đa 384 token mỗi đầu vào, hai cửa sổ chung nhau 128 token (tham số `stride` của bộ tách từ, với `truncation="only_second"` để chỉ cắt đoạn văn, không cắt câu hỏi). Cẩn thận khi đọc code cũ: script `run_squad.py` gốc của BERT cũng có `doc_stride=128`, nhưng ở đó 128 là **bước nhảy** giữa đầu hai cửa sổ, không phải số token chung. Chạy mô hình trên từng cửa sổ, lấy span tốt nhất của mỗi cửa sổ, rồi chọn span có điểm cao nhất trong tất cả.
+
+### Đánh giá: EM và F1 mức token
+
+Mô hình trả lời "năm 1994", đáp án mẫu ghi "1994". Đúng hay sai? SQuAD dùng hai độ đo, sau một bước **chuẩn hóa** cả hai chuỗi.
+
+**Chuẩn hóa** theo script đánh giá chính thức của SQuAD: đổi sang chữ thường, bỏ dấu câu, bỏ mạo từ tiếng Anh "a", "an", "the", rồi gộp khoảng trắng. Bỏ mạo từ là quy ước riêng của script tiếng Anh này: "the Eiffel Tower" và "Eiffel Tower" được tính là một.
+
+**Đừng áp nguyên bước bỏ mạo từ cho tiếng Việt.** Tiếng Việt không có mạo từ, nhưng bước này vẫn xóa mọi chữ "a", "an" đứng riêng: "Long An" thành "long", "An Giang" thành "giang", "an toàn giao thông" thành "toàn giao thông", "A Lưới" thành "lưới". Dự đoán "Long" so với đáp án "Long An" khi đó được EM = 1, dù thiếu nửa tên tỉnh. Chấm tiếng Việt thì giữ chữ thường, bỏ dấu câu, gộp khoảng trắng, và bỏ bước mạo từ. Với bản đó, "năm 1994" và "1994" vẫn khác nhau.
+
+**Khớp hoàn toàn** (EM): bằng 1 nếu hai chuỗi đã chuẩn hóa giống hệt nhau, ngược lại bằng 0.
+
+**F1 mức token**: tách hai chuỗi thành token theo khoảng trắng, đếm số token chung (tính cả lặp lại), rồi
+
+$$
+P = \frac{\text{số token chung}}{\text{số token của dự đoán}}, \quad R = \frac{\text{số token chung}}{\text{số token của đáp án}}, \quad F_1 = \frac{2PR}{P + R}
+$$
+
+$P$ (precision) hỏi "dự đoán có bao nhiêu phần đúng", $R$ (recall) hỏi "đáp án được phủ bao nhiêu". "năm 1994" so với "1994": chung 1 token, $P = 1/2$, $R = 1$, nên $F_1 = 2 \cdot \frac{1}{2} \cdot 1 / (\frac{1}{2} + 1) = 0.667$. F1 cho điểm một phần, còn EM thì không.
+
+Thêm hai quy ước của script:
+
+- Một câu hỏi có thể có **nhiều đáp án mẫu** (mỗi người gán nhãn chọn hơi khác). Lấy điểm **cao nhất** trên các đáp án mẫu, rồi lấy trung bình trên mọi câu hỏi.
+- Ở SQuAD 2.0, câu không có đáp án có đáp án mẫu là chuỗi rỗng. Nếu dự đoán hoặc đáp án rỗng thì F1 bằng 1 khi cả hai cùng rỗng, bằng 0 khi chỉ một bên rỗng.
+
+### Hỏi đáp miền mở: retriever và reader
+
+Khi không ai đưa sẵn đoạn văn, [Chen và cộng sự (2017)](https://arxiv.org/abs/1704.00051) đề xuất DrQA, chia việc cho hai phần:
+
+1. **Retriever** (bộ truy xuất): từ câu hỏi, tìm vài bài liên quan trong toàn bộ Wikipedia tiếng Anh. DrQA dùng TF-IDF trên từ và cặp từ (bigram), không học gì.
+2. **Reader** (bộ đọc): chạy QA trích xuất trên từng đoạn tìm được, rồi chọn span có điểm cao nhất. Reader của DrQA là một mạng RNN; ngày nay thường là một mô hình kiểu BERT như ở trên.
+
+Cách chấm điểm và xếp hạng văn bản (TF-IDF, BM25, truy xuất dày) nằm ở bài [Truy xuất thông tin](/vi/nlp/information-retrieval/). Ở đây chỉ cần một hệ quả: **reader chỉ đọc được những gì retriever đưa**. Nếu đoạn chứa câu trả lời không nằm trong top-$k$, reader giỏi mấy cũng không trả lời đúng. Tỉ lệ câu hỏi có đáp án trong top-$k$ là **trần** của cả hệ thống.
+
+Số của DrQA cho thấy rõ điều này. Retriever của nó tìm được bài chứa câu trả lời trong top-5 cho 77.8% câu hỏi SQuAD. Reader, khi được đưa đúng đoạn, đạt EM 69.5 trên tập dev SQuAD. Cả hệ thống, phải tự tìm trong Wikipedia, chỉ còn EM 27.1 (bản chỉ huấn luyện trên SQuAD). Lỗi của hai phần chồng lên nhau, và đoạn văn thật dài hơn, nhiễu hơn đoạn được đưa sẵn.
+
+[Karpukhin và cộng sự (2020)](https://arxiv.org/abs/2004.04906) thay retriever TF-IDF/BM25 bằng **DPR** (Dense Passage Retrieval): hai bộ mã hóa BERT biến câu hỏi và đoạn văn thành vectơ, xếp hạng bằng tích vô hướng. Retriever tốt hơn nâng trần lên, và độ chính xác của cả hệ thống tăng theo.
+
+### Sinh câu trả lời có truy xuất
+
+Reader trích xuất có hai giới hạn: câu trả lời phải nằm nguyên văn trong **một** đoạn, và nó không ghép được ý từ nhiều đoạn. [Lewis và cộng sự (2020)](https://arxiv.org/abs/2005.11401) thay reader bằng một mô hình **sinh** (BART, một encoder–decoder như ở bài [Mô hình chuỗi sang chuỗi](/vi/llm/seq2seq/)): mô hình đọc câu hỏi cùng các đoạn tìm được rồi viết câu trả lời. Họ gọi cách này là **RAG** (Retrieval-Augmented Generation). Chatbot trả lời theo tài liệu ngày nay làm theo đúng khuôn này với một LLM, như bài [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/).
+
+Đổi lại, câu trả lời sinh ra không còn được bảo đảm nằm trong đoạn văn: mô hình có thể thêm ý không có trong đó. QA trích xuất vẫn có chỗ đứng khi bạn cần câu trả lời **chỉ ra được vị trí** trong văn bản gốc (để tô sáng, để kiểm), chạy rẻ trên CPU, và không bịa thêm chữ.
+
+### Giới hạn
+
+- **Câu trả lời phải là một span liền mạch.** Câu hỏi "có hay không", câu cần tính toán ("cách nhau bao nhiêu năm?") hay cần ghép nhiều chỗ không có span nào đúng. Cần mô hình sinh, như ở mục trên.
+- **Mô hình học mẹo của bộ dữ liệu.** Một mô hình SQuAD 1.1 quen với việc luôn có đáp án, và có xu hướng chọn span có cùng kiểu với câu hỏi (hỏi "năm nào" thì chọn một con số). Ô DistilBERT của bài cho thấy nó trả lời bừa khi đoạn văn không có thông tin.
+- **Điểm của span không phải độ tin cậy đã hiệu chỉnh.** Xem hộp thứ hai ở mục Lỗi hay gặp.
+
+## Minh họa
+
+Hình dưới là hệ thống hỏi đáp miền mở. Hãy nhìn chỗ kho văn bản thu hẹp thành vài đoạn: mọi thứ reader biết đều đi qua chỗ hẹp đó.
+
+{/* FIG: retriever thu hẹp cả kho thành vài đoạn, reader chỉ chấm span trong các đoạn đó, nên đoạn đúng mà không được lấy thì reader không thể trả lời đúng. */}
+<RetrieverReaderFigure />
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: hai ô đầu với Python 3.14 và NumPy 2.4 (bản có trong Pyodide), ô DistilBERT với Python 3.14, `transformers` 5.22 và PyTorch 2.14 trên CPU. Hai ô đầu chạy ngay trên trang và chạy độc lập với nhau. Ô thứ ba cần PyTorch nên chạy trên máy bạn.
+
+### Chọn span và quyết định "không có đáp án"
+
+Ô này làm lại mục Lý thuyết trên logit giả định: đoạn văn về vịnh Hạ Long đã tách theo âm tiết, `[CLS]` ở vị trí 0. Để gọn, ô bỏ phần câu hỏi khỏi chuỗi; mô hình thật có câu hỏi ở giữa `[CLS]` và đoạn văn, và các vị trí đó bị loại khỏi việc tìm span. Hàm `best_span` duyệt mọi cặp $i \le j < i + K$ với $K = 5$.
+
+<PythonRunner code={spanCode} title="Chọn span tốt nhất từ logit đầu/cuối" />
+
+- **Argmax riêng** cho `start=24 2000, end=18 1994`: điểm đầu nằm sau điểm cuối, đúng cái bẫy ở mục Lý thuyết.
+- **Span tốt nhất** là `(18, 18) '1994'` với điểm 8.4, tức $3.9 + 4.5$.
+- **Câu hỏi về diện tích:** span tốt nhất vẫn là "1994" với 5.0, nhưng điểm `null` của `[CLS]` là 6.2. Với `tau=0.0`, $5.0 < 6.2$ nên mô hình trả lời `(no answer)`. Hạ ngưỡng xuống `tau=-1.5` thì $5.0 > 4.7$, và mô hình trả lời "1994", sai. Chọn $\tau$ là đánh đổi giữa từ chối nhầm và trả lời bừa.
+
+### EM và F1 mức token
+
+Ô này cài hai độ đo của SQuAD, với hàm `normalize` theo đúng bốn bước của script đánh giá. Tham số `en` bật hay tắt bước bỏ mạo từ: `en=True` là script SQuAD nguyên bản, `en=False` là bản cho tiếng Việt. Ô chấm chín cặp dự đoán và đáp án mẫu; cột `en` cho biết cặp đó dùng bản nào.
+
+<PythonRunner code={emF1Code} title="EM và F1 mức token" />
+
+- `'1994.'` được EM 1: dấu chấm bị bỏ khi chuẩn hóa.
+- `'năm 1994'` so với `"1994"` được EM 0, F1 0.667, như phép tính ở mục Lý thuyết. Thêm `"năm 1994"` vào danh sách đáp án mẫu (dòng thứ ba) thì điểm thành 1, vì lấy điểm cao nhất trên các đáp án mẫu.
+- `'2000'` được 0 ở cả hai: không chung token nào.
+- `'The Eiffel Tower'` được EM 1 nhờ bỏ mạo từ "the", quy ước chỉ có nghĩa với tiếng Anh.
+- `'vịnh Hạ Long ở Quảng Ninh'` so với "Quảng Ninh": 6 token, chung 2, nên $P = 1/3$, $R = 1$, F1 0.500. Câu trả lời dài dòng bị F1 phạt qua precision.
+- Cặp rỗng được 1 ở cả hai: mô hình từ chối đúng một câu không có đáp án.
+- **Hai dòng cuối** chấm cùng một cặp, dự đoán `'Long'` so với đáp án "Long An". Với `en=True`, chữ "An" bị xóa như một mạo từ, nên EM 1 và F1 1.000: một câu trả lời thiếu nửa tên tỉnh được chấm là đúng hoàn toàn. Với `en=False`, EM 0 và F1 0.667, đúng như mong đợi.
+
+### DistilBERT fine-tune trên SQuAD
+
+Ô này dùng `distilbert/distilbert-base-cased-distilled-squad`: DistilBERT ([Sanh và cộng sự, 2019](https://arxiv.org/abs/1910.01108)), bản BERT thu nhỏ bằng chắt lọc tri thức (knowledge distillation), đã fine-tune trên SQuAD 1.1. Theo trang mô hình, nó đạt EM 79.6 và F1 87.0 trên tập dev SQuAD 1.1. Đoạn văn tiếng Anh do bài tự viết, vì mô hình chỉ biết tiếng Anh. Ba câu hỏi: hai câu có đáp án, một câu không (đoạn văn không nói gì về độ sâu).
+
+Từ `transformers` 5, pipeline `question-answering` đã bị bỏ, nên ô này gọi thẳng `AutoModelForQuestionAnswering` và tự chọn span. Nhờ vậy bạn thấy đúng các bước của mục Lý thuyết. Đây là phần chọn span, tính cho mọi cặp cùng lúc bằng một ma trận:
+
+```python
+score = s[:, None] + e[None, :]  # score[i, j] = s_i + e_j
+n = len(s)
+ok = torch.ones(n, n).triu().tril(max_len - 1).bool()
+score = score.masked_fill(~ok, -1e4)  # bỏ j < i và span quá dài
+```
+
+`triu()` giữ các ô $j \ge i$, `tril(max_len - 1)` giữ các ô $j - i \le K - 1$, với $K$ là `max_len` = 15. Trước đó, logit của mọi token không thuộc đoạn văn đã bị đặt về $-10^4$, nhờ `sequence_ids` cho biết token nào thuộc câu hỏi (0), đoạn văn (1) hay là token đặc biệt.
+
+<LocalCode
+  code={readerCode}
+  title="QA trích xuất với DistilBERT: logit đầu/cuối và chọn span"
+  packages={['transformers', 'torch']}
+  hardware="CPU là đủ. Lần đầu tải khoảng 261 MB (mô hình và bộ tách từ). Trên máy phát triển, mỗi lần chạy mất khoảng một tới hai phút, phần lớn là thời gian nạp PyTorch và transformers"
+  sampleVaries={false}
+>
+
+```text
+When was Ha Long Bay first inscribed as a World Heritage Site?
+  answer='1994' p=0.992 start=170 end=174
+  best span score=19.55  [CLS] score=-4.73
+Which province is Ha Long Bay in?
+  answer='Quang Ninh' p=0.812 start=18 end=28
+  best span score=25.48  [CLS] score=-1.71
+How deep is the water in Ha Long Bay?
+  answer='2,000 limestone islands and islets' p=0.228 start=75 end=109
+  best span score=1.38  [CLS] score=-14.37
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Câu 1** trả lời đúng `'1994'`, không nhầm sang "2000", với `p=0.992`. `p` là $p_{\text{start}}(\hat{i}) \cdot p_{\text{end}}(\hat{j})$, softmax tính trên các token của đoạn văn. `start=170 end=174` là vị trí ký tự trong đoạn văn, có được nhờ `offset_mapping` của bộ tách từ: `context[170:174]` đúng là "1994". Câu trả lời trích xuất luôn chỉ ra được chỗ của nó trong văn bản gốc.
+- **Câu 2** trả lời `'Quang Ninh'`, với `p=0.812`. Điểm span 25.48 lại cao hơn câu 1, dù `p` thấp hơn: `p` chỉ so span này với các span khác **trong cùng một lần chạy**, còn logit thô không so được giữa hai câu hỏi.
+- **Câu 3** không có đáp án, nhưng mô hình vẫn trả lời `'2,000 limestone islands and islets'`. Mô hình SQuAD 1.1 luôn chỉ vào một span. Dấu hiệu duy nhất là điểm thấp: span 1.38 và `p=0.228`.
+- **Điểm `[CLS]` không cứu được.** Ở câu 3, điểm `[CLS]` là $-14.37$, thấp hơn span bừa rất xa, nên quy tắc SQuAD 2.0 với $\tau = 0$ vẫn trả lời. Mô hình này chưa bao giờ được dạy trỏ vào `[CLS]`, nên điểm đó vô nghĩa. Muốn từ chối được, cần một mô hình fine-tune trên dữ liệu có câu không có đáp án, như SQuAD 2.0.
+
+Mô hình không lấy mẫu, nên mỗi lần chạy trên cùng máy cho cùng kết quả; trên bản thư viện khác, số có thể lệch ở chữ số cuối.
+
+## Lỗi hay gặp
+
+:::caution[Lấy argmax của logit đầu và logit cuối riêng rẽ]
+Hai argmax độc lập có thể cho điểm đầu sau điểm cuối, như ô code đầu tiên (`start=24, end=18`), hoặc một span dài cả đoạn. Ví dụ suy luận ngắn trong vài hướng dẫn trực tuyến làm đúng như vậy cho gọn, và với đoạn văn dễ thì vẫn ra kết quả đúng, nên lỗi rất khó thấy. Hãy chọn cặp có $s_i + e_j$ lớn nhất với $i \le j < i + K$, và chỉ trên token của đoạn văn, như hàm `answer` trong ô DistilBERT.
+:::
+
+:::caution[Coi điểm của span là độ tin cậy]
+`p=0.812` không có nghĩa là "đúng với xác suất 81%". `p` chỉ so các span trong cùng đoạn văn: đoạn có hai ứng viên na ná nhau thì `p` thấp dù mô hình chọn đúng. Ngược lại, `p` thấp như $0.228$ ở câu 3 của ô DistilBERT cũng chỉ là gợi ý, không phải lời từ chối: không có ngưỡng nào sẵn để biết thấp bao nhiêu là "không có đáp án". Muốn dùng điểm để từ chối, hãy chọn ngưỡng trên một tập dev có cả câu không có đáp án, như cách SQuAD 2.0 chọn $\tau$, và đo F1 ở ngưỡng đó.
+:::
+
+:::caution[Cắt đoạn văn dài mà không gối đầu]
+Cắt đoạn văn thành các cửa sổ liền nhau thì câu trả lời nằm ở chỗ cắt bị chia đôi, và không cửa sổ nào chứa trọn nó. Hãy để các cửa sổ chung nhau một phần (`stride` trong bộ tách từ của Hugging Face là số token chung; `doc_stride` trong `run_squad.py` gốc của BERT là bước nhảy, cùng con số 128 mà khác nghĩa), cắt chỉ phần đoạn văn (`truncation="only_second"`), rồi lấy span có điểm cao nhất trên mọi cửa sổ. Khi huấn luyện, cửa sổ nào không chứa trọn câu trả lời thì gán nhãn trỏ vào `[CLS]`.
+:::
+
+:::caution[So EM, F1 giữa các bài báo mà không xem cách chuẩn hóa]
+EM và F1 phụ thuộc bước chuẩn hóa và cách tách token. Bỏ mạo từ "a", "an", "the" là quy ước của script tiếng Anh; chạy nguyên script đó trên tiếng Việt thì "Long An" thành "long", và dự đoán "Long" được EM = 1 (hai dòng cuối của ô EM và F1). Với tiếng Việt, tách theo âm tiết hay theo từ ("Quảng Ninh" là 2 token hay 1) cho F1 khác nhau trên cùng dự đoán. Chỉ so hai con số khi chúng tính bằng cùng một script.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- QA trích xuất trả lời bằng một đoạn trích của đoạn văn. Mô hình kiểu BERT đọc `[CLS] câu hỏi [SEP] đoạn văn [SEP]`, cho mỗi token hai logit $s_i = \mathbf{w}_{\text{start}}^\top \mathbf{h}_i$ và $e_i = \mathbf{w}_{\text{end}}^\top \mathbf{h}_i$, huấn luyện bằng tổng cross-entropy của vị trí đầu và cuối.
+- Chọn span bằng $\arg\max_{i \le j < i + K} (s_i + e_j)$, không lấy argmax riêng từng bên. Câu không có đáp án (SQuAD 2.0): trả lời khi span tốt nhất hơn điểm `[CLS]` cộng ngưỡng $\tau$ chọn trên tập dev. Đoạn văn dài: cửa sổ trượt có gối đầu.
+- EM và F1 mức token chấm sau khi chuẩn hóa (chữ thường, bỏ dấu câu, bỏ mạo từ tiếng Anh); lấy điểm cao nhất trên các đáp án mẫu. F1 cho điểm một phần, EM thì không.
+- Hỏi đáp miền mở ghép retriever với reader; tỉ lệ có đáp án trong top-$k$ là trần của cả hệ thống. Thay reader bằng mô hình sinh là RAG: linh hoạt hơn, nhưng mất bảo đảm câu trả lời nằm nguyên văn trong tài liệu.
+
+**Đọc thêm:**
+
+- Nguyen, K. V., Nguyen, D.-V., Nguyen, A. G.-T., Nguyen, N. L.-T. (2020). [*A Vietnamese Dataset for Evaluating Machine Reading Comprehension*](https://aclanthology.org/2020.coling-main.233/). COLING 2020. Bộ UIT-ViQuAD: hỏi đáp trích xuất kiểu SQuAD trên Wikipedia tiếng Việt, kèm phân tích các loại câu hỏi khó.
+- Rajpurkar, P., Zhang, J., Lopyrev, K., Liang, P. (2016). [*SQuAD: 100,000+ Questions for Machine Comprehension of Text*](https://arxiv.org/abs/1606.05250). EMNLP 2016. Cách dựng bộ dữ liệu và lý do chọn câu trả lời là đoạn trích. Bản 2.0: Rajpurkar, P., Jia, R., Liang, P. (2018). [*Know What You Don't Know: Unanswerable Questions for SQuAD*](https://arxiv.org/abs/1806.03822). ACL 2018.
+- Devlin, J., Chang, M.-W., Lee, K., Toutanova, K. (2019). [*BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding*](https://arxiv.org/abs/1810.04805). NAACL 2019, mục 4.2 và 4.3. Nguồn của vectơ đầu/cuối, quy tắc chọn span và ngưỡng $\tau$ cho câu không có đáp án.
+- Chen, D., Fisch, A., Weston, J., Bordes, A. (2017). [*Reading Wikipedia to Answer Open-Domain Questions*](https://arxiv.org/abs/1704.00051). ACL 2017. Hệ thống retriever–reader DrQA; bảng 3 và bảng 6 cho thấy retriever đặt trần cho cả hệ thống.
+- Jurafsky, D., Martin, J. H. [*Speech and Language Processing*](https://web.stanford.edu/~jurafsky/slp3/), bản thảo lần 3 (8/2026), chương 11 "Information Retrieval and RAG", mục 11.5 và 11.6. Các bộ dữ liệu hỏi đáp và cách đánh giá, đặt cạnh truy xuất và RAG.
+- Hugging Face. [*Question answering*](https://huggingface.co/learn/llm-course/chapter7/7), chương 7 của khóa học LLM. Cài đặt đầy đủ: cửa sổ trượt với `stride`, gán nhãn cho cửa sổ không chứa câu trả lời, gộp span từ nhiều cửa sổ.
+
+<LessonProgress />

@@ -1,0 +1,337 @@
+---
+title: Tách từ (Tokenizer)
+description: Cắt câu thành token cho mô hình. Theo từ, ký tự, subword; tách từ tiếng Việt; BPE, WordPiece, Unigram, SentencePiece; vì sao tiếng Việt tốn token.
+quiz:
+  - question: 'Bộ từ có tần số: `nhà` 5 lần, `nhanh` 4 lần, `anh` 3 lần. Mỗi từ được tách thành ký tự, thêm `_` ở cuối. Bước đầu tiên của BPE gộp cặp nào, với số đếm bao nhiêu?'
+    options:
+      - '`n` + `h`, đếm được 12'
+      - '`n` + `h`, đếm được 16'
+      - '`a` + `n`, đếm được 7'
+      - '`h` + `_`, đếm được 7'
+    answer: 1
+    explanation: 'Mỗi lần cặp xuất hiện trong một từ được tính bằng tần số của từ đó. `nhanh` chứa `n h` hai lần (đầu và cuối), nên góp $2 \times 4 = 8$; `nhà` góp 5, `anh` góp 3, tổng 16. Con số 12 là khi chỉ đếm mỗi từ một lần, quên rằng một cặp có thể lặp trong cùng một từ. `a n` và `h _` chỉ được 7.'
+  - question: 'Một bộ tách từ byte-level BPE như của GPT-2 gặp một chuỗi chữ Khmer mà nó chưa từng thấy khi huấn luyện. Điều gì xảy ra?'
+    options:
+      - 'Cả chuỗi được thay bằng một token `[UNK]`'
+      - 'Bộ tách từ báo lỗi vì ký tự nằm ngoài từ vựng'
+      - 'Chuỗi bị cắt thành các byte UTF-8; byte nào cũng có trong từ vựng nên không có token lạ, nhưng chuỗi tốn rất nhiều token'
+      - 'Các ký tự lạ bị bỏ qua, chỉ giữ dấu cách và dấu câu'
+    answer: 2
+    explanation: 'Từ vựng gốc của byte-level BPE là đủ 256 giá trị byte, và mọi văn bản đều là một dãy byte. Vì vậy luôn tách được, không cần `[UNK]`. Cái giá là các phép gộp học từ dữ liệu ít chữ Khmer, nên chuỗi gần như ở mức byte: mỗi ký tự Khmer là 3 byte, có thể thành tới 3 token. `[UNK]` là chuyện của bộ tách từ có từ vựng gốc là ký tự, như WordPiece của BERT.'
+  - question: 'Từ điển có `học sinh`, `sinh học`, `học`, `sinh`. Khớp dài nhất từ trái và từ phải tách chuỗi `sinh học sinh` thế nào?'
+    options:
+      - 'Từ trái: `sinh học | sinh`. Từ phải: `sinh học | sinh`'
+      - 'Từ trái: `sinh | học sinh`. Từ phải: `sinh học | sinh`'
+      - 'Cả hai: `sinh | học | sinh`'
+      - 'Từ trái: `sinh học | sinh`. Từ phải: `sinh | học sinh`'
+    answer: 3
+    explanation: 'Từ trái, hai âm tiết đầu `sinh học` có trong từ điển nên được lấy trước, còn lại `sinh`. Từ phải, hai âm tiết cuối `học sinh` có trong từ điển nên được lấy trước, còn lại `sinh`. Hai chiều cho hai kết quả khác nhau vì `học` có thể ghép với âm tiết bên trái hoặc bên phải: đó là nhập nhằng chồng lấp. Từ điển không đủ để chọn, phải nhìn ngữ cảnh.'
+  - question: 'Ở ô đếm token của bài, câu tiếng Việt tốn 33 token với GPT-2 nhưng chỉ 9 token với mBERT. Giải thích nào đúng nhất?'
+    options:
+      - 'Phép gộp của GPT-2 học từ văn bản gần như toàn tiếng Anh, nên chuỗi byte của chữ có dấu hầu như không được gộp; mỗi chữ có dấu tách thành 2 tới 3 token byte'
+      - 'GPT-2 tách văn bản theo từng ký tự, còn mBERT tách theo từ'
+      - 'GPT-2 bỏ dấu tiếng Việt trước khi tách, nên phải dùng thêm token để ghi lại dấu'
+      - 'mBERT dùng tách từ tiếng Việt trước, nên mỗi từ nhiều âm tiết thành một token'
+    answer: 0
+    explanation: 'GPT-2 vẫn là BPE, nhưng các phép gộp phản ánh dữ liệu huấn luyện: `Students` hay ` studying` là một token, còn `ọ` (3 byte) đứng riêng thành 3 token. mBERT có từ vựng 119 547 mảnh học trên Wikipedia nhiều thứ tiếng, nên nhiều âm tiết tiếng Việt là một mảnh. mBERT không tách từ tiếng Việt: `học sinh` vẫn là hai token `học`, `sinh`.'
+  - question: 'Bạn huấn luyện BPE trên cùng một kho văn bản, tăng số phép gộp từ 8 000 lên 64 000. Điều nào đúng?'
+    options:
+      - 'Chuỗi token dài ra, vì có nhiều token hơn để chọn'
+      - 'Không có gì đổi, vì BPE luôn tách một từ theo cùng một cách'
+      - 'Chuỗi token ngắn đi, nhưng bảng embedding lớn hơn và nhiều token chỉ gặp vài lần khi huấn luyện'
+      - 'Không bao giờ còn từ nào bị tách thành nhiều mảnh'
+    answer: 2
+    explanation: 'Mỗi phép gộp thêm một token dài hơn vào từ vựng, nên cùng một câu cần ít token hơn. Đổi lại, mỗi token cần một hàng trong bảng embedding (bảng vectơ, mỗi mã token một hàng) và trong lớp đầu ra, và các phép gộp cuối cùng ứng với chuỗi hiếm, nên token mới ít được học. Từ hiếm vẫn bị tách, chỉ là ít mảnh hơn. Số phép gộp là siêu tham số chính của BPE.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import BpeMergeViz from '@components/viz/BpeMergeViz.astro';
+import maxMatchCode from '@code/nlp/tokenization/max-match.vi.py?raw';
+import bpeCode from '@code/nlp/tokenization/bpe.vi.py?raw';
+import countTokensCode from '@code/nlp/tokenization/count-tokens.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Phân biệt được ba cách cắt văn bản thành **token**: theo từ, theo ký tự và theo **mảnh từ** (subword), và biết vì sao mô hình hiện đại chọn mảnh từ.
+- Hiểu vì sao tiếng Việt khó: chữ viết tách theo âm tiết, còn từ có thể gồm nhiều âm tiết. Cài đặt được **khớp dài nhất** (maximum matching) và chỉ ra chỗ nó sai.
+- Tự chạy tay được thuật toán **BPE** (byte pair encoding), và nói được WordPiece, Unigram, SentencePiece, byte-level BPE khác nhau ở đâu.
+- Đếm token bằng bộ tách từ thật, giải thích vì sao cùng một ý mà tiếng Việt tốn nhiều token hơn tiếng Anh, và nhận ra các **token đặc biệt** (special token).
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+## Trực giác
+
+### Mô hình không đọc chữ, nó đọc số
+
+Bạn muốn đưa câu "Học sinh đang học sinh học ở trường." vào một mô hình ngôn ngữ. Mô hình chỉ nhận một dãy số nguyên, mỗi số là vị trí của một mục trong một danh sách cố định gọi là **từ vựng** (vocabulary). Vậy trước hết phải trả lời: cắt câu thành những mảnh nào, và mảnh nào ứng với số nào? Việc cắt đó là **tách từ** (tokenization), mỗi mảnh là một **token**, và chương trình làm việc này là **bộ tách từ** (tokenizer).
+
+Có ba cách cắt tự nhiên:
+
+| Cách cắt | Câu trên thành | Số token | Cỡ từ vựng cần có |
+|---|---|---:|---|
+| Theo từ (cắt ở dấu cách và dấu câu) | `Học` `sinh` `đang` `học` `sinh` `học` `ở` `trường` `.` | 9 | Rất lớn: mọi từ, mọi biến thể |
+| Theo ký tự | `H` `ọ` `c`, dấu cách, `s` `i` … | 36 | Nhỏ: vài trăm ký tự |
+| Theo mảnh từ | mảnh thường gặp giữ nguyên, mảnh hiếm cắt nhỏ | ở giữa | Do bạn chọn, thường vài chục nghìn |
+
+**Theo từ** thì chuỗi ngắn, nhưng từ vựng không bao giờ đủ. Gặp chữ gõ sai ("truong"), tên riêng mới, hay từ mượn, mô hình chỉ còn cách đổi nó thành một token "không biết", thường viết `[UNK]`. Đó là bài toán **từ ngoài từ vựng** (out-of-vocabulary, OOV). Dùng regex để cắt theo từ, như ở bài [Biểu thức chính quy](/vi/nlp/regex/), là bước đầu tốt, nhưng không giải quyết được chuyện này.
+
+**Theo ký tự** thì không còn từ lạ, nhưng chuỗi dài gấp mấy lần, và mỗi token mang rất ít nghĩa. Bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/) dùng token ký tự cho gọn, và ghi rõ đó là một giới hạn.
+
+**Theo mảnh từ** là đường ở giữa: từ hay gặp như "trường" là một token, từ hiếm được ghép từ vài mảnh quen. Không mảnh nào là lạ, mà chuỗi vẫn ngắn.
+
+### Tiếng Việt: dấu cách không chia từ
+
+Tiếng Anh viết dấu cách giữa các từ. Tiếng Việt viết dấu cách giữa các **âm tiết** (syllable), còn một từ có thể gồm nhiều âm tiết: "học sinh", "máy tính", "giáo viên". Đọc lại câu đầu bài: "Học sinh | đang | học | sinh học | ở | trường". Cùng hai âm tiết "học sinh" xuất hiện hai lần, lần đầu là một từ, lần sau thuộc về hai từ khác nhau.
+
+Trong bài này, "tách từ" theo nghĩa rộng là tokenization. Việc gộp âm tiết thành từ tiếng Việt gọi riêng là **tách từ tiếng Việt** (Vietnamese word segmentation). Hai việc này khác nhau: bộ tách từ của GPT hay BERT không hề tách từ tiếng Việt, như bạn sẽ thấy ở ô code cuối.
+
+Bài toán của bài này là: **chọn một cách cắt văn bản bất kỳ thành các mảnh thuộc một từ vựng cỡ cố định, sao cho không có mảnh lạ, chuỗi không quá dài, và cách cắt học được từ dữ liệu thay vì viết tay.**
+
+## Lý thuyết
+
+### Một bộ tách từ gồm những bước nào
+
+Gọi từ vựng là $V$, có $|V|$ token. Bộ tách từ của các mô hình hiện nay thường làm bốn bước:
+
+1. **Chuẩn hóa** (normalization): đưa văn bản về một dạng thống nhất, ví dụ cùng một kiểu mã Unicode. Chi tiết ở bài [Chuẩn hóa văn bản](/vi/nlp/text-normalization/).
+2. **Tách sơ bộ** (pre-tokenization): cắt thô theo dấu cách và dấu câu, thường bằng regex. Các bước sau không bao giờ ghép qua ranh giới này.
+3. **Mô hình tách** (tokenization model): cắt mỗi mảnh thô thành các token thuộc $V$, theo một thuật toán học từ dữ liệu, như BPE.
+4. **Đổi sang số** và thêm token đặc biệt: mỗi token thành vị trí của nó trong $V$, gọi là **mã token** (token ID).
+
+Chiều ngược lại, từ dãy mã về chữ, gọi là **giải mã** (decode). Một bộ tách từ tốt cho phép giải mã ra đúng văn bản ban đầu.
+
+### Tách từ tiếng Việt bằng khớp dài nhất
+
+Cách đơn giản nhất để gộp âm tiết thành từ là dùng một từ điển. **Khớp dài nhất** (maximum matching) đi từ trái sang phải. Ở mỗi vị trí, nó thử cụm dài nhất (ví dụ 3 âm tiết), rồi ngắn dần. Gặp cụm nào có trong từ điển thì lấy cụm đó làm một từ và nhảy qua. Một âm tiết đứng riêng thì luôn được nhận, để thuật toán không bị kẹt.
+
+Với câu "giáo viên chấm bài tập trên máy tính", cách này cho đúng: `giáo viên | chấm | bài tập | trên | máy tính`. Nhưng với "học sinh học sinh học" (học sinh học môn sinh học), nó lấy `học sinh` ngay từ đầu, rồi lại `học sinh`, còn thừa `học`. Đi từ phải sang trái cũng sai, theo kiểu khác. Lỗi này gọi là **nhập nhằng chồng lấp** (overlapping ambiguity): âm tiết "học" ở giữa có thể ghép với bên trái hoặc bên phải, và từ điển không nói được nên chọn bên nào. Muốn chọn đúng phải dựa vào ngữ cảnh, tức là một mô hình học từ dữ liệu đã gán nhãn.
+
+Các công cụ thật làm đúng việc đó. **VnCoreNLP** (Vu và cộng sự, 2018) là bộ công cụ Java có phần tách từ học từ dữ liệu đã gán nhãn, đạt F1 97.90% trên tập kiểm tra của VLSP 2013 (Nguyen và cộng sự, 2018). Nó in từ nhiều âm tiết bằng dấu gạch dưới: `học_sinh`. [underthesea](https://github.com/undertheseanlp/underthesea) và [pyvi](https://github.com/trungtv/pyvi) là hai thư viện Python làm việc tương tự. Một số mô hình tiếng Việt, như PhoBERT (Nguyen và Nguyen, 2020), đòi văn bản đầu vào đã được tách từ theo cách này.
+
+### BPE: học từ vựng bằng cách gộp dần
+
+Mô hình mảnh từ không cần từ điển của người. Nó tự tìm mảnh từ thống kê. Thuật toán phổ biến nhất là **BPE**, vốn là một cách nén dữ liệu, được Sennrich, Haddow và Birch (2016) đem vào dịch máy.
+
+**Dữ liệu.** Sau bước tách sơ bộ, ta có một bộ từ kèm số lần xuất hiện $f(w)$ của mỗi từ $w$. Với tiếng Việt, mỗi "từ" ở đây là một âm tiết, vì tách sơ bộ cắt ở dấu cách. Bài dùng bộ 7 âm tiết sau, chọn để có những mảnh mà người Việt nhận ra ngay: phụ âm đầu "ng", "nh", "tr", vần "ường".
+
+| Âm tiết | người | ngành | nghề | trường | đường | thương | nhà |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Số lần $f(w)$ | 8 | 3 | 4 | 6 | 5 | 3 | 7 |
+
+**Bước 0: tách thành ký tự.** Mỗi âm tiết thành dãy ký tự, thêm ký hiệu `_` ở cuối để đánh dấu hết âm tiết: `người` thành `n g ư ờ i _`. Nhờ `_`, mảnh "ng" ở cuối "trường" (`ng_`) khác "ng" ở đầu "người". Bài báo gốc dùng `</w>` cho ký hiệu này. Từ vựng ban đầu $V_0$ là mọi ký tự có mặt, kể cả `_`: ở đây $|V_0| = 13$.
+
+**Bước 1: đếm mọi cặp ký hiệu kề nhau.** Một cặp $(a, b)$ được đếm theo tần số của từ chứa nó:
+
+$$
+\operatorname{count}(a, b) = \sum_{w} f(w) \cdot n_{ab}(w)
+$$
+
+Ở đây $n_{ab}(w)$ là số lần $a$ đứng ngay trước $b$ trong cách tách hiện tại của $w$. Nhân với $f(w)$ là vì một âm tiết gặp 8 lần trong văn bản thì mỗi cặp của nó cũng gặp 8 lần. Với cặp `n g`: "người" góp 8, "ngành" 3, "nghề" 4, "trường" 6, "đường" 5, "thương" 3, tổng 29. Không cặp nào nhiều hơn.
+
+**Bước 2: gộp cặp nhiều nhất.** Thêm ký hiệu mới `ng` vào từ vựng, và thay mọi chỗ `n g` kề nhau bằng `ng`. Ghi lại phép gộp này vào danh sách **phép gộp** (merge), theo đúng thứ tự.
+
+**Bước 3: lặp lại** với cách tách mới. Bước thứ hai gộp `ư ờ` (8 + 6 + 5 = 19, từ "người", "trường", "đường"). Bước thứ ba gộp `ng _` (6 + 5 + 3 = 14). Bước thứ tư gộp `ườ ng_` (6 + 5 = 11): "trường" và "đường" giờ chung một mảnh `ường_`. Khi nhiều cặp hòa nhau, code của bài chọn cặp được gặp trước khi đọc bộ từ từ trên xuống, mỗi từ từ trái sang phải.
+
+Sau $K$ bước, từ vựng có đúng
+
+$$
+|V| = |V_0| + K
+$$
+
+token, vì mỗi phép gộp thêm đúng một ký hiệu. $K$ là siêu tham số chính của thuật toán. Bài dừng ở $K = 12$, nên $|V| = 25$. Mô hình thật chọn $K$ để $|V|$ cỡ vài chục tới vài trăm nghìn.
+
+**Tách một từ mới.** Cắt từ thành ký tự cộng `_`, rồi áp lại các phép gộp **theo đúng thứ tự đã học**. "nhường" không có trong bộ từ, nhưng thành `nh` + `ường_`: hai mảnh quen. Một từ có ký tự lạ thì ký tự đó mới là token lạ. Còn mọi tổ hợp của các ký tự đã biết đều tách được.
+
+Có một điều đáng để ý: "thương" vẫn rời thành `t h ư ơ ng_` sau 12 bước. Chữ "ơ" trong "thương" và "ờ" trong "trường" là hai ký tự khác nhau, chỉ vì dấu thanh. Dấu thanh nhân số tổ hợp lên, nên mỗi tổ hợp xuất hiện ít hơn và được gộp muộn hơn.
+
+:::note[Ghi nhớ]
+BPE bắt đầu từ ký tự, lặp lại việc gộp cặp kề nhau có số đếm $\sum_w f(w)\, n_{ab}(w)$ lớn nhất, và ghi lại thứ tự các phép gộp. Sau $K$ phép gộp, từ vựng có $|V_0| + K$ token. Tách văn bản mới là áp lại các phép gộp theo đúng thứ tự: chuỗi hay gặp thành một token, chuỗi hiếm thành vài mảnh, không có mảnh lạ nếu ký tự đã biết.
+:::
+
+### Họ hàng của BPE
+
+**WordPiece** (Schuster và Nakajima, 2012; Wu và cộng sự, 2016) cũng gộp dần, nhưng không chọn cặp đếm được nhiều nhất. Nó chọn cặp làm **likelihood** của dữ liệu tăng nhiều nhất. Khóa học của Hugging Face diễn đạt điều này bằng một điểm dễ tính toán: số lần gặp cặp, chia cho tích số lần gặp từng phần. Một cặp được ưu tiên khi hai phần của nó hay đi với nhau hơn là đi riêng. BERT (Devlin và cộng sự, 2019) dùng WordPiece với từ vựng 30 000 token. Mảnh nằm giữa từ có tiền tố `##`, ví dụ `như` `##ờng`. Khi tách, WordPiece của BERT lấy **mảnh dài nhất có trong từ vựng** ở đầu từ rồi lặp lại với phần còn lại: chính là khớp dài nhất, ở mức ký tự thay vì âm tiết. Không khớp được mảnh nào thì cả từ thành `[UNK]`.
+
+**Unigram LM** (Kudo, 2018) đi theo chiều ngược lại. Nó bắt đầu từ một từ vựng rất lớn, rồi **bỏ dần** các mảnh ít có ích nhất. Mô hình giả sử các mảnh độc lập, nên xác suất của một cách tách $\mathbf{x} = (x_1, \dots, x_M)$ là tích xác suất từng mảnh:
+
+$$
+P(\mathbf{x}) = \prod_{i=1}^{M} p(x_i)
+$$
+
+Cách tách được chọn là cách có $P(\mathbf{x})$ lớn nhất, tìm bằng thuật toán Viterbi. Xác suất $p(x_i)$ được ước lượng bằng thuật toán EM. Mỗi vòng, thuật toán tính xem bỏ từng mảnh thì likelihood của dữ liệu giảm bao nhiêu, rồi chỉ giữ những mảnh làm nó giảm nhiều nhất, ví dụ 80% số mảnh như trong bài báo. Các ký tự đơn luôn được giữ, để không có token lạ. Vì có xác suất cho mọi cách tách, Unigram cho phép **lấy mẫu** một cách tách khác mỗi lần huấn luyện (subword regularization), giúp mô hình bền hơn với nhiễu, như lỗi chính tả.
+
+**SentencePiece** (Kudo và Richardson, 2018) là một thư viện, không phải thuật toán mới. Nó cài cả BPE lẫn Unigram, và học thẳng từ câu thô, không cần tách sơ bộ theo dấu cách. Dấu cách được coi là một ký tự thường, viết thành `▁`, nên `"Hello world."` thành `[Hello] [▁wor] [ld] [.]` và giải mã ra lại đúng chuỗi gốc. Điều này hợp với tiếng Nhật, tiếng Trung, vốn không có dấu cách. Nhiều mô hình như T5, LLaMA 1 và 2 dùng SentencePiece (LLaMA dùng BPE của nó). Llama 3 chuyển sang byte-level BPE kiểu tiktoken, từ vựng 128K.
+
+**Byte-level BPE** là BPE chạy trên **byte** thay vì ký tự. GPT-2 (Radford và cộng sự, 2019) dùng cách này. Lý do: Unicode có hơn 130 000 ký tự, quá nhiều cho từ vựng gốc, trong khi byte chỉ có 256 giá trị. Mọi văn bản đều là một dãy byte trong mã **UTF-8**, nên không bao giờ cần `[UNK]`. GPT-2 có từ vựng 50 257 token, và không cho gộp qua các loại ký tự khác nhau (chữ với dấu câu), trừ dấu cách. Nếu không, BPE sẽ phí chỗ cho `dog.`, `dog!`, `dog?`.
+
+| Thuật toán | Bắt đầu từ | Học từ vựng bằng | Token lạ | Ví dụ dùng |
+|---|---|---|---|---|
+| BPE | Ký tự | Gộp cặp đếm nhiều nhất | Chỉ ký tự chưa gặp | Dịch máy của Sennrich và cộng sự |
+| WordPiece | Ký tự | Gộp cặp tăng likelihood nhiều nhất | `[UNK]` cả từ | BERT, mBERT |
+| Unigram LM | Từ vựng lớn | Bỏ dần mảnh ít có ích | Chỉ ký tự chưa gặp | Qua SentencePiece |
+| Byte-level BPE | 256 byte | Gộp cặp đếm nhiều nhất | Không có | GPT-2 |
+
+### Token đặc biệt
+
+Ngoài mảnh chữ, từ vựng còn có vài **token đặc biệt** không đến từ văn bản. BERT có `[CLS]` ở đầu mọi đầu vào (trạng thái của nó dùng để phân loại cả câu), `[SEP]` để ngăn hai câu, `[MASK]` để che token khi huấn luyện, `[UNK]` cho từ lạ và `[PAD]` để **đệm** (padding). GPT-2 chỉ có một: `<|endoftext|>`, đánh dấu hết văn bản, đóng vai trò `<eos>` (end of sequence).
+
+Đệm cần khi đưa nhiều câu vào cùng một lô: các câu phải dài bằng nhau, nên câu ngắn được nối thêm token đệm. Bộ tách từ trả về kèm một **attention mask** (mặt nạ attention): 1 ở token thật, 0 ở token đệm, để mô hình bỏ qua phần đệm. Bài [BERT](/vi/nlp/bert/) dùng lại các token này.
+
+### Chi phí token của tiếng Việt
+
+Mã UTF-8 dùng 1 byte cho mỗi chữ cái tiếng Anh, nhưng 2 byte cho "đ", "ư", "ơ", và 3 byte cho chữ có dấu thanh như "ọ", "ờ", "ở". Câu "Học sinh đang học sinh học ở trường." có 36 ký tự nhưng 48 byte. Với byte-level BPE, mỗi byte là một token, trừ khi một phép gộp đã nối nó với byte khác. Phép gộp lại được học từ dữ liệu: dữ liệu ít tiếng Việt thì ít phép gộp cho chuỗi byte tiếng Việt.
+
+Petrov và cộng sự (2023) đo việc này trên FLORES-200: 2 000 câu Wikipedia được dịch sang 200 thứ tiếng. Họ chia số token của bản dịch cho số token của bản tiếng Anh, gọi là **mức phụ trội** (tokenization premium). Với tiếng Việt, mức đó là 4.54 cho bộ tách từ của GPT-2, và 2.45 cho bộ tách từ `cl100k_base` của ChatGPT và GPT-4. Từ vựng lớn hơn, dữ liệu đa ngôn ngữ hơn thì khoảng cách nhỏ lại, nhưng chưa mất.
+
+Hệ quả rất thực tế. API của LLM tính tiền theo token và giới hạn **cửa sổ ngữ cảnh** (context window) theo token (bài [Sử dụng API văn bản](/vi/llm/text-api/)). Nên cùng một nội dung, bản tiếng Việt có thể đắt hơn, chậm hơn (mỗi token sinh ra mất một bước), và chứa được ít chữ hơn trong cửa sổ ngữ cảnh.
+
+### Giới hạn
+
+- **Bộ tách từ gắn chặt với mô hình.** Mô hình giữ một **bảng embedding** (bảng vectơ, mỗi mã token một hàng; xem bài [Vector Semantics và Embeddings](/vi/nlp/vector-semantics-embeddings/)). Mỗi hàng ứng với đúng một mã token. Đổi bộ tách từ thì mã đổi, mô hình đọc sai hoàn toàn. Hộp đầu tiên ở mục Lỗi hay gặp nói thêm.
+- **BPE thường không gộp qua dấu cách,** vì bước tách sơ bộ cắt ở đó. Vì vậy "học sinh" thường là ít nhất hai token. Mô hình phải tự học rằng hai token này thường đi với nhau.
+- **Con số bị cắt tùy ý.** GPT-2 cắt " 2026" thành ` 20` và `26`, " 12345" thành ` 123` và `45` (tự chạy). Mô hình khó làm toán trên những mảnh như vậy.
+- **Một chữ, hai cách mã.** "ọ" có thể là một ký tự, hoặc "o" cộng một dấu chấm dưới. Hai cách trông như nhau nhưng tách ra khác nhau. Bài [Chuẩn hóa văn bản](/vi/nlp/text-normalization/) xử lý chuyện này.
+
+## Minh họa
+
+Hình dưới chạy BPE từng bước trên đúng bộ 7 âm tiết ở mục Lý thuyết. Mỗi bước, bạn thấy bảng đếm cặp kề nhau (cặp thắng tô đậm), danh sách phép gộp đã học, và cách mỗi âm tiết đang bị chia. Nút "Bước tiếp" chạy một phép gộp, nút "Đặt lại" quay về bước 0. Hãy thử:
+
+1. Bấm "Bước tiếp" một lần: cặp `n g` thắng với số đếm 29, và mọi âm tiết có "ng" đổi sang mảnh `ng`.
+2. Bấm tới bước 4: phép gộp `ườ` + `ng_` (11) làm "trường" và "đường" chung một mảnh `ường_`.
+3. Bấm tới bước 8: cả `người_` thành một token. Ở bước 6, ba cặp cùng đếm được 8, và cặp gặp trước (`ng` + `ườ`) thắng.
+4. Bấm tới bước 12: `trường_` là một token, còn "thương" vẫn rời thành 5 mảnh `t h ư ơ ng_`.
+
+{/* VIZ: BPE gộp dần cặp kề nhau có số đếm lớn nhất; mảnh hay gặp (ng, ường_, người_) thành token, âm tiết hiếm như "thương" vẫn rời. */}
+
+<BpeMergeViz />
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: hai ô Python thuần với Python 3.14 (bản có trong Pyodide), ô đếm token với Python 3.14 và `transformers` 5.22. Hai ô đầu chạy ngay trên trang, không cần thư viện nào. Ô thứ ba cần tải bộ tách từ từ Hugging Face Hub, nên chạy trên máy bạn.
+
+### Khớp dài nhất cho tiếng Việt
+
+Ô dưới cài khớp dài nhất với một từ điển 15 mục tự viết, theo cả hai chiều: từ trái (`left`) và từ phải (`right`). Hàm `segment` nhận danh sách âm tiết, vì chữ viết tiếng Việt đã tách sẵn theo âm tiết ở dấu cách.
+
+<PythonRunner code={maxMatchCode} title="Tách từ tiếng Việt bằng khớp dài nhất" />
+
+Đọc kết quả:
+
+- **Câu thứ nhất được tách đúng theo cả hai chiều:** `giáo viên | chấm | bài tập | trên | máy tính`. Khi không có chỗ chồng lấp, từ điển là đủ.
+- **Câu thứ hai sai theo cả hai chiều.** Từ trái ra `học sinh | học sinh | học`, từ phải ra `học | sinh học | sinh học`. Cách đọc đúng, `học sinh | học | sinh học`, nằm ở giữa, và không chiều nào thấy được nó. Từ điển có đủ mọi từ cần thiết. Cái thiếu là thông tin về ngữ cảnh.
+
+Thử thêm "sinh viên" vào câu, hoặc bỏ "sinh học" khỏi `DICT`, để xem kết quả đổi thế nào.
+
+### BPE đồ chơi
+
+Ô này làm đúng các bước ở mục Lý thuyết, trên cùng bộ 7 âm tiết với hình ở mục Minh họa. Hàm `merge` thay mọi cặp kề nhau bằng ký hiệu gộp. Vòng lặp chạy 12 phép gộp, mỗi lần in cặp được gộp và số đếm. Cuối cùng, ô tách bốn âm tiết bằng cách áp lại các phép gộp theo thứ tự.
+
+<PythonRunner code={bpeCode} title="BPE đồ chơi trên 7 âm tiết tiếng Việt" />
+
+Đọc kết quả:
+
+- **`start vocab: 13`, `end vocab: 25`:** đúng $|V| = |V_0| + K = 13 + 12$.
+- **Ba phép gộp đầu** là `n + g (29)`, `ư + ờ (19)`, `ng + _ (14)`, khớp số tính tay ở mục Lý thuyết. Thuật toán không biết gì về chính tả, nhưng tự tìm ra phụ âm đầu "ng", "nh", "tr" và vần "ường", vì chúng lặp lại nhiều.
+- **Các bước 6, 7, 8** có cùng số đếm 8: một khi "người" bắt đầu được gộp, các cặp bên trong nó có cùng tần số, nên nó được gộp liền một mạch tới `người_`.
+- **Tách âm tiết:** `trường` là một token `trường_`. `nhường` chưa từng gặp nhưng thành `nh` + `ường_`. `nghiêng` thành `ng h i ê ng_`. `thương` vẫn là 5 mảnh, vì "ơ" khác "ờ".
+
+Thử đổi tần số của "thương" từ 3 lên 20 rồi chạy lại: các bước 3 tới 6 dành để gộp nó thành một token `thương_`, còn "trường" bị đẩy ra ngoài 12 bước và chỉ còn `t r ường_`. Từ vựng phản ánh đúng dữ liệu nó được học.
+
+### Đếm token bằng bộ tách từ thật
+
+Ô cuối nạp hai bộ tách từ thật bằng `AutoTokenizer` của thư viện `transformers`: GPT-2 (byte-level BPE, Radford và cộng sự, 2019) và mBERT, bản BERT đa ngôn ngữ (WordPiece, Devlin và cộng sự, 2019). Chỉ các file từ vựng được tải, không có trọng số mô hình. Ô đếm token của cùng một câu tiếng Việt và bản dịch tiếng Anh, in các mảnh, tách thử một cụm ít gặp (`rare`), và in dãy mã của câu tiếng Anh kèm token đặc biệt. Ô chỉ cần `transformers`, không cần PyTorch: nếu bạn chỉ cài `transformers`, dòng cảnh báo `PyTorch was not found…` lúc đầu là bình thường, vì ô không nạp mô hình.
+
+<LocalCode
+  code={countTokensCode}
+  title="Đếm token tiếng Việt và tiếng Anh với GPT-2 và mBERT"
+  packages={['transformers']}
+  hardware="CPU là đủ. Chỉ tải bộ tách từ, khoảng 6 MB cho cả hai. Từ 30 giây tới vài phút, phần lớn là thời gian nạp thư viện"
+  sampleVaries={false}
+>
+
+```text
+36 chars, 48 bytes: Học sinh đang học sinh học ở trường.
+40 chars, 40 bytes: Students are studying biology at school.
+
+openai-community/gpt2 (vocab 50257)
+vi: 33 tokens
+    ['H', 'á', '»', 'į', 'c', 'Ġsin', 'h', 'ĠÄ', 'ĳ', 'ang', 'Ġh', 'á', '»', 'į', 'c', 'Ġsin', 'h', 'Ġh', 'á', '»', 'į', 'c', 'Ġá', '»', 'Ł', 'Ġtr', 'Æ', '°', 'á', '»', 'Ŀ', 'ng', '.']
+en: 7 tokens
+    ['Students', 'Ġare', 'Ġstudying', 'Ġbiology', 'Ġat', 'Ġschool', '.']
+rare: ['n', 'h', 'Æ', '°', 'á', '»', 'Ŀ', 'ng', 'Ġn', 'h', 'á', '»', 'ĭ', 'n']
+ids: [28239, 389, 11065, 17219, 379, 1524, 13]
+back: Students are studying biology at school.
+
+google-bert/bert-base-multilingual-cased (vocab 119547)
+vi: 9 tokens
+    ['Học', 'sinh', 'đang', 'học', 'sinh', 'học', 'ở', 'trường', '.']
+en: 7 tokens
+    ['Students', 'are', 'studying', 'biology', 'at', 'school', '.']
+rare: ['như', '##ờng', 'n', '##hị', '##n']
+ids: [101, 30356, 10301, 47308, 48262, 10160, 11393, 119, 102]
+back: [CLS] Students are studying biology at school. [SEP]
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Hai dòng đầu:** câu tiếng Việt ngắn hơn (36 ký tự so với 40) nhưng nặng hơn (48 byte so với 40), vì mỗi chữ có dấu tốn 2 tới 3 byte.
+- **GPT-2 cần 33 token cho câu tiếng Việt, 7 token cho câu tiếng Anh,** gấp khoảng 4.7 lần, gần mức 4.54 mà Petrov và cộng sự đo trên cả FLORES-200. Các mảnh trông lạ vì GPT-2 in mỗi byte thành một ký tự cho dễ nhìn: `Ġ` là dấu cách, còn "ọ" (3 byte `E1 BB 8D`) thành ba mảnh `á`, `»`, `į`. Riêng chữ "Học" đã là 5 token, "trường" là 7. Trong khi đó `Students` và ` studying` mỗi từ chỉ là một token.
+- **mBERT cần 9 token cho câu tiếng Việt,** mỗi âm tiết một token, vì từ vựng 119 547 mảnh của nó học trên Wikipedia của hơn một trăm thứ tiếng. Nhưng nó không tách từ tiếng Việt: "học sinh" vẫn là `học` và `sinh`.
+- **Cụm ít gặp "nhường nhịn"** cho thấy mảnh `##` của WordPiece: `như` `##ờng`, `n` `##hị` `##n`. GPT-2 tốn 14 token cho cùng cụm này.
+- **Token đặc biệt:** khi gọi `tok(...)` thay vì `tok.tokenize(...)`, mBERT tự thêm `[CLS]` (mã 101) ở đầu và `[SEP]` (mã 102) ở cuối, nên dãy có 9 mã cho 7 mảnh. GPT-2 không thêm gì. Giải mã dãy mã cho lại đúng câu gốc.
+
+## Lỗi hay gặp
+
+:::caution[Dùng bộ tách từ của mô hình khác]
+Mỗi mô hình chỉ hiểu mã token của chính bộ tách từ nó được huấn luyện cùng. Ở ô trên, `Students` là mã 28239 với GPT-2 và 30356 với mBERT. Đưa dãy mã của bộ này vào mô hình kia thì mô hình vẫn chạy, không báo lỗi, nhưng đọc ra một câu vô nghĩa. Luôn nạp bộ tách từ và mô hình từ cùng một tên, ví dụ cùng `"google-bert/bert-base-multilingual-cased"`. Cũng đừng tự huấn luyện lại bộ tách từ cho một mô hình đã huấn luyện xong: từ vựng mới không khớp với bảng embedding cũ.
+:::
+
+:::caution[Ước lượng số token bằng cách đếm từ]
+`len(text.split())` đếm được 9 "từ" cho câu tiếng Việt ở trên, nhưng GPT-2 cần 33 token. Ước lượng chi phí API hay độ dài ngữ cảnh bằng số từ có thể sai vài lần với tiếng Việt. Hãy đếm bằng chính bộ tách từ của mô hình bạn dùng, như ô `LocalCode` ở trên. Khi đặt độ dài tối đa (ví dụ 512 token của BERT), nhớ rằng `[CLS]` và `[SEP]` cũng nằm trong con số đó.
+:::
+
+:::caution[Gặp UnicodeEncodeError khi lưu output ra tệp trên Windows]
+In thẳng ra cửa sổ dòng lệnh thì chữ có dấu hiện bình thường. Nhưng khi chuyển output ra tệp (`python count-tokens.py > out.txt`) hay qua một lệnh khác, Python trên Windows có thể ghi bằng bảng mã cũ và báo `UnicodeEncodeError` ở chữ có dấu đầu tiên. Chạy `python -X utf8 count-tokens.py`, hoặc đặt biến môi trường `PYTHONUTF8=1` trước khi chạy, để Python dùng UTF-8.
+:::
+
+:::caution[Đưa văn bản dạng tổ hợp (NFD) vào bộ tách từ]
+Chữ "ọ" có thể được mã thành một ký tự (dạng NFC), hoặc "o" cộng một dấu chấm dưới riêng (dạng NFD). Mắt không phân biệt được, nhưng bộ tách từ thì có. Ở lần chạy thử của bài, đổi câu tiếng Việt sang NFD bằng `unicodedata.normalize("NFD", ...)` thì mBERT trả về `[UNK]` cho 5 trong 9 token, đúng các chữ có dấu thanh ("Học", "học", "học", "ở", "trường"), còn GPT-2 tăng từ 33 lên 34 token. Chuẩn hóa về NFC trước khi tách, như bài [Chuẩn hóa văn bản](/vi/nlp/text-normalization/) hướng dẫn.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Bộ tách từ đổi văn bản thành dãy mã token thuộc một từ vựng cố định. Tách theo từ thì gặp từ ngoài từ vựng, tách theo ký tự thì chuỗi quá dài. Mảnh từ (subword) là đường ở giữa: từ hay gặp là một token, từ hiếm ghép từ vài mảnh.
+- Chữ viết tiếng Việt tách theo âm tiết, nhưng từ có thể nhiều âm tiết. Khớp dài nhất với từ điển làm được phần lớn, nhưng sai ở nhập nhằng chồng lấp như "học sinh học sinh học". Công cụ thật (VnCoreNLP, underthesea, pyvi) học từ dữ liệu có nhãn.
+- BPE gộp dần cặp kề nhau có $\sum_w f(w)\, n_{ab}(w)$ lớn nhất, sau $K$ bước có $|V| = |V_0| + K$ token. WordPiece gộp theo likelihood (BERT, tiền tố `##`), Unigram bỏ dần mảnh từ một từ vựng lớn, SentencePiece học từ câu thô với `▁` cho dấu cách, byte-level BPE bắt đầu từ 256 byte nên không có token lạ.
+- Cùng một ý, tiếng Việt tốn nhiều token hơn với bộ tách từ thiên về tiếng Anh, vì chữ có dấu tốn 2 tới 3 byte và ít được gộp: 33 so với 7 token với GPT-2 ở ô của bài. Token đặc biệt (`[CLS]`, `[SEP]`, `[PAD]`, `<|endoftext|>`) do bộ tách từ thêm vào.
+
+**Đọc thêm:**
+
+- Vu, T., Nguyen, D. Q., Nguyen, D. Q., Dras, M., Johnson, M. (2018). [*VnCoreNLP: A Vietnamese Natural Language Processing Toolkit*](https://aclanthology.org/N18-5012/), NAACL 2018 (Demonstrations). Bộ công cụ cho tiếng Việt có phần tách từ, kèm kết quả đo trên dữ liệu VLSP.
+- Sennrich, R., Haddow, B., Birch, A. (2016). [*Neural Machine Translation of Rare Words with Subword Units*](https://aclanthology.org/P16-1162/), ACL 2016, mục 3.2. Bài gốc đưa BPE vào xử lý ngôn ngữ, có đoạn code Python ngắn của thuật toán. Bài báo dùng `</w>` cho ký hiệu cuối từ, chỗ bài này viết `_`.
+- Kudo, T. (2018). [*Subword Regularization: Improving Neural Network Translation Models with Multiple Subword Candidates*](https://aclanthology.org/P18-1007/), ACL 2018, mục 3. Mô hình Unigram, cách bỏ dần mảnh, và lấy mẫu nhiều cách tách. Kèm theo là Kudo và Richardson (2018), [*SentencePiece*](https://aclanthology.org/D18-2012/), EMNLP 2018 (Demonstrations).
+- Radford, A., Wu, J., Child, R., Luan, D., Amodei, D., Sutskever, I. (2019). [*Language Models are Unsupervised Multitask Learners*](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) (PDF), báo cáo kỹ thuật của OpenAI, mục 2.2. Lý do GPT-2 chọn BPE mức byte, và vì sao không cho gộp qua các loại ký tự.
+- Petrov, A., La Malfa, E., Torr, P. H. S., Bibi, A. (2023). [*Language Model Tokenizers Introduce Unfairness Between Languages*](https://arxiv.org/abs/2305.15425), NeurIPS 2023, mục 4. Đo mức phụ trội token của 200 thứ tiếng, có tiếng Việt.
+- Hugging Face. [*LLM Course*, mục Byte-Pair Encoding tokenization](https://huggingface.co/learn/llm-course/chapter6/5), cùng hai mục kế tiếp về WordPiece và Unigram ở chương 6. Cài từng thuật toán bằng Python trên ví dụ nhỏ, và cách dùng thư viện `tokenizers`.
+
+<LessonProgress />

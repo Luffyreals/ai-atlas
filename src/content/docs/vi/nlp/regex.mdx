@@ -1,0 +1,341 @@
+---
+title: Biểu thức chính quy (Regex)
+description: Lấy số điện thoại, email, ngày tháng ra khỏi tin nhắn tiếng Việt. Lớp ký tự, lượng từ, neo, nhóm, tham lam và lười, lookaround, mô-đun re và giới hạn của regex.
+quiz:
+  - question: 'Bạn chạy `re.findall(r"\d{2}/\d{2}/\d{4}", "Hạn 5/11/2026 và 15/11/2026")`. Kết quả là gì?'
+    options:
+      - '`[''5/11/2026'', ''15/11/2026'']`'
+      - '`[''15/11/2026'']`'
+      - '`[]`, vì mẫu không có `\b` ở hai đầu'
+      - '`[''05/11/2026'', ''15/11/2026'']`'
+    answer: 1
+    explanation: '`\d{2}` đòi đúng hai chữ số liền nhau trước dấu `/`. Ngày "5/11/2026" chỉ có một chữ số ở đầu nên không khớp, và regex không tự thêm số 0. Thiếu `\b` không làm mất kết quả; nó chỉ khiến mẫu có thể khớp lẫn vào giữa một dãy số dài hơn. Muốn nhận cả ngày một chữ số thì viết `\d{1,2}`, như mẫu `DATE` trong bài.'
+  - question: 'Với chuỗi `Anh nói "chào" rồi "tạm biệt"`, mẫu `".*"` (dấu nháy kép, dấu chấm, dấu sao, dấu nháy kép) khớp được đoạn nào?'
+    options:
+      - 'Một đoạn duy nhất: `"chào" rồi "tạm biệt"`'
+      - 'Hai đoạn: `"chào"` và `"tạm biệt"`'
+      - 'Chỉ `"chào"`, vì regex dừng ở dấu nháy đầu tiên gặp được'
+      - 'Không khớp gì, vì `.` không khớp dấu nháy kép'
+    answer: 0
+    explanation: '`.*` là tham lam: nó nuốt tới cuối chuỗi rồi lùi dần cho tới khi gặp một dấu nháy để phần còn lại của mẫu khớp được, tức dấu nháy cuối cùng. Kết quả là một đoạn từ dấu nháy đầu tới dấu nháy cuối. Muốn hai đoạn riêng thì dùng bản lười `".*?"`, hoặc `"[^"]*"`. Dấu `.` khớp mọi ký tự trừ xuống dòng, kể cả dấu nháy.'
+  - question: 'Trong Python 3, `re.findall(r"[a-zA-Z]+", "Đà Lạt")` trả về gì?'
+    options:
+      - '`[''Đà'', ''Lạt'']`'
+      - '`[''Lạt'']`'
+      - '`[''L'', ''t'']`'
+      - '`[]`'
+    answer: 2
+    explanation: 'Khoảng `a-z` và `A-Z` chỉ gồm 52 chữ cái không dấu. "Đ", "à", "ạ" nằm ngoài, nên "Đà" không cho mảnh nào, còn "Lạt" bị cắt thành "L" và "t". Với chữ tiếng Việt, dùng `\w+`: trong Python 3, `\w` khớp mọi chữ cái Unicode, nên ra `[''Đà'', ''Lạt'']`.'
+  - question: 'Vì sao không thể viết một regex (chính quy theo nghĩa toán học) khớp đúng mọi đoạn HTML có thẻ `<div>` lồng nhau sâu tùy ý?'
+    options:
+      - 'Vì regex chạy quá chậm trên văn bản dài'
+      - 'Vì mô-đun `re` không hỗ trợ dấu `<` và `>`'
+      - 'Vì HTML có chữ Unicode mà regex không đọc được'
+      - 'Vì phải nhớ đang ở độ sâu thứ mấy, mà độ sâu không có giới hạn, còn ôtômat hữu hạn chỉ có hữu hạn trạng thái'
+    answer: 3
+    explanation: 'Để biết thẻ đóng nào khớp thẻ mở nào, phải đếm số thẻ đang mở. Độ sâu có thể là 1, 10 hay 1000. Một ôtômat hữu hạn chỉ có hữu hạn trạng thái, nên không đếm tới mức tùy ý được: đây là giới hạn về khả năng, không phải về tốc độ. Hãy dùng bộ phân tích HTML thật cho việc này.'
+  - question: 'Mẫu `(a+)+$` chạy trên chuỗi gồm $n$ chữ `a` rồi một dấu `!`. Giả sử mỗi chữ `a` thêm vào làm thời gian gấp đôi, và 24 chữ `a` mất khoảng 1.7 giây. Với 30 chữ `a`, khoảng bao lâu?'
+    options:
+      - 'Vẫn khoảng 1.7 giây, vì mẫu đã được biên dịch sẵn'
+      - 'Khoảng 2 giây, vì chuỗi chỉ dài hơn một chút'
+      - 'Khoảng 2 phút'
+      - 'Không bao giờ dừng'
+    answer: 2
+    explanation: 'Thêm 6 chữ `a` là gấp đôi 6 lần: $1.7 \times 2^6 \approx 109$ giây, gần 2 phút. Thời gian tăng theo hàm mũ vì có khoảng $2^{n-1}$ cách chia $n$ chữ `a` cho hai lượng từ lồng nhau, và khi khớp thất bại, bộ máy quay lui thử lần lượt các cách đó. Biên dịch không giúp gì. Nó vẫn dừng, chỉ là rất lâu. Viết lại thành `a+$` thì tức thì.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import extractCode from '@code/nlp/regex/extract.vi.py?raw';
+import pitfallsCode from '@code/nlp/regex/pitfalls.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu **biểu thức chính quy** (regular expression, regex) là một cách mô tả một tập chuỗi, và đọc được các thành phần chính: lớp ký tự, lượng từ, neo, nhóm, tham lam và lười, lookaround.
+- Viết được mẫu trích số điện thoại di động Việt Nam, email và ngày tháng từ một đoạn văn tiếng Việt, rồi che hoặc đổi dạng chúng bằng `re.sub`.
+- Dùng đúng mô-đun `re` của Python: `search`, `findall`, `sub`, `compile`, cờ, chuỗi thô, và biết vì sao `\w` hợp với chữ có dấu còn `[a-zA-Z]` thì không.
+- Nhận ra khi nào regex không phải công cụ đúng: cấu trúc lồng nhau như HTML, và mẫu có thể chạy lâu theo hàm mũ.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Trong Python 3, một **chuỗi** (`str`) là dãy ký tự Unicode: `len("phở")` bằng 3, `s.split()` tách theo khoảng trắng, `s.replace(a, b)` thay chuỗi con. Trong chuỗi thường, dấu `\` mở đầu một **ký tự thoát** (escape sequence): `"\n"` là một ký tự xuống dòng, `"\b"` là một ký tự lùi (backspace). **Chuỗi thô** (raw string) `r"..."` giữ nguyên mọi dấu `\`, nên `r"\n"` là hai ký tự `\` và `n`, và mẫu regex hầu như luôn viết bằng chuỗi thô.
+:::
+
+## Trực giác
+
+### Một tin rao vặt và ba thứ cần lấy
+
+Bạn có vài nghìn tin rao vặt như tin dưới đây, và cần lấy ra số điện thoại, email, ngày tháng. Hoặc ngược lại: cần **che** số điện thoại trước khi đưa văn bản vào huấn luyện một mô hình, vì đó là dữ liệu cá nhân (bài [Chuẩn bị dữ liệu pre-train](/vi/llm/pretraining-data/) có nói vì sao).
+
+> Bán xe Wave 2019, giá 12 triệu. Gọi anh Nam 0912 345 678 hoặc chị Lan +84987654321. Email: nam.nguyen@gmail.com. Xem xe từ 05/11/2026 đến 15/11/2026. STK 1903456789123 không phải số điện thoại.
+
+(Số, tên và email trong bài đều tự đặt.) Bằng mắt, bạn nhận ra số điện thoại ngay. Nhưng bạn nhận ra nhờ **hình dạng**, không nhờ con số cụ thể: "bắt đầu bằng 0 hoặc +84, rồi khoảng 9 chữ số, có thể cách nhau". Không thể liệt kê mọi số điện thoại có thể có. Bạn chỉ mô tả được hình dạng của chúng.
+
+### Thử bằng các hàm chuỗi
+
+Với các hàm chuỗi quen thuộc, bạn có thể tách theo khoảng trắng rồi giữ những mảnh toàn chữ số. Cách này hỏng ngay ở "0912 345 678", vì số bị cắt làm ba mảnh "0912", "345", "678". Nó lấy nhầm "12" (giá tiền) và "1903456789123" (số tài khoản). Và nó bỏ qua "+84987654321", vì dấu `+` không phải chữ số. Mỗi trường hợp mới lại cần thêm một đoạn `if`, và code nhanh chóng thành một mớ luật khó đọc.
+
+### Một ngôn ngữ nhỏ để mô tả hình dạng
+
+Regex là một ngôn ngữ nhỏ, chuyên để viết đúng những câu như "0 hoặc +84, rồi một chữ số trong 3, 5, 7, 8, 9, rồi 8 chữ số nữa, có thể cách nhau bằng dấu cách". Viết một lần, chạy được trên mọi văn bản, và hầu hết ngôn ngữ lập trình, trình soạn thảo, lệnh `grep` đều hiểu.
+
+Regex xuất hiện trong xử lý ngôn ngữ từ rất sớm. Chatbot ELIZA (Weizenbaum, 1966) gần như chỉ là một chuỗi phép thay thế theo mẫu: thấy "I need X" thì đáp "What would it mean to you if you got X?". Ngày nay, nhiều bộ tách từ (tokenizer), ví dụ của GPT-2, vẫn dùng regex để cắt văn bản thành từng mảnh trước khi chạy thuật toán chính (bài [Tách từ](/vi/nlp/tokenization/)).
+
+**Bài toán của bài này: mô tả hình dạng của số điện thoại, email, ngày tháng bằng một mẫu, rồi dùng mẫu đó để tìm, trích, che và đổi dạng chúng trong văn bản tiếng Việt, đồng thời biết mẫu sai ở đâu.**
+
+## Lý thuyết
+
+### Mẫu và chuỗi khớp
+
+Một regex là một **mẫu** (pattern). Bộ máy regex quét văn bản từ trái sang phải, tìm những đoạn **khớp** (match) với mẫu. Trong Python:
+
+```python
+import re
+re.search(r"Wave", "Bán xe Wave 2019")  # khớp "Wave" ở vị trí 7
+```
+
+Mẫu đơn giản nhất là chữ thường: `Wave` khớp đúng chuỗi "Wave". Sức mạnh nằm ở các **ký tự đặc biệt** (metacharacter): `. ^ $ * + ? { } [ ] \ | ( )`. Muốn khớp chính các ký tự này thì đặt `\` trước: `\.` khớp một dấu chấm, `\+` khớp một dấu cộng. Đó là lý do mẫu số điện thoại viết `\+84`.
+
+### Lớp ký tự: một vị trí, nhiều lựa chọn
+
+**Lớp ký tự** (character class) `[...]` khớp **đúng một** ký tự nằm trong ngoặc:
+
+| Mẫu | Khớp một ký tự | Ví dụ khớp |
+|---|---|---|
+| `[35789]` | một trong năm chữ số 3, 5, 7, 8, 9 | `9` trong "0912" |
+| `[0-9]` | một chữ số từ 0 tới 9 (dấu `-` chỉ khoảng) | `2` |
+| `[^>]` | mọi ký tự **trừ** `>` (dấu `^` đầu ngoặc là phủ định) | `b` trong `<b>` |
+| `[ .]` | một dấu cách hoặc một dấu chấm (trong ngoặc, `.` là dấu chấm thật) | dấu cách trong "0912 345" |
+
+Vài lớp hay dùng có tên viết tắt. Chữ hoa là phủ định của chữ thường:
+
+| Viết tắt | Trong Python 3 (chuỗi `str`) | Phủ định |
+|---|---|---|
+| `\d` | một chữ số Unicode, gồm `0-9` | `\D` |
+| `\w` | một **ký tự chữ** (word character): mọi chữ cái và chữ số Unicode, cộng dấu `_` | `\W` |
+| `\s` | một khoảng trắng: dấu cách, tab, xuống dòng | `\S` |
+| `.` | mọi ký tự trừ xuống dòng (ký tự đại diện, wildcard) | |
+
+Dòng `\w` là chỗ quan trọng với tiếng Việt. Tài liệu Python ghi rõ: với chuỗi `str`, `\w` khớp mọi ký tự mà `str.isalnum()` coi là chữ hoặc số, cộng dấu `_`. Vậy "ở", "à", "ộ", "đ" đều là `\w`. Ngược lại, `[a-zA-Z]` chỉ có 52 chữ cái không dấu: nó cắt "Phở" thành "Ph". Nhiều tài liệu tiếng Anh, kể cả sách của Jurafsky và Martin, viết `\w` như `[a-zA-Z0-9_]`. Điều đó chỉ đúng khi bật cờ `re.ASCII`.
+
+### Lượng từ: lặp bao nhiêu lần
+
+**Lượng từ** (quantifier) đặt ngay sau một ký tự, một lớp hay một nhóm, và nói nó được lặp bao nhiêu lần:
+
+| Lượng từ | Số lần | Ví dụ |
+|---|---|---|
+| `*` | 0 lần trở lên | `[0-9]*` khớp cả chuỗi rỗng |
+| `+` | 1 lần trở lên | `[0-9]+` khớp "2019" |
+| `?` | 0 hoặc 1 lần | `[ .]?` cho phép có hoặc không có dấu cách |
+| `{3}` | đúng 3 lần | `\d{3}` khớp "345" |
+| `{1,2}` | từ 1 tới 2 lần | `\d{1,2}` khớp "5" và "05" |
+
+Lượng từ chỉ áp lên **thứ đứng ngay trước nó**. `ha+` khớp trọn "haaa", còn trong "hahaha" nó chỉ khớp từng "ha" một. Muốn khớp cả "hahaha" thì phải nhóm lại: `(ha)+`.
+
+### Neo và ranh giới: khớp ở đâu
+
+**Neo** (anchor) không khớp ký tự nào. Nó chỉ kiểm tra **vị trí**:
+
+- `^` khớp ở đầu chuỗi, `$` khớp ở cuối chuỗi. Với cờ `re.MULTILINE`, chúng khớp cả ở đầu và cuối mỗi dòng.
+- `\b` là **ranh giới từ** (word boundary): chỗ giữa một ký tự `\w` và một ký tự không phải `\w`, hoặc giữa một ký tự `\w` và đầu hay cuối chuỗi. `\bxe\b` khớp "xe" trong "Bán xe Wave", không khớp trong "xem". Vì `\w` của Python 3 hiểu chữ có dấu, `\b` cũng hiểu: `\bHà\b` khớp "Hà" trong "Hà Nội".
+
+### Nhóm, lựa chọn và tham chiếu ngược
+
+Dấu `|` nghĩa là "hoặc", và nó có độ ưu tiên thấp nhất: `\+84|0` là "`\+84` hoặc `0`". Dấu ngoặc tròn có hai việc:
+
+1. **Gom nhóm**, để lượng từ hay dấu `|` áp lên cả cụm: `(?:\+84|0)` giới hạn phép "hoặc" trong ngoặc.
+2. **Bắt** (capture) đoạn khớp để dùng lại. `(\d{1,2})` là một **nhóm bắt** (capturing group). Các nhóm được đánh số từ 1, theo thứ tự dấu mở ngoặc từ trái sang phải.
+
+Viết `(?:...)` khi chỉ cần gom mà không cần bắt: đó là **nhóm không bắt** (non-capturing group). Muốn đặt tên cho nhóm thì viết `(?P<ngay>...)`.
+
+Nhóm bắt dùng được trong phép thay thế qua **tham chiếu ngược** (backreference) `\1`, `\2`, `\3`. Với mẫu ngày tháng `\b(\d{1,2})/(\d{1,2})/(\d{4})\b`, phần thay `\3-\2-\1` đổi "05/11/2026" thành "2026-11-05": nhóm 3 (năm), gạch ngang, nhóm 2 (tháng), gạch ngang, nhóm 1 (ngày).
+
+### Tham lam và lười
+
+Lượng từ mặc định là **tham lam** (greedy): khớp **càng nhiều càng tốt**, rồi chỉ nhả bớt khi phần sau của mẫu cần. Thử với đoạn HTML `<b>Phở</b> và <i>bún chả</i>` và mẫu `<.*>`:
+
+- `<` khớp dấu `<` đầu tiên.
+- `.*` nuốt **hết** phần còn lại của chuỗi.
+- `>` không còn gì để khớp, nên bộ máy lùi từng ký tự. Lần lùi đầu tiên đã trả lại dấu `>` cuối chuỗi. Khớp xong.
+
+Kết quả là **cả chuỗi**, không phải thẻ `<b>`. Thêm `?` sau lượng từ để nó thành **lười** (lazy, non-greedy): `*?`, `+?`, `??` khớp **càng ít càng tốt**. `<.*?>` thử khớp 0 ký tự, rồi 1, rồi 2…, và dừng ở dấu `>` **gần nhất**, nên lấy được từng thẻ. Cách thứ ba thường rõ ràng hơn: `<[^>]+>` nói thẳng "các ký tự không phải `>`", nên không bao giờ vượt qua dấu `>`.
+
+### Lookaround: nhìn mà không nuốt
+
+Đôi khi bạn cần điều kiện về **hàng xóm** của đoạn khớp mà không muốn đưa hàng xóm vào kết quả. Đó là **lookaround**. Giống neo, nó khớp một vị trí, độ dài 0:
+
+| Cú pháp | Tên | Đúng khi |
+|---|---|---|
+| `(?=...)` | nhìn trước (lookahead) | ngay sau là `...` |
+| `(?!...)` | nhìn trước phủ định | ngay sau **không** là `...` |
+| `(?<=...)` | nhìn sau (lookbehind) | ngay trước là `...` |
+| `(?<!...)` | nhìn sau phủ định | ngay trước **không** là `...` |
+
+Trong tin rao vặt, số tài khoản 1903456789123 chứa đoạn "0345678912", đúng hình dạng một số di động. Mẫu số điện thoại vì vậy mở bằng `(?<!\d)` và kết bằng `(?!\d)`: trước và sau đoạn khớp không được là chữ số. Sao không dùng `\b`? Vì `\b` đòi một bên là `\w`, mà trước "+84" thường là dấu cách: giữa dấu cách và `+` không có ranh giới từ nào, nên `\b\+84` không khớp ở đó. Trong Python, phần bên trong lookbehind phải có độ dài cố định: `(?<!\d)` được, `(?<!\d+)` thì báo lỗi.
+
+### Mô-đun `re` của Python
+
+| Hàm | Làm gì | Trả về |
+|---|---|---|
+| `re.search(p, s)` | tìm chỗ khớp **đầu tiên**, ở bất kỳ đâu | đối tượng `Match` hoặc `None` |
+| `re.match(p, s)` | chỉ thử khớp **ở đầu** chuỗi | `Match` hoặc `None` |
+| `re.fullmatch(p, s)` | đòi **cả chuỗi** khớp | `Match` hoặc `None` |
+| `re.findall(p, s)` | mọi chỗ khớp, không chồng lên nhau | danh sách chuỗi; nếu mẫu có nhóm bắt thì danh sách nhóm |
+| `re.finditer(p, s)` | như `findall` | dãy `Match`, có cả vị trí `m.start()`, `m.end()` |
+| `re.sub(p, r, s)` | thay mọi chỗ khớp bằng `r` (`r` có thể chứa `\1` hoặc là một hàm) | chuỗi mới |
+| `re.split(p, s)` | tách chuỗi tại các chỗ khớp | danh sách chuỗi |
+| `re.compile(p, flags)` | biên dịch mẫu một lần, dùng lại nhiều lần | đối tượng `Pattern` có các hàm trên |
+
+Hai điểm hay gây bất ngờ. Thứ nhất, `findall` đổi dạng kết quả theo số nhóm bắt: không nhóm thì trả cả đoạn khớp, một nhóm thì trả nhóm đó, nhiều nhóm thì trả các bộ (tuple). Thứ hai, `re.match(r"\d+", "Giá 12 triệu")` trả `None`, vì chuỗi không bắt đầu bằng chữ số; `re.search` mới tìm ra "12".
+
+Các **cờ** (flag) hay dùng: `re.IGNORECASE` (không phân biệt hoa thường), `re.MULTILINE` (`^` và `$` theo từng dòng), `re.DOTALL` (`.` khớp cả xuống dòng), `re.ASCII` (`\w`, `\d`, `\b`, `\s` chỉ hiểu ASCII), `re.VERBOSE` (cho phép viết mẫu nhiều dòng, có chú thích).
+
+### Nhìn theo kiểu toán: một regex là một tập chuỗi
+
+Phần này giải thích chữ "chính quy" trong tên gọi, và chuẩn bị cho mục Giới hạn. Gọi $\Sigma$ là bảng chữ cái, tức tập mọi ký tự được dùng, và $\Sigma^*$ là tập mọi chuỗi hữu hạn gồm các ký tự đó, kể cả chuỗi rỗng $\varepsilon$. Mỗi regex $r$ mô tả một tập chuỗi $L(r) \subseteq \Sigma^*$: những chuỗi khớp **trọn vẹn** với $r$.
+
+Kleene (1951, in lại năm 1956) định nghĩa regex như sau: các viên gạch cơ sở là từng chữ cái đơn lẻ (khớp đúng chữ cái đó), chuỗi rỗng $\varepsilon$ và tập rỗng $\varnothing$ (không khớp gì); mọi regex khác được ghép từ chúng bằng ba phép:
+
+$$
+\begin{aligned}
+L(r_1 r_2) &= \lbrace uv : u \in L(r_1),\ v \in L(r_2) \rbrace \\
+L(r_1 \mid r_2) &= L(r_1) \cup L(r_2) \\
+L(r^*) &= \lbrace \varepsilon \rbrace \cup L(r) \cup L(rr) \cup L(rrr) \cup \cdots
+\end{aligned}
+$$
+
+- **Nối** (concatenation): dòng đầu nói chuỗi khớp $r_1 r_2$ là một chuỗi khớp $r_1$ đặt liền trước một chuỗi khớp $r_2$.
+- **Hợp** (union): dòng hai là dấu `|`, chuỗi khớp một trong hai mẫu.
+- **Sao Kleene** (Kleene star): dòng ba là dấu `*`, nối $r$ với chính nó 0, 1, 2… lần.
+
+Các ký hiệu còn lại chỉ là cách viết tắt. $r^+$ là $r r^*$ (ít nhất một lần). $r?$ là $r \mid \varepsilon$. `[357]` là $3 \mid 5 \mid 7$. `\d{3}` là `\d\d\d`. Một tập chuỗi viết được từ các viên gạch cơ sở và ba phép trên gọi là **ngôn ngữ chính quy** (regular language). Kleene cũng chứng minh rằng đó đúng là các tập mà một **ôtômat hữu hạn** (finite automaton) nhận ra được: một cỗ máy chỉ có hữu hạn trạng thái, đọc từng ký tự một và chuyển trạng thái.
+
+Về lịch sử: Thompson (1968) biên dịch regex thành ôtômat cho trình soạn thảo QED, và cách mô phỏng ôtômat của ông chạy trong thời gian tỉ lệ với độ dài văn bản. Trình soạn thảo `ed` về sau có lệnh `g/re/p` (tìm theo regex rồi in dòng), từ đó có lệnh `grep`. Nhưng theo Cox (2007), `ed` và `grep` lại tìm khớp bằng quay lui, và nhiều bộ máy regex ngày nay, kể cả `re` của Python, cũng vậy. Mục Giới hạn cho thấy cái giá của lựa chọn đó.
+
+Regex của Python mạnh hơn lý thuyết một chút: tham chiếu ngược như `(\w+) \1` (một từ lặp lại hai lần) không chính quy theo nghĩa toán học. Nhưng ý chính vẫn đúng, và nó giải thích giới hạn đầu tiên dưới đây.
+
+:::note[Ghi nhớ]
+Một regex mô tả hình dạng của một tập chuỗi. Lớp ký tự chọn **một** ký tự, lượng từ nói **bao nhiêu lần**, neo và lookaround kiểm tra **vị trí** mà không nuốt ký tự, nhóm vừa gom vừa bắt để dùng lại bằng `\1`. Lượng từ mặc định tham lam; thêm `?` để thành lười. Trong Python 3, `\w` hiểu chữ có dấu, `[a-zA-Z]` thì không. Luôn viết mẫu bằng chuỗi thô `r"..."`.
+:::
+
+### Giới hạn
+
+- **Cấu trúc lồng nhau tùy ý.** Để biết thẻ `</div>` nào đóng thẻ `<div>` nào, phải đếm đang mở bao nhiêu thẻ. Độ sâu có thể lớn tùy ý, còn ôtômat hữu hạn chỉ có hữu hạn trạng thái, nên không đếm được. Tập các chuỗi ngoặc cân bằng như `()`, `(())`, `((()))` không phải ngôn ngữ chính quy. Với HTML, JSON hay mã nguồn, hãy dùng bộ phân tích thật, ví dụ `html.parser` hay `json` của Python. Regex chỉ hợp với việc nhỏ trên văn bản phẳng, như bỏ thẻ trong ô code thứ hai.
+- **Quay lui thảm họa** (catastrophic backtracking). Mô-đun `re` tìm khớp bằng cách thử và **quay lui** (backtracking): một nhánh hỏng thì lùi lại, thử cách chia khác. Với mẫu `(a+)+$` và chuỗi $n$ chữ `a` theo sau là một dấu `!`, mẫu chắc chắn thất bại ở dấu `!`. Nhưng trước khi chịu thua, bộ máy thử mọi cách chia $n$ chữ `a` thành các lượt của `a+` bên trong, và có $2^{n-1}$ cách như vậy (giữa hai chữ `a` liền nhau, hoặc cắt, hoặc không). Trên máy phát triển, với Python 3.14, 24 chữ `a` mất khoảng 1.7 giây, và mỗi chữ `a` thêm vào làm thời gian gấp khoảng đôi. Bài này **không** cho chạy mẫu đó trên trang, vì nó có thể treo trình duyệt. Một mẫu như vậy trên server, gặp đầu vào do người dùng gửi, là một lỗ hổng từ chối dịch vụ có tên **ReDoS**. Cách chữa: tránh lượng từ lồng nhau trên cùng một thứ (`(a+)+` viết lại thành `a+`), và giới hạn độ dài đầu vào.
+- **Regex không hiểu nghĩa.** Mẫu ngày tháng của bài khớp cả "31/02/2026" và "99/99/2026". Mẫu chỉ kiểm hình dạng, nên luôn có hai loại lỗi: **dương tính giả** (false positive), khớp thứ không nên khớp, và **âm tính giả** (false negative), bỏ sót thứ nên khớp. Siết mẫu để bớt loại này thường làm tăng loại kia. Hộp cuối ở mục Lỗi hay gặp có thêm ví dụ.
+- **Tách từ tiếng Việt cần hơn regex.** `\w+` cắt "Hà Nội" thành hai âm tiết "Hà" và "Nội", trong khi đó là một từ. Bài [Tách từ](/vi/nlp/tokenization/) đi tiếp từ chỗ này.
+
+## Minh họa
+
+Bảng dưới tách mẫu số điện thoại trong ô code thứ nhất thành từng phần, mỗi dòng một phần, theo đúng thứ tự bộ máy regex đi qua. Hai cột bên phải là đoạn mà từng phần khớp được trong hai số của tin rao vặt. Hãy nhìn các ô "rỗng": lookaround và lượng từ `?` có thể khớp mà không lấy ký tự nào.
+
+| Phần của mẫu | Ý nghĩa | Trong `0912 345 678` | Trong `+84987654321` |
+|---|---|---|---|
+| `(?<!\d)` | ngay trước không phải chữ số | rỗng (chỉ kiểm tra) | rỗng (chỉ kiểm tra) |
+| `(?:\+84\|0)` | `+84` hoặc `0`, nhóm không bắt | `0` | `+84` |
+| `[35789]` | một chữ số đầu của đầu số di động | `9` | `9` |
+| `\d{2}` | đúng hai chữ số | `12` | `87` |
+| `[ .]?` | một dấu cách hoặc dấu chấm, có thể không có | dấu cách | rỗng |
+| `\d{3}` | đúng ba chữ số | `345` | `654` |
+| `[ .]?` | như trên | dấu cách | rỗng |
+| `\d{3}` | đúng ba chữ số | `678` | `321` |
+| `(?!\d)` | ngay sau không phải chữ số | rỗng (chỉ kiểm tra) | rỗng (chỉ kiểm tra) |
+
+Với số tài khoản 1903456789123, đoạn "0345678912" qua được mọi dòng giữa bảng. Nhưng dòng đầu thất bại: ngay trước số 0 là chữ số 9. Đó là việc của lookaround.
+
+Mẫu ngày tháng ngắn hơn, nhưng có ba nhóm bắt. Bảng dưới cho thấy nhóm nào giữ phần nào của "05/11/2026", và phép thay `\3-\2-\1` ghép chúng lại ra sao.
+
+| Phần của mẫu | Ý nghĩa | Khớp | Nhóm |
+|---|---|---|---|
+| `\b` | ranh giới từ | rỗng | |
+| `(\d{1,2})` | một hoặc hai chữ số: ngày | `05` | `\1` |
+| `/` | dấu gạch chéo | `/` | |
+| `(\d{1,2})` | một hoặc hai chữ số: tháng | `11` | `\2` |
+| `/` | dấu gạch chéo | `/` | |
+| `(\d{4})` | bốn chữ số: năm | `2026` | `\3` |
+| `\b` | ranh giới từ | rỗng | |
+
+Phép thay `\3-\2-\1` cho ra `2026` + `-` + `11` + `-` + `05`, tức "2026-11-05".
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026 với Python 3.14 (bản có trong Pyodide). Cả hai ô chỉ dùng mô-đun có sẵn của Python (`re`, `unicodedata`), chạy ngay trên trang và chạy độc lập với nhau.
+
+### Trích, che và đổi dạng
+
+Ô dưới biên dịch ba mẫu của bài, trích số điện thoại, email, ngày tháng từ tin rao vặt, thử bỏ lookaround để thấy nó dùng vào việc gì, rồi che số điện thoại và đổi ngày sang dạng năm-tháng-ngày. Mẫu số điện thoại được viết thành nhiều chuỗi thô liền nhau: Python tự nối chúng thành một chuỗi, và mỗi dòng có chỗ cho một chú thích, giống bảng ở mục Minh họa.
+
+<PythonRunner code={extractCode} title="Trích số điện thoại, email, ngày tháng và che số" />
+
+Đọc kết quả:
+
+- **`phones`** có đúng hai số, `'0912 345 678'` và `'+84987654321'`. Năm 2019 và số tài khoản không lọt vào.
+- **`emails`** là `['nam.nguyen@gmail.com']`. Dấu chấm cuối câu ngay sau ".com" không bị lấy theo, vì `(?:\.[\w-]+)+` đòi sau mỗi dấu chấm phải có ít nhất một ký tự chữ hoặc dấu `-`.
+- **`dates`** là danh sách bộ `('05', '11', '2026')` và `('15', '11', '2026')`, không phải chuỗi ngày đầy đủ, vì mẫu `DATE` có ba nhóm bắt.
+- **`no guard`**: bỏ hai lookaround, mẫu lấy thêm `'0345678912'` từ giữa số tài khoản. Một dương tính giả điển hình.
+- **Dòng cuối** là tin rao vặt sau hai lần `sub`: hai số điện thoại thành `<PHONE>`, hai ngày thành "2026-11-05" và "2026-11-15". Email vẫn còn. Muốn che nốt thì thêm một lần `EMAIL.sub(...)`.
+
+### Chữ có dấu, tham lam và lười, tách từ
+
+Ô thứ hai gom các chỗ dễ sai: `[a-zA-Z]` so với `\w` trên chữ có dấu, cờ `re.ASCII`, chữ ở dạng tách dấu, tham lam và lười trên HTML, và một bộ tách từ đơn giản.
+
+<PythonRunner code={pitfallsCode} title="Chữ có dấu, tham lam và lười, bộ tách từ nhỏ" />
+
+Đọc kết quả, theo thứ tự các dòng in ra:
+
+- **Ba dòng đầu.** `[a-zA-Z]+` cắt "Phở Hà Nội ngon quá!" thành `['Ph', 'H', 'N', 'i', 'ngon', 'qu']`. `\w+` cho đúng năm âm tiết `['Phở', 'Hà', 'Nội', 'ngon', 'quá']`. Bật cờ `re.ASCII` thì `\w` quay về nghĩa ASCII, và kết quả lại giống dòng đầu.
+- **`3 4 2`.** Chữ "hòa" gõ thông thường có 3 ký tự. Ở dạng chuẩn hóa NFD, dấu huyền tách thành một **ký tự tổ hợp** (combining character) riêng, nên có 4 ký tự. Ký tự tổ hợp không phải `\w`, nên `\w+` cắt chữ làm 2 mảnh. Văn bản lấy từ nhiều nguồn có thể ở dạng này mà nhìn không khác gì. Bài [Chuẩn hóa văn bản](/vi/nlp/text-normalization/) chỉ cách đưa về một dạng trước khi chạy regex.
+- **Ba dòng HTML.** `<.*>` tham lam trả về một mảnh là cả chuỗi. `<.*?>` lười trả về bốn thẻ `['<b>', '</b>', '<i>', '</i>']`. `re.sub(r"<[^>]+>", "", html)` bỏ thẻ, còn lại "Phở và bún chả".
+- **Hai dòng cuối.** Mẫu `\w+|[^\w\s]` là một bộ tách từ nhỏ: một dãy ký tự chữ, hoặc một ký tự không phải chữ cũng không phải khoảng trắng (dấu câu). Trên "Giá 12.000đ, rẻ quá!", nó cắt giá tiền thành `'12'`, `'.'`, `'000đ'`. Thêm nhánh số `\d+(?:[.,]\d+)*` **đứng trước** thì ra `'12.000'` và `'đ'`. Thứ tự các nhánh quan trọng: tại mỗi vị trí, bộ máy thử nhánh trái trước, nhánh nào khớp trước thì được chọn, kể cả khi nhánh sau khớp được dài hơn.
+
+## Lỗi hay gặp
+
+:::caution[Viết mẫu bằng chuỗi thường thay vì chuỗi thô]
+Trong chuỗi thường, `"\b"` là **một** ký tự lùi (backspace), không phải hai ký tự `\` và `b`. Vì vậy `re.findall("\bHà\b", "Hà Nội")` trả về `[]` mà không báo lỗi gì, còn `re.findall(r"\bHà\b", "Hà Nội")` trả về `['Hà']`. Với `"\d"`, Python 3.14 chỉ in cảnh báo `SyntaxWarning: "\d" is an invalid escape sequence` và tạm thời vẫn chạy đúng; chính cảnh báo đó nói các chuỗi như vậy sẽ không còn chạy được trong tương lai. Thói quen an toàn: mẫu regex **luôn** viết `r"..."`.
+:::
+
+:::caution[Dùng `[a-zA-Z]` cho văn bản tiếng Việt]
+`[a-zA-Z]` chỉ có 52 chữ không dấu, nên nó cắt vụn chữ có dấu, như ô code thứ hai cho thấy. Dùng `\w` (hoặc `[^\W\d_]` nếu chỉ muốn chữ cái, không lấy chữ số và `_`). Theo chiều ngược lại, `\d` của Python 3 khớp cả chữ số của các hệ chữ khác, như chữ số Devanagari `३४` (34 trong chữ Hindi). Khi cần đúng `0-9`, viết `[0-9]` hoặc bật `re.ASCII`.
+:::
+
+:::caution[Nhầm `match` với `search`, và quên rằng nhóm đổi kết quả của `findall`]
+`re.match` chỉ thử ở **đầu** chuỗi: `re.match(r"\d+", "Giá 12 triệu")` là `None`. Muốn tìm ở bất kỳ đâu thì dùng `re.search`; muốn cả chuỗi phải khớp (kiểm tra một ô nhập số điện thoại chẳng hạn) thì dùng `re.fullmatch`. Với `findall`, thêm một cặp ngoặc để gom nhóm là đổi luôn dạng kết quả: thay vì cả đoạn khớp, bạn nhận về nhóm, hoặc các bộ. Chỉ cần gom thì viết `(?:...)`.
+:::
+
+:::caution[Tin rằng mẫu đã đúng vì nó khớp ví dụ của bạn]
+Mẫu ngày tháng của bài khớp "31/02/2026" và "99/99/2026": hai dương tính giả. Nó bỏ sót "5-11-2026" và "5 tháng 11 năm 2026": hai âm tính giả. Mẫu số điện thoại không biết số cố định, chỉ đúng với đầu số di động áp dụng từ năm 2018, và trả về `[]` với cả bốn cách viết hợp lệ này: "+84 912 345 678", "0912-345-678", "091 234 5678", "84912345678". Hãy thử mẫu trên những câu **không nên** khớp, không chỉ câu nên khớp. Phần kiểm tra ý nghĩa (ngày có tồn tại không) thì làm bằng code sau khi trích, ví dụ đổi ba nhóm (đang là chuỗi) sang số bằng `int(...)`, đưa vào `datetime.date(nam, thang, ngay)` rồi bắt lỗi `ValueError`.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Regex mô tả **hình dạng** của một tập chuỗi. Lớp ký tự `[...]`, `\d`, `\w`, `\s`, `.` chọn một ký tự; lượng từ `*`, `+`, `?`, `{m,n}` nói bao nhiêu lần; neo `^`, `$`, `\b` và lookaround `(?=...)`, `(?<!...)` kiểm tra vị trí mà không lấy ký tự; nhóm `(...)` vừa gom vừa bắt, dùng lại bằng `\1`.
+- Lượng từ mặc định tham lam, khớp càng nhiều càng tốt; thêm `?` thì thành lười. Lớp phủ định như `[^>]+` thường rõ ràng hơn cả hai.
+- Trong Python, viết mẫu bằng chuỗi thô `r"..."`, biên dịch bằng `re.compile` khi dùng lại, và chọn đúng hàm: `search`, `match`, `fullmatch`, `findall`, `sub`. `\w` của Python 3 hiểu chữ có dấu, `[a-zA-Z]` thì không; văn bản ở dạng tách dấu cần chuẩn hóa trước.
+- Regex không đếm được độ sâu lồng nhau (HTML, ngoặc), có thể chạy lâu theo hàm mũ khi lượng từ lồng nhau như `(a+)+`, và không hiểu nghĩa. Luôn thử mẫu trên cả dương tính giả lẫn âm tính giả.
+
+**Đọc thêm:**
+
+- Jurafsky, D., Martin, J. H. (2026). [*Speech and Language Processing*](https://web.stanford.edu/~jurafsky/slp3/), bản nháp lần 3 (ngày 19/8/2026), chương 2 "Words and Tokens", mục 2.6 (PDF của chương có link từ trang này). Giới thiệu regex cho xử lý ngôn ngữ, có dương tính giả và âm tính giả, ELIZA, và regex tiền xử lý của bộ tách từ GPT-2. Sách viết `\w` theo nghĩa ASCII `[a-zA-Z0-9_]`, khác với Python 3 mặc định.
+- Python Software Foundation. [*`re` — Regular expression operations*](https://docs.python.org/3.14/library/re.html), tài liệu Python 3.14. Bảng đầy đủ cú pháp, các cờ, và các hàm của mô-đun `re`. Phần mô tả `\w`, `\d` cho chuỗi Unicode là nguồn của bài này.
+- Kuchling, A. M. [*Regular Expression HOWTO*](https://docs.python.org/3.14/howto/regex.html), tài liệu Python 3.14. Hướng dẫn dạng bài học, đi từ ký tự đơn tới nhóm và lookahead, có mục về chuỗi thô và lỗi hay gặp.
+- Cox, R. (2007). [*Regular Expression Matching Can Be Simple And Fast*](https://swtch.com/~rsc/regexp/regexp1.html). Giải thích vì sao bộ máy quay lui có thể chạy theo hàm mũ, và cách mô phỏng ôtômat của Thompson tránh được điều đó.
+- Thompson, K. (1968). [*Regular expression search algorithm*](https://doi.org/10.1145/363347.363387). *Communications of the ACM* 11(6): 419–422. Bài gốc biên dịch regex thành ôtômat để tìm kiếm văn bản. Lý thuyết nền là Kleene, S. C. (1951), [*Representation of Events in Nerve Nets and Finite Automata*](https://www.rand.org/pubs/research_memoranda/RM704.html), RAND RM-704, in lại năm 1956 trong *Automata Studies*.
+
+<LessonProgress />

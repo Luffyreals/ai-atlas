@@ -59,6 +59,12 @@ export const UI_KEYS = {
     'slowNote', 'zigzagNote', 'diverged', 'announceStep', 'announceEta', 'running', 'stopped', 'atEnd',
     'resetDone',
   ],
+  vizBpeMerge: [
+    'caption', 'controls', 'next', 'reset', 'stepOf', 'vocabLabel', 'vocabValue', 'pairsStart', 'pairsLabel',
+    'pairCol', 'countCol', 'pair', 'picked', 'showAll', 'showFew', 'syllablesLabel', 'syllableCol', 'splitCol',
+    'freqCol', 'splitText', 'mergesLabel', 'mergeItem', 'noMerges', 'startNote', 'mergedNote', 'tieNote',
+    'doneNote', 'announceStep', 'announceEnd', 'resetDone',
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 export type UiNamespace = keyof typeof UI_KEYS;

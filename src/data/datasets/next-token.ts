@@ -8,7 +8,7 @@ import type { TokenDistribution } from './types';
 
 export const NEXT_TOKEN = {
   id: 'next-token',
-  lessons: ['llm/text-api', 'llm/build-first-llm'],
+  lessons: ['llm/text-api', 'llm/build-first-llm', 'nlp/text-generation-summarization'],
   context: { vi: 'Hôm nay trời rất', en: 'The weather today is very' },
   tokens: {
     vi: ['đẹp', 'nóng', 'lạnh', 'mát', 'nắng', 'oi', 'trong', 'xanh', 'ẩm', 'tối'],

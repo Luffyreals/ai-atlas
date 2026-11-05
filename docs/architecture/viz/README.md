@@ -14,6 +14,7 @@
 | 10 | [regularization.md](regularization.md) | `RegularizationViz` (bài Ridge, Lasso, Elastic Net) |
 | 11 | [static-plots.md](static-plots.md) | Đồ thị tĩnh trong kit FIG, `FigMath` và `RegularizationGeometryFigure` |
 | 12 | [gradient-descent.md](gradient-descent.md) | `GradientDescentViz` (bài Gradient Descent) |
+| 13 (mới) | [bpe-merge.md](bpe-merge.md) | `BpeMergeViz` (bài Tách từ, `nlp/tokenization`): bảng đếm cặp, chip mảnh, nút `aria-disabled` |
 
 > Phạm vi: quy ước cho **mọi** minh họa (VIZ) của 78 bài, và đặc tả VIZ đầu tiên: `LinearFitViz` của bài mẫu Hồi quy tuyến tính (mốc M2). Quy ước cho **hình SVG tĩnh** (FIG, 0 JS) ở [mục 8](figures.md) (mốc M3). Bộ dữ liệu `sine` và `PolyFitViz` của bài Overfitting và Underfitting ở [mục 9](poly-fit.md) (mốc M3). `RegularizationViz` của bài Ridge, Lasso, Elastic Net ở [mục 10](regularization.md) (mốc M3). Đồ thị sơ đồ tĩnh và ký hiệu toán trong hình FIG ở [mục 11](static-plots.md). `GradientDescentViz` của bài Gradient Descent ở [mục 12](gradient-descent.md) (mốc M3).
 > Liên quan: [components.md](../components.md) (mẫu wrapper Astro + island React mục 2.1, `useId` mục 2.9, hình thức và tương phản mục 4.9), [scaffold.md](../scaffold.md) mục 2.6, 4.5 (chuỗi giao diện), [.claude/agents/viz-builder.md](../../../.claude/agents/viz-builder.md).
