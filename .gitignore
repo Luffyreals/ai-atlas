@@ -45,3 +45,6 @@ playwright/.cache/
 
 # Local venv for checking illustrative LLM code (openai, torch CPU); see docs/decisions.md decision 54
 .venv-llm/
+
+# Local venv for checking computer-vision code (torch CPU, torchvision, transformers); see docs/decisions.md decision 85
+.venv-cv/

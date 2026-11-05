@@ -1,0 +1,422 @@
+---
+title: 'Sinh ảnh (1): VAE, GAN, CycleGAN, Pix2Pix'
+description: 'Làm sao máy vẽ ra ảnh chưa từng có? VAE nén ảnh thành phân phối rồi lấy mẫu, GAN cho hai mạng đấu nhau; Pix2Pix và CycleGAN biến ảnh này thành ảnh kia.'
+quiz:
+  - question: 'Trong VAE, bạn lấy $\mathbf{z}$ thẳng từ $\mathcal{N}(\boldsymbol\mu, \mathrm{diag}(\boldsymbol\sigma^2))$ bằng một hàm lấy mẫu có sẵn, thay vì viết $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$. Code vẫn chạy. Điều gì hỏng?'
+    options:
+      - 'Không có gì hỏng, hai cách cho cùng một phân phối của $\mathbf{z}$ nên cùng một gradient'
+      - 'Hàm mất mát tái tạo không còn gradient chảy về bộ mã hóa, nên $\boldsymbol\mu$ và $\boldsymbol\sigma$ chỉ học từ số hạng KL'
+      - 'Số hạng KL không còn tính được bằng công thức dạng đóng'
+      - 'Bộ giải mã không nhận được $\mathbf{z}$ nữa'
+    answer: 1
+    explanation: 'Phân phối của $\mathbf{z}$ đúng là như nhau, nhưng phép lấy mẫu thẳng không phải một hàm khả vi của $\boldsymbol\mu, \boldsymbol\sigma$, nên lan truyền ngược dừng ở đó (PyTorch còn tách $\mathbf{z}$ khỏi đồ thị). Số hạng KL vẫn tính bằng công thức theo $\boldsymbol\mu, \boldsymbol\sigma$ nên vẫn có gradient: bộ mã hóa chỉ còn bị kéo về $\mathcal{N}(\mathbf{0}, \mathbf{I})$ và không học mã hóa ảnh. Viết $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$ đưa phần ngẫu nhiên vào $\boldsymbol\epsilon$, đường từ loss về $\boldsymbol\mu, \boldsymbol\sigma$ là phép cộng và nhân thường.'
+  - question: 'Giữ bộ sinh $G$ cố định. Ở một ảnh $\mathbf{x}$, mật độ dữ liệu thật là $p_{\text{data}}(\mathbf{x}) = 0.3$ và mật độ ảnh giả là $p_g(\mathbf{x}) = 0.1$. Bộ phân biệt tối ưu $D^*(\mathbf{x})$ bằng bao nhiêu?'
+    options: ['$0.3$', '$0.5$', '$0.75$', '$0.25$']
+    answer: 2
+    explanation: '$D^*(\mathbf{x}) = p_{\text{data}} / (p_{\text{data}} + p_g) = 0.3 / 0.4 = 0.75$: ảnh nằm ở vùng thật dày gấp ba vùng giả, nên đoán "thật" với xác suất 3 phần 4 là tốt nhất. $0.5$ chỉ đúng khi $p_g = p_{\text{data}}$, tức khi $G$ đã học xong.'
+  - question: 'Đầu quá trình huấn luyện GAN, $D$ nhận ra ảnh giả dễ dàng: $D(G(\mathbf{z})) \approx 0.01$. Viết $D = \sigma(a)$ với $a$ là logit. Vì sao nên cho $G$ làm lớn $\log D(G(\mathbf{z}))$ thay vì làm nhỏ $\log(1 - D(G(\mathbf{z})))$?'
+    options:
+      - 'Vì đạo hàm theo $a$ của $\log(1 - \sigma(a))$ là $-\sigma(a) \approx -0.01$, gần như không đẩy $G$; còn của $\log \sigma(a)$ là $1 - \sigma(a) \approx 0.99$'
+      - 'Vì hai hàm có điểm tối ưu khác nhau, và chỉ $\log D$ cho $p_g = p_{\text{data}}$'
+      - 'Vì $\log(1 - D)$ âm, còn hàm mất mát phải dương'
+    answer: 0
+    explanation: 'Cả hai đều đẩy $D(G(\mathbf{z}))$ lên, cùng một hướng. Khác nhau ở độ lớn gradient: khi $D$ thắng áp đảo, $\log(1 - \sigma(a))$ gần như phẳng (bão hòa) nên $G$ học rất chậm. Goodfellow và cộng sự (2014) đề xuất đổi sang $\log D$ vì nó cho gradient mạnh ở đúng giai đoạn đầu này. Dấu của hàm mất mát không quan trọng: cộng một hằng số không đổi gradient.'
+  - question: 'Bạn có 3 000 ảnh chụp đường phố ban ngày và 2 000 ảnh ban đêm, chụp ở những nơi khác nhau. Bạn muốn biến ảnh ngày thành ảnh đêm. Nên chọn cách nào?'
+    options:
+      - 'Pix2Pix, vì nó có U-Net và PatchGAN giữ chi tiết tốt'
+      - 'VAE, vì nó không cần nhãn'
+      - 'CycleGAN, vì hai tập không ghép cặp, và mất mát chu trình buộc ảnh đêm giữ nội dung của ảnh ngày'
+      - 'GAN thường, vì bộ sinh sẽ tự học ảnh đêm'
+    answer: 2
+    explanation: 'Pix2Pix cần từng cặp (ảnh ngày, đúng ảnh đó ban đêm) để tính mất mát L1, mà ở đây không có. GAN thường sinh ảnh đêm từ nhiễu, không gắn với ảnh ngày nào. CycleGAN dùng hai bộ sinh $G: X \to Y$, $F: Y \to X$ và đòi $F(G(\mathbf{x})) \approx \mathbf{x}$, nên ảnh đêm phải giữ đủ thông tin của ảnh ngày ban đầu.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import reparamCode from '@code/cv/vae-gan/reparam-kl.vi.py?raw';
+import vaeCode from '@code/cv/vae-gan/tiny-vae.vi.py?raw';
+import ganCode from '@code/cv/vae-gan/tiny-gan.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu **mô hình sinh** (generative model) là gì: học phân phối của dữ liệu để lấy mẫu ra ảnh mới.
+- Tự dẫn được **ELBO** (evidence lower bound) của **VAE** (variational autoencoder), công thức KL dạng đóng với phân phối Gauss, và giải thích được vì sao cần **mẹo tham số hóa lại** (reparameterization trick).
+- Hiểu trò chơi giữa **bộ sinh** (generator) và **bộ phân biệt** (discriminator) của **GAN** (generative adversarial network): bộ phân biệt tối ưu, hàm mất mát không bão hòa, và vì sao GAN khó huấn luyện.
+- Phân biệt được Pix2Pix (cần ảnh ghép cặp) với CycleGAN (không cần cặp), và chọn được cách hợp với dữ liệu mình có.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Hai bài nền chưa xuất bản, nên nhắc ở đây phần bài này dùng. Một **phân phối xác suất** (probability distribution) $p(\mathbf{x})$ cho biết mỗi giá trị hay gặp cỡ nào; **lấy mẫu** (sampling) là rút ngẫu nhiên một giá trị theo phân phối đó. **Phân phối chuẩn nhiều chiều** (multivariate normal) với ma trận hiệp phương sai chéo, viết $\mathcal{N}(\boldsymbol\mu, \mathrm{diag}(\boldsymbol\sigma^2))$, là $J$ phân phối chuẩn một chiều độc lập, chiều thứ $j$ có trung bình $\mu_j$ và độ lệch chuẩn $\sigma_j$; $\mathcal{N}(\mathbf{0}, \mathbf{I})$ là trường hợp mọi $\mu_j = 0$, $\sigma_j = 1$. **Kỳ vọng** (expectation) $\mathbb{E}_{p}[f(\mathbf{z})]$ là trung bình của $f$ khi $\mathbf{z}$ rút từ $p$, và ước lượng được bằng trung bình trên nhiều mẫu (cách làm này gọi là **Monte Carlo**). **Độ lệch KL** (Kullback–Leibler divergence) $D_{\mathrm{KL}}(q \parallel p) = \mathbb{E}_{q}[\log q - \log p]$ đo $q$ khác $p$ bao nhiêu: luôn không âm, bằng 0 khi hai phân phối trùng nhau, như ở bài [RLHF](/vi/llm/rlhf/). Cuối cùng, **autoencoder** là một mạng nơ-ron gồm **bộ mã hóa** (encoder) nén ảnh thành một vectơ ngắn và **bộ giải mã** (decoder) dựng lại ảnh từ vectơ đó, học bằng cách làm nhỏ sai khác giữa ảnh vào và ảnh ra.
+:::
+
+## Trực giác
+
+### Sinh ảnh là lấy mẫu
+
+Bạn có 1 797 ảnh chữ số viết tay cỡ $8 \times 8$ (bộ `load_digits` của scikit-learn). Bạn muốn máy vẽ ra **chữ số mới**: trông như viết tay, nhưng không trùng ảnh nào đã có.
+
+Hãy nghĩ mỗi ảnh là một điểm trong không gian 64 chiều (64 điểm ảnh). Ảnh chữ số thật không rải đều khắp không gian đó. Chọn bừa 64 số, bạn được nhiễu lốm đốm, gần như không bao giờ ra một chữ số. Ảnh thật chỉ tụ ở một vùng rất nhỏ, có hình dạng phức tạp. "Vẽ ảnh mới" nghĩa là **rút một điểm từ đúng vùng đó**: lấy mẫu từ phân phối của dữ liệu thật, $p_{\text{data}}(\mathbf{x})$.
+
+Ta không có công thức của $p_{\text{data}}$, chỉ có các mẫu của nó. Mô hình sinh phải học từ mẫu một cách lấy mẫu mới.
+
+### Hai ý tưởng
+
+**Ý thứ nhất: nén rồi giải nén.** Mọi chữ số "3" khác nhau ở vài yếu tố: nghiêng nhiều hay ít, nét dày hay mảnh, vòng trên to hay nhỏ. Nếu mô tả được ảnh bằng vài con số như vậy (một **biến ẩn**, latent variable, ký hiệu $\mathbf{z}$), và biết các con số đó thường phân bố thế nào, thì sinh ảnh dễ: rút vài con số, rồi "giải nén" thành ảnh. Autoencoder đã có bộ giải nén. Thứ còn thiếu là một vùng $\mathbf{z}$ **có trật tự**, để rút bừa một $\mathbf{z}$ trong vùng đó vẫn ra ảnh hợp lý. VAE thêm đúng điều này.
+
+**Ý thứ hai: người làm giả và người kiểm tra.** Một người tập vẽ tiền giả, một người tập soi tiền. Người soi giỏi lên thì người vẽ phải vẽ kỹ hơn, và ngược lại. Không ai viết ra công thức "tiền thật trông thế nào"; người vẽ chỉ biết mình bị bắt ở đâu. GAN là trò chơi này giữa hai mạng nơ-ron.
+
+Sau đó còn một biến thể rất hay dùng: không sinh từ con số ngẫu nhiên, mà **biến ảnh này thành ảnh kia**, như bản phác thảo thành ảnh chụp, ảnh ngày thành ảnh đêm. Đó là Pix2Pix và CycleGAN.
+
+Bài toán của bài này là: **chỉ có một tập ảnh mẫu, làm sao học được một cách rút ra ảnh mới trông như thật, và làm sao huấn luyện cách đó bằng gradient?**
+
+## Lý thuyết
+
+### Ký hiệu
+
+Ảnh được trải phẳng thành vectơ $\mathbf{x}$ (với chữ số $8 \times 8$ là 64 số). Biến ẩn $\mathbf{z} \in \mathbb{R}^J$ có $J$ chiều, theo ký hiệu của bài báo VAE. Phân phối **tiên nghiệm** (prior) của $\mathbf{z}$ là $p(\mathbf{z}) = \mathcal{N}(\mathbf{0}, \mathbf{I})$. Bộ mã hóa $q_\phi(\mathbf{z} \mid \mathbf{x})$ có tham số $\phi$, bộ giải mã $p_\theta(\mathbf{x} \mid \mathbf{z})$ có tham số $\theta$.
+
+Ở phần GAN, $G$ là bộ sinh và **$D$ là bộ phân biệt**: một mạng nhận ảnh, trả ra xác suất ảnh đó là thật. Chữ $D$ này khác $D$ số chiều embedding ở các bài ViT, và khác chữ $D$ trong $D_{\mathrm{KL}}$ (độ lệch KL).
+
+### Mô hình sinh học gì
+
+Cách quen thuộc để học $p_\theta(\mathbf{x})$ là làm lớn **likelihood** của dữ liệu: chọn $\theta$ để $\log p_\theta(\mathbf{x})$ lớn ở các ảnh thật. Với mô hình có biến ẩn, ảnh được sinh qua hai bước: rút $\mathbf{z} \sim p(\mathbf{z})$, rồi rút $\mathbf{x} \sim p_\theta(\mathbf{x} \mid \mathbf{z})$. Xác suất của một ảnh là tổng trên mọi cách sinh ra nó:
+
+$$
+p_\theta(\mathbf{x}) = \int p_\theta(\mathbf{x} \mid \mathbf{z})\, p(\mathbf{z})\, d\mathbf{z}
+$$
+
+Tích phân này trên mọi $\mathbf{z}$ không tính được khi bộ giải mã là mạng nơ-ron. Rút bừa $\mathbf{z}$ để ước lượng cũng không ổn: gần như mọi $\mathbf{z}$ rút bừa cho ra ảnh khác hẳn $\mathbf{x}$, nên cần vô số mẫu. Ta cần biết **$\mathbf{z}$ nào có khả năng sinh ra $\mathbf{x}$**. Đó là việc của bộ mã hóa.
+
+### VAE: từ autoencoder tới phân phối
+
+VAE (Kingma và Welling, 2014) sửa autoencoder ở một chỗ: bộ mã hóa không trả về **một** vectơ $\mathbf{z}$, mà trả về một **phân phối** của $\mathbf{z}$. Với mỗi ảnh, bộ mã hóa trả ra hai vectơ $\boldsymbol\mu$ và $\boldsymbol\sigma$ (cùng $J$ chiều), và
+
+$$
+q_\phi(\mathbf{z} \mid \mathbf{x}) = \mathcal{N}\big(\boldsymbol\mu, \mathrm{diag}(\boldsymbol\sigma^2)\big)
+$$
+
+Hiểu nôm na: ảnh không được đóng đinh vào một điểm, mà vào một "đám mây" nhỏ. Bộ giải mã phải dựng lại ảnh từ bất kỳ điểm nào trong đám mây. Đồng thời, mọi đám mây bị kéo về gần $\mathcal{N}(\mathbf{0}, \mathbf{I})$. Hai lực này làm vùng $\mathbf{z}$ liền mạch: không còn lỗ hổng giữa các ảnh, nên rút $\mathbf{z}$ từ $\mathcal{N}(\mathbf{0}, \mathbf{I})$ rồi giải mã vẫn ra ảnh có nghĩa. Hai lực đó chính là hai số hạng của ELBO dưới đây.
+
+### Dẫn ELBO từng bước
+
+**Bước 1: viết $\log p_\theta(\mathbf{x})$ thành một kỳ vọng.** $\log p_\theta(\mathbf{x})$ không phụ thuộc $\mathbf{z}$, nên lấy kỳ vọng của nó theo bất kỳ phân phối nào của $\mathbf{z}$ vẫn được chính nó. Chọn phân phối $q_\phi(\mathbf{z} \mid \mathbf{x})$:
+
+$$
+\log p_\theta(\mathbf{x}) = \mathbb{E}_{q_\phi(\mathbf{z} \mid \mathbf{x})}\big[\log p_\theta(\mathbf{x})\big]
+$$
+
+**Bước 2: dùng quy tắc nhân xác suất.** Phân phối đồng thời viết được theo hai cách: $p_\theta(\mathbf{x}, \mathbf{z}) = p_\theta(\mathbf{x})\, p_\theta(\mathbf{z} \mid \mathbf{x})$. Chia cho $p_\theta(\mathbf{z} \mid \mathbf{x})$, ta được $p_\theta(\mathbf{x}) = p_\theta(\mathbf{x}, \mathbf{z}) / p_\theta(\mathbf{z} \mid \mathbf{x})$. Sau đó nhân cả tử và mẫu với cùng một số $q_\phi(\mathbf{z} \mid \mathbf{x})$ (không đổi giá trị), rồi tách log của tích thành tổng hai log:
+
+$$
+\begin{aligned}
+\log p_\theta(\mathbf{x})
+&= \mathbb{E}_{q}\left[\log \frac{p_\theta(\mathbf{x}, \mathbf{z})}{p_\theta(\mathbf{z} \mid \mathbf{x})}\right] \\
+&= \mathbb{E}_{q}\left[\log \frac{p_\theta(\mathbf{x}, \mathbf{z})}{q_\phi(\mathbf{z} \mid \mathbf{x})}\right]
+ + \mathbb{E}_{q}\left[\log \frac{q_\phi(\mathbf{z} \mid \mathbf{x})}{p_\theta(\mathbf{z} \mid \mathbf{x})}\right]
+\end{aligned}
+$$
+
+Ở đây $\mathbb{E}_q$ viết tắt cho $\mathbb{E}_{q_\phi(\mathbf{z} \mid \mathbf{x})}$.
+
+**Bước 3: nhận ra độ lệch KL.** Số hạng thứ hai đúng là định nghĩa của $D_{\mathrm{KL}}\big(q_\phi(\mathbf{z} \mid \mathbf{x}) \parallel p_\theta(\mathbf{z} \mid \mathbf{x})\big)$, luôn không âm. Bỏ nó đi thì vế phải nhỏ đi hoặc giữ nguyên, nên số hạng thứ nhất là một **cận dưới** của $\log p_\theta(\mathbf{x})$. Ta gọi nó là ELBO:
+
+$$
+\log p_\theta(\mathbf{x}) \ge \mathcal{L}_{\text{ELBO}} = \mathbb{E}_{q}\left[\log \frac{p_\theta(\mathbf{x}, \mathbf{z})}{q_\phi(\mathbf{z} \mid \mathbf{x})}\right]
+$$
+
+Khoảng cách giữa hai vế đúng bằng độ lệch KL vừa bỏ: $q_\phi$ càng gần phân phối thật $p_\theta(\mathbf{z} \mid \mathbf{x})$, cận càng sát. Vì thế làm lớn ELBO vừa đẩy $\log p_\theta(\mathbf{x})$ lên, vừa dạy bộ mã hóa đoán đúng $\mathbf{z}$ nào sinh ra $\mathbf{x}$. Chữ "evidence" (bằng chứng) trong tên là $\log p_\theta(\mathbf{x})$.
+
+**Bước 4: tách thành tái tạo trừ KL.** Viết lại $p_\theta(\mathbf{x}, \mathbf{z}) = p_\theta(\mathbf{x} \mid \mathbf{z})\, p(\mathbf{z})$ (sinh $\mathbf{z}$ trước, rồi $\mathbf{x}$), rồi tách log thành hai phần:
+
+$$
+\begin{aligned}
+\mathcal{L}_{\text{ELBO}}
+&= \mathbb{E}_{q}\big[\log p_\theta(\mathbf{x} \mid \mathbf{z})\big]
+ + \mathbb{E}_{q}\left[\log \frac{p(\mathbf{z})}{q_\phi(\mathbf{z} \mid \mathbf{x})}\right] \\
+&= \underbrace{\mathbb{E}_{q}\big[\log p_\theta(\mathbf{x} \mid \mathbf{z})\big]}_{\text{tái tạo}}
+ - \underbrace{D_{\mathrm{KL}}\big(q_\phi(\mathbf{z} \mid \mathbf{x}) \parallel p(\mathbf{z})\big)}_{\text{kéo về tiên nghiệm}}
+\end{aligned}
+$$
+
+Dòng thứ hai đổi dấu vì $\log(p/q) = -\log(q/p)$. Số hạng **tái tạo** lớn khi bộ giải mã dựng lại được $\mathbf{x}$ từ $\mathbf{z}$ rút trong đám mây của $\mathbf{x}$. Số hạng **KL** nhỏ khi đám mây gần $\mathcal{N}(\mathbf{0}, \mathbf{I})$. Đây là hai lực đã nói ở trên. Khi huấn luyện, ta làm nhỏ $-\mathcal{L}_{\text{ELBO}}$, lấy trung bình trên các ảnh của một lô.
+
+### KL dạng đóng với Gauss chéo
+
+Cả $q_\phi$ và $p(\mathbf{z})$ đều là Gauss, nên số hạng KL có công thức tính thẳng, không cần lấy mẫu. Các chiều độc lập, nên log mật độ là tổng theo từng chiều, và KL là tổng của $J$ độ lệch KL một chiều. Xét một chiều, $q = \mathcal{N}(\mu, \sigma^2)$, $p = \mathcal{N}(0, 1)$. Log mật độ của hai phân phối là:
+
+$$
+\begin{aligned}
+\log q(z) &= -\tfrac12 \log(2\pi) - \log \sigma - \frac{(z - \mu)^2}{2\sigma^2} \\
+\log p(z) &= -\tfrac12 \log(2\pi) - \frac{z^2}{2}
+\end{aligned}
+$$
+
+Trừ hai dòng, hằng số $\log(2\pi)$ triệt tiêu. Lấy kỳ vọng theo $z \sim q$, cần hai kết quả: $\mathbb{E}_q[(z - \mu)^2] = \sigma^2$ (định nghĩa phương sai) và $\mathbb{E}_q[z^2] = \mu^2 + \sigma^2$ (phương sai cộng bình phương trung bình). Thay vào:
+
+$$
+\begin{aligned}
+D_{\mathrm{KL}}(q \parallel p)
+&= \mathbb{E}_q\big[\log q(z) - \log p(z)\big] \\
+&= -\log \sigma - \frac{\sigma^2}{2\sigma^2} + \frac{\mu^2 + \sigma^2}{2} \\
+&= \tfrac12\big(\mu^2 + \sigma^2 - 1 - \log \sigma^2\big)
+\end{aligned}
+$$
+
+Dòng cuối gom các số hạng và viết $-\log \sigma = -\tfrac12 \log \sigma^2$. Cộng trên $J$ chiều:
+
+$$
+D_{\mathrm{KL}}\big(q_\phi(\mathbf{z} \mid \mathbf{x}) \parallel \mathcal{N}(\mathbf{0}, \mathbf{I})\big)
+= \frac12 \sum_{j=1}^{J} \big(\mu_j^2 + \sigma_j^2 - 1 - \log \sigma_j^2\big)
+$$
+
+Kiểm nhanh: với $\mu_j = 0$, $\sigma_j = 1$, mỗi số hạng bằng $0 + 1 - 1 - 0 = 0$, đúng như mong đợi khi hai phân phối trùng nhau. Đây là công thức ở phụ lục B của bài báo VAE, và ô NumPy bên dưới so nó với ước lượng Monte Carlo. Trong code, bộ mã hóa thường xuất $\log \sigma^2$ thay vì $\sigma$, để $\sigma$ luôn dương mà không cần ràng buộc.
+
+### Mẹo tham số hóa lại
+
+Số hạng tái tạo là một kỳ vọng theo $q_\phi$, nên ta ước lượng nó bằng cách rút $\mathbf{z}$ (bài báo VAE dùng một mẫu cho mỗi ảnh khi lô đủ lớn, ví dụ 100 ảnh). Vấn đề: để học bộ mã hóa, ta cần đạo hàm của loss theo $\boldsymbol\mu$ và $\boldsymbol\sigma$. Nhưng "rút một số ngẫu nhiên từ $\mathcal{N}(\boldsymbol\mu, \boldsymbol\sigma^2)$" không phải một phép tính có đạo hàm: lan truyền ngược không biết đi qua bước rút thăm thế nào.
+
+Mẹo là tách phần ngẫu nhiên ra ngoài. Rút $\boldsymbol\epsilon \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$, một nhiễu không phụ thuộc tham số nào, rồi tính
+
+$$
+\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon
+$$
+
+với $\odot$ là nhân từng phần tử. Dời một biến chuẩn đi $\mu_j$ và giãn ra $\sigma_j$ lần thì được đúng $\mathcal{N}(\mu_j, \sigma_j^2)$, nên $\mathbf{z}$ vẫn có phân phối mong muốn. Nhưng giờ, với $\boldsymbol\epsilon$ đã rút xong, $\mathbf{z}$ là một hàm bình thường của $\boldsymbol\mu$ và $\boldsymbol\sigma$: $\partial z_j / \partial \mu_j = 1$, $\partial z_j / \partial \sigma_j = \epsilon_j$. Gradient chảy từ bộ giải mã, qua $\mathbf{z}$, về bộ mã hóa như qua mọi lớp khác.
+
+:::note[Ghi nhớ]
+Hàm mất mát của VAE là $-\mathcal{L}_{\text{ELBO}}$ = (sai số tái tạo) + $\frac12 \sum_j (\mu_j^2 + \sigma_j^2 - 1 - \log \sigma_j^2)$, với $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$ để gradient đi qua bước lấy mẫu. Sinh ảnh mới: rút $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$, cho qua bộ giải mã.
+:::
+
+Số hạng tái tạo cụ thể là gì tùy cách chọn $p_\theta(\mathbf{x} \mid \mathbf{z})$. Coi mỗi điểm ảnh (giá trị trong $[0, 1]$) là một biến Bernoulli thì $-\log p_\theta(\mathbf{x} \mid \mathbf{z})$ là cross-entropy nhị phân cộng trên các điểm ảnh; coi là Gauss có phương sai cố định thì nó là tổng bình phương sai số (cộng một hằng số). Bài báo VAE dùng cả hai loại, và code của bài dùng loại Bernoulli.
+
+### Vì sao ảnh VAE hay mờ
+
+Bộ giải mã Bernoulli hay Gauss ở trên coi các điểm ảnh **độc lập** khi đã biết $\mathbf{z}$. Giả sử cùng một vùng $\mathbf{z}$ ứng với vài ảnh hơi khác nhau, ví dụ nét số "1" lệch trái một chút hoặc lệch phải một chút. Sai số bình phương nhỏ nhất khi bộ giải mã trả ra **trung bình** của các ảnh đó: một nét nhòe nằm giữa. Mà vùng $\mathbf{z}$ luôn có chồng lấn, vì số hạng KL ép mọi đám mây phình ra và dồn về giữa. Kết quả: ảnh sinh ra trông như trung bình của nhiều ảnh, tức là mờ. Bài báo Pix2Pix cũng ghi nhận điều tương tự cho mất mát L1 và L2 khi sinh ảnh: chúng làm ảnh mờ. Ảnh mẫu của ô VAE bên dưới cho thấy đúng hiện tượng này.
+
+### GAN: trò chơi hai người
+
+GAN (Goodfellow và cộng sự, 2014) bỏ hẳn likelihood. Bộ sinh $G$ biến nhiễu $\mathbf{z} \sim p(\mathbf{z})$ thành ảnh $G(\mathbf{z})$; phân phối của các ảnh này gọi là $p_g$. Bộ phân biệt $D$ nhận một ảnh và trả ra $D(\mathbf{x}) \in (0, 1)$, xác suất nó cho là ảnh thật. Hai mạng chơi một **trò chơi minimax**:
+
+$$
+\min_G \max_D V(D, G)
+= \mathbb{E}_{\mathbf{x} \sim p_{\text{data}}}\big[\log D(\mathbf{x})\big]
++ \mathbb{E}_{\mathbf{z} \sim p(\mathbf{z})}\big[\log\big(1 - D(G(\mathbf{z}))\big)\big]
+$$
+
+Đọc từng phần: $D$ muốn $V$ lớn, tức $D(\mathbf{x})$ gần 1 với ảnh thật và $D(G(\mathbf{z}))$ gần 0 với ảnh giả. Đây chính là cross-entropy nhị phân của một bộ phân loại "thật hay giả", đổi dấu. $G$ chỉ tác động lên số hạng thứ hai và muốn nó nhỏ, tức muốn $D$ bị lừa.
+
+**Bộ phân biệt tối ưu.** Giữ $G$ cố định. Viết kỳ vọng thành tích phân theo $\mathbf{x}$ (ảnh giả $G(\mathbf{z})$ có phân phối $p_g$):
+
+$$
+V = \int \Big( p_{\text{data}}(\mathbf{x}) \log D(\mathbf{x}) + p_g(\mathbf{x}) \log\big(1 - D(\mathbf{x})\big) \Big)\, d\mathbf{x}
+$$
+
+$D$ được chọn tự do ở từng $\mathbf{x}$, nên ta làm lớn biểu thức trong ngoặc tại từng điểm. Với $a = p_{\text{data}}(\mathbf{x})$, $b = p_g(\mathbf{x})$, hàm $a \log y + b \log(1 - y)$ có đạo hàm $a/y - b/(1 - y)$, bằng 0 khi $y = a/(a + b)$. Vậy:
+
+$$
+D^*(\mathbf{x}) = \frac{p_{\text{data}}(\mathbf{x})}{p_{\text{data}}(\mathbf{x}) + p_g(\mathbf{x})}
+$$
+
+Ý nghĩa: ở chỗ ảnh thật dày hơn ảnh giả, $D^*$ nghiêng về "thật". Bài báo GAN thay $D^*$ trở lại $V$ và chứng minh giá trị nhỏ nhất theo $G$ là $-\log 4$, đạt khi và chỉ khi $p_g = p_{\text{data}}$. Lúc đó $D^* = 1/2$ ở mọi nơi: bộ phân biệt chỉ còn đoán may rủi. Đó là điểm cân bằng mà trò chơi nhắm tới.
+
+**Hàm mất mát không bão hòa.** Đầu quá trình học, ảnh giả rất dở, $D$ nhận ra dễ dàng: $D(G(\mathbf{z})) \approx 0$. Viết $D = \sigma(a)$ với $a$ là logit (đầu ra trước sigmoid). Đạo hàm theo $a$:
+
+$$
+\frac{\partial}{\partial a} \log\big(1 - \sigma(a)\big) = -\sigma(a),
+\qquad
+\frac{\partial}{\partial a} \log \sigma(a) = 1 - \sigma(a)
+$$
+
+Khi $\sigma(a) \approx 0$, đạo hàm thứ nhất gần 0: hàm $\log(1 - D)$ **bão hòa** (saturate), $G$ gần như không nhận được tín hiệu học. Đạo hàm thứ hai gần 1. Vì vậy, ngay trong bài báo gốc, Goodfellow và cộng sự đề nghị cho $G$ **làm lớn $\log D(G(\mathbf{z}))$** thay vì làm nhỏ $\log(1 - D(G(\mathbf{z})))$. Hai mục tiêu cùng hướng, nhưng cái sau cho gradient mạnh ở đầu. Trong code, nó chỉ là cross-entropy nhị phân của ảnh giả với **nhãn 1**.
+
+**Huấn luyện xen kẽ.** Mỗi vòng: vài bước cập nhật $D$ (bài báo gốc dùng một bước), rồi một bước cập nhật $G$. Khi cập nhật $D$, ảnh giả được tách khỏi đồ thị tính toán để không sửa nhầm $G$.
+
+### Vì sao GAN khó huấn luyện
+
+- **Không có một hàm mất mát giảm dần để theo dõi.** Hai mạng cùng thay đổi, loss của mỗi bên phụ thuộc bên kia. Loss $G$ tăng có thể vì $D$ vừa giỏi lên, không phải vì $G$ tệ đi. Phân tích $D^*$ ở trên giả định $D$ luôn tối ưu và hai mạng đủ lớn; thực tế không có điều đó, và quá trình có thể dao động thay vì hội tụ.
+- **Mode collapse** (sụp mode). $G$ tìm ra vài ảnh lừa được $D$ rồi chỉ sinh những ảnh đó, bỏ qua phần lớn sự đa dạng của dữ liệu (ví dụ chỉ vẽ một hai chữ số). Bài báo GAN gọi nó là "kịch bản Helvetica" và khuyên không cập nhật $G$ quá nhiều mà không cập nhật $D$. Ô GAN bên dưới đếm xem ảnh giả thuộc những chữ số nào để thử phát hiện điều này.
+- **Nhạy với kiến trúc và siêu tham số.** DCGAN (Radford và cộng sự, 2016) đưa ra một bộ quy tắc giúp GAN tích chập học ổn định hơn: thay pooling bằng tích chập có stride (ở $D$) và tích chập chuyển vị (ở $G$), dùng batch normalization ở cả hai mạng, bỏ các lớp kết nối đầy đủ ẩn, $G$ dùng ReLU và Tanh ở lớp ra, $D$ dùng LeakyReLU. Họ dùng Adam với tốc độ học $0.0002$ và $\beta_1 = 0.5$; ô GAN của bài dùng lại hai số này. DCGAN còn cho thấy làm phép cộng trừ trên vectơ $\mathbf{z}$ cho ra thay đổi có nghĩa trên ảnh khuôn mặt.
+
+### Pix2Pix: GAN có điều kiện, ảnh ghép cặp
+
+Nhiều bài toán không cần sinh ảnh từ hư không, mà cần **dịch ảnh sang ảnh** (image-to-image translation): bản đồ nhãn thành ảnh đường phố, ảnh đen trắng thành ảnh màu, nét phác thảo thành ảnh chụp. Ở mục này, $\mathbf{x}$ là ảnh nguồn và $\mathbf{y}$ là ảnh đích (một ảnh, không phải nhãn lớp). Pix2Pix (Isola và cộng sự, 2017) cần dữ liệu **ghép cặp** $(\mathbf{x}, \mathbf{y})$.
+
+Đây là một **GAN có điều kiện** (conditional GAN): cả $G$ và $D$ đều được xem ảnh nguồn. $D$ không hỏi "ảnh này có thật không" mà hỏi "ảnh này có phải đích thật **của ảnh nguồn này** không":
+
+$$
+\mathcal{L}_{\text{cGAN}}(G, D) = \mathbb{E}_{\mathbf{x}, \mathbf{y}}\big[\log D(\mathbf{x}, \mathbf{y})\big] + \mathbb{E}_{\mathbf{x}, \mathbf{z}}\big[\log\big(1 - D(\mathbf{x}, G(\mathbf{x}, \mathbf{z}))\big)\big]
+$$
+
+Vì có đáp án $\mathbf{y}$, Pix2Pix thêm mất mát L1 kéo ảnh sinh về gần đáp án, và chọn L1 thay L2 vì L1 ít làm mờ hơn:
+
+$$
+G^* = \arg\min_G \max_D \; \mathcal{L}_{\text{cGAN}}(G, D) + \lambda\, \mathbb{E}_{\mathbf{x}, \mathbf{y}, \mathbf{z}}\big[\lVert \mathbf{y} - G(\mathbf{x}, \mathbf{z}) \rVert_1\big]
+$$
+
+Tác giả dùng $\lambda = 100$. Chia việc rõ ràng: L1 lo phần tổng thể (màu, bố cục đúng chỗ), $D$ lo phần chi tiết sắc nét mà L1 làm nhòe. Ba lựa chọn thiết kế:
+
+- **Bộ sinh U-Net:** mạng mã hóa – giải mã có **nối tắt** (skip connection) từ lớp thứ $i$ sang lớp thứ $n - i$, để chi tiết như vị trí cạnh đi thẳng từ ảnh vào sang ảnh ra mà không phải chui qua chỗ hẹp nhất. Bạn gặp kiến trúc này ở bài [Phân đoạn ngữ nghĩa](/vi/cv/semantic-segmentation/).
+- **Bộ phân biệt PatchGAN:** $D$ chấm "thật hay giả" cho từng mảnh $N \times N$ của ảnh rồi lấy trung bình, thay vì một điểm cho cả ảnh. Mảnh $70 \times 70$ cho kết quả tốt nhất trong thí nghiệm của tác giả. Mảnh nhỏ thì ít tham số, chạy nhanh, và áp được cho ảnh cỡ bất kỳ.
+- **Nhiễu qua dropout:** tác giả thấy $G$ học cách bỏ qua $\mathbf{z}$ đưa vào trực tiếp, nên chỉ giữ ngẫu nhiên dưới dạng dropout, bật cả khi dùng. Dù vậy, đầu ra vẫn ít đa dạng.
+
+### CycleGAN: không cần cặp
+
+Nhiều khi không có cặp: không ai có ảnh cùng một con ngựa đúng tư thế đó nhưng là ngựa vằn. CycleGAN (Zhu và cộng sự, 2017) học với hai tập ảnh **không ghép cặp**: miền $X$ (ví dụ ảnh ngựa) và miền $Y$ (ảnh ngựa vằn).
+
+Chỉ dùng GAN thì chưa đủ. Một bộ sinh $G: X \to Y$ có thể sinh ra ảnh ngựa vằn rất thật mà **không liên quan gì** tới con ngựa đưa vào; $D$ chỉ kiểm "có giống ngựa vằn không". Có vô số ánh xạ như vậy. CycleGAN thêm một bộ sinh ngược $F: Y \to X$ và đòi đi một vòng phải về chỗ cũ: ngựa → ngựa vằn → ngựa phải ra con ngựa ban đầu. Đó là **mất mát nhất quán chu trình** (cycle consistency loss):
+
+$$
+\mathcal{L}_{\text{cyc}}(G, F) = \mathbb{E}_{\mathbf{x}}\big[\lVert F(G(\mathbf{x})) - \mathbf{x} \rVert_1\big] + \mathbb{E}_{\mathbf{y}}\big[\lVert G(F(\mathbf{y})) - \mathbf{y} \rVert_1\big]
+$$
+
+Muốn quay về được $\mathbf{x}$, ảnh $G(\mathbf{x})$ phải giữ đủ thông tin về $\mathbf{x}$: tư thế, nền, bố cục. Hàm mục tiêu đầy đủ có hai trò chơi GAN ($G$ với $D_Y$, $F$ với $D_X$) cộng $\lambda \mathcal{L}_{\text{cyc}}$, với $\lambda = 10$ trong bài báo. Khi huấn luyện, tác giả thay log-likelihood của GAN bằng bình phương sai số (least-squares GAN) cho ổn định hơn, và dùng PatchGAN $70 \times 70$ làm bộ phân biệt.
+
+Giới hạn tác giả tự nêu: CycleGAN đổi tốt màu sắc và kết cấu (ngựa sang ngựa vằn, ảnh sang tranh Monet), nhưng gần như thất bại khi cần đổi **hình dạng**, như chó thành mèo.
+
+### Giới hạn
+
+- **Chất lượng và đa dạng.** VAE mờ; GAN nét nhưng dễ sụp mode và khó huấn luyện. Diffusion, ở bài [Sinh ảnh (2): Diffusion, Stable Diffusion, LoRA](/vi/cv/diffusion-models/), giữ được ưu điểm của cả hai ở mức đáng kể, và Stable Diffusion lại dùng một autoencoder để nén ảnh.
+- **Đánh giá ảnh sinh** khó hơn đánh giá bộ phân loại: không có nhãn đúng để so. Bài này chỉ dùng mẹo nhỏ trong ô GAN (đếm chữ số bằng một bộ phân loại).
+- **Bài chỉ dùng MLP trên ảnh $8 \times 8$** cho chạy nhanh trên CPU; mô hình thật dùng mạng tích chập như DCGAN và U-Net.
+
+## Minh họa
+
+Hình dưới đặt hai cách sinh ảnh cạnh nhau. Hãy nhìn chỗ $\mathbf{z}$ đến từ đâu: ở VAE, $\mathbf{z}$ được rút từ đám mây $(\boldsymbol\mu, \boldsymbol\sigma)$ do bộ mã hóa trả ra; ở GAN, $\mathbf{z}$ là nhiễu thuần, và ảnh thật chỉ đi vào $D$, không bao giờ đi qua $G$.
+
+{/* FIG: GenerativeModelsFigure — hai hàng. Hàng VAE: ảnh x → bộ mã hóa → hai ô μ, σ → z = μ + σ ⊙ ε (ε đi vào từ bên cạnh) → bộ giải mã → ảnh tái tạo; hai nhãn loss: "tái tạo" giữa ảnh vào và ảnh ra, "KL" ở ô μ, σ. Hàng GAN: nhiễu z → G → ảnh giả; ảnh thật và ảnh giả cùng đi vào D → "thật hay giả". */}
+
+Bảng dưới so sánh bốn mô hình của bài. Cột "Hàm mất mát" ghi dạng trong bài báo gốc.
+
+| Tiêu chí | VAE | GAN | Pix2Pix | CycleGAN |
+|---|---|---|---|---|
+| Bài báo | Kingma và Welling, 2014 | Goodfellow và cộng sự, 2014 | Isola và cộng sự, 2017 | Zhu và cộng sự, 2017 |
+| Dữ liệu cần | Một tập ảnh, không nhãn | Một tập ảnh, không nhãn | Cặp ảnh (nguồn, đích) | Hai tập ảnh của hai miền, không cần cặp |
+| Sinh từ | $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ | Nhiễu $\mathbf{z}$ | Ảnh nguồn | Ảnh của miền kia |
+| Hàm mất mát | $-$ELBO: tái tạo + KL | Minimax $G$ với $D$ (thường dùng bản không bão hòa) | cGAN + $\lambda$ L1, $\lambda = 100$ | Hai GAN + $\lambda \mathcal{L}_{\text{cyc}}$, $\lambda = 10$ |
+| Điểm mạnh | Học ổn định, có bộ mã hóa ảnh → $\mathbf{z}$, có cận dưới của likelihood | Ảnh sắc nét | Bám sát ảnh nguồn, cần ít ảnh (vài trăm cặp) | Không cần dữ liệu cặp |
+| Điểm yếu | Ảnh mờ | Khó huấn luyện, mode collapse, không có bộ mã hóa | Cần cặp ảnh, đầu ra ít đa dạng | Khó đổi hình dạng, huấn luyện bốn mạng |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: ô NumPy với Python 3.14 và NumPy 2.4 (bản có trong Pyodide), hai ô PyTorch với Python 3.14, PyTorch 2.15 và scikit-learn 1.9 trên CPU. Ô NumPy chạy ngay trên trang, hai ô PyTorch chạy trên máy bạn. Các ô độc lập, không dùng biến của nhau.
+
+### Tham số hóa lại và KL bằng NumPy
+
+Ô dưới đây lấy một $q(\mathbf{z} \mid \mathbf{x})$ hai chiều với $\boldsymbol\mu = (1, -0.5)$, $\boldsymbol\sigma = (0.5, 1.5)$. Nó tính KL với $\mathcal{N}(\mathbf{0}, \mathbf{I})$ bằng công thức dạng đóng, rồi ước lượng lại bằng Monte Carlo: rút $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$, lấy trung bình của $\log q(\mathbf{z}) - \log p(\mathbf{z})$, với số mẫu tăng dần. Cuối cùng, nó ước lượng đạo hàm của KL theo $\boldsymbol\mu$ và $\boldsymbol\sigma$ **qua chính các mẫu** $\mathbf{z}$, như lan truyền ngược làm.
+
+<PythonRunner code={reparamCode} title="Mẹo tham số hóa lại và KL: Monte Carlo so với dạng đóng" />
+
+Đọc kết quả:
+
+- **`closed form KL = 1.1627`:** chiều thứ nhất góp $\frac12(1 + 0.25 - 1 + 1.386) \approx 0.818$, chiều thứ hai góp $\frac12(0.25 + 2.25 - 1 - 0.811) \approx 0.344$.
+- **Bảng Monte Carlo:** với 10 mẫu, ước lượng là 0.6253, lệch hơn 0.5. Với 1 000 mẫu, sai số còn khoảng 0.02; với 10 000 và 100 000 mẫu, còn dưới 0.005. Sai số của trung bình mẫu giảm cỡ $1/\sqrt{n}$, và lên xuống ngẫu nhiên, nên không giảm đều từng dòng. Công thức dạng đóng cho đúng con số mà không tốn mẫu nào: đó là lý do VAE dùng nó cho số hạng KL, chỉ lấy mẫu cho số hạng tái tạo.
+- **`mean of z`, `std of z`:** gần $(1, -0.5)$ và $(0.5, 1.5)$. Dời và giãn nhiễu chuẩn cho đúng phân phối $q$.
+- **Hai dòng `grad`:** đạo hàm theo $\boldsymbol\mu$ ước lượng được $(1.001, -0.503)$, đúng là $\boldsymbol\mu$ (đạo hàm của $\frac12 \mu_j^2$); theo $\boldsymbol\sigma$ được $(-1.497, 0.84)$, so với $\sigma_j - 1/\sigma_j = (-1.5, 0.833)$. Gradient đi qua bước lấy mẫu được, nhờ $\mathbf{z}$ là hàm của $\boldsymbol\mu, \boldsymbol\sigma$ khi $\boldsymbol\epsilon$ đã cố định.
+
+### VAE tí hon trên chữ số $8 \times 8$
+
+File dưới đây dựng một VAE bằng MLP: bộ mã hóa $64 \to 128 \to (\boldsymbol\mu, \log \boldsymbol\sigma^2)$ với $J = 2$, bộ giải mã $2 \to 128 \to 64$. Điểm ảnh chia cho 16 về $[0, 1]$, tái tạo dùng cross-entropy nhị phân (bộ giải mã Bernoulli), KL dùng công thức dạng đóng. Huấn luyện 60 epoch, lô 64 ảnh, Adam. Cứ vài epoch, file in hai số hạng (tính trung bình mỗi ảnh); cuối cùng nó rút một $\mathbf{z}$ từ $\mathcal{N}(\mathbf{0}, \mathbf{I})$, giải mã, và in ảnh bằng ký tự (từ ` ` là trắng tới `#` là đậm nhất). Cách cài PyTorch bản CPU có ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+<LocalCode
+  code={vaeCode}
+  title="VAE tí hon trên load_digits"
+  packages={['torch', 'scikit-learn']}
+  hardware="CPU là đủ, không cần GPU, không tải gì từ mạng. Mô hình rất nhỏ; trên máy phát triển đang chạy nhiều việc khác cùng lúc, lần chạy mẫu mất gần 6 phút"
+  sampleVaries={false}
+>
+
+```text
+epoch  1  recon  38.65  KL  0.33
+epoch  5  recon  27.75  KL  0.73
+epoch 10  recon  26.45  KL  0.61
+epoch 20  recon  24.14  KL  1.55
+epoch 40  recon  23.07  KL  2.03
+epoch 60  recon  22.74  KL  2.13
+  .++:  
+  +*=-  
+ .*-.-  
+ .*-:-. 
+ .+--+: 
+  +..+- 
+  +=-*: 
+  .+*=. 
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Tái tạo giảm, từ 38.65 xuống 22.74.** Nó không về 0 được: nhiều điểm ảnh có giá trị xám (ví dụ 0.5), mà cross-entropy nhị phân với đích xám có giá trị nhỏ nhất lớn hơn 0. Hơn nữa, chỉ 2 số $\mathbf{z}$ phải mang thông tin của 64 điểm ảnh.
+- **KL tăng, từ 0.33 lên 2.13.** Lúc đầu, bộ giải mã chưa biết dùng $\mathbf{z}$, nên chi phí rẻ nhất là để $q$ gần sát tiên nghiệm (KL nhỏ). Khi học, mô hình chấp nhận trả thêm KL để $\mathbf{z}$ mang thông tin về ảnh, đổi lại tái tạo tốt hơn nhiều. Đây là hai lực của ELBO giằng co nhau.
+- **Ảnh sinh ra** có dáng một chữ số (nét vòng, giống số 0 hay 8), nhưng không có ô `#` nào: các điểm ảnh đều ở mức trung gian. Bộ giải mã trả về **xác suất** từng điểm ảnh, gần với trung bình của các ảnh ứng với vùng $\mathbf{z}$ đó, nên nét bị nhòe. Đúng là hiện tượng mờ đã giải thích ở mục Lý thuyết.
+
+Hãy thử đổi `J = 2` thành `J = 8`: tái tạo sẽ tốt hơn, KL lớn hơn.
+
+### GAN tí hon trên chữ số $8 \times 8$
+
+File thứ hai huấn luyện một GAN bằng MLP trên cùng bộ ảnh, đưa về $[-1, 1]$ cho khớp lớp Tanh ở đầu ra của $G$. $G$: $16 \to 128 \to 64$, $D$: $64 \to 128 \to 1$ (ra logit, LeakyReLU 0.2). Mỗi bước cập nhật $D$ một lần rồi $G$ một lần, với loss không bão hòa (nhãn 1 cho ảnh giả ở bước $G$). Adam với $0.0002$ và $\beta_1 = 0.5$, như DCGAN. File in loss hai bên và trung bình $D(\text{thật})$, $D(\text{giả})$ trên lô cuối của vài epoch. Cuối cùng, nó sinh 1 000 ảnh và nhờ một bộ hồi quy logistic (học trên ảnh thật) đoán xem mỗi ảnh là chữ số nào, để xem $G$ có sinh đủ mười chữ số không.
+
+<LocalCode
+  code={ganCode}
+  title="GAN tí hon trên load_digits"
+  packages={['torch', 'scikit-learn', 'numpy']}
+  hardware="CPU là đủ, không cần GPU, không tải gì từ mạng"
+  sampleVaries={false}
+>
+
+```text
+GAN_OUTPUT
+```
+
+</LocalCode>
+
+GAN_READING
+
+## Lỗi hay gặp
+
+:::caution[Đọc loss của GAN như loss của bộ phân loại]
+Loss của $G$ tăng không có nghĩa $G$ tệ đi, và loss của $D$ giảm không có nghĩa mô hình tốt lên: mỗi bên đang chơi với một đối thủ thay đổi liên tục. Loss $D$ gần $2\ln 2 \approx 1.386$ (tổng hai cross-entropy khi $D$ đoán 0.5 cho mọi ảnh) chỉ nói hai bên đang giằng co, không nói ảnh đã đẹp. Hãy nhìn ảnh sinh ra định kỳ, và kiểm độ đa dạng (như bước đếm chữ số trong ô GAN). Nếu loss $D$ tiến về 0 và ở đó, $D$ đã thắng áp đảo, $G$ hết tín hiệu học.
+:::
+
+:::caution[Cộng hai số hạng của VAE theo hai thang khác nhau]
+Một lỗi rất hay gặp: tái tạo tính bằng `F.mse_loss(...)` mặc định, tức **trung bình** trên các điểm ảnh, còn KL **cộng** trên $J$ chiều. Tái tạo bị chia nhỏ đi 64 lần (hay hàng trăm nghìn lần với ảnh lớn), nên KL lấn át: bộ mã hóa đẩy mọi $q$ về $\mathcal{N}(\mathbf{0}, \mathbf{I})$, bộ giải mã bỏ qua $\mathbf{z}$ và vẽ ra một ảnh trung bình cho mọi đầu vào. ELBO cần $\log p_\theta(\mathbf{x} \mid \mathbf{z})$ của **cả ảnh**, nên cộng trên mọi điểm ảnh (`reduction="sum"`, như ô VAE), rồi mới chia cho số ảnh trong lô. Nếu muốn đổi cân bằng giữa hai số hạng, hãy làm có chủ đích bằng một hệ số trước KL, không phải do nhầm cách lấy trung bình.
+:::
+
+:::caution[Chọn Pix2Pix khi không có cặp, hay chờ CycleGAN đổi hình dạng]
+Pix2Pix cần từng cặp ảnh đúng nhau từng điểm ảnh, vì mất mát L1 so ảnh sinh với đúng ảnh đích. Hai tập ảnh chỉ "cùng chủ đề" thì không đủ; khi đó dùng CycleGAN. Ngược lại, CycleGAN giữ bố cục của ảnh nguồn nhờ mất mát chu trình, nên giỏi đổi màu và kết cấu nhưng gần như không đổi được hình dạng: bài báo ghi chó thành mèo là một ca thất bại điển hình.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Mô hình sinh học cách lấy mẫu từ phân phối của dữ liệu thật. VAE học bằng cách làm lớn ELBO $= \mathbb{E}_q[\log p_\theta(\mathbf{x} \mid \mathbf{z})] - D_{\mathrm{KL}}(q_\phi(\mathbf{z} \mid \mathbf{x}) \parallel \mathcal{N}(\mathbf{0}, \mathbf{I}))$, một cận dưới của $\log p_\theta(\mathbf{x})$; sinh ảnh bằng cách rút $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ rồi giải mã.
+- Với Gauss chéo, KL có dạng đóng $\frac12 \sum_j (\mu_j^2 + \sigma_j^2 - 1 - \log \sigma_j^2)$. Mẹo $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$ đưa phần ngẫu nhiên ra ngoài để gradient đi qua bước lấy mẫu. Ảnh VAE hay mờ vì bộ giải mã trả về trung bình của các ảnh có thể.
+- GAN cho bộ sinh $G$ và bộ phân biệt $D$ chơi minimax. $D^* = p_{\text{data}} / (p_{\text{data}} + p_g)$, cân bằng khi $p_g = p_{\text{data}}$. Trong thực tế, $G$ dùng loss không bão hòa; huấn luyện khó, dễ dao động và sụp mode.
+- Pix2Pix: GAN có điều kiện trên ảnh ghép cặp, cộng $\lambda$ L1, bộ sinh U-Net và bộ phân biệt PatchGAN. CycleGAN: hai miền không ghép cặp, hai bộ sinh và mất mát nhất quán chu trình $F(G(\mathbf{x})) \approx \mathbf{x}$.
+
+**Đọc thêm:**
+
+- Kingma, D. P., Welling, M. (2014). [*Auto-Encoding Variational Bayes*](https://arxiv.org/abs/1312.6114), arXiv:1312.6114, mục 2.2–2.4, mục 3 và phụ lục B. Ngắn; có cận dưới, mẹo tham số hóa lại và cách tính KL dạng đóng. Bài báo dùng $\mathcal{L}$ cho ELBO (đại lượng cần làm lớn), còn bài này dùng $\mathcal{L}_{\text{ELBO}}$ để khỏi lẫn với hàm mất mát.
+- Kingma, D. P., Welling, M. (2019). [*An Introduction to Variational Autoencoders*](https://arxiv.org/abs/1906.02691), arXiv:1906.02691, chương 2. Viết lại VAE chậm rãi, có nhiều hình và giải thích hơn bài báo gốc.
+- Goodfellow, I. và cộng sự (2014). [*Generative Adversarial Networks*](https://arxiv.org/abs/1406.2661), arXiv:1406.2661, mục 3, 4 và 6. Trò chơi minimax, đoạn về loss không bão hòa, chứng minh $D^*$ và điểm cân bằng $p_g = p_{\text{data}}$.
+- Radford, A., Metz, L., Chintala, S. (2016). [*Unsupervised Representation Learning with Deep Convolutional Generative Adversarial Networks*](https://arxiv.org/abs/1511.06434), arXiv:1511.06434, mục 3. Bộ quy tắc kiến trúc của DCGAN.
+- Isola, P., Zhu, J.-Y., Zhou, T., Efros, A. A. (2017). [*Image-to-Image Translation with Conditional Adversarial Networks*](https://arxiv.org/abs/1611.07004), arXiv:1611.07004, mục 3; và Zhu, J.-Y., Park, T., Isola, P., Efros, A. A. (2017). [*Unpaired Image-to-Image Translation using Cycle-Consistent Adversarial Networks*](https://arxiv.org/abs/1703.10593), arXiv:1703.10593, mục 3 và 6. Hàm mục tiêu của Pix2Pix và CycleGAN, cùng các ca thất bại của CycleGAN.
+
+<LessonProgress />

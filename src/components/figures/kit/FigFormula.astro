@@ -1,0 +1,29 @@
+---
+// A short formula of a static figure (docs/architecture/cv-lessons.md, section 4): several FigMath-like
+// pieces in one <text>, e.g. F(x) + x, H × W × K, I1 · T1, μ, σ. Symbols are italic (or bold upright, the
+// site's \mathbf), subscripts 13 units moved down with dy, upright runs as written; spaced operators get a
+// gap each side. The pieces and their checks: formulaSpans in src/lib/figures/geometry.ts (no words can slip
+// in). Language-neutral, so written in the figure component. The tspans come from one map with no line
+// break between them: a break would draw a space. Colour and weights: figures.css (.atlas-fig-math).
+import { FIG_FONT, formulaSpans, type Formula, type FormulaSpan } from '@lib/figures/geometry';
+
+interface Props {
+  x: number;
+  /** Vertical centre, dominant-baseline: central, like FigText. */
+  y: number;
+  parts: Formula;
+  size?: 'label' | 'small';
+  anchor?: 'start' | 'middle' | 'end';
+}
+
+const { x, y, parts, size = 'label', anchor = 'middle' } = Astro.props;
+const fontSize = FIG_FONT[size];
+let spans: FormulaSpan[];
+try {
+  spans = formulaSpans(parts, fontSize);
+} catch (error) {
+  throw new Error(`<FigFormula> on "${Astro.locals.starlightRoute.id}": ${error instanceof Error ? error.message : String(error)}`);
+}
+---
+
+<text class="atlas-fig-math" font-size={fontSize} text-anchor={anchor === 'middle' ? undefined : anchor} x={x} y={y}>{spans.map((s) => <tspan class={s.bold ? 'atlas-fig-math-bold' : undefined} font-style={s.italic ? 'italic' : undefined} font-size={s.small && fontSize !== FIG_FONT.small ? FIG_FONT.small : undefined} dx={s.dx} dy={s.dy}>{s.text}</tspan>)}</text>

@@ -90,6 +90,8 @@ export interface MathLabel {
   after?: string;
   before?: string;
   bold?: boolean;
+  /** A hat over the symbol, \hat{x} (cv-lessons.md 4): only for a lone symbol (no sub, before or after). */
+  hat?: boolean;
 }
 
 /**
@@ -185,4 +187,87 @@ export function textLinePositions(x: number, y: number, count: number, fontSize:
   }
   if (count < 1 || count > MAX_NODE_LINES) throw new Error(`textLinePositions: needs 1–${MAX_NODE_LINES} lines, got ${count}.`);
   return lineOffsets(count, fontSize).map((offset) => [round1(x), round1(y + offset)]);
+}
+
+/**
+ * One piece of a FigFormula (docs/architecture/cv-lessons.md, section 4): a symbol, as in MathLabel (one Latin
+ * or Greek letter, italic or bold, with an optional subscript), or a run of upright math characters ("64",
+ * "(", "×"). Words belong in src/data/figures/.
+ */
+export type FormulaPart = string | { readonly symbol: string; readonly bold?: boolean; readonly sub?: string };
+export type Formula = readonly FormulaPart[];
+
+/** Upright characters of a formula: those of MATH_AFTER, plus "·" (U+00B7, a product) and "/". */
+const FORMULA_UPRIGHT = /^[0-9 =+\u2212\-.,<>\u2264\u2265()\u00d7\u00b7/]+$/u;
+/** Operators drawn with a gap of FORMULA_GAP on each side, as KaTeX spaces a binary or relation sign. */
+const FORMULA_SPACED = /^[=+\u2212<>\u2264\u2265\u00d7\u00b7]$/u;
+/** Gap around a spaced operator and after a comma, in viewBox units (FigMath's dx before `after`). */
+export const FORMULA_GAP = 3;
+
+/** One <tspan> of a FigFormula. dy moves a subscript down and the next span back up. */
+export interface FormulaSpan {
+  text: string;
+  italic: boolean;
+  bold: boolean;
+  small: boolean;
+  dx?: number;
+  dy?: number;
+}
+
+/**
+ * The tspans of a formula at `fontSize`: symbols italic (or bold upright), subscripts 13 units moved down
+ * by 0.3 of the font size (as FigMath), upright runs as written. Spaced operators (= + − < > ≤ ≥ × ·) stand
+ * alone and get FORMULA_GAP each side; a run ending in "," gets it after. Throws on words or empty pieces.
+ */
+export function formulaSpans(parts: Formula, fontSize: number): FormulaSpan[] {
+  if (parts.length === 0) throw new Error('formulaSpans: needs at least one part.');
+  const shift = round1(0.3 * fontSize);
+  const spans: FormulaSpan[] = [];
+  let dx: number | undefined;
+  let dy: number | undefined;
+  const push = (span: Omit<FormulaSpan, 'dx' | 'dy'>, gapBefore = false) => {
+    const gap = gapBefore ? FORMULA_GAP : dx;
+    spans.push({ ...span, ...(gap !== undefined && { dx: gap }), ...(dy !== undefined && { dy }) });
+    dx = undefined;
+    dy = undefined;
+  };
+  for (const part of parts) {
+    if (typeof part === 'string') {
+      const text = part.trim();
+      if (!text || !FORMULA_UPRIGHT.test(text)) {
+        throw new Error(`formulaSpans: an upright run may hold only digits, spaces and = + − - . , < > ≤ ≥ ( ) × · /, got "${part}".`);
+      }
+      const spaced = FORMULA_SPACED.test(text);
+      push({ text, italic: false, bold: false, small: false }, spaced);
+      if (spaced || text.endsWith(',')) dx = FORMULA_GAP;
+      continue;
+    }
+    checkMathLabel(part.symbol, part.sub);
+    const bold = part.bold === true;
+    push({ text: part.symbol, italic: !bold, bold, small: false });
+    if (part.sub !== undefined) {
+      dy = shift;
+      push({ text: part.sub, italic: false, bold: false, small: true });
+      dy = -shift;
+    }
+  }
+  return spans;
+}
+
+/**
+ * "x1,y1 x2,y2 x3,y3": a hat (the circumflex of \hat{x}) over a lone symbol of FigMath centred on (x, y),
+ * drawn as a FigArrow-style polyline, since Barlow's subsets have no combining circumflex (U+0302). It sits
+ * over the x-height of a lower-case letter: 0.2 em above the centre to 0.5 em, 0.25 em each side.
+ */
+export function hatPoints(x: number, y: number, fontSize: number): string {
+  const half = 0.25 * fontSize;
+  const foot = y - 0.2 * fontSize;
+  const tip = y - 0.45 * fontSize;
+  return [
+    [x - half, foot],
+    [x, tip],
+    [x + half, foot],
+  ]
+    .map(([px, py]) => `${round1(px!)},${round1(py!)}`)
+    .join(' ');
 }

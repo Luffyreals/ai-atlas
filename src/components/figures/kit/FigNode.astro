@@ -11,8 +11,10 @@
 // `bare` (llm-lessons.md 2.9.3): a box with no words, a layer bar or a cell, named by text around it; the
 // rules of what a box holds are nodeContentError in src/lib/figures/geometry.ts. A plain box writes no
 // data-tone, and its lines no anchor or baseline: figures.css has them (2.9.3), for a smaller figure.
+// cv-lessons.md 4: the math row may be a Formula (an array of pieces, drawn by FigFormula), e.g. "μ, σ".
 import type { Lines } from '@data/figures/types';
-import { FIG_FONT, nodeContentError, round1, nodeRows, toLines, type MathLabel } from '@lib/figures/geometry';
+import { FIG_FONT, nodeContentError, round1, nodeRows, toLines, type Formula, type MathLabel } from '@lib/figures/geometry';
+import FigFormula from './FigFormula.astro';
 import FigMath from './FigMath.astro';
 
 interface Props {
@@ -24,8 +26,8 @@ interface Props {
   lines?: Lines;
   /** Smaller lines under the main ones. */
   small?: Lines;
-  /** A math row above the main lines. */
-  math?: MathLabel;
+  /** A math row above the main lines: one symbol (FigMath) or a formula (FigFormula). */
+  math?: MathLabel | Formula;
   tone?: 'plain' | 'accent' | 'alt' | 'off';
   /** No words at all: a layer bar or a cell, named by text around it. */
   bare?: boolean;
@@ -35,7 +37,7 @@ const { x, y, width, height, math, tone = 'plain', bare = false } = Astro.props;
 const main = Astro.props.lines === undefined ? [] : toLines(Astro.props.lines);
 const small = Astro.props.small === undefined ? [] : toLines(Astro.props.small);
 const all = [...main, ...small];
-const where = `<FigNode> "${[math?.symbol ?? '', ...all].filter(Boolean).join(' / ')}" at ${x},${y} on "${Astro.locals.starlightRoute.id}"`;
+const where = `<FigNode> "${[math === undefined ? '' : Array.isArray(math) ? 'formula' : (math as MathLabel).symbol, ...all].filter(Boolean).join(' / ')}" at ${x},${y} on "${Astro.locals.starlightRoute.id}"`;
 
 const fault = nodeContentError(main, small, math !== undefined, bare);
 if (fault) throw new Error(`${where}: ${fault}`);
@@ -54,7 +56,7 @@ const smallLines = small.map((line, i) => ({ line, y: centres[first + main.lengt
 
 <g class="atlas-fig-node" data-tone={tone === 'plain' ? undefined : tone}>
   <rect x={x} y={y} width={width} height={height}></rect>
-  {math && <FigMath {...math} x={cx} y={mathY} />}
+  {math && (Array.isArray(math) ? <FigFormula parts={math as Formula} x={cx} y={mathY} /> : <FigMath {...(math as MathLabel)} x={cx} y={mathY} />)}
   {
     mainLines.length > 0 && (
       <text class="atlas-fig-text" font-size={FIG_FONT.label}>

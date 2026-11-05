@@ -87,3 +87,24 @@ export function mainAndSmall(label: Lines): { lines: string; small: readonly str
   const [main = '', ...small] = toLines(label);
   return { lines: main, small };
 }
+
+/**
+ * A closed outline of a regular `count`-gon centred on (cx, cy), first corner straight up, as FigArrow props
+ * with no head (cv-lessons.md 4): a circle drawn in a thumbnail (count 16) or a triangle (count 3). A polyline,
+ * not a <circle>, so e2e measures it as a .atlas-fig-arrow (llm-lessons.md 2.9.1).
+ */
+export function ring(cx: number, cy: number, radius: number, count: number): { from: Pt; via: Pt[]; to: Pt } {
+  if (!Number.isInteger(count) || count < 3) throw new Error(`ring: count must be an integer ≥ 3, got ${count}.`);
+  if (!(radius > 0)) throw new Error(`ring: radius must be positive, got ${radius}.`);
+  const points = Array.from({ length: count }, (_, i): Pt => {
+    const angle = -Math.PI / 2 + (2 * Math.PI * i) / count;
+    return [round1(cx + radius * Math.cos(angle)), round1(cy + radius * Math.sin(angle))];
+  });
+  return { from: points[0]!, via: points.slice(1), to: points[0]! };
+}
+
+/** A closed outline through `points` (at least 3), as FigArrow props with no head: a frame or a drawn shape. */
+export function closed(points: readonly Pt[]): { from: Pt; via: Pt[]; to: Pt } {
+  if (points.length < 3) throw new Error(`closed: needs at least 3 points, got ${points.length}.`);
+  return { from: points[0]!, via: points.slice(1), to: points[0]! };
+}
