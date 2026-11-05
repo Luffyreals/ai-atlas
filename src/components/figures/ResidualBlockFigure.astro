@@ -1,0 +1,76 @@
+---
+// cv/cnn-image-classification: a ResNet basic block (He et al., 2016). The input goes through two 3 × 3
+// convolutions, framed: their output is the residual F(x); the shortcut (dashed, second group) carries x
+// unchanged down the right edge to "add" (accent, the point of the block), which gives F(x) + x, then ReLU and
+// the output. One column read top-down; the frame is a closed FigArrow with no head, so e2e measures it
+// (llm-lessons.md 2.9.1). F(x) is written beside the arrow that carries it, F(x) + x beside the one after add.
+// Narrow layout only. Words: src/data/figures/residual-block.ts; x, F(x), F(x) + x with FigMath / FigFormula.
+import { RESIDUAL_BLOCK } from '@data/figures/residual-block';
+import type { Formula } from '@lib/figures/geometry';
+import { anchor, closed, mainAndSmall, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigFormula from './kit/FigFormula.astro';
+import FigMath from './kit/FigMath.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = RESIDUAL_BLOCK[getPageLocale(Astro.locals.starlightRoute)];
+const l = t.labels;
+
+// The main column is centred on x 150; the frame round the two convolutions spans x 58–242; the shortcut runs
+// down x 318, its words right-aligned between the frame and the lane.
+const MID = 150;
+const LANE = 318;
+const box = (y: number, width: number, height: number): Box => ({ x: MID - width / 2, y, width, height });
+
+const input = box(8, 160, 55);
+const FRAME = { top: 84, bottom: 240, left: 58, right: 242 } as const;
+const conv1 = box(98, 168, 52);
+const conv2 = box(174, 168, 52);
+const add = box(276, 72, 36);
+const relu = box(348, 120, 36);
+const output = box(408, 160, 36);
+const height = output.y + output.height + 8;
+
+const frame = closed([
+  [FRAME.left, FRAME.top],
+  [FRAME.right, FRAME.top],
+  [FRAME.right, FRAME.bottom],
+  [FRAME.left, FRAME.bottom],
+]);
+const addY = anchor(add, 'right')[1];
+const inY = anchor(input, 'right')[1];
+const fx: Formula = [{ symbol: 'F' }, '(', { symbol: 'x', bold: true }, ')'];
+const sum: Formula = [...fx, '+', { symbol: 'x', bold: true }];
+const residualY = (FRAME.bottom + add.y) / 2;
+const sumY = (add.y + add.height + relu.y) / 2;
+const laneMid = (FRAME.top + FRAME.bottom) / 2;
+---
+
+<FigureFrame id="residual-block" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigNode {...input} math={{ symbol: 'x', bold: true }} lines={l.input} />
+    <FigArrow from={anchor(input, 'bottom')} to={anchor(conv1, 'top')} />
+    <FigArrow {...frame} head={false} />
+    <FigNode {...conv1} {...mainAndSmall(l.conv1)} />
+    <FigArrow from={anchor(conv1, 'bottom')} to={anchor(conv2, 'top')} />
+    <FigNode {...conv2} {...mainAndSmall(l.conv2)} />
+
+    <FigArrow from={anchor(conv2, 'bottom')} to={anchor(add, 'top')} />
+    <FigFormula x={MID + 8} y={residualY} parts={fx} anchor="start" />
+    <FigText x={MID + 46} y={residualY} lines={l.residual} size="small" anchor="start" />
+
+    <FigArrow from={anchor(input, 'right')} via={[[LANE, inY], [LANE, addY]]} to={anchor(add, 'right')} tone="alt" />
+    <FigText x={LANE - 8} y={laneMid - 8} lines={l.shortcut} size="small" anchor="end" />
+    <FigMath x={LANE - 8} y={laneMid + 22} symbol="x" bold size="small" anchor="end" />
+
+    <FigNode {...add} lines={l.add} tone="accent" />
+    <FigArrow from={anchor(add, 'bottom')} to={anchor(relu, 'top')} />
+    <FigFormula x={MID + 8} y={sumY} parts={sum} anchor="start" />
+    <FigNode {...relu} lines={l.relu} />
+    <FigArrow from={anchor(relu, 'bottom')} to={anchor(output, 'top')} />
+    <FigNode {...output} lines={l.output} />
+  </Fragment>
+</FigureFrame>

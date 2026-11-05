@@ -12,6 +12,7 @@ import { MULTIMODAL } from './multimodal';
 import { PARALLELISM } from './parallelism';
 import { RAG_PIPELINE } from './rag-pipeline';
 import { REGULARIZATION_GEOMETRY } from './regularization-geometry';
+import { RESIDUAL_BLOCK } from './residual-block';
 import { RLHF_STAGES } from './rlhf-stages';
 import type { FigureText } from './types';
 
@@ -28,5 +29,6 @@ export const FIGURES = {
   multimodal: MULTIMODAL,
   parallelism: PARALLELISM,
   'container-image': CONTAINER_IMAGE,
+  'residual-block': RESIDUAL_BLOCK,
 } as const satisfies Record<string, FigureText<string>>;
 export type FigureId = keyof typeof FIGURES;

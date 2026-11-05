@@ -34,3 +34,17 @@ export interface TokenDistribution {
   logits: readonly number[]; // fixed, shared by both locales, so the numbers match the Python cell
   description: Localized; // 1–2 sentences for screen readers
 }
+
+/**
+ * A small grey-scale image drawn by hand as numbers, for the CV VIZ (docs/architecture/cv-lessons.md, sections 1.1,
+ * 1.2): never taken from a dataset under copyright. `pixels[r][c]`, row 0 at the top, every row `width` long.
+ */
+export interface PixelImage {
+  id: string;
+  lessons: readonly LessonId[]; // lessons whose VIZ shows it
+  width: number;
+  height: number;
+  range: readonly [min: number, max: number]; // every pixel lies in it; min is drawn as the background
+  pixels: readonly (readonly number[])[];
+  description: Localized; // what the picture shows, for screen readers
+}

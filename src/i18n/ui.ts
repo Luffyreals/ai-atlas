@@ -59,6 +59,16 @@ export const UI_KEYS = {
     'slowNote', 'zigzagNote', 'diverged', 'announceStep', 'announceEta', 'running', 'stopped', 'atEnd',
     'resetDone',
   ],
+  vizConvolution: [
+    'caption', 'kernelGroup', 'identity', 'blur', 'vertical', 'horizontal', 'imageTitle', 'mapTitle', 'imageLabel',
+    'mapLabel', 'kernelTitle', 'kernelText', 'shadeKey', 'positive', 'negative', 'controls', 'positionLabel',
+    'position', 'sumTitle', 'identityNote', 'blurNote', 'verticalNote', 'horizontalNote', 'announce', 'announceKernel',
+  ],
+  vizDiffusion: [
+    'caption', 'x0Title', 'noiseTitle', 'xtTitle', 'x0Label', 'noiseLabel', 'xtLabel', 'shadeKey', 'signalName',
+    'noiseName', 'chartLabel', 'chartDesc', 'tAxis', 'coefAxis', 'controls', 'tLabel', 'tValueText', 'startNote',
+    'midNote', 'endNote', 'announce',
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 export type UiNamespace = keyof typeof UI_KEYS;
