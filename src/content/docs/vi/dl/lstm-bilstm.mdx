@@ -1,0 +1,370 @@
+---
+title: LSTM và BiLSTM
+description: 'Trạng thái ô như một băng chuyền, ba cổng quên, vào, ra, vì sao đường cộng giúp gradient đi xa; so LSTM với GRU, LSTM nhiều tầng, và BiLSTM đọc câu theo cả hai chiều.'
+quiz:
+  - question: 'Ở một thành phần nào đó của ô LSTM, suốt 50 bước liền, cổng quên $f_t \approx 1$ và cổng vào $i_t \approx 0$. Điều gì xảy ra với thành phần đó của $\mathbf{c}_t$?'
+    options:
+      - 'Nó bị xóa về 0 ngay bước đầu tiên'
+      - 'Nó gần như giữ nguyên giá trị suốt 50 bước, và gradient theo đường $\mathbf{c}$ cũng đi qua gần như nguyên vẹn'
+      - 'Nó bị thay bằng ứng viên $\tilde{c}_t$ ở mỗi bước'
+      - 'Nó tăng dần, vì mỗi bước cộng thêm một lượng dương'
+    answer: 1
+    explanation: 'Thay vào $c_t = f_t c_{t-1} + i_t \tilde{c}_t$: với $f_t \approx 1$, $i_t \approx 0$ thì $c_t \approx c_{t-1}$, ô chỉ chép giá trị cũ sang. Đạo hàm theo đường thẳng trên băng chuyền là tích các $f_t$, ở đây gần 1, nên gradient không bị bào mòn. Xóa về 0 là trường hợp $f_t \approx 0$; thay hẳn bằng ứng viên là $f_t \approx 0$, $i_t \approx 1$.'
+  - question: 'Một LSTM có $d_x = 100$, $d_h = 200$. Theo công thức của bài (mỗi nhánh một vectơ bias), LSTM này có bao nhiêu tham số?'
+    options: ['60 200', '180 600', '240 800', '241 600']
+    answer: 2
+    explanation: 'Mỗi nhánh có $d_h(d_x + d_h) + d_h = 200 \cdot 300 + 200 = 60\,200$ tham số, đúng bằng một RNN thường. LSTM có bốn nhánh (ba cổng và ứng viên) nên gấp 4: $240\,800$. 180 600 là của GRU (ba nhánh). 241 600 là con số `nn.LSTM` của PyTorch báo, vì nó dùng hai vectơ bias cho mỗi nhánh: $4(d_h(d_x + d_h) + 2d_h)$.'
+  - question: 'Bạn huấn luyện một mô hình ngôn ngữ dự đoán từ kế tiếp $x_{t+1}$ từ trạng thái tại vị trí $t$. Đổi LSTM sang BiLSTM làm loss huấn luyện giảm gần về 0. Vì sao không nên vui?'
+    options:
+      - 'Vì BiLSTM có gấp đôi tham số nên luôn overfitting'
+      - 'Vì loss gần 0 nghĩa là gradient biến mất'
+      - 'Vì chiều ngược đã đọc $x_{t+1}$ khi tạo trạng thái tại $t$: mô hình chép đáp án, và khi sinh văn bản thật thì $x_{t+1}$ chưa tồn tại'
+      - 'Thật ra nên vui: BiLSTM luôn tốt hơn LSTM một chiều'
+    answer: 2
+    explanation: 'Trạng thái chiều ngược tại $t$ tóm tắt $x_L, \dots, x_t$, nên có $x_{t+1}$, chính là nhãn. Mô hình học cách đọc đáp án chứ không học dự đoán. Lúc sinh, từ kế tiếp chưa được viết ra, nên chiều ngược không có gì để đọc. BiLSTM chỉ dùng khi cả chuỗi có sẵn từ đầu.'
+  - question: 'Bạn phân loại cả câu bằng BiLSTM của PyTorch, lấy `output[:, -1]` (vectơ tại vị trí cuối) đưa vào lớp phân loại. Chỗ nào chưa ổn?'
+    options:
+      - 'Không có gì sai, vị trí cuối luôn đã đọc cả câu theo cả hai chiều'
+      - '`output[:, -1]` chỉ chứa $\mathbf{c}_t$, không chứa $\mathbf{h}_t$'
+      - 'BiLSTM không dùng được cho phân loại cả câu'
+      - 'Nửa chiều ngược của `output[:, -1]` mới đọc đúng một từ cuối, nên câu chỉ được tóm tắt đầy đủ ở nửa chiều xuôi'
+    answer: 3
+    explanation: 'Chiều ngược chạy từ cuối về đầu, nên ở vị trí cuối nó mới bắt đầu, chỉ thấy $x_L$. Trạng thái tóm tắt cả câu của chiều ngược nằm ở vị trí đầu. Nên lấy `h_n` (trạng thái cuối của mỗi chiều) hoặc ghép nửa xuôi của `output[:, -1]` với nửa ngược của `output[:, 0]`.'
+  - question: 'Trong ô PyTorch của bài, nhãn tại vị trí $t$ là "chữ số kế tiếp có lớn hơn chữ số hiện tại không". LSTM một chiều dừng ở khoảng 75% đúng. Vì sao không cao hơn được?'
+    options:
+      - 'Vì huấn luyện quá ít bước; chạy lâu hơn sẽ lên 100%'
+      - 'Tại $t$ nó chưa đọc $x_{t+1}$, chỉ đoán được theo $x_t$: chữ số nhỏ thì đoán "lớn hơn", và cách đoán tốt nhất đó đúng 75% trung bình'
+      - 'Vì LSTM một chiều có ít tham số hơn'
+      - 'Vì gradient tiêu biến sau 12 bước'
+    answer: 1
+    explanation: 'Với chữ số hiện tại $v$, xác suất chữ số kế tiếp lớn hơn là $(9 - v)/10$. Đoán theo phía nhiều khả năng hơn thì đúng $\max\big((9 - v)/10,\ (v + 1)/10\big)$; trung bình trên 10 giá trị của $v$ là $7.5/10 = 0.75$. Không có thông tin về $x_{t+1}$ thì huấn luyện lâu hay thêm tham số cũng không vượt được trần này. BiLSTM đọc được $x_{t+1}$ nên gần như đúng hết.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import lstmStepCode from '@code/dl/lstm-bilstm/lstm-step.vi.py?raw';
+import bilstmCode from '@code/dl/lstm-bilstm/bilstm-tagging.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu vai trò của trạng thái ô (cell state) $\mathbf{c}_t$ và ba cổng của LSTM (Long Short-Term Memory): cổng quên (forget gate), cổng vào (input gate), cổng ra (output gate).
+- Giải thích được vì sao đường cộng $\mathbf{c}_t = \mathbf{f}_t \odot \mathbf{c}_{t-1} + \mathbf{i}_t \odot \tilde{\mathbf{c}}_t$ giúp gradient đi xa hơn RNN thường.
+- Cài đặt được một bước LSTM bằng NumPy, đếm được số tham số, và so LSTM với GRU.
+- Nhận ra khi nào dùng được LSTM hai chiều (BiLSTM) và khi nào không, và dùng LSTM nhiều tầng.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+**RNN** (bài [Mạng hồi tiếp](/vi/dl/rnn/)) đọc chuỗi $\mathbf{x}_1, \dots, \mathbf{x}_L$ từng bước và cập nhật **trạng thái ẩn** (hidden state) $\mathbf{h}_t = \tanh(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{W}_{hh}\mathbf{h}_{t-1} + \mathbf{b}_h)$. Khi lan truyền ngược qua nhiều bước, gradient bị nhân lặp với cùng một ma trận nên dễ tiêu biến hoặc bùng nổ. **GRU** (bài [GRU](/vi/dl/gru/)) thêm **cổng** (gate): các vectơ trong khoảng $(0, 1)$, nhân từng phần tử ($\odot$) để quyết định giữ bao nhiêu trạng thái cũ, lấy bao nhiêu trạng thái mới.
+:::
+
+## Trực giác
+
+Đọc câu này và đoán chữ còn thiếu:
+
+> Chiếc **xe máy** mà ông nội mua từ năm 1995, sau bao nhiêu lần sửa, thay lốp, sơn lại và một trận ngập nước năm ngoái, đến giờ vẫn ___ được.
+
+Bạn đoán "chạy", không phải "nấu" hay "đọc". Từ quyết định đáp án là "xe máy", nằm cách chỗ trống 26 chữ. Trong khoảng giữa có rất nhiều thứ mà bạn đọc xong là quên ngay (năm 1995, lốp, sơn). Bạn chỉ **giữ lại** một ghi chú nhỏ: "chủ ngữ là một cái xe".
+
+RNN thường không giữ ghi chú kiểu đó được lâu. Mỗi bước nó **viết lại toàn bộ** trạng thái $\mathbf{h}_t$: nhân với ma trận, cộng đầu vào mới, rồi qua $\tanh$. Giống như chụp lại bản photo của bản photo: sau vài chục lần, nét chữ ban đầu mờ hẳn. Về mặt huấn luyện, như bài RNN đã chỉ ra, tín hiệu lỗi đi ngược 26 bước cũng bị nhân 26 lần với cùng một ma trận, nên thường tắt trước khi tới được chữ "xe máy".
+
+### Một băng chuyền chạy suốt câu
+
+LSTM thêm một đường riêng cho ghi chú, gọi là **trạng thái ô** $\mathbf{c}_t$. Hãy hình dung một băng chuyền chạy ngang qua mọi bước thời gian. Mặc định, thứ gì đặt lên băng chuyền thì cứ thế trôi đi, không bị nhân với ma trận nào. Ở mỗi bước có ba người gác, mỗi người cầm một cái van:
+
+- **Người gác quên:** nhìn đầu vào mới và quyết định bỏ bớt món nào trên băng. Đọc tới một chủ ngữ mới thì xóa chủ ngữ cũ.
+- **Người gác vào:** quyết định đặt thêm món mới nào lên băng. Đọc "xe máy" thì ghi lại "chủ ngữ là một cái xe".
+- **Người gác ra:** quyết định lúc này lấy món nào trên băng ra dùng. Ở chỗ trống, cần lấy đúng ghi chú về chủ ngữ.
+
+Phần lớn các bước, cả ba van gần như không động tới ghi chú "xe máy", nên nó đi qua 26 chữ mà gần như nguyên vẹn.
+
+### Khi cả câu đã có sẵn
+
+Giờ đổi sang một việc khác: gắn nhãn cho từng từ. Từ "Hồ" ở đầu hai câu sau là tên người hay một phần tên địa danh?
+
+> **Hồ** Chí Minh đọc bản Tuyên ngôn Độc lập năm 1945.
+>
+> **Hồ** Chí Minh là thành phố đông dân nhất Việt Nam.
+
+Bên trái từ "Hồ" không có gì cả. Chỉ phần **bên phải** ("đọc bản Tuyên ngôn" hay "là thành phố") mới quyết định. Một LSTM đọc từ trái sang phải phải đưa ra nhãn cho "Hồ" khi chưa thấy chữ nào phía sau. Nếu cả câu đã nằm sẵn trong tay, sao không đọc thêm một lượt từ phải sang trái?
+
+Bài toán của bài này là: **thiết kế một ô hồi tiếp giữ được thông tin (và gradient) qua hàng chục bước, rồi ghép hai ô như vậy chạy ngược chiều nhau để mỗi vị trí nhìn được cả hai phía của câu.**
+
+## Lý thuyết
+
+### Phát biểu bài toán
+
+Đầu vào là chuỗi $\mathbf{x}_1, \dots, \mathbf{x}_L$, mỗi $\mathbf{x}_t \in \mathbb{R}^{d_x}$ (ví dụ embedding của một từ). Khác RNN, LSTM mang theo **hai** vectơ qua mỗi bước, cùng kích thước $d_h$:
+
+- **Trạng thái ô** $\mathbf{c}_t$: băng chuyền, bộ nhớ dài hạn. Nó không đi thẳng ra ngoài.
+- **Trạng thái ẩn** $\mathbf{h}_t$: phần được đọc ra ở bước $t$, dùng để dự đoán và để tính các cổng ở bước sau.
+
+Ban đầu $\mathbf{c}_0 = \mathbf{h}_0 = \mathbf{0}$. Mỗi bước nhận $\mathbf{x}_t$, $\mathbf{h}_{t-1}$, $\mathbf{c}_{t-1}$ và trả ra $\mathbf{h}_t$, $\mathbf{c}_t$.
+
+### Bốn nhánh: ba cổng và một ứng viên
+
+Mỗi bước, LSTM tính bốn vectơ từ cùng một đầu vào $(\mathbf{x}_t, \mathbf{h}_{t-1})$. Mỗi vectơ có bộ trọng số riêng, cùng khuôn với RNN thường: $\mathbf{W}_{x\cdot} \in \mathbb{R}^{d_h \times d_x}$ nhân với đầu vào, $\mathbf{W}_{h\cdot} \in \mathbb{R}^{d_h \times d_h}$ nhân với trạng thái cũ, và một vectơ bias.
+
+$$
+\begin{aligned}
+\mathbf{f}_t &= \sigma(\mathbf{W}_{xf}\mathbf{x}_t + \mathbf{W}_{hf}\mathbf{h}_{t-1} + \mathbf{b}_f) \\
+\mathbf{i}_t &= \sigma(\mathbf{W}_{xi}\mathbf{x}_t + \mathbf{W}_{hi}\mathbf{h}_{t-1} + \mathbf{b}_i) \\
+\mathbf{o}_t &= \sigma(\mathbf{W}_{xo}\mathbf{x}_t + \mathbf{W}_{ho}\mathbf{h}_{t-1} + \mathbf{b}_o) \\
+\tilde{\mathbf{c}}_t &= \tanh(\mathbf{W}_{xc}\mathbf{x}_t + \mathbf{W}_{hc}\mathbf{h}_{t-1} + \mathbf{b}_c)
+\end{aligned}
+$$
+
+- $\mathbf{f}_t$ là **cổng quên**, $\mathbf{i}_t$ là **cổng vào**, $\mathbf{o}_t$ là **cổng ra**. Cả ba qua sigmoid $\sigma$, nên mỗi thành phần nằm trong $(0, 1)$: 0 là đóng hẳn, 1 là mở hết.
+- $\tilde{\mathbf{c}}_t$ là **ứng viên** (candidate): nội dung mới có thể ghi lên băng. Nó qua $\tanh$, nên nằm trong $(-1, 1)$ và có thể âm hay dương. Nhánh này chính là công thức của RNN thường.
+
+Vì sao cổng dùng sigmoid còn ứng viên dùng $\tanh$? Cổng là một **hệ số nhân**, cần nằm giữa "chặn hết" và "cho qua hết". Ứng viên là **nội dung**, cần được tăng lẫn giảm giá trị của ô.
+
+### Cập nhật trạng thái ô và trạng thái ẩn
+
+Hai dòng quan trọng nhất của bài:
+
+$$
+\begin{aligned}
+\mathbf{c}_t &= \mathbf{f}_t \odot \mathbf{c}_{t-1} + \mathbf{i}_t \odot \tilde{\mathbf{c}}_t \\
+\mathbf{h}_t &= \mathbf{o}_t \odot \tanh(\mathbf{c}_t)
+\end{aligned}
+$$
+
+Đọc dòng đầu theo từng thành phần $j$. Thành phần $c_{t,j}$ mới bằng phần **giữ lại** của giá trị cũ, $f_{t,j}\,c_{t-1,j}$, cộng phần **ghi thêm** của ứng viên, $i_{t,j}\,\tilde{c}_{t,j}$. Vài trường hợp đầu mút:
+
+| $f_{t,j}$ | $i_{t,j}$ | $c_{t,j}$ | Ô làm gì |
+|---:|---:|---|---|
+| 1 | 0 | $c_{t-1,j}$ | Giữ nguyên, bỏ qua đầu vào |
+| 0 | 1 | $\tilde{c}_{t,j}$ | Xóa cũ, ghi mới hoàn toàn |
+| 1 | 1 | $c_{t-1,j} + \tilde{c}_{t,j}$ | Cộng dồn |
+| 0 | 0 | 0 | Xóa sạch |
+
+Hai cổng độc lập, nên LSTM có cả trường hợp "cộng dồn" mà GRU không có: ở GRU, tỉ lệ giữ cái cũ và tỉ lệ lấy cái mới luôn cộng lại bằng 1.
+
+Dòng thứ hai đọc ô ra ngoài. $\tanh$ ép giá trị của ô (có thể lớn hơn 1 do cộng dồn) về $(-1, 1)$, rồi cổng ra chọn thành phần nào được lộ ra. Vì vậy ô có thể **giữ** một thông tin rất lâu mà không để nó ảnh hưởng tới $\mathbf{h}_t$, cho tới lúc cần.
+
+:::note[Ghi nhớ]
+LSTM tách bộ nhớ ($\mathbf{c}_t$) khỏi phần đọc ra ($\mathbf{h}_t$). Cổng quên quyết định giữ bao nhiêu ô cũ, cổng vào quyết định ghi bao nhiêu nội dung mới, cổng ra quyết định để lộ bao nhiêu ô. Ô được cập nhật bằng **phép cộng**, không phải bằng cách viết lại qua ma trận.
+:::
+
+### Vì sao đường cộng giúp gradient đi xa
+
+Nhắc lại vì sao RNN thường gặp khó. Với $\mathbf{h}_t = \tanh(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{W}_{hh}\mathbf{h}_{t-1} + \mathbf{b}_h)$, đạo hàm của $\mathbf{h}_t$ theo $\mathbf{h}_{t-1}$ là
+
+$$
+\frac{\partial \mathbf{h}_t}{\partial \mathbf{h}_{t-1}} = \mathrm{diag}\!\left(\mathbf{1} - \mathbf{h}_t \odot \mathbf{h}_t\right)\mathbf{W}_{hh}
+$$
+
+($\mathrm{diag}(\mathbf{v})$ là ma trận đường chéo có các phần tử của $\mathbf{v}$ trên đường chéo; $\mathbf{1} - \mathbf{h}_t \odot \mathbf{h}_t$ là đạo hàm của $\tanh$, tính từng phần tử). Đi ngược $k$ bước thì gradient bị nhân với $k$ ma trận như vậy, cùng một $\mathbf{W}_{hh}$ lặp lại. Tích đó thường co về 0 hoặc phình ra theo cấp số nhân.
+
+Giờ xét LSTM, và chỉ nhìn **đường thẳng trên băng chuyền**: từ $\mathbf{c}_{t-1}$ tới $\mathbf{c}_t$, coi các cổng như những hệ số đã biết. Lấy đạo hàm dòng $\mathbf{c}_t = \mathbf{f}_t \odot \mathbf{c}_{t-1} + \mathbf{i}_t \odot \tilde{\mathbf{c}}_t$ theo $\mathbf{c}_{t-1}$: số hạng thứ hai không chứa $\mathbf{c}_{t-1}$ nên bỏ đi, số hạng đầu là nhân từng phần tử với $\mathbf{f}_t$, nên
+
+$$
+\frac{\partial \mathbf{c}_t}{\partial \mathbf{c}_{t-1}} = \mathrm{diag}(\mathbf{f}_t)
+$$
+
+Đi ngược từ bước $t$ về bước $t - k$, theo quy tắc dây chuyền ta nhân $k$ ma trận đường chéo. Tích các ma trận đường chéo vẫn là ma trận đường chéo, với phần tử là tích các phần tử tương ứng:
+
+$$
+\frac{\partial \mathbf{c}_t}{\partial \mathbf{c}_{t-k}} = \mathrm{diag}\!\left(\mathbf{f}_t \odot \mathbf{f}_{t-1} \odot \cdots \odot \mathbf{f}_{t-k+1}\right)
+$$
+
+So với RNN, có ba khác biệt:
+
+1. **Không có ma trận trọng số và không có đạo hàm $\tanh$** trên đường này. Gradient chỉ bị nhân với các giá trị cổng.
+2. **Hệ số do mạng tự chọn, ở từng bước và từng thành phần.** Thành phần nào đang giữ thông tin quan trọng thì mạng học cách để $f \approx 1$ ở đó, và gradient đi qua gần như nguyên vẹn. Ở RNN, cùng một $\mathbf{W}_{hh}$ phải dùng cho mọi bước.
+3. **Không bùng nổ trên đường này**, vì mỗi $f$ nằm trong $(0, 1)$.
+
+Đây chưa phải toàn bộ gradient: các cổng cũng phụ thuộc $\mathbf{h}_{t-1}$, nên còn những đường khác đi qua ma trận trọng số. Nhưng chỉ cần **một** đường đi xa được là tín hiệu lỗi tới được chữ "xe máy". Ý tưởng "cộng thay vì viết lại" bạn sẽ gặp lại ở kết nối tắt (residual connection) của ResNet và Transformer.
+
+LSTM cũng không phải phép màu. Với $f = 0.9$ ở mọi bước, sau 100 bước còn $0.9^{100} \approx 2.7 \times 10^{-5}$; với $f = 0.99$ thì còn $0.99^{100} \approx 0.37$. Mạng phải **học** được để $f$ rất gần 1. Gradient qua các đường khác vẫn có thể bùng nổ, nên cắt chuẩn gradient (gradient clipping) vẫn hay dùng khi huấn luyện LSTM.
+
+:::tip[Mẹo: khởi tạo bias cổng quên bằng 1]
+Khởi tạo $\mathbf{b}_f$ bằng 0 thì lúc đầu $\mathbf{f}_t \approx \sigma(0) = 0.5$: mỗi bước ô mất một nửa, sau 10 bước còn chưa tới 0.1%. Mạng khó học được phụ thuộc xa ngay từ đầu. Khởi tạo $\mathbf{b}_f = \mathbf{1}$ thì $\mathbf{f}_t \approx \sigma(1) \approx 0.73$, ô nhớ lâu hơn hẳn. Ý này đã có trong bài giới thiệu cổng quên (Gers và cộng sự, 2000). Jozefowicz và cộng sự (2015) nhắc lại nó vì thấy nhiều người không biết, và khuyên dùng cho mọi LSTM: trong thí nghiệm của họ, riêng mẹo này đã giúp LSTM gần đuổi kịp GRU.
+:::
+
+### Một chút lịch sử
+
+LSTM do Sepp Hochreiter và Jürgen Schmidhuber công bố năm 1997, nhằm giải quyết đúng vấn đề gradient tiêu biến của RNN. Bản gốc **chưa có cổng quên**: ô cập nhật bằng $\mathbf{c}_t = \mathbf{c}_{t-1} + \mathbf{i}_t \odot \tilde{\mathbf{c}}_t$, tức $\mathbf{f}_t$ luôn bằng 1. Các tác giả gọi đường này là "vòng quay lỗi không đổi" (constant error carousel): lỗi chạy vòng qua ô mà không to lên hay nhỏ đi.
+
+Vấn đề: với một luồng dữ liệu dài không có điểm ngắt, ô chỉ cộng mà không bao giờ xóa, nên giá trị cứ phình ra. Năm 2000, Felix Gers, Jürgen Schmidhuber và Fred Cummins thêm **cổng quên** để ô tự xóa khi cần. Dạng có cổng quên là dạng mà ngày nay mọi người gọi là LSTM, và là dạng `nn.LSTM` của PyTorch cài đặt. Một nghiên cứu lớn (Greff và cộng sự, 2017) so tám biến thể của LSTM và thấy cổng quên là một trong hai thành phần quan trọng nhất.
+
+### Đếm tham số, và so với GRU
+
+Mỗi nhánh có $\mathbf{W}_{x\cdot}$ ($d_h d_x$ số), $\mathbf{W}_{h\cdot}$ ($d_h^2$ số) và bias ($d_h$ số), tức $d_h(d_x + d_h) + d_h$, đúng bằng một RNN thường. LSTM có bốn nhánh nên:
+
+$$
+\text{số tham số LSTM} = 4\left(d_h(d_x + d_h) + d_h\right)
+$$
+
+GRU có ba nhánh (hai cổng và một ứng viên), nên bằng 3 lần RNN. Ví dụ với $d_x = 3$, $d_h = 4$ (ô NumPy dưới đây): RNN có $4 \cdot 7 + 4 = 32$ tham số, GRU có 96, LSTM có 128.
+
+:::note[PyTorch đếm nhiều hơn một chút]
+`nn.LSTM` của PyTorch dùng **hai** vectơ bias cho mỗi nhánh, một đi với $\mathbf{W}_{x\cdot}$ (`bias_ih`), một đi với $\mathbf{W}_{h\cdot}$ (`bias_hh`). Hai vectơ này luôn được cộng với nhau, nên về toán chúng tương đương một vectơ, chỉ thừa tham số. Số PyTorch báo là $4\left(d_h(d_x + d_h) + 2d_h\right)$, với ví dụ trên là 144. `nn.GRU` cũng có hai bias như vậy.
+:::
+
+So sánh LSTM và GRU:
+
+| Tiêu chí | LSTM | GRU |
+|---|---|---|
+| Vectơ mang qua mỗi bước | Hai: $\mathbf{c}_t$ và $\mathbf{h}_t$ | Một: $\mathbf{h}_t$ |
+| Số nhánh | 4 (quên, vào, ra, ứng viên) | 3 (reset, update, ứng viên) |
+| Số tham số | 4 lần RNN | 3 lần RNN |
+| Giữ cũ và ghi mới | Hai cổng độc lập, được cộng dồn | Một cổng, nội suy giữa cũ và mới |
+| Cổng ra | Có, ô có thể giữ kín thông tin | Không, toàn bộ $\mathbf{h}_t$ lộ ra |
+| Năm | 1997 (cổng quên: 2000) | 2014 |
+
+Còn chạy thực tế thì sao? Chung và cộng sự (2014) so hai loại trên dữ liệu nhạc và tiếng nói, và thấy GRU **tương đương** LSTM. Jozefowicz và cộng sự (2015) thử hơn mười nghìn kiến trúc hồi tiếp. Với khởi tạo thông thường, GRU hơn LSTM ở hầu hết các bài, trừ mô hình ngôn ngữ; LSTM có bias cổng quên bằng 1 thì gần đuổi kịp GRU, và khi có dropout thì LSTM tốt nhất ở bài mô hình ngôn ngữ. Không loại nào thắng hẳn. Lời khuyên thực dụng: GRU nhẹ hơn khoảng một phần tư, thử trước nếu cần nhanh; LSTM là lựa chọn mặc định quen thuộc; còn tốt hơn thì phải đo trên dữ liệu của bạn.
+
+### LSTM nhiều tầng
+
+Một tầng LSTM biến chuỗi $\mathbf{x}_1, \dots, \mathbf{x}_L$ thành chuỗi $\mathbf{h}_1, \dots, \mathbf{h}_L$, cùng độ dài. Vậy có thể đưa chuỗi đó làm đầu vào cho một tầng LSTM thứ hai, rồi thứ ba. Viết $\mathbf{h}^{[l]}_t$ là trạng thái ẩn của tầng $l$ tại bước $t$, với $\mathbf{h}^{[0]}_t = \mathbf{x}_t$:
+
+$$
+\mathbf{h}^{[l]}_t, \mathbf{c}^{[l]}_t = \mathrm{LSTM}^{[l]}\!\left(\mathbf{h}^{[l-1]}_t,\ \mathbf{h}^{[l]}_{t-1},\ \mathbf{c}^{[l]}_{t-1}\right)
+$$
+
+Mỗi tầng có bộ tham số và băng chuyền riêng. Cũng như các lớp của một MLP, xếp chồng cho mạng thêm khả năng biểu diễn: tầng trên làm việc với những đặc trưng mà tầng dưới đã rút ra, thay vì với đầu vào thô. Trong PyTorch chỉ cần `nn.LSTM(..., num_layers=2, dropout=0.2)`; `dropout` áp lên đầu ra giữa các tầng. Hai đến bốn tầng là phổ biến. Mô hình seq2seq của Sutskever và cộng sự (2014) dùng LSTM 4 tầng (xem bài [Mô hình chuỗi sang chuỗi](/vi/llm/seq2seq/)), còn hệ dịch máy GNMT của Google (Wu và cộng sự, 2016) dùng 8 tầng cho encoder và 8 tầng cho decoder.
+
+### BiLSTM: đọc theo cả hai chiều
+
+Ý tưởng **RNN hai chiều** (bidirectional RNN) có từ Schuster và Paliwal (1997). Graves và Schmidhuber (2005) ghép nó với LSTM thành **BiLSTM**. Cách làm rất đơn giản: chạy **hai LSTM riêng biệt**, tham số khác nhau, trên cùng chuỗi.
+
+- Chiều xuôi đọc từ $\mathbf{x}_1$ tới $\mathbf{x}_L$, cho $\overrightarrow{\mathbf{h}}_t$ tóm tắt $\mathbf{x}_1, \dots, \mathbf{x}_t$.
+- Chiều ngược đọc từ $\mathbf{x}_L$ về $\mathbf{x}_1$, cho $\overleftarrow{\mathbf{h}}_t$ tóm tắt $\mathbf{x}_L, \dots, \mathbf{x}_t$.
+
+Tại mỗi vị trí, ghép (concatenate) hai vectơ thành một:
+
+$$
+\mathbf{h}_t = \left[\overrightarrow{\mathbf{h}}_t;\ \overleftarrow{\mathbf{h}}_t\right] \in \mathbb{R}^{2d_h}
+$$
+
+Vậy $\mathbf{h}_t$ biết cả phần trước lẫn phần sau vị trí $t$. Với từ "Hồ" ở mục Trực giác, nửa ngược đã đọc "đọc bản Tuyên ngôn" hay "là thành phố" trước khi tới "Hồ". BiLSTM có gấp đôi tham số của một LSTM cùng $d_h$, và lớp phía sau nhận vectơ $2d_h$ chiều.
+
+**Dùng được khi cả chuỗi có sẵn từ đầu:**
+
+- Gán nhãn từng từ: từ loại, nhận dạng thực thể có tên (named entity recognition, NER). Huang, Xu và Yu (2015) ghép BiLSTM với CRF cho các bài này, một cấu hình rất phổ biến trước Transformer.
+- Phân loại cả câu, cả đoạn.
+- Encoder của mô hình dịch: câu nguồn đã có đủ. Tầng dưới cùng của encoder GNMT là hai chiều.
+
+**Không dùng được khi:**
+
+- **Sinh văn bản từ trái sang phải.** Khi sinh từ thứ $t + 1$, các từ phía sau chưa được viết ra, nên chiều ngược không có gì để đọc. Tệ hơn, nếu cố huấn luyện mô hình ngôn ngữ bằng BiLSTM, $\overleftarrow{\mathbf{h}}_t$ đã đọc $\mathbf{x}_{t+1}$, đúng là nhãn cần dự đoán: mô hình chép đáp án thay vì học. Decoder của seq2seq vì vậy luôn một chiều.
+- **Xử lý theo thời gian thực**, như nhận dạng giọng nói trực tiếp: muốn chạy chiều ngược thì phải chờ hết câu.
+
+### Giới hạn
+
+- **Vẫn tuần tự.** Bước $t$ phải đợi bước $t - 1$ xong, nên không tận dụng được GPU để xử lý song song theo chiều dài chuỗi. Huấn luyện trên chuỗi dài chậm.
+- **Vẫn khó với chuỗi rất dài.** Gradient trên băng chuyền là tích các $f$, chỉ đi xa khi $f$ rất gần 1. Thông tin từ hàng trăm bước trước vẫn phải đi qua từng bước một.
+- **Mọi thứ phải nén vào một vectơ $d_h$ chiều.** Ở seq2seq, cả câu nguồn dồn vào trạng thái cuối, là nút thắt mà attention được sinh ra để gỡ.
+
+Ba giới hạn này dẫn thẳng tới bài [Transformers](/vi/dl/transformers/): thay vì chuyền thông tin qua từng bước, mỗi vị trí **nhìn thẳng** vào mọi vị trí khác bằng attention, và mọi vị trí được tính song song.
+
+## Minh họa
+
+Hình dưới vẽ một ô LSTM. Hãy nhìn đường nằm ngang phía trên, từ $\mathbf{c}_{t-1}$ tới $\mathbf{c}_t$: trên đường này chỉ có một phép nhân với cổng quên và một phép cộng, không có ma trận trọng số nào. Mọi thứ phức tạp (bốn nhánh sigmoid và $\tanh$) nằm ở phía dưới và chỉ "chạm" vào băng chuyền qua hai điểm đó.
+
+{/* FIG: LstmCellFigure
+    Ý: trạng thái ô chạy thẳng phía trên như một băng chuyền, chỉ bị nhân với cổng quên và cộng thêm phần mới; mọi tính toán nặng nằm phía dưới.
+    Khối và mũi tên: đọc từ trái sang phải. Trọng tâm là đường ngang phía trên: c(t-1) → nút ⊙ (nhân với f) → nút ⊕ (cộng phần mới) → c(t). Phía dưới, h(t-1) và x(t) đi vào, nhập thành một bó và tỏa ra bốn khối: σ (cổng quên), σ (cổng vào), tanh (ứng viên), σ (cổng ra). Cổng quên đi lên nút ⊙ trên băng. Cổng vào và ứng viên gặp nhau ở một nút ⊙ rồi đi lên nút ⊕. Từ c(t), một nhánh rẽ xuống qua khối tanh, gặp cổng ra ở nút ⊙, ra h(t) bên phải; h(t) cũng đi lên làm đầu ra của bước. Nhóm thứ hai (màu nhạt): bốn khối cổng.
+    Nhãn: "trạng thái ô", "cổng quên", "cổng vào", "ứng viên", "cổng ra", "trạng thái ẩn", "đầu vào".
+    Chú thích: Một bước LSTM: $\mathbf{c}_t = \mathbf{f}_t \odot \mathbf{c}_{t-1} + \mathbf{i}_t \odot \tilde{\mathbf{c}}_t$ chạy trên đường ngang phía trên, $\mathbf{h}_t = \mathbf{o}_t \odot \tanh(\mathbf{c}_t)$ đi ra bên phải. */}
+
+Bảng dưới cho thấy BiLSTM thấy gì ở vị trí đầu tiên của câu "Hồ Chí Minh là thành phố đông dân nhất Việt Nam". Chiều xuôi mới đọc đúng một từ, chiều ngược đã đọc cả câu. Ở vị trí cuối thì ngược lại.
+
+| Vị trí | Chiều xuôi $\overrightarrow{\mathbf{h}}_t$ đã đọc | Chiều ngược $\overleftarrow{\mathbf{h}}_t$ đã đọc |
+|---|---|---|
+| 1 ("Hồ") | Hồ | Hồ Chí Minh là thành phố … Việt Nam |
+| 4 ("là") | Hồ Chí Minh là | là thành phố … Việt Nam |
+| 11 ("Nam") | Hồ Chí Minh là thành phố … Việt Nam | Nam |
+
+Hàng cuối cũng giải thích một lỗi hay gặp: vectơ ở vị trí cuối **không** tóm tắt cả câu theo cả hai chiều (xem mục Lỗi hay gặp).
+
+## Ví dụ code
+
+Các ô chạy độc lập. Ô thứ nhất chạy trên trang, chỉ dùng NumPy. Ô thứ hai cần PyTorch nên chạy trên máy bạn, CPU là đủ.
+
+Ô thứ nhất cài đặt đúng các công thức ở mục Lý thuyết với $d_x = 3$, $d_h = 4$, chạy qua một chuỗi ngẫu nhiên $L = 5$ bước, bias cổng quên khởi tạo bằng 1, rồi đếm tham số.
+
+<PythonRunner code={lstmStepCode} title="Một bước LSTM bằng NumPy" />
+
+Đọc kết quả:
+
+- **Cổng quên** ở bước đầu có các giá trị 0.77, 0.74, 0.69, 0.73, quanh $\sigma(1) \approx 0.73$: đúng tác dụng của mẹo bias bằng 1. Các bước sau, khi $\mathbf{h}_{t-1}$ khác 0, giá trị tản ra hơn (từ 0.48 tới 0.88).
+- **Trạng thái ô** đổi dấu và lớn dần qua các bước (thành phần đầu: 0.13, 0.49, 0.19, $-0.53$, $-0.87$), còn $\mathbf{h}_L$ luôn nằm trong $(-1, 1)$ vì đi qua $\tanh$ và cổng ra.
+- **`prod f`** là tích các $f_t$ của năm bước, tức đạo hàm theo đường thẳng trên băng chuyền $\partial \mathbf{c}_5 / \partial \mathbf{c}_0$: từ 0.103 tới 0.271. Gần với $0.73^5 \approx 0.21$. Nếu bias cổng quên bằng 0, các $f$ quanh 0.5 và tích chỉ còn cỡ $0.5^5 \approx 0.03$. Đây là mạng chưa huấn luyện; mạng đã học sẽ đẩy $f$ sát 1 ở những thành phần cần nhớ.
+- **Đếm tham số:** 128, khớp công thức $4(d_h(d_x + d_h) + d_h)$. RNN có 32, GRU 96, còn PyTorch sẽ báo 144 vì có hai bias mỗi nhánh.
+
+Ô thứ hai so LSTM một chiều với BiLSTM trên một bài gán nhãn tự sinh. Đầu vào là dãy 12 chữ số ngẫu nhiên. Nhãn tại vị trí $t$ là 1 nếu chữ số **kế tiếp** lớn hơn chữ số hiện tại, ngược lại là 0 (vị trí cuối không có nhãn). Nhãn phụ thuộc vào phía bên phải, giống từ "Hồ".
+
+<LocalCode
+  code={bilstmCode}
+  title="LSTM một chiều và BiLSTM gán nhãn từng vị trí"
+  packages={['torch']}
+  hardware="CPU là đủ, không cần GPU. Khoảng 30 tới 60 giây trên máy phát triển, có thể vài phút trên máy chậm hoặc đang bận"
+  sampleVaries={false}
+>
+
+```text
+LSTM   params  6400  loss 0.497  test acc 0.753
+BiLSTM params 12800  loss 0.000  test acc 1.000
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Số tham số:** LSTM có $d_x = 16$ (embedding), $d_h = 32$, nên PyTorch báo $4(32 \cdot 48 + 2 \cdot 32) = 6400$, đúng công thức hai bias ở mục Lý thuyết. BiLSTM là hai LSTM như vậy, nên gấp đôi: 12 800.
+- **LSTM một chiều dừng ở 0.753.** Đây không phải do huấn luyện chưa đủ. Tại vị trí $t$, nó chưa đọc $x_{t+1}$, nên chỉ đoán được theo $x_t$: chữ số hiện tại là $v$ thì xác suất chữ số kế tiếp lớn hơn là $(9 - v)/10$. Đoán theo phía nhiều khả năng hơn thì đúng $\max\big((9 - v)/10,\ (v + 1)/10\big)$, trung bình trên 10 giá trị của $v$ là $7.5/10 = 0.75$. Mô hình đã học được cách đoán tốt nhất có thể và chạm trần (0.753 hơi trên 0.75 chỉ do 2000 dãy kiểm tra là một mẫu ngẫu nhiên).
+- **BiLSTM đạt 1.000** trên 2000 dãy kiểm tra, loss về 0.000. Chiều ngược tại vị trí $t$ đã đọc $x_{t+1}$, nên bài toán trở nên tầm thường.
+
+Chênh lệch ở đây đến từ **thông tin**, không phải từ số tham số: cho LSTM một chiều thêm tầng hay thêm chiều thì nó vẫn không thấy được $x_{t+1}$. Seed cố định nên chạy lại trên cùng máy cho cùng kết quả; trên máy khác hoặc bản PyTorch khác, số loss có thể lệch đôi chút. Nếu máy chạy chậm bất thường, đặt biến môi trường `OMP_NUM_THREADS=1` trước khi chạy: mô hình nhỏ thế này không lợi gì từ nhiều luồng.
+
+## Lỗi hay gặp
+
+:::caution[Dùng BiLSTM cho mô hình sinh văn bản]
+Trạng thái chiều ngược tại vị trí $t$ đã đọc $\mathbf{x}_{t+1}$. Nếu nhãn tại $t$ chính là $\mathbf{x}_{t+1}$ (mô hình ngôn ngữ), mô hình chỉ cần chép, loss huấn luyện xuống gần 0, nhưng khi sinh thật thì từ kế tiếp chưa có. Quy tắc: chỉ dùng BiLSTM khi **cả chuỗi đầu vào có sẵn** lúc dự đoán. Phần sinh (decoder) luôn một chiều.
+:::
+
+:::caution[Lấy vị trí cuối của BiLSTM làm vectơ cho cả câu]
+Với `bidirectional=True`, `output[:, -1]` chứa trạng thái **cuối** của chiều xuôi nhưng trạng thái **đầu tiên** của chiều ngược, vốn mới đọc đúng một từ (hàng cuối của bảng ở mục Minh họa). Tài liệu PyTorch nói rõ `h_n` không bằng phần tử cuối của `output` khi hai chiều. Để có vectơ cho cả câu, dùng `h_n` (`h_n[-2]` là chiều xuôi, `h_n[-1]` là chiều ngược của tầng trên cùng), hoặc ghép `output[:, -1, :d_h]` với `output[:, 0, d_h:]`. Với câu có độ dài khác nhau đã đệm thêm, dùng `pack_padded_sequence` để chiều ngược bắt đầu từ từ thật cuối cùng, không phải từ ký tự đệm.
+:::
+
+:::caution[Nhầm $\mathbf{c}_t$ với $\mathbf{h}_t$, hoặc quên mang theo $\mathbf{c}_t$]
+`nn.LSTM` trả về `output, (h_n, c_n)`. Lớp phía sau dùng `output` (chuỗi các $\mathbf{h}_t$), không dùng $\mathbf{c}_t$: ô là bộ nhớ trong, chưa qua cổng ra. Khi tự viết vòng lặp từng bước (ví dụ lúc sinh), phải truyền **cả hai** $(\mathbf{h}, \mathbf{c})$ sang bước sau. Chỉ truyền $\mathbf{h}$ và để $\mathbf{c}$ về 0 mỗi bước là xóa sạch băng chuyền, LSTM thành một RNN có cổng kém hơn.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- LSTM mang theo trạng thái ô $\mathbf{c}_t$ (bộ nhớ) bên cạnh trạng thái ẩn $\mathbf{h}_t$ (phần đọc ra). Ba cổng sigmoid điều khiển nó: $\mathbf{c}_t = \mathbf{f}_t \odot \mathbf{c}_{t-1} + \mathbf{i}_t \odot \tilde{\mathbf{c}}_t$ và $\mathbf{h}_t = \mathbf{o}_t \odot \tanh(\mathbf{c}_t)$.
+- Trên đường băng chuyền, gradient chỉ bị nhân với các giá trị cổng quên, không qua ma trận trọng số hay đạo hàm $\tanh$. Mạng học $f \approx 1$ ở chỗ cần nhớ, nên gradient đi xa hơn RNN thường. Khởi tạo bias cổng quên bằng 1 giúp lúc đầu.
+- LSTM có 4 lần số tham số của RNN, GRU có 3 lần. Trên thực tế hai loại ngang nhau, tùy bài. Xếp chồng nhiều tầng LSTM bằng cách lấy chuỗi $\mathbf{h}_t$ của tầng dưới làm đầu vào tầng trên.
+- BiLSTM chạy hai LSTM ngược chiều và ghép trạng thái, nên mỗi vị trí thấy cả hai phía. Dùng khi có cả chuỗi (gán nhãn, NER, phân loại, encoder); không dùng để sinh văn bản từ trái sang phải.
+
+**Đọc thêm:**
+
+- Christopher Olah (2015). [*Understanding LSTM Networks*](https://colah.github.io/posts/2015-08-Understanding-LSTMs/). Bài viết có hình vẽ từng cổng, nguồn của hình ảnh "băng chuyền". Hình ảnh trực quan nhất để đọc cùng bài này.
+- Aston Zhang, Zachary C. Lipton, Mu Li, Alexander J. Smola (2023). [*Dive into Deep Learning*](https://d2l.ai/chapter_recurrent-modern/lstm.html), mục 10.1 (LSTM); mục 10.3, 10.4 cho RNN nhiều tầng và hai chiều. Có code cài đặt từ đầu. Sách viết $\mathbf{I}_t, \mathbf{F}_t, \mathbf{O}_t$ cho cổng và gọi $\tilde{\mathbf{C}}_t$ là "input node".
+- Sepp Hochreiter, Jürgen Schmidhuber (1997). [*Long Short-Term Memory*](https://doi.org/10.1162/neco.1997.9.8.1735). *Neural Computation* 9(8). Bài gốc, chưa có cổng quên; phần đầu phân tích vì sao gradient tiêu biến.
+- Felix A. Gers, Jürgen Schmidhuber, Fred Cummins (2000). [*Learning to Forget: Continual Prediction with LSTM*](https://doi.org/10.1162/089976600300015015). *Neural Computation* 12(10). Bài thêm cổng quên.
+- Rafal Jozefowicz, Wojciech Zaremba, Ilya Sutskever (2015). [*An Empirical Exploration of Recurrent Network Architectures*](https://proceedings.mlr.press/v37/jozefowicz15.html). ICML 2015. So LSTM, GRU và hơn mười nghìn biến thể; nguồn của mẹo bias cổng quên bằng 1.
+- Alex Graves, Jürgen Schmidhuber (2005). [*Framewise Phoneme Classification with Bidirectional LSTM and Other Neural Network Architectures*](https://doi.org/10.1016/j.neunet.2005.06.042). *Neural Networks* 18(5–6). Bài giới thiệu BiLSTM, trên bài nhận dạng âm vị.
+
+<LessonProgress />

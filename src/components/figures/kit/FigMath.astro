@@ -9,7 +9,11 @@
 // head ("×" of "× N"), dx = 3 before the symbol. FigNode draws one of these as its `math` row.
 // The central baseline and the middle anchor come from figures.css (llm-lessons.md 2.9.3): only start and end
 // are written.
+// Added for the DL figures (docs/architecture/dl-lessons.md, section 4.2): a sub that starts with a letter is
+// italic, as KaTeX sets h_t and h_{t−1} (Barlow 400 italic is loaded); `tilde` puts a "~" over a bold symbol
+// (the candidates h̃_t, c̃_t), placed by tildeShift in src/lib/figures/tilde.ts.
 import { FIG_FONT, checkMathLabel, round1, type MathLabel } from '@lib/figures/geometry';
+import { TILDE_SIZE, tildeShift } from '@lib/figures/tilde';
 
 interface Props extends MathLabel {
   x: number;
@@ -17,16 +21,26 @@ interface Props extends MathLabel {
   y: number;
   size?: 'label' | 'small';
   anchor?: 'start' | 'middle' | 'end';
+  /** A tilde over the symbol; bold symbols only. */
+  tilde?: boolean;
 }
 
-const { x, y, symbol, sub, after, before, bold = false, size = 'label', anchor = 'middle' } = Astro.props;
+const { x, y, symbol, sub, after, before, bold = false, tilde = false, size = 'label', anchor = 'middle' } = Astro.props;
+const fontSize = FIG_FONT[size];
+let mark: ReturnType<typeof tildeShift> | undefined;
 try {
   checkMathLabel(symbol, sub, after, before);
+  if (tilde) mark = tildeShift(symbol, bold, fontSize);
 } catch (error) {
   throw new Error(`<FigMath> on "${Astro.locals.starlightRoute.id}": ${error instanceof Error ? error.message : String(error)}`);
 }
-const fontSize = FIG_FONT[size];
 const shift = round1(0.3 * fontSize);
+// dy is relative: each tspan undoes what the one before it raised or lowered.
+const raisedByMark = mark?.up ?? 0;
+const subDy = round1(shift - raisedByMark);
+const afterDy = sub !== undefined ? -shift : mark ? -raisedByMark : undefined;
+const afterDx = round1(3 + (mark && sub === undefined ? mark.after : 0));
+const subItalic = sub !== undefined && /^[A-Za-z]/.test(sub);
 ---
 
-<text class="atlas-fig-math" font-size={fontSize} text-anchor={anchor === 'middle' ? undefined : anchor} x={x} y={y}>{before !== undefined && <tspan>{before}</tspan>}<tspan class={bold ? 'atlas-fig-math-bold' : undefined} font-style={bold ? undefined : 'italic'} dx={before !== undefined ? 3 : undefined}>{symbol}</tspan>{sub !== undefined && <tspan font-size={FIG_FONT.small} dy={shift}>{sub}</tspan>}{after !== undefined && <tspan dy={sub !== undefined ? -shift : undefined} dx="3">{after}</tspan>}</text>
+<text class="atlas-fig-math" font-size={fontSize} text-anchor={anchor === 'middle' ? undefined : anchor} x={x} y={y}>{before !== undefined && <tspan>{before}</tspan>}<tspan class={bold ? 'atlas-fig-math-bold' : undefined} font-style={bold ? undefined : 'italic'} dx={before !== undefined ? 3 : undefined}>{symbol}</tspan>{mark && <tspan font-size={TILDE_SIZE} dx={mark.before} dy={mark.up}>~</tspan>}{sub !== undefined && <tspan font-size={FIG_FONT.small} font-style={subItalic ? 'italic' : undefined} dx={mark?.after} dy={subDy}>{sub}</tspan>}{after !== undefined && <tspan dy={afterDy} dx={afterDx}>{after}</tspan>}</text>

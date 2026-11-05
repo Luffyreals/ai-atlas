@@ -1,0 +1,92 @@
+---
+// dl/gru, "Minh họa": one GRU step in PyTorch's convention, h_t = (1 − z_t) ⊙ h̃_t + z_t ⊙ h_{t−1}. The focus
+// (accent) is the hidden-state line across the top: h_{t−1} → × (with z_t) → + → h_t, one product and one sum.
+// Below it, the branches with weights (second group, dashed, as in LstmCellFigure): the update gate σ (z_t), the
+// reset gate σ (r_t) and the tanh layer that makes the candidate h̃_t from r_t ⊙ h_{t−1} and x_t. Small plain
+// boxes are element-wise operations: × (⊙), "1 −" and +. h_{t−1} also runs down the left edge: into a bus where
+// x_t joins it (both gates take both), and under the gates up into r_t ⊙ h_{t−1}; x_t alone runs on to tanh.
+// The one crossing (x_t over that under-path) is the price of the planar rest. Narrow layout only.
+// Words: src/data/figures/gru-cell.ts; symbols with FigMath (h̃ with its tilde).
+import { GRU_CELL } from '@data/figures/gru-cell';
+import { getPageLocale } from '@lib/page-locale';
+import { anchor, type Box } from '@lib/figures/layout';
+import FigArrow from './kit/FigArrow.astro';
+import FigMath from './kit/FigMath.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = GRU_CELL[getPageLocale(Astro.locals.starlightRoute)];
+
+/** A box from its centre. */
+const at = (cx: number, cy: number, width: number, height: number): Box => ({ x: cx - width / 2, y: cy - height / 2, width, height });
+const OP = { width: 30, height: 36 } as const;
+const op = (cx: number, cy: number, width: number = OP.width) => at(cx, cy, width, OP.height);
+const LAYER_HEIGHT = 56;
+
+const TOP = 40; // the hidden-state line
+const DROP = 22; // h_{t−1} down the left edge
+const Z = 72; // update gate column, and the × on the top line
+const R = 160; // reset gate column
+const M = 236; // column of r ⊙ h and of "1 −"
+const C = 306; // column of tanh, the second × and +
+const OPS = 112; // row of "1 −" and the second ×
+const CAND = 186; // row of tanh and r ⊙ h
+const GATES = 262; // row of the gates
+const BUS = 314; // [h_{t−1}, x_t] into the gates
+const UNDER = 334; // h_{t−1} on its way to r ⊙ h
+const XIN = 52; // x_t comes up here
+const XLANE = 354; // x_t on its way to tanh
+
+const keep = op(Z, TOP); // z ⊙ h_{t−1}
+const sum = op(C, TOP);
+const oneMinus = op(M, OPS, 36);
+const mix = op(C, OPS); // (1 − z) ⊙ h̃
+const resetMul = op(M, CAND); // r ⊙ h_{t−1}
+const tanh = at(C, CAND, 76, LAYER_HEIGHT);
+const update = at(Z, GATES, 68, LAYER_HEIGHT);
+const reset = at(R, GATES, 68, LAYER_HEIGHT);
+const gateTop = GATES - LAYER_HEIGHT / 2;
+const gateBottom = GATES + LAYER_HEIGHT / 2;
+const sigma = { symbol: 'σ' } as const;
+---
+
+<FigureFrame id="gru-cell" text={t} narrowHeight={408}>
+  <Fragment slot="narrow">
+    <FigMath x={6} y={16} symbol="h" sub="t−1" bold anchor="start" />
+    <FigMath x={356} y={16} symbol="h" sub="t" bold anchor="end" />
+    <FigText x={(Z + C) / 2} y={22} lines={t.labels.state} size="small" />
+    <FigArrow from={[4, TOP]} to={anchor(keep, 'left')} tone="accent" />
+    <FigNode {...keep} lines={t.labels.times} tone="accent" />
+    <FigArrow from={anchor(keep, 'right')} to={anchor(sum, 'left')} tone="accent" />
+    <FigNode {...sum} lines={t.labels.plus} tone="accent" />
+    <FigArrow from={anchor(sum, 'right')} to={[356, TOP]} tone="accent" />
+
+    <FigArrow from={[Z, gateTop]} to={anchor(keep, 'bottom')} />
+    <FigMath x={Z + 8} y={150} symbol="z" sub="t" bold anchor="start" />
+    <FigArrow from={[Z, OPS]} to={anchor(oneMinus, 'left')} />
+    <FigNode {...oneMinus} lines={t.labels.oneMinus} />
+    <FigArrow from={anchor(oneMinus, 'right')} to={anchor(mix, 'left')} />
+    <FigNode {...mix} lines={t.labels.times} />
+    <FigArrow from={anchor(mix, 'top')} to={anchor(sum, 'bottom')} />
+
+    <FigArrow from={[R, gateTop]} via={[[R, CAND]]} to={anchor(resetMul, 'left')} />
+    <FigMath x={R + 8} y={212} symbol="r" sub="t" bold anchor="start" />
+    <FigNode {...resetMul} lines={t.labels.times} />
+    <FigArrow from={anchor(resetMul, 'right')} to={anchor(tanh, 'left')} />
+    <FigNode {...tanh} lines={t.labels.tanh} small={t.labels.candidate} tone="alt" />
+    <FigArrow from={anchor(tanh, 'top')} to={anchor(mix, 'bottom')} />
+    <FigMath x={C - 8} y={144} symbol="h" sub="t" bold tilde anchor="end" />
+
+    <FigNode {...update} math={sigma} lines={t.labels.update} tone="alt" />
+    <FigNode {...reset} math={sigma} lines={t.labels.reset} tone="alt" />
+
+    <FigArrow from={[DROP, TOP]} via={[[DROP, UNDER], [M, UNDER]]} to={anchor(resetMul, 'bottom')} />
+    <FigArrow from={[DROP, BUS]} to={[R, BUS]} head={false} />
+    <FigArrow from={[Z, BUS]} to={[Z, gateBottom]} />
+    <FigArrow from={[R, BUS]} to={[R, gateBottom]} />
+    <FigArrow from={[XIN, 380]} to={[XIN, BUS]} />
+    <FigArrow from={[XIN, XLANE]} via={[[C, XLANE]]} to={anchor(tanh, 'bottom')} />
+    <FigMath x={XIN} y={392} symbol="x" sub="t" bold />
+  </Fragment>
+</FigureFrame>
