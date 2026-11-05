@@ -1,0 +1,319 @@
+---
+title: Xử lý dữ liệu, tăng cường dữ liệu, dữ liệu mất cân bằng
+description: 'Bảng thật có ô trống, cột chữ, thang đo lệch, lớp hiếm. Điền giá trị thiếu, one-hot, chuẩn hóa, tránh rò rỉ bằng Pipeline, tăng cường và cân bằng dữ liệu.'
+quiz:
+  - question: 'Bộ dữ liệu có 1000 giao dịch, 20 gian lận. Bạn nhân bản mỗi giao dịch gian lận 10 lần, rồi mới chia train/test. Recall trên tập test lên tới 0.98. Vì sao con số này đáng ngờ?'
+    options:
+      - 'Vì nhân bản làm mô hình underfitting'
+      - 'Vì các bản sao của cùng một giao dịch nằm ở cả train lẫn test, nên mô hình chỉ cần nhớ là đoán đúng'
+      - 'Vì recall không dùng được cho dữ liệu mất cân bằng'
+      - 'Không đáng ngờ: nhân bản trước hay sau khi chia đều như nhau'
+    answer: 1
+    explanation: 'Mỗi giao dịch gian lận có 10 bản giống hệt nhau, chia ngẫu nhiên thì gần như chắc chắn có bản rơi vào train và bản rơi vào test. Mô hình gặp lại đúng mẫu đã học, nên recall cao giả. Đây là rò rỉ dữ liệu kiểu "mẫu trùng". Đúng là phải chia trước, rồi chỉ lấy mẫu lại trên tập train.'
+  - question: 'Bạn đổi cột diện tích từ m² sang dm² (nhân 100), không chuẩn hóa, và giữ nguyên các cột khác. Dự đoán của mô hình nào gần như chắc chắn thay đổi?'
+    options:
+      - 'Cây quyết định'
+      - 'Hồi quy tuyến tính không phạt (bình phương tối thiểu)'
+      - 'KNN dùng khoảng cách Euclid'
+      - 'Cả ba đều không đổi'
+    answer: 2
+    explanation: 'Khoảng cách Euclid cộng bình phương chênh lệch của từng cột. Nhân diện tích lên 100 thì chênh lệch diện tích lấn át mọi cột khác, nên láng giềng gần nhất đổi. Cây chỉ hỏi "diện tích có lớn hơn ngưỡng không", ngưỡng đổi theo đơn vị nhưng cách chia mẫu giữ nguyên. Bình phương tối thiểu không phạt thì trọng số tự nhỏ đi 100 lần, dự đoán không đổi.'
+  - question: 'Cột "màu xe" có ba giá trị đỏ, xanh, trắng. Bạn mã hóa đỏ = 0, xanh = 1, trắng = 2 rồi đưa vào hồi quy tuyến tính. Mô hình đang ngầm giả định điều gì?'
+    options:
+      - 'Ba màu cách đều nhau theo thứ tự đã đánh số: phần cộng thêm của trắng gấp đôi của xanh, và xanh nằm "giữa" đỏ và trắng'
+      - 'Không giả định gì, vì con số chỉ là tên gọi'
+      - 'Ba màu có ảnh hưởng hoàn toàn độc lập với nhau'
+      - 'Màu xe không ảnh hưởng tới giá'
+    answer: 0
+    explanation: 'Mô hình tuyến tính cộng $w \cdot \text{mã}$, nên đỏ được cộng $0$, xanh $w$, trắng $2w$: ba màu bị ép thành ba bậc cách đều theo đúng thứ tự bạn tình cờ chọn. Mô hình không biết con số chỉ là tên. One-hot cho mỗi màu một trọng số riêng, nên mới đúng là "độc lập" như phương án thứ ba.'
+  - question: 'Tập train có 1000 mẫu, 20 mẫu lớp 1 và 980 mẫu lớp 0. Với `class_weight=''balanced''`, trọng số của mỗi mẫu lớp 1 gấp bao nhiêu lần mỗi mẫu lớp 0?'
+    options: ['$2$', '$25$', '$50$', '$49$']
+    answer: 3
+    explanation: 'Trọng số lớp $c$ là $m/(K m_c)$: lớp 1 được $1000/(2 \cdot 20) = 25$, lớp 0 được $1000/(2 \cdot 980) \approx 0.51$. Tỉ số là $980/20 = 49$, đúng bằng tỉ lệ số mẫu hai lớp, nên tổng trọng số hai lớp bằng nhau. Số 25 là trọng số của lớp 1, chưa chia cho trọng số lớp 0; số 50 là $1000/20$.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import preprocessCode from '@code/ml/data-preprocessing/preprocess.vi.py?raw';
+import leakageCode from '@code/ml/data-preprocessing/leakage.vi.py?raw';
+import imbalancedCode from '@code/ml/data-preprocessing/imbalanced.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Xử lý được ba vấn đề hay gặp của bảng dữ liệu thật: giá trị thiếu (missing value), biến phân loại (categorical variable) và đặc trưng lệch thang đo, bằng `SimpleImputer`, `OneHotEncoder`, `StandardScaler` gộp trong `ColumnTransformer`.
+- Hiểu vì sao mọi bước xử lý phải học **chỉ từ tập train**, và nhận ra rò rỉ dữ liệu (data leakage) khi bước xử lý được khớp trên toàn bộ dữ liệu.
+- Biết tăng cường dữ liệu (data augmentation) là gì và khi nào dùng được.
+- Xử lý được dữ liệu mất cân bằng (imbalanced data): đo bằng precision, recall, F1, chia bằng `stratify`, và chọn giữa trọng số lớp, lấy mẫu lại, dời ngưỡng.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+**DataFrame** của pandas là một bảng có tên cột, mỗi cột một kiểu dữ liệu (số, chữ…). Ô bị thiếu hiện là `NaN` (not a number). `df.isna().sum()` đếm số ô thiếu của từng cột, `df["area"]` lấy riêng cột `area`.
+:::
+
+## Trực giác
+
+### Bảng dữ liệu thật không sạch
+
+Bạn muốn đoán giá thuê căn hộ. Lần này dữ liệu không phải bảng gọn gàng như bài [Hồi quy tuyến tính](/vi/ml/linear-regression/), mà là 8 căn hộ do người thuê tự điền qua một biểu mẫu:
+
+| Căn | Diện tích (m²) | Tầng | Quận | Ban công |
+|---:|---:|---:|---|---|
+| 1 | 30 | 5 | Cầu Giấy | có |
+| 2 | 45 | *trống* | Ba Đình | không |
+| 3 | *trống* | 12 | Hoàng Mai | có |
+| 4 | 60 | 3 | Cầu Giấy | *trống* |
+| 5 | 52 | 8 | Hoàng Mai | không |
+| 6 | 38 | 2 | Ba Đình | có |
+| 7 | 75 | 15 | *trống* | có |
+| 8 | 41 | 6 | Cầu Giấy | không |
+
+Bảng này có ba chỗ mà mô hình chưa nuốt được:
+
+- **Ô trống.** Mô hình tuyến tính tính $\mathbf{w}^\top\mathbf{x} + b$. Một ô trống trong $\mathbf{x}$ làm phép tính đó vô nghĩa, và scikit-learn sẽ báo lỗi.
+- **Cột chữ.** "Cầu Giấy" không nhân được với trọng số. Phải đổi chữ thành số, nhưng đổi thế nào cho khỏi bịa ra quan hệ không có thật?
+- **Thang đo lệch nhau.** Diện tích lên tới hàng chục, tầng chỉ vài đơn vị, còn cột "có/không" sẽ thành 0 và 1. Bài [Gradient Descent](/vi/ml/gradient-descent/) đã cho thấy thang đo lệch làm GD chậm hẳn.
+
+### Lớp hiếm và dữ liệu ít
+
+Một bài toán khác: đoán giao dịch thẻ nào là gian lận. Cứ 100 giao dịch chỉ có khoảng 5 gian lận. Một mô hình lười, **luôn** nói "không gian lận", đúng tới 95%. Như bài [Đánh giá mô hình: Accuracy, Precision, Recall, F1](/vi/ml/classification-metrics/) đã chỉ ra, accuracy cao mà mô hình vô dụng, vì nó không bắt được giao dịch gian lận nào.
+
+Còn khi dữ liệu quá ít, ví dụ vài trăm ảnh, bạn có thể tự tạo thêm mẫu: một tấm ảnh mèo lật ngang vẫn là ảnh mèo.
+
+Bài toán của bài này là: **biến một bảng dữ liệu thật (có ô trống, có cột chữ, thang đo lệch, lớp hiếm) thành đầu vào mà mô hình học được, mà không để thông tin của tập kiểm tra lọt vào quá trình học.**
+
+## Lý thuyết
+
+### Giá trị thiếu
+
+**Bỏ đi.** Cách đơn giản nhất là bỏ mọi dòng có ô trống (`df.dropna()`). Ở bảng trên, bốn ô trống nằm ở bốn căn khác nhau, nên bỏ dòng là mất một nửa dữ liệu. Bỏ cả cột chỉ hợp lý khi cột đó thiếu gần hết. Bỏ dòng còn nguy hiểm ở chỗ khác: nếu người thuê căn rẻ hay bỏ trống ô diện tích, phần còn lại không còn đại diện cho dữ liệu thật.
+
+**Điền vào (impute).** Thay ô trống bằng một giá trị tính từ cột đó:
+
+- **Trung bình** (mean) hoặc **trung vị** (median) cho cột số. Diện tích của 7 căn có dữ liệu có trung bình $341/7 \approx 48.71$ và trung vị $45$. Trung vị ít bị kéo bởi điểm ngoại lai (outlier): thay căn 75 m² bằng một biệt thự 500 m², trung bình nhảy lên khoảng 109, còn trung vị vẫn là 45.
+- **Giá trị hay gặp nhất** (mode) cho cột phân loại. Cột quận có Cầu Giấy 3 lần, nên căn 7 được điền Cầu Giấy.
+
+**Thêm cờ đánh dấu thiếu.** Bản thân việc thiếu có thể mang thông tin: có thể chủ nhà cố ý giấu diện tích của căn quá nhỏ. Vì vậy, ngoài việc điền, người ta thường thêm một cột 0/1 (missing indicator) cho biết ô đó vốn bị trống. Mô hình tự học xem cờ này có đáng tin không.
+
+### Biến phân loại
+
+Cách nghĩ ngay ra là đánh số: Ba Đình = 0, Cầu Giấy = 1, Hoàng Mai = 2, gọi là **mã hóa thứ tự** (ordinal encoding). Với mô hình tuyến tính, phần đóng góp của cột quận vào giá là $w \cdot \text{mã}$:
+
+$$
+\text{Ba Đình: } 0, \qquad \text{Cầu Giấy: } w, \qquad \text{Hoàng Mai: } 2w
+$$
+
+Mô hình bị ép tin rằng ba quận cách đều nhau theo đúng thứ tự bạn tình cờ đặt, và Cầu Giấy luôn nằm "giữa" hai quận kia. Đổi thứ tự đánh số là đổi mô hình, dù dữ liệu không đổi gì. Đó là bẫy.
+
+**One-hot encoding** thay một cột quận bằng ba cột 0/1, mỗi quận một cột. Mỗi căn có đúng một số 1:
+
+| Căn | Quận | quận Ba Đình | quận Cầu Giấy | quận Hoàng Mai |
+|---:|---|---:|---:|---:|
+| 1 | Cầu Giấy | 0 | 1 | 0 |
+| 2 | Ba Đình | 1 | 0 | 0 |
+| 3 | Hoàng Mai | 0 | 0 | 1 |
+
+Giờ mỗi quận có trọng số riêng $w_{\text{BĐ}}$, $w_{\text{CG}}$, $w_{\text{HM}}$, và mô hình tự học xem quận nào đắt hơn bao nhiêu. Giá phải trả là số cột: cột có 500 giá trị khác nhau thành 500 cột.
+
+Mã hóa thứ tự chỉ đúng khi các giá trị **có thứ tự thật**, ví dụ nội thất "không, cơ bản, đầy đủ" (`OrdinalEncoder`). Cây quyết định (bài [Decision Tree và Random Forest](/vi/ml/decision-tree-random-forest/)) cũng chịu được mã thứ tự tốt hơn mô hình tuyến tính, vì nó chỉ hỏi "mã có nhỏ hơn ngưỡng không".
+
+Một chi tiết khi dùng thật: tập test có thể có quận chưa từng xuất hiện ở tập train. `OneHotEncoder(handle_unknown="ignore")` khi đó cho cả ba cột bằng 0 thay vì báo lỗi.
+
+### Co giãn đặc trưng
+
+Hai cách hay dùng, cho đặc trưng thứ $j$:
+
+$$
+\text{z-score: } z_j = \frac{x_j - \mu_j}{\sigma_j}
+\qquad\qquad
+\text{min-max: } \tilde{x}_j = \frac{x_j - \min_j}{\max_j - \min_j}
+$$
+
+**Chuẩn hóa z-score** (standardization, `StandardScaler`) trừ trung bình $\mu_j$ và chia cho độ lệch chuẩn $\sigma_j$, nên cột mới có trung bình 0, độ lệch chuẩn 1. **Chuẩn hóa min-max** (`MinMaxScaler`) đưa cột về đoạn $[0, 1]$, như bài [Gradient Descent](/vi/ml/gradient-descent/). Min-max nhạy với điểm ngoại lai hơn: một căn 500 m² làm mọi căn còn lại dồn về gần 0.
+
+Mô hình nào **cần** co giãn?
+
+- **KNN** (bài [K-Nearest Neighbors](/vi/ml/k-nearest-neighbors/)): khoảng cách cộng bình phương chênh lệch của từng cột, nên cột có số lớn nhất quyết định ai là láng giềng.
+- **Gradient descent**: thang đo lệch làm mặt mất mát thành thung lũng hẹp, GD chậm hoặc phân kỳ.
+- **Mô hình có phạt** (bài [Ridge, Lasso, Elastic Net](/vi/ml/regularization/)): khoản phạt đối xử mọi $w_j$ như nhau, nên độ lớn của $w_j$ không được phụ thuộc vào đơn vị.
+
+Mô hình **không cần**: cây quyết định và rừng ngẫu nhiên. Cây chỉ chia mẫu theo câu hỏi kiểu "diện tích $\le 50$?". Sau z-score, câu hỏi thành "$z \le (50 - \mu)/\sigma$?", vẫn chia đúng những căn đó, nên cây không đổi.
+
+**Điểm ngoại lai.** Trước khi xử lý, hãy xem điểm đó là lỗi nhập liệu (diện tích 4500 m² vì gõ thừa số 0) hay là thật (một căn penthouse). Lỗi thì sửa hoặc bỏ. Thật thì giữ, và cân nhắc trung vị khi điền, hay `RobustScaler` (co giãn theo trung vị và khoảng tứ phân vị) thay vì min-max. Bài [Hồi quy tuyến tính](/vi/ml/linear-regression/) có ví dụ một điểm ngoại lai kéo lệch cả đường thẳng.
+
+### Rò rỉ dữ liệu khi xử lý
+
+Để ý rằng mọi bước ở trên đều **học** một thứ gì đó từ dữ liệu: trung vị để điền, danh sách quận để one-hot, $\mu_j$ và $\sigma_j$ để chuẩn hóa. Theo đúng tinh thần của bài [Tổng quan về Học máy](/vi/ml/ml-overview/), những thứ đó phải học **chỉ từ tập train**. Quy tắc của scikit-learn:
+
+- Trên tập train: `fit` (học tham số xử lý) rồi `transform`, viết gọn là `fit_transform`.
+- Trên tập test và dữ liệu mới: **chỉ** `transform`, dùng lại đúng tham số đã học.
+
+Nếu bạn `fit` bộ chuẩn hóa trên toàn bộ dữ liệu rồi mới chia, $\mu_j$ đã "thấy" tập test. Với chuẩn hóa, sai lệch thường nhỏ. Nhưng với bước dùng cả **nhãn**, như chọn những đặc trưng tương quan với nhãn mạnh nhất, sai lệch có thể khổng lồ: ô code thứ hai cho thấy một mô hình đạt 85% trên dữ liệu hoàn toàn ngẫu nhiên.
+
+Kiểm định chéo (cross-validation) làm việc này khó hơn, vì mỗi fold có tập train riêng, nên phải khớp lại bộ xử lý ở mỗi fold. **`Pipeline`** lo việc đó: nó nối các bước xử lý với mô hình thành một khối có `fit` và `predict`. Khi `cross_val_score` khớp pipeline trên một fold, mọi bước bên trong chỉ học từ phần train của fold ấy. **`ColumnTransformer`** cho phép mỗi nhóm cột một chuỗi xử lý riêng (cột số thì điền trung vị và chuẩn hóa, cột chữ thì điền mode và one-hot), rồi ghép kết quả lại.
+
+:::note[Ghi nhớ]
+Bước xử lý nào học từ dữ liệu thì học chỉ trên tập train. Đặt mọi bước vào một `Pipeline` cùng mô hình, để `fit` chỉ chạm tập train và `cross_val_score` tự làm đúng ở mỗi fold.
+:::
+
+### Tăng cường dữ liệu
+
+**Tăng cường dữ liệu** là tạo thêm mẫu train bằng cách biến đổi mẫu có sẵn theo những cách **không làm đổi nhãn**. Mô hình học được rằng các biến đổi đó không quan trọng, nên ít học thuộc chi tiết vặt của từng mẫu.
+
+- **Ảnh**: lật ngang, xoay nhẹ, cắt một phần, đổi độ sáng. Phải chọn biến đổi hợp với bài toán: lật ngang ảnh mèo vẫn là mèo, nhưng xoay ngược chữ số 6 thành 9 thì nhãn sai. Phần Thị giác máy tính sẽ nói kỹ.
+- **Dữ liệu bảng**: cộng nhiễu nhỏ vào cột số, ví dụ $x_j + \varepsilon$ với $\varepsilon$ ngẫu nhiên nhỏ so với $\sigma_j$. Ít hiệu quả hơn với ảnh, vì khó biết biến đổi nào giữ nguyên nhãn.
+- **Văn bản ngắn**: thay vài từ bằng từ đồng nghĩa, hoặc dịch sang ngôn ngữ khác rồi dịch ngược lại (back-translation).
+
+Chỉ tăng cường **tập train**, và chỉ sau khi đã chia. Bản biến đổi của một ảnh train mà lọt vào tập test thì gần như là mẫu trùng.
+
+### Dữ liệu mất cân bằng
+
+**Đo cho đúng.** Accuracy bị lớp đông lấn át, nên hãy nhìn precision, recall và F1 của lớp hiếm (bài [Đánh giá mô hình: Accuracy, Precision, Recall, F1](/vi/ml/classification-metrics/)). Khi chia train/test, dùng `train_test_split(..., stratify=y)` để hai tập giữ đúng tỉ lệ lớp. Không có `stratify`, với 100 mẫu chỉ 5 mẫu hiếm, tập test có thể rơi vào cảnh chỉ có 0 hay 1 mẫu hiếm.
+
+Mô hình học từ dữ liệu lệch thường đẩy lớp hiếm sang một góc: sai cả 5 mẫu hiếm vẫn rẻ hơn sai vài trong 95 mẫu đông. Có ba nhóm cách chữa.
+
+**1. Trọng số lớp** (class weight). Nhân mất mát của mỗi mẫu với trọng số của lớp nó. Gọi $\ell^{(i)}$ là mất mát của mẫu thứ $i$, $s_c$ là trọng số của lớp $c$:
+
+$$
+\mathcal{L} = \frac{1}{m}\sum_{i=1}^{m} s_{y^{(i)}}\,\ell^{(i)},
+\qquad
+s_c = \frac{m}{K\,m_c}
+$$
+
+với $K$ là số lớp và $m_c$ là số mẫu của lớp $c$. Công thức của $s_c$ là chế độ `class_weight="balanced"` của scikit-learn. Nhân $s_c$ với $m_c$ được $m/K$ cho mọi lớp: mỗi lớp góp **cùng một tổng trọng số**, dù đông hay hiếm. Ở ô code thứ ba, tập train có $m = 1400$, $m_1 = 74$, $m_0 = 1326$, nên:
+
+$$
+s_1 = \frac{1400}{2 \cdot 74} \approx 9.46,
+\qquad
+s_0 = \frac{1400}{2 \cdot 1326} \approx 0.53
+$$
+
+Mỗi giao dịch gian lận nặng gần 18 lần một giao dịch thường, đúng bằng $1326/74$.
+
+**2. Lấy mẫu lại** (resampling) tập train.
+
+- **Oversampling ngẫu nhiên**: bốc lặp lại (có hoàn lại) các mẫu lớp hiếm cho tới khi đủ số. Một mẫu xuất hiện $k$ lần góp $k\,\ell^{(i)}$ vào tổng mất mát, giống hệt trọng số $k$. Vì vậy oversampling ngẫu nhiên gần như tương đương trọng số lớp, chỉ tốn bộ nhớ hơn.
+- **Undersampling**: bỏ bớt mẫu lớp đông. Nhanh, nhưng vứt đi dữ liệu thật; hợp khi lớp đông có hàng triệu mẫu.
+- **SMOTE** (Chawla và cộng sự, 2002): thay vì chép nguyên, tạo mẫu hiếm **mới** nằm giữa một mẫu hiếm $\mathbf{x}^{(i)}$ và một láng giềng gần của nó (cũng thuộc lớp hiếm) $\mathbf{x}^{(z)}$:
+
+$$
+\mathbf{x}_{\text{mới}} = \mathbf{x}^{(i)} + u\left(\mathbf{x}^{(z)} - \mathbf{x}^{(i)}\right), \qquad u \in [0, 1] \text{ ngẫu nhiên}
+$$
+
+Với $\mathbf{x}^{(i)} = (1, 2)$, $\mathbf{x}^{(z)} = (3, 6)$ và $u = 0.5$, mẫu mới là $(2, 4)$, trung điểm của đoạn nối hai mẫu. SMOTE có trong thư viện imbalanced-learn; thư viện này không có sẵn trong bộ gói Pyodide mà trang dùng, nên ô code của bài tự viết oversampling ngẫu nhiên bằng NumPy.
+
+**3. Dời ngưỡng quyết định.** Giữ nguyên mô hình, chỉ hạ ngưỡng $t$: dự đoán lớp hiếm khi xác suất $p \ge t$, với $t$ nhỏ hơn 0.5. Recall tăng, precision thường giảm. Ngưỡng là siêu tham số, chọn trên tập kiểm định như bài [Đánh giá mô hình: Accuracy, Precision, Recall, F1](/vi/ml/classification-metrics/).
+
+Như tăng cường dữ liệu, mọi cách lấy mẫu lại **chỉ áp dụng trên tập train**. Tập test phải giữ đúng tỉ lệ thật, vì đó là tỉ lệ mô hình sẽ gặp khi dùng.
+
+### Giới hạn
+
+- **Không có công thức xử lý chung.** Điền trung vị hay thêm cờ, giữ hay bỏ điểm ngoại lai: tùy dữ liệu và mô hình. Hãy so các lựa chọn bằng kiểm định chéo, với mọi bước nằm trong pipeline. Bài Dự án ML từ đầu đến cuối làm điều này trên một bộ dữ liệu trọn vẹn.
+- **Không cách chữa mất cân bằng nào tạo ra thông tin mới.** Trọng số lớp, oversampling hay dời ngưỡng chủ yếu đổi chỗ đánh đổi giữa precision và recall (ô code thứ ba). Muốn tốt hơn thật thì cần thêm dữ liệu lớp hiếm hoặc đặc trưng tốt hơn.
+- **Tăng cường dữ liệu dựa vào hiểu biết về bài toán.** Biến đổi sai làm đổi nhãn, và mô hình học điều sai.
+
+## Minh họa
+
+Bảng dưới gom mọi bước của bài: mỗi bước học gì từ tập train, dùng lớp nào của scikit-learn, và mô hình nào cần nó. Cột thứ hai là danh sách những thứ không được học từ tập test.
+
+| Bước | Học gì từ tập train | scikit-learn | Ai cần |
+|---|---|---|---|
+| Điền cột số | trung bình hoặc trung vị | `SimpleImputer(strategy="median")` | mọi mô hình không nhận `NaN` |
+| Cờ đánh dấu thiếu | cột nào có ô trống | `MissingIndicator`, hoặc `add_indicator=True` | khi việc thiếu có thể mang thông tin |
+| Điền cột phân loại | giá trị hay gặp nhất | `SimpleImputer(strategy="most_frequent")` | mọi mô hình |
+| One-hot | danh sách giá trị của cột | `OneHotEncoder(handle_unknown="ignore")` | mô hình tuyến tính, KNN, mạng nơ-ron |
+| Chuẩn hóa | $\mu_j$, $\sigma_j$ (hoặc min, max) | `StandardScaler`, `MinMaxScaler` | KNN, GD, mô hình có phạt; cây thì không |
+| Chọn đặc trưng | đặc trưng nào liên quan tới nhãn | `SelectKBest` | khi có rất nhiều đặc trưng |
+| Trọng số lớp | số mẫu mỗi lớp | `class_weight="balanced"` | dữ liệu mất cân bằng |
+| Lấy mẫu lại, tăng cường | mẫu nào để nhân bản, biến đổi | tự viết, hoặc imbalanced-learn | dữ liệu mất cân bằng, dữ liệu ít |
+
+## Ví dụ code
+
+Ba ô dưới đây chạy độc lập. Ô chạy đầu tiên lâu hơn, vì trình duyệt phải tải thêm scikit-learn (và pandas ở ô thứ nhất).
+
+### Một ColumnTransformer cho bảng 8 căn hộ
+
+Ô đầu tiên xử lý đúng bảng ở mục Trực giác (tên quận viết không dấu). Cột số được điền trung vị rồi chuẩn hóa z-score; hai cột cờ đánh dấu ô số nào bị trống; cột phân loại được điền mode rồi one-hot.
+
+<PythonRunner code={preprocessCode} title="Điền, one-hot, chuẩn hóa" />
+
+Mỗi cột thiếu đúng một ô. Bảng sau xử lý có 9 cột, toàn số, không còn ô trống:
+
+- Căn 3 (dòng có chỉ số 2) bị trống diện tích, được điền trung vị 45 m², nên có `area` $= -0.25$, giống hệt căn 2, căn thật sự rộng 45 m². Chỉ cột `miss_area` $= 1$ phân biệt hai căn.
+- Căn 7 (dòng 6) thiếu quận, được điền Cầu Giấy, giá trị hay gặp nhất. Căn 4 thiếu ban công, được điền "có".
+- Dòng cuối là tham số chuẩn hóa: $\mu = 48.25$ m² và $7.12$ tầng, $\sigma = 13.13$ và $4.14$. $\mu$ của diện tích tính **sau khi điền**, nên là $(341 + 45)/8 = 48.25$, không phải $48.71$.
+
+Đây chính là các tham số mà `prep.transform(df_test)` sẽ dùng lại cho căn hộ mới.
+
+### Rò rỉ dữ liệu: chọn đặc trưng trước khi chia
+
+Ô thứ hai dựng một bộ dữ liệu **không có gì để học**: 100 mẫu, 5000 đặc trưng ngẫu nhiên, nhãn tung đồng xu. Mô hình trung thực chỉ đoán đúng khoảng 50%. Ô so hai cách chọn 20 đặc trưng tương quan với nhãn mạnh nhất (`SelectKBest`), rồi đo accuracy bằng kiểm định chéo 5 fold.
+
+<PythonRunner code={leakageCode} title="Chọn đặc trưng ngoài và trong Pipeline" />
+
+Chọn trên toàn bộ dữ liệu rồi mới kiểm định chéo cho accuracy 0.850, trên dữ liệu ngẫu nhiên. Lý do: trong 5000 cột ngẫu nhiên, luôn có vài chục cột **tình cờ** khớp với 100 nhãn. Bước chọn đã nhìn thấy nhãn của cả các fold kiểm định, nên giữ lại đúng những cột khớp tình cờ với chúng. Đặt bước chọn vào `Pipeline`, mỗi fold tự chọn trên phần train của mình, và những cột đó không còn khớp với phần kiểm định: accuracy về 0.480, đúng mức đoán bừa.
+
+Ví dụ này là kinh điển (sách *The Elements of Statistical Learning* gọi nó là cách sai và cách đúng để kiểm định chéo). Nó hay xảy ra với dữ liệu ít mẫu mà nhiều đặc trưng, như dữ liệu gen.
+
+### Mất cân bằng: bốn cách trên cùng dữ liệu
+
+Ô thứ ba sinh 2000 mẫu bằng `make_classification`, lớp 1 (coi như giao dịch gian lận) chiếm khoảng 5%. Chia 70/30 có `stratify`, rồi so bốn cách dùng hồi quy logistic (bài [Hồi quy Logistic](/vi/ml/logistic-regression/)): mặc định; mặc định nhưng hạ ngưỡng xuống 0.2; `class_weight="balanced"`; và oversampling ngẫu nhiên tự viết. Mọi chỉ số tính trên tập test, cho lớp 1.
+
+<PythonRunner code={imbalancedCode} title="Trọng số lớp, oversampling, dời ngưỡng" />
+
+Tập train có 74 mẫu lớp 1 trên 1400, tập test 31 trên 600: cùng khoảng 5% nhờ `stratify`. Mô hình luôn đoán lớp 0 đã có accuracy $569/600 \approx 0.948$, nên đừng nhìn cột `acc`.
+
+- **Mặc định**: accuracy 0.968 trông rất đẹp, nhưng recall chỉ 0.516: bỏ sót gần nửa số giao dịch gian lận (bắt được 16 trên 31).
+- **`class_weight="balanced"`**: recall lên 0.903 (28 trên 31), nhưng precision rơi từ 0.800 xuống 0.509: mô hình báo 55 giao dịch, chỉ 28 là gian lận thật. F1 nhích từ 0.627 lên 0.651.
+- **Oversampling ngẫu nhiên** cho đúng cùng các số với `balanced`, như lý thuyết đã dự đoán: nhân bản mẫu cũng là nhân trọng số.
+- **Hạ ngưỡng xuống 0.2** ở đây cho F1 tốt nhất, 0.788 (recall 0.839, precision 0.743). Trọng số `balanced` đẩy mô hình đi quá xa về phía recall; hạ ngưỡng vừa phải thì giữ được precision.
+
+Không có cách nào thắng tuyệt đối: chọn cách nào tùy bỏ sót hay báo nhầm đắt hơn. Ngưỡng 0.2 được đặt sẵn cho ví dụ. Làm thật, bạn phải chọn ngưỡng trên tập kiểm định, không phải nhìn tập test như ở đây.
+
+## Lỗi hay gặp
+
+:::caution[Gọi `fit_transform` trên toàn bộ dữ liệu, hoặc trên tập test]
+`StandardScaler().fit_transform(X)` rồi mới `train_test_split` để $\mu$, $\sigma$ học cả từ tập test. Gọi `fit_transform(X_test)` thì còn sai hơn: tập test được co giãn theo tham số của chính nó, khác với tập train. Hãy chia trước, rồi đặt bộ xử lý vào `Pipeline` hoặc `ColumnTransformer` cùng mô hình. Bước dùng nhãn, như chọn đặc trưng, là chỗ rò rỉ nặng nhất (0.850 so với 0.480 ở ô code thứ hai).
+:::
+
+:::caution[Lấy mẫu lại hay tăng cường trước khi chia]
+Nhân bản lớp hiếm rồi mới chia thì bản sao của cùng một mẫu nằm ở cả train lẫn test, và recall trên tập test cao giả. SMOTE trước khi chia cũng vậy: mẫu tổng hợp ở tập train được nội suy từ chính mẫu test. Thứ tự đúng: chia (có `stratify`), rồi chỉ lấy mẫu lại hay tăng cường trên tập train. Trong kiểm định chéo, việc lấy mẫu lại cũng phải làm lại trong từng fold.
+:::
+
+:::caution[Gán 0, 1, 2 cho giá trị không có thứ tự]
+`df["district"].map({"Ba Dinh": 0, "Cau Giay": 1, "Hoang Mai": 2})` gọn, nhưng ép mô hình tuyến tính tin rằng ba quận cách đều nhau. Dùng `OneHotEncoder` cho giá trị không thứ tự; chỉ dùng `OrdinalEncoder` khi thứ tự là thật.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Giá trị thiếu: bỏ dòng thì mất dữ liệu; điền trung vị (cột số) hoặc mode (cột phân loại), thêm cờ đánh dấu thiếu khi việc thiếu có thể mang thông tin. Biến phân loại không thứ tự dùng one-hot, không gán 0, 1, 2.
+- Chuẩn hóa z-score $z_j = (x_j - \mu_j)/\sigma_j$ hoặc min-max cho KNN, gradient descent, mô hình có phạt; cây quyết định không cần.
+- Mọi bước học từ dữ liệu (trung vị, danh sách giá trị, $\mu_j$, $\sigma_j$, đặc trưng được chọn) chỉ học từ tập train. `Pipeline` và `ColumnTransformer` bảo đảm điều đó, kể cả trong kiểm định chéo.
+- Dữ liệu mất cân bằng: đo bằng precision, recall, F1, chia có `stratify`. Trọng số lớp $s_c = m/(K m_c)$, oversampling (gần như tương đương trọng số lớp), undersampling, SMOTE, hay dời ngưỡng đều đổi chỗ đánh đổi precision–recall. Lấy mẫu lại và tăng cường dữ liệu chỉ làm trên tập train, sau khi chia.
+
+**Đọc thêm:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Bài 11: Giới thiệu về Feature Engineering](https://machinelearningcoban.com/general/2017/02/06/featureengineering/), mục Feature Scaling and Normalization. Tiếng Việt, có rescaling (min-max), standardization và chuẩn hóa về độ dài 1.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Common pitfalls and recommended practices](https://scikit-learn.org/1.8/common_pitfalls.html), mục Data leakage. Ví dụ chọn đặc trưng trên dữ liệu ngẫu nhiên, cùng ý với ô code thứ hai, và lời khuyên dùng `Pipeline`.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Preprocessing data](https://scikit-learn.org/1.8/modules/preprocessing.html), [Imputation of missing values](https://scikit-learn.org/1.8/modules/impute.html) và [Pipelines and composite estimators](https://scikit-learn.org/1.8/modules/compose.html). Tra cứu các lớp của bài: `StandardScaler`, `OneHotEncoder`, `SimpleImputer`, `MissingIndicator`, `ColumnTransformer`.
+- Chawla, N. V., Bowyer, K. W., Hall, L. O., Kegelmeyer, W. P. (2002). [*SMOTE: Synthetic Minority Over-sampling Technique*](https://doi.org/10.1613/jair.953). *Journal of Artificial Intelligence Research* 16, 321–357. Bài báo đề xuất SMOTE. Cách dùng trong Python: [tài liệu imbalanced-learn, mục Over-sampling](https://imbalanced-learn.org/stable/over_sampling.html).
+- He, H., Garcia, E. A. (2009). [*Learning from Imbalanced Data*](https://doi.org/10.1109/TKDE.2008.239). *IEEE Transactions on Knowledge and Data Engineering* 21(9), 1263–1284. Tổng quan về lấy mẫu lại, học có trọng số chi phí và cách đánh giá khi lớp lệch.
+- Kaufman, S., Rosset, S., Perlich, C., Stitelman, O. (2012). [*Leakage in Data Mining: Formulation, Detection, and Avoidance*](https://doi.org/10.1145/2382577.2382579). *ACM Transactions on Knowledge Discovery from Data* 6(4), 1–21. Các dạng rò rỉ dữ liệu gặp trong các cuộc thi và dự án thật.
+
+<LessonProgress />

@@ -1,0 +1,399 @@
+---
+title: Decision Tree và Random Forest
+description: Đoán chiều nay Minh có đi đá bóng bằng chuỗi câu hỏi có/không. Chọn câu hỏi bằng Gini, vì sao cây sâu overfitting, vì sao rừng cây đoán vững hơn một cây.
+quiz:
+  - question: 'Một nút có 10 mẫu: 5 lớp A, 5 lớp B. Cách chia P cho hai nhánh (4 A, 1 B) và (1 A, 4 B). Cách chia Q cho hai nhánh (5 A, 3 B) và (0 A, 2 B). Dùng Gini, CART chọn cách nào?'
+    options:
+      - 'Q, vì Q có một nhánh thuần'
+      - 'P, vì Gini có trọng số của P nhỏ hơn'
+      - 'Hai cách ngang nhau, vì tổng số mẫu mỗi lớp trước và sau khi chia không đổi'
+    answer: 1
+    explanation: 'Với P, mỗi nhánh có Gini $1 - 0.8^2 - 0.2^2 = 0.32$, nên trung bình có trọng số là $0.32$. Với Q, nhánh 8 mẫu có Gini $1 - (5/8)^2 - (3/8)^2 \approx 0.469$, nhân tỉ lệ $8/10$ được $0.375$; nhánh thuần góp 0. Vì $0.32 < 0.375$, CART chọn P. Một nhánh thuần nhưng nhỏ không bù được một nhánh lớn còn lẫn lộn.'
+  - question: 'Bạn đổi cột nhiệt độ của bảng 12 buổi chiều từ độ C sang độ F ($F = 1.8C + 32$), rồi huấn luyện lại cây quyết định. Điều gì xảy ra?'
+    options:
+      - 'Cây đổi hẳn, vì số độ F lớn hơn nên nhiệt độ được ưu tiên ở gốc'
+      - 'Phải chuẩn hóa cột nhiệt độ trước, nếu không cây sẽ chia sai'
+      - 'Cây giữ nguyên cấu trúc và dự đoán, chỉ ngưỡng đổi từ 33 thành 91.4'
+    answer: 2
+    explanation: 'Cây chỉ dùng thứ tự của các giá trị trong một cột. Phép đổi $F = 1.8C + 32$ giữ nguyên thứ tự, nên mỗi cách chia tách đúng các nhóm buổi như trước, và Gini không đổi. Chỉ con số ngưỡng đổi: điểm giữa của 89.6 và 93.2 độ F là 91.4. Đây là lý do cây không cần chuẩn hóa, khác với KNN hay gradient descent.'
+  - question: 'Trong cây học trên 12 buổi chiều, câu hỏi về mưa nằm ở gốc. Thế nhưng `feature_importances_` cho nhiệt độ $0.643$, mưa chỉ $0.357$. Vì sao?'
+    options:
+      - 'Độ quan trọng cộng lượng Gini giảm (nhân tỉ lệ mẫu) ở mọi nút dùng đặc trưng đó. Câu hỏi nhiệt độ đưa Gini của nút 8 mẫu từ $0.4688$ về 0, góp nhiều hơn câu hỏi mưa ở gốc'
+      - 'Đặc trưng ở gốc luôn phải quan trọng nhất, nên đây là lỗi làm tròn của scikit-learn'
+      - 'Nhiệt độ có nhiều giá trị khác nhau, nên luôn được cộng thêm điểm một cách thiên lệch'
+    answer: 0
+    explanation: 'Mưa góp $\frac{12}{12}(0.4861 - 0.3125) = 0.1736$. Nhiệt độ góp $\frac{8}{12}(0.4688 - 0) = 0.3125$. Chia cho tổng $0.4861$ được $0.357$ và $0.643$. Câu ở gốc chỉ là câu giảm Gini nhiều nhất ở bước đầu, không phải câu góp nhiều nhất cho cả cây. Thiên lệch về đặc trưng nhiều giá trị là có thật, nhưng ở đây hai con số tính ra đúng từ hai lần chia.'
+  - question: 'Một rừng 500 cây dùng `max_features=None` (mỗi lần chia xét mọi đặc trưng), trên dữ liệu có một đặc trưng mạnh vượt trội. Tăng lên 5000 cây gần như không làm điểm kiểm định tốt hơn. Cách nào có khả năng giúp nhất?'
+    options:
+      - 'Tăng tiếp lên 50 000 cây'
+      - 'Đặt `bootstrap=False` để mỗi cây thấy đủ dữ liệu'
+      - 'Bỏ hẳn đặc trưng mạnh đó khỏi dữ liệu'
+      - 'Đặt `max_features=''sqrt''` để các cây khác nhau hơn'
+    answer: 3
+    explanation: 'Cây nào cũng hỏi đặc trưng mạnh ở gốc, nên các cây rất giống nhau: tương quan $\rho$ lớn. Phương sai của trung bình là $\rho\sigma^2 + \frac{1-\rho}{B}\sigma^2$. Tăng $B$ chỉ xóa số hạng thứ hai, còn $\rho\sigma^2$ đứng yên. Chọn ngẫu nhiên tập con đặc trưng làm $\rho$ nhỏ đi. `bootstrap=False` làm các cây càng giống nhau hơn, còn bỏ đặc trưng mạnh thì mất thông tin tốt nhất.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import giniSplitCode from '@code/ml/decision-tree-random-forest/gini-split.vi.py?raw';
+import depthCode from '@code/ml/decision-tree-random-forest/depth.vi.py?raw';
+import randomForestCode from '@code/ml/decision-tree-random-forest/random-forest.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu cây quyết định (decision tree) là một chuỗi câu hỏi có/không, và cách nó dự đoán cho một mẫu mới.
+- Tự tính được độ vẩn đục Gini (Gini impurity), entropy và độ lợi thông tin (information gain) để chọn câu hỏi chia, rồi kiểm lại bằng `DecisionTreeClassifier`.
+- Nhận ra vì sao cây để mọc tự do thì overfitting, và hãm nó bằng `max_depth`, `min_samples_leaf` hoặc cắt tỉa (pruning).
+- Giải thích vì sao random forest (rừng ngẫu nhiên) đoán vững hơn một cây, và dùng được điểm OOB cùng độ quan trọng đặc trưng (feature importance) mà không đọc sai.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài này dùng **độ chính xác** (accuracy) và **F1** từ bài [Đánh giá mô hình: Accuracy, Precision, Recall, F1](/vi/ml/classification-metrics/), và hai hiện tượng **overfitting**, **underfitting** từ bài [Overfitting và Underfitting](/vi/ml/overfitting-underfitting/): MSE (hay accuracy) trên tập train đẹp chưa nói lên gì, phải nhìn điểm trên dữ liệu mô hình chưa thấy.
+:::
+
+## Trực giác
+
+Chiều nào Minh cũng có thể ra sân đá bóng với hội bạn. Nhưng không phải chiều nào cũng đi. Bạn của Minh ghi lại 12 buổi chiều gần đây:
+
+| Buổi | Mưa | Nhiệt độ (°C) | Gió mạnh | Đi đá bóng |
+|---:|---|---:|---|---|
+| 1 | không | 30 | không | có |
+| 2 | không | 35 | không | không |
+| 3 | có | 27 | có | không |
+| 4 | không | 32 | có | có |
+| 5 | không | 28 | không | có |
+| 6 | có | 25 | không | không |
+| 7 | không | 34 | có | không |
+| 8 | không | 31 | không | có |
+| 9 | có | 29 | có | không |
+| 10 | không | 36 | không | không |
+| 11 | không | 29 | không | có |
+| 12 | có | 26 | có | không |
+
+Chiều nay trời không mưa, 31°C, có gió. Minh có đi không?
+
+Nhìn bảng một lúc, bạn sẽ tự đặt câu hỏi theo thứ tự. **Trời có mưa không?** Cả 4 buổi mưa, Minh đều ở nhà. Nếu không mưa thì hỏi tiếp: **có nóng quá 33°C không?** Ba buổi nóng 34–36°C, Minh không đi; năm buổi còn lại, Minh đi. Chiều nay không mưa, 31°C, vậy đoán là **có**.
+
+Chuỗi câu hỏi đó chính là một cây quyết định: mỗi câu chỉ trả lời có hoặc không, và mỗi câu thu hẹp khả năng lại.
+
+### Câu hỏi nào nên hỏi trước?
+
+Bạn chọn "mưa" làm câu đầu vì thấy nó tách bảng rất gọn. Thử so với câu "có gió mạnh không?":
+
+- Hỏi **mưa**: nhóm "mưa" có 4 buổi, cả 4 đều không đi. Nhóm "không mưa" có 8 buổi: 5 đi, 3 không.
+- Hỏi **gió**: nhóm "gió mạnh" có 5 buổi: 1 đi, 4 không. Nhóm "không gió" có 7 buổi: 4 đi, 3 không.
+
+Câu hỏi về mưa cho một nhóm hoàn toàn "sạch". Câu hỏi về gió để lại hai nhóm còn lẫn lộn. Câu tốt là câu tách ra những nhóm **thuần** (pure) nhất có thể, tức gần như chỉ còn một lớp. Với 3 cột và 12 dòng, bạn nhìn bằng mắt được. Với 30 cột và hàng nghìn dòng thì không. Bài toán của bài này là: **đo bằng một con số mức "lẫn lộn" của một nhóm mẫu, để máy tự chọn câu hỏi tốt nhất ở mỗi bước, rồi biết khi nào nên dừng hỏi.**
+
+## Lý thuyết
+
+### Cấu tạo của một cây
+
+Một cây quyết định gồm các **nút** (node):
+
+- **Nút gốc** (root node): câu hỏi đầu tiên, nơi mọi mẫu đi vào.
+- **Nút trong** (internal node): một câu hỏi dạng "$x_j \le t$?", với $x_j$ là đặc trưng thứ $j$ và $t$ là một **ngưỡng** (threshold). Trả lời "đúng" thì đi sang nhánh trái, "sai" thì sang nhánh phải.
+- **Nút lá** (leaf node): không hỏi nữa, chỉ đưa ra dự đoán. Với bài toán phân loại, lá dự đoán **lớp chiếm đa số** trong các mẫu train rơi vào lá đó.
+
+Số câu hỏi trên đường dài nhất từ gốc tới lá là **độ sâu** (depth) của cây. Cây của Minh có độ sâu 2.
+
+Dự đoán cho một mẫu mới rất đơn giản: bắt đầu ở gốc, trả lời từng câu hỏi, đi theo nhánh tương ứng tới khi gặp lá. Cột "có/không" được mã hóa thành số 0/1, nên "có mưa không?" viết thành "mưa $\le 0.5$?": không mưa (0) thì đúng, có mưa (1) thì sai.
+
+### Đo độ lẫn lộn: Gini và entropy
+
+Xét một nút có $m$ mẫu, thuộc $K$ lớp. Gọi $p_k$ là tỉ lệ mẫu thuộc lớp $k$ trong nút. Ở đây có $K = 2$ lớp: "có" và "không".
+
+**Độ vẩn đục Gini** (Gini impurity) là
+
+$$
+G = 1 - \sum_{k=1}^{K} p_k^2
+$$
+
+Cách hiểu: rút ngẫu nhiên một mẫu trong nút, rồi đoán lớp của nó bằng cách bốc thăm theo đúng các tỉ lệ $p_k$. $G$ là xác suất đoán sai. Nút thuần (một lớp chiếm hết, $p_k = 1$) có $G = 0$. Nút chia đôi 50/50 với hai lớp có $G = 1 - 0.5^2 - 0.5^2 = 0.5$, mức lẫn lộn lớn nhất khi có hai lớp.
+
+**Entropy** đo cùng ý đó theo cách khác:
+
+$$
+H = -\sum_{k=1}^{K} p_k \log_2 p_k
+$$
+
+với quy ước $0 \cdot \log_2 0 = 0$. Nút thuần có $H = 0$, nút 50/50 có $H = 1$ (một bit: phải hỏi thêm đúng một câu có/không mới biết lớp).
+
+Một câu hỏi chia nút thành nhánh trái có $m_L$ mẫu và nhánh phải có $m_R$ mẫu, $m_L + m_R = m$. Độ lẫn lộn sau khi chia là **trung bình có trọng số** của hai nhánh, trọng số là tỉ lệ mẫu đi vào mỗi nhánh:
+
+$$
+G_{\text{chia}} = \frac{m_L}{m}G_L + \frac{m_R}{m}G_R
+$$
+
+Trọng số cần thiết: một nhánh thuần nhưng chỉ có 1 mẫu thì không đáng kể bằng một nhánh 100 mẫu còn lẫn lộn. Câu hỏi tốt nhất là câu làm $G_{\text{chia}}$ nhỏ nhất, tức làm **độ giảm Gini** $G - G_{\text{chia}}$ lớn nhất. Dùng entropy thì độ giảm ấy có tên riêng, **độ lợi thông tin** (information gain):
+
+$$
+\mathrm{IG} = H - \left(\frac{m_L}{m}H_L + \frac{m_R}{m}H_R\right)
+$$
+
+Trong thực tế, Gini và entropy thường chọn cùng câu hỏi. scikit-learn mặc định dùng Gini (`criterion="gini"`), và Gini cũng tính nhanh hơn một chút vì không cần logarit.
+
+### Tính tay trên 12 buổi chiều
+
+**Bước 1: độ lẫn lộn ở gốc.** Có 5 buổi đi và 7 buổi không đi, nên $p_{\text{có}} = 5/12$, $p_{\text{không}} = 7/12$:
+
+$$
+\begin{aligned}
+G &= 1 - \left(\tfrac{5}{12}\right)^2 - \left(\tfrac{7}{12}\right)^2 \\
+&= 1 - \tfrac{25}{144} - \tfrac{49}{144} \\
+&= \tfrac{70}{144} \approx 0.4861
+\end{aligned}
+$$
+
+Dòng thứ hai chỉ bình phương từng tỉ lệ, dòng thứ ba gộp lại. Gốc gần mức 0.5, tức rất lẫn lộn.
+
+**Bước 2: thử câu hỏi "mưa".** Nhánh "không mưa" có 8 buổi (5 có, 3 không), nhánh "mưa" có 4 buổi (cả 4 không):
+
+$$
+\begin{aligned}
+G_L &= 1 - \left(\tfrac{5}{8}\right)^2 - \left(\tfrac{3}{8}\right)^2 = \tfrac{30}{64} \approx 0.4688 \\
+G_R &= 1 - 0^2 - 1^2 = 0 \\
+G_{\text{chia}} &= \tfrac{8}{12} \cdot 0.4688 + \tfrac{4}{12} \cdot 0 = 0.3125
+\end{aligned}
+$$
+
+Dòng cuối là trung bình có trọng số: nhánh trái chiếm 8 trên 12 buổi, nhánh phải 4 trên 12.
+
+**Bước 3: thử các câu khác, cùng cách tính.** Câu "gió mạnh" cho hai nhánh 7 buổi (4 có, 3 không) và 5 buổi (1 có, 4 không). Câu "nhiệt độ $\le 33$" cho 9 buổi (5 có, 4 không, vì 4 buổi mưa đều mát) và 3 buổi (cả 3 không). Bảng dưới gom kết quả, kèm độ lợi thông tin tính bằng entropy (ô code đầu tiên in lại các số này):
+
+| Câu hỏi | Nhánh "đúng" | Nhánh "sai" | $G_{\text{chia}}$ | Độ giảm Gini | Độ lợi thông tin |
+|---|---|---|---:|---:|---:|
+| Không mưa? | 5 có, 3 không | 0 có, 4 không | 0.3125 | 0.1736 | 0.3436 |
+| Không gió? | 4 có, 3 không | 1 có, 4 không | 0.4190 | 0.0671 | 0.1043 |
+| Nhiệt độ $\le 33$? | 5 có, 4 không | 0 có, 3 không | 0.3704 | 0.1157 | 0.2366 |
+
+Câu "mưa" thắng theo cả hai thước đo, đúng như mắt bạn đã chọn ở phần Trực giác. Nó thành nút gốc.
+
+**Bước 4: lặp lại ở từng nhánh.** Nhánh "mưa" đã thuần (4 không), nên thành lá "không". Nhánh "không mưa" còn 8 buổi, Gini 0.4688. Thử lại mọi câu hỏi **chỉ trên 8 buổi này**. Câu "nhiệt độ $\le 33$?" tách thành 5 buổi đi và 3 buổi không đi, cả hai nhánh thuần, $G_{\text{chia}} = 0$. Không câu nào tốt hơn được, nên chọn nó. Mọi lá đã thuần, cây dừng.
+
+Hình dưới là cây hoàn chỉnh. Hãy nhìn cột Gini đi từ 0.486 ở gốc xuống 0 ở cả ba lá.
+
+{/* FIG: DecisionTreeFigure
+    Ý: cây quyết định độ sâu 2 học được trên 12 buổi chiều; Gini giảm dần từ gốc xuống lá.
+    Khối và mũi tên: đọc từ trên xuống. Nút gốc (trọng tâm) ở trên cùng. Hai mũi tên đi xuống: trái ghi "đúng", phải ghi "sai". Nhánh trái tới nút trong thứ hai; nhánh phải tới lá "không". Từ nút trong thứ hai, hai mũi tên tới lá "có" (trái, "đúng") và lá "không" (phải, "sai"). Nút trong là nhóm thứ nhất, ba lá là nhóm thứ hai (màu lớp: "có" một màu, "không" một màu).
+    Nhãn: gốc "Không mưa?" / "Gini 0.486 · 12 buổi" / "5 có, 7 không". Nút trong "Nhiệt độ ≤ 33°C?" / "Gini 0.469 · 8 buổi" / "5 có, 3 không". Lá trái dưới "Đi đá bóng: có" / "Gini 0 · 5 buổi". Lá giữa dưới "Đi đá bóng: không" / "Gini 0 · 3 buổi". Lá phải "Đi đá bóng: không" / "Gini 0 · 4 buổi".
+    Chú thích: Mỗi nút trong hỏi một câu $x_j \le t$, đúng thì sang trái; lá dự đoán lớp chiếm đa số, và cả ba lá đều có $G = 0$. */}
+
+### CART: thuật toán tham lam
+
+Cách làm vừa rồi là thuật toán **CART** (Classification And Regression Trees, Breiman và cộng sự, 1984), thứ scikit-learn cài đặt. Ở mỗi nút:
+
+1. Với mỗi đặc trưng $x_j$, sắp các giá trị khác nhau của nó trong nút theo thứ tự tăng dần. Mỗi ngưỡng ứng viên $t$ là **điểm giữa** hai giá trị liền nhau. Nhiệt độ có 11 giá trị khác nhau (25, 26, ..., 36), nên có 10 ngưỡng ứng viên. Ngưỡng 33 là điểm giữa của 32 và 34.
+2. Tính $G_{\text{chia}}$ cho mọi cặp (đặc trưng, ngưỡng), chọn cặp nhỏ nhất.
+3. Chia nút, rồi làm lại từ bước 1 cho từng nút con.
+4. Dừng khi nút đã thuần, hoặc khi chạm một giới hạn như độ sâu tối đa.
+
+CART là thuật toán **tham lam** (greedy): mỗi bước chọn câu hỏi tốt nhất **ngay lúc đó**, không nhìn trước xem cây về sau có tốt nhất không. Tìm cây tốt nhất trên toàn cục quá tốn kém khi dữ liệu lớn, nên cách tham lam là lựa chọn thực tế: nhanh, và thường đủ tốt.
+
+### Cây hồi quy
+
+Cây cũng dự đoán được số, gọi là **cây hồi quy** (regression tree). Hai chỗ thay đổi:
+
+- Lá dự đoán **trung bình** $\bar{y}$ của các mẫu train trong lá, thay cho lớp đa số.
+- Độ lẫn lộn của nút đo bằng MSE quanh trung bình đó, $\frac{1}{m}\sum_i (y^{(i)} - \bar{y})^2$, và chọn câu hỏi làm MSE có trọng số của hai nhánh nhỏ nhất.
+
+Ví dụ: một nút có 4 căn hộ, giá thuê 3, 4, 9 và 10 triệu đồng. Trung bình là 6.5, MSE là $(3.5^2 + 2.5^2 + 2.5^2 + 3.5^2)/4 = 9.25$. Chia thành hai nhóm (3, 4) và (9, 10) thì hai nhánh có trung bình 3.5 và 9.5, MSE mỗi nhánh 0.25: MSE giảm 9.0. Kết quả là một hàm **bậc thang**, mỗi lá một con số không đổi.
+
+### Cây sâu thì overfitting
+
+Để CART chạy tới khi mọi lá thuần, cây có thể tạo một lá riêng cho từng mẫu "lạ": accuracy train lên 1.000, nhưng cây đã học thuộc cả nhiễu. Đây đúng là overfitting ở bài [Overfitting và Underfitting](/vi/ml/overfitting-underfitting/), với **độ sâu** thay cho bậc đa thức làm núm điều chỉnh độ linh hoạt.
+
+Có ba cách hãm:
+
+- **`max_depth`**: giới hạn số câu hỏi trên mỗi đường đi. Độ sâu $d$ cho tối đa $2^d$ lá.
+- **`min_samples_leaf`**: mỗi lá phải chứa ít nhất từng ấy mẫu. Một lá chỉ dựa trên 1–2 mẫu thì rất dễ là nhiễu.
+- **Cắt tỉa** (pruning): để cây mọc lớn, rồi cắt bớt những nhánh đóng góp ít. scikit-learn dùng cắt tỉa theo độ phức tạp (cost-complexity pruning) qua tham số `ccp_alpha`: nó phạt mỗi lá thêm một lượng $\alpha$, cùng tinh thần với khoản phạt của bài [Ridge, Lasso, Elastic Net](/vi/ml/regularization/). $\alpha$ càng lớn, cây càng nhỏ.
+
+Cả ba đều là siêu tham số. Chọn chúng bằng kiểm định chéo, không bằng tập test.
+
+### Ưu và nhược điểm của một cây
+
+| Tiêu chí | Cây quyết định |
+|---|---|
+| Dễ giải thích | Rất dễ: in cây ra là đọc được từng luật "nếu ... thì ..." |
+| Chuẩn hóa đặc trưng | Không cần. Cây chỉ so $x_j \le t$, nên chỉ thứ tự các giá trị là quan trọng; đổi đơn vị không đổi cây |
+| Ranh giới quyết định | Hình **bậc thang song song với các trục**, vì mỗi câu hỏi chỉ xét một đặc trưng. Ranh giới chéo như "$x_1 > x_2$" phải xấp xỉ bằng rất nhiều bậc nhỏ |
+| Variance | Cao: đổi vài mẫu train là cây có thể đổi câu hỏi ở gốc, kéo theo cả cây khác hẳn |
+| Ngoại suy | Không: ngoài vùng dữ liệu train, cây hồi quy chỉ trả về giá trị của lá ở mép |
+
+Nhược điểm lớn nhất là variance cao. Random forest sinh ra để chữa đúng điểm đó.
+
+### Random forest: nhiều cây, mỗi cây hơi khác
+
+Ý tưởng: thay vì tin một cây, hãy trồng nhiều cây **khác nhau**, rồi gộp dự đoán của chúng. Đây là một kiểu **tổ hợp mô hình** (ensemble). Random forest (Breiman, 2001) làm các cây khác nhau bằng hai nguồn ngẫu nhiên.
+
+**Nguồn 1: bootstrap.** Mỗi cây học trên một **mẫu bootstrap**: rút $m$ mẫu từ tập train có $m$ mẫu, **có hoàn lại**. Có mẫu được rút hai, ba lần, có mẫu không được rút lần nào. Gộp dự đoán của các cây học trên các mẫu bootstrap gọi là **bagging** (bootstrap aggregating):
+
+- Phân loại: mỗi cây bỏ phiếu, lớp được nhiều phiếu nhất thắng. scikit-learn làm mềm hơn một chút: lấy trung bình xác suất mà các cây dự đoán, rồi chọn lớp có xác suất cao nhất.
+- Hồi quy: lấy trung bình các dự đoán.
+
+**Nguồn 2: chọn ngẫu nhiên đặc trưng.** Ở **mỗi lần chia**, cây chỉ được xét một tập con ngẫu nhiên các đặc trưng, thường cỡ $\sqrt{n}$ trên $n$ đặc trưng (`max_features="sqrt"`, mặc định của `RandomForestClassifier`). Với 30 đặc trưng, mỗi lần chia chỉ xét 5. Vì sao phải làm vậy? Nếu có một đặc trưng rất mạnh, mọi cây bagging đều chọn nó ở gốc, và các cây giống nhau tới mức gộp lại cũng chẳng thêm được bao nhiêu.
+
+### Vì sao trung bình nhiều cây thì vững hơn
+
+Coi dự đoán của mỗi cây tại một điểm là một biến ngẫu nhiên (ngẫu nhiên vì mẫu bootstrap và đặc trưng được chọn), có phương sai $\sigma^2$, và mỗi cặp cây có hệ số tương quan $\rho$. Trung bình của $B$ cây có phương sai
+
+$$
+\operatorname{Var}\left(\frac{1}{B}\sum_{b=1}^{B} f_b\right) = \rho\sigma^2 + \frac{1-\rho}{B}\sigma^2
+$$
+
+với $f_b$ là dự đoán của cây thứ $b$.
+
+<details>
+<summary>Xem cách ra công thức</summary>
+
+Phương sai của một tổng bằng tổng các phương sai cộng tổng các hiệp phương sai của mọi cặp khác nhau. Có $B$ phương sai, mỗi cái $\sigma^2$, và $B(B-1)$ cặp có thứ tự, mỗi cặp hiệp phương sai $\rho\sigma^2$:
+
+$$
+\operatorname{Var}\left(\sum_{b=1}^{B} f_b\right) = B\sigma^2 + B(B-1)\rho\sigma^2
+$$
+
+Chia cho $B$ thì phương sai chia cho $B^2$:
+
+$$
+\begin{aligned}
+\operatorname{Var}\left(\frac{1}{B}\sum_{b=1}^{B} f_b\right) &= \frac{\sigma^2}{B} + \frac{(B-1)\rho\sigma^2}{B} \\
+&= \rho\sigma^2 + \frac{1-\rho}{B}\sigma^2
+\end{aligned}
+$$
+
+Dòng thứ hai tách $\frac{(B-1)\rho}{B} = \rho - \frac{\rho}{B}$, rồi gộp $\frac{\sigma^2}{B} - \frac{\rho\sigma^2}{B}$ thành $\frac{1-\rho}{B}\sigma^2$.
+
+</details>
+
+Đọc công thức theo hai số hạng:
+
+- Số hạng thứ hai giảm về 0 khi số cây $B$ tăng. Vì vậy thêm cây không làm rừng overfitting: tới một lúc, thêm cây chỉ không giúp thêm nữa.
+- Số hạng thứ nhất $\rho\sigma^2$ **không giảm** dù trồng bao nhiêu cây. Muốn nó nhỏ thì các cây phải ít tương quan. Đó là việc của bootstrap và của việc chọn ngẫu nhiên đặc trưng.
+
+Mỗi cây trong rừng thường được để mọc sâu: độ chệch thấp, variance cao. Phép lấy trung bình lo phần variance.
+
+### Điểm OOB: tập kiểm định miễn phí
+
+Một mẫu cụ thể **không** được rút ở một lần rút với xác suất $1 - \frac{1}{m}$. Rút $m$ lần độc lập, xác suất nó không được rút lần nào là
+
+$$
+\left(1 - \frac{1}{m}\right)^m \approx e^{-1} \approx 0.368
+$$
+
+khi $m$ lớn. Vậy mỗi cây không thấy khoảng 37% tập train. Các mẫu đó là mẫu **ngoài túi** (out-of-bag, OOB) của cây.
+
+Điểm OOB chấm mỗi mẫu train chỉ bằng những cây **chưa thấy** nó, rồi tính accuracy trên cả tập train. Nó là một ước lượng trung thực của điểm trên dữ liệu mới, mà không phải tách riêng tập kiểm định. Trong scikit-learn, đặt `oob_score=True` rồi đọc `oob_score_`.
+
+### Độ quan trọng đặc trưng
+
+`feature_importances_` của cây và rừng đo **độ giảm độ vẩn đục trung bình** (mean decrease in impurity, MDI). Với mỗi đặc trưng, cộng lượng Gini giảm ở mọi nút chia theo đặc trưng đó, mỗi nút nhân với tỉ lệ mẫu đi qua nút, rồi chia cho tổng để các số cộng lại bằng 1. Rừng lấy trung bình trên các cây.
+
+Trên cây của Minh: câu hỏi mưa ở gốc góp $\frac{12}{12}(0.4861 - 0.3125) = 0.1736$, câu hỏi nhiệt độ ở nút 8 buổi góp $\frac{8}{12}(0.4688 - 0) = 0.3125$. Nhiệt độ quan trọng hơn mưa (0.643 so với 0.357), dù mưa nằm ở gốc.
+
+Con số này tiện nhưng có hai thiên lệch. Nó tính trên **tập train**, nên một đặc trưng cây dùng để học thuộc nhiễu vẫn có điểm. Và nó **ưu ái đặc trưng có nhiều giá trị khác nhau**, vì những đặc trưng đó có nhiều ngưỡng để thử, dễ tìm được một cách chia "ăn may". Hộp Lỗi hay gặp đầu tiên nói cách làm chắc hơn.
+
+:::note[Ghi nhớ]
+Cây chọn câu hỏi làm độ vẩn đục có trọng số $\frac{m_L}{m}G_L + \frac{m_R}{m}G_R$ nhỏ nhất, theo kiểu tham lam. Cây sâu thì overfitting và có variance cao. Random forest lấy trung bình nhiều cây học trên mẫu bootstrap, mỗi lần chia chỉ xét một tập con đặc trưng, để các cây ít tương quan, nhờ đó phương sai $\rho\sigma^2 + \frac{1-\rho}{B}\sigma^2$ nhỏ đi.
+:::
+
+### Giới hạn
+
+- **Rừng khó giải thích hơn cây.** Một cây đọc được thành luật, năm trăm cây thì không.
+- **Vẫn là bậc thang song song trục.** Trung bình nhiều cây làm bậc thang mịn hơn, nhưng rừng hồi quy vẫn không ngoại suy được.
+- **Boosting.** Một họ tổ hợp khác, **gradient boosting** (các thư viện XGBoost, LightGBM), trồng cây nối tiếp nhau, cây sau sửa lỗi của các cây trước. Trên dữ liệu dạng bảng, nó thường cho điểm cao nhất, nhưng nằm ngoài phạm vi bài này.
+
+## Minh họa
+
+Để thấy bagging làm các cây khác nhau thế nào, hãy trồng một "rừng" chỉ 3 cây trên chính 12 buổi chiều. Mỗi cây rút 12 buổi có hoàn lại (bằng `np.random.default_rng(0)`), rồi để `DecisionTreeClassifier(random_state=0)` mọc tự do. Ở đây chỉ có bootstrap, chưa chọn ngẫu nhiên đặc trưng. Hãy nhìn cột "Câu hỏi ở gốc" và cột cuối.
+
+| Cây | Các buổi được rút (có lặp) | Buổi OOB | Câu hỏi ở gốc | Đoán đúng buổi OOB |
+|---:|---|---|---|---:|
+| 1 | 1, 1, 1, 3, 4, 4, 7, 8, 8, 10, 11, 11 | 2, 5, 6, 9, 12 | Nhiệt độ $\le 33$? | 5/5 |
+| 2 | 1, 4, 7, 7, 7, 8, 8, 9, 9, 10, 12, 12 | 2, 3, 5, 6, 11 | Không gió? | 4/5 |
+| 3 | 1, 1, 2, 3, 5, 7, 7, 9, 10, 11, 11, 11 | 4, 6, 8, 12 | Nhiệt độ $\le 32$? | 2/4 |
+
+- **Ba cây, ba câu hỏi gốc khác nhau**, không cây nào hỏi "mưa" trước như cây học trên cả bảng. Chỉ đổi dữ liệu một chút mà cây đổi hẳn: đó là variance cao.
+- **Mỗi cây bỏ sót 4–5 buổi**, gần mức 37% của công thức ở trên. Những buổi đó dùng để chấm cây một cách trung thực.
+- **Cây 2 đoán sai buổi 6** (mưa, 25°C, không gió). Trong mẫu của nó, hai buổi mưa (9 và 12) đều có gió, nên cây hỏi "gió" trước và ở nhánh không gió chưa bao giờ gặp trời mưa. Mỗi cây chỉ thấy một mảnh dữ liệu, nên sai theo một kiểu riêng.
+
+Buổi 6 là buổi OOB của cả ba cây: cây 1 đoán "không" (đúng), cây 2 và 3 đoán "có", nên bỏ phiếu sai. Ba cây là quá ít. Rừng thật dùng hàng trăm cây, cộng thêm việc chọn ngẫu nhiên đặc trưng, như ô code thứ ba.
+
+## Ví dụ code
+
+Ba ô dưới đây chạy độc lập. Ô chạy đầu tiên lâu hơn một chút, vì trình duyệt phải tải thêm scikit-learn.
+
+Ô đầu tiên làm lại phần tính tay: hàm `gini` và `entropy` viết bằng NumPy, hàm `score` tính độ vẩn đục có trọng số của hai nhánh. Sau đó, ô huấn luyện `DecisionTreeClassifier` trên cùng bảng và in cây bằng `export_text`. Tên cột trong code là tiếng Anh: `rain` (mưa), `temp` (nhiệt độ), `windy` (gió mạnh), `play` (đi đá bóng); lớp `yes` là "có", `no` là "không".
+
+<PythonRunner code={giniSplitCode} title="Gini, entropy và cây trên 12 buổi chiều" />
+
+Dòng đầu cho Gini 0.4861 và entropy 0.9799 ở gốc. Ba dòng sau khớp bảng ở bước 3: cột `gini` là $G_{\text{chia}}$ (0.3125, 0.4190, 0.3704), cột `gain` là độ lợi thông tin (0.3436, 0.1043, 0.2366). Cây scikit-learn in ra đúng cây đã tính tay: gốc hỏi `rain <= 0.50`, nhánh không mưa hỏi `temp <= 33.00`. `weights` là số mẫu mỗi lớp trong lá, theo thứ tự `[no, yes]`: lá "có" chứa `[0.00, 5.00]`, hai lá "không" chứa `[3.00, 0.00]` và `[4.00, 0.00]`.
+
+Ô thứ hai dùng bộ dữ liệu ung thư vú của scikit-learn (`load_breast_cancer`): 569 khối u, 30 đặc trưng đo từ ảnh tế bào, nhãn ác tính hoặc lành tính. Ô chia 75% train, 25% test (143 mẫu), rồi tăng dần `max_depth`.
+
+<PythonRunner code={depthCode} title="Độ sâu của cây và overfitting" />
+
+Cách đọc:
+
+- Accuracy train tăng đều theo độ sâu: 0.930, 0.932, 0.977, 0.986, rồi 1.000 từ độ sâu 5. Từ đó cây đã thuần ở mọi lá (18 lá), nên `max_depth` lớn hơn hay `None` cũng cho đúng cây đó.
+- Accuracy test cao nhất ở độ sâu 3 (0.916), rồi giảm nhẹ còn 0.902 khi cây mọc hết cỡ. Khoảng cách train–test lớn nhất, gần 0.1, là ở cây mọc tự do: dấu hiệu overfitting.
+- `min_samples_leaf=10` cho cây 8 lá, accuracy test 0.916, bằng cây độ sâu 3, mà không cần chọn độ sâu.
+
+Chênh lệch giữa 0.916 và 0.902 chỉ là 2 trên 143 mẫu test, nên đừng đọc quá nhiều vào từng con số. Muốn chọn độ sâu cho chắc thì dùng kiểm định chéo trên tập train, như bài [Overfitting và Underfitting](/vi/ml/overfitting-underfitting/).
+
+Ô thứ ba so một cây với một rừng 200 cây trên năm cách chia train/test khác nhau, rồi tính điểm OOB, F1 và 5 đặc trưng quan trọng nhất.
+
+<PythonRunner code={randomForestCode} title="Random forest: OOB và độ quan trọng đặc trưng" />
+
+- **Rừng tốt hơn và ổn định hơn.** Qua năm cách chia, accuracy test của cây nhảy từ 0.902 tới 0.951; của rừng chỉ từ 0.944 tới 0.972, và ở cách chia nào rừng cũng không thua cây. Đây là phép trung bình làm giảm variance.
+- **OOB gần với test.** Điểm OOB là 0.965, accuracy test là 0.944. OOB chỉ dùng tập train mà vẫn cho ước lượng cùng cỡ với điểm test; hai số lệch nhau một chút vì 143 mẫu test cũng chỉ là một mẫu nhỏ.
+- **F1 cho lớp ác tính là 0.925.** Trong bộ này, lớp 1 là lành tính, nên `pos_label=0` để F1 đo khả năng bắt đúng khối u ác tính, lớp mà bỏ sót thì nguy hiểm hơn (xem bài [Đánh giá mô hình: Accuracy, Precision, Recall, F1](/vi/ml/classification-metrics/)).
+- **Độ quan trọng.** Đứng đầu là `worst perimeter` (0.144), `worst radius` (0.136), `worst concave points` (0.131), `worst area` (0.103), `mean concave points` (0.095). Chu vi, bán kính và diện tích gần như đo cùng một thứ: độ lớn của khối u. Rừng chia điểm quan trọng cho cả ba, như hộp đầu tiên bên dưới giải thích.
+
+## Lỗi hay gặp
+
+:::caution[Đọc `feature_importances_` như thứ tự quan trọng thật]
+Độ quan trọng MDI tính trên tập train và ưu ái đặc trưng có nhiều giá trị khác nhau. Nó còn bị đặc trưng tương quan làm rối. Huấn luyện một cây mọc tự do trên cách chia đầu tiên (`random_state=0`, như ô thứ hai với `max_depth=None`) rồi in `feature_importances_`: cây dồn 0.725 vào `worst perimeter`, câu hỏi ở gốc của nó. Đã hỏi chu vi rồi thì bán kính gần như không còn gì để nói thêm, nên `worst radius` chỉ được 0.037. Rừng thì chia điểm cho cả chu vi, bán kính, diện tích (0.144, 0.136, 0.103). Không con số nào sai, nhưng cũng không nói "bán kính chẳng quan trọng". Muốn đo chắc hơn, dùng `permutation_importance` (trong `sklearn.inspection`) trên tập test: xáo trộn một cột rồi xem điểm test giảm bao nhiêu.
+:::
+
+:::caution[Chấm cây hoặc rừng bằng accuracy train]
+Cây mọc tự do và random forest đều đạt accuracy train 1.000 trên bộ ung thư vú, vì mỗi cây được để mọc tới khi mọi lá thuần. Con số đó không nói gì về dữ liệu mới. Hãy nhìn accuracy test, điểm kiểm định chéo, hoặc với rừng thì điểm OOB. Và chọn `max_depth`, `min_samples_leaf` bằng kiểm định chéo, không bằng tập test.
+:::
+
+:::caution[Sợ thêm cây làm rừng overfitting]
+Khác bậc đa thức hay độ sâu, số cây `n_estimators` không phải núm độ linh hoạt. Thêm cây chỉ làm số hạng $\frac{1-\rho}{B}\sigma^2$ nhỏ đi, nên điểm test thường tăng rồi đi ngang. Cái giá chỉ là thời gian chạy và bộ nhớ. Nếu rừng overfitting, hãy hãm từng cây (`max_depth`, `min_samples_leaf`) hoặc giảm `max_features`, không phải bớt cây.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Cây quyết định là chuỗi câu hỏi $x_j \le t$ đi từ nút gốc qua các nút trong tới nút lá; lá dự đoán lớp đa số (phân loại) hoặc trung bình (hồi quy). Nó không cần chuẩn hóa và dễ đọc thành luật.
+- CART chọn câu hỏi một cách tham lam: thử mọi đặc trưng và mọi ngưỡng ở điểm giữa, giữ câu làm độ vẩn đục có trọng số $\frac{m_L}{m}G_L + \frac{m_R}{m}G_R$ nhỏ nhất, với Gini $G = 1 - \sum_k p_k^2$ (hoặc entropy, cho độ lợi thông tin).
+- Cây mọc tự do thì overfitting và có variance cao. Hãm bằng `max_depth`, `min_samples_leaf` hoặc cắt tỉa `ccp_alpha`, chọn bằng kiểm định chéo.
+- Random forest lấy trung bình nhiều cây học trên mẫu bootstrap, mỗi lần chia chỉ xét một tập con đặc trưng, để các cây ít tương quan. Điểm OOB ước lượng điểm trên dữ liệu mới mà không cần tập kiểm định. Đọc `feature_importances_` cẩn thận, ưu tiên `permutation_importance` trên tập test.
+
+**Đọc thêm:**
+
+- Vũ Hữu Tiệp (2018). [*Machine Learning cơ bản*, Bài 34: Decision Trees (1): Iterative Dichotomiser 3](https://machinelearningcoban.com/2018/01/14/id3/). Tiếng Việt, xây cây bằng entropy và độ lợi thông tin (thuật toán ID3), có ví dụ tính tay trên một bảng thời tiết. Bài đó không dùng Gini và chia nhiều nhánh theo từng giá trị, khác cây nhị phân của CART.
+- James, G., Witten, D., Hastie, T., Tibshirani, R. (2021). [*An Introduction to Statistical Learning*](https://www.statlearning.com/) (bản 2). Chương 8: cây quyết định, cắt tỉa, bagging, random forest và boosting, giải thích bằng lời rất kỹ. Ký hiệu khác: $n$ là số mẫu, $p$ là số đặc trưng.
+- Breiman, L. (2001). [*Random Forests*](https://doi.org/10.1023/A:1010933404324). *Machine Learning*, 45(1), 5–32. Bài báo gốc: chọn ngẫu nhiên đặc trưng ở mỗi lần chia, ước lượng OOB, và vì sao thêm cây không gây overfitting.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Decision Trees](https://scikit-learn.org/1.8/modules/tree.html), mục 1.10. Công thức Gini, entropy, MSE mà `DecisionTreeClassifier` dùng, các mẹo thực hành, và cắt tỉa theo độ phức tạp (`ccp_alpha`).
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Ensembles](https://scikit-learn.org/1.8/modules/ensemble.html), mục 1.11.2. Random forest trong scikit-learn: lấy trung bình xác suất thay vì bỏ phiếu, `max_features`, `oob_score`, và cảnh báo về độ quan trọng MDI.
+
+<LessonProgress />
