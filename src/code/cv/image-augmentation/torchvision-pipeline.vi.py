@@ -25,6 +25,9 @@ train_tf = v2.Compose([
     v2.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4),
     v2.ToDtype(torch.float32, scale=True),       # uint8 0..255 -> 0..1
 ])
+# Tập kiểm định, test: chỉ các bước tất định, không ngẫu nhiên
+eval_tf = v2.Compose([v2.Resize(110), v2.CenterCrop(96),
+                      v2.ToDtype(torch.float32, scale=True)])
 
 
 def color_class(x):
@@ -49,3 +52,4 @@ print(f"agreement, one call: {agree(out_img, out_mask):.3f}")
 img2 = train_tf(img)
 mask2 = train_tf(mask)
 print(f"agreement, two calls: {agree(img2, mask2):.3f}")
+print("eval image:", tuple(eval_tf(img).shape))

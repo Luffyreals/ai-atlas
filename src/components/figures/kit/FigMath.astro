@@ -9,9 +9,7 @@
 // head ("×" of "× N"), dx = 3 before the symbol. FigNode draws one of these as its `math` row.
 // The central baseline and the middle anchor come from figures.css (llm-lessons.md 2.9.3): only start and end
 // are written.
-// `hat` (cv-lessons.md 4): \hat{x} over a lone symbol centred on x, a polyline (hatPoints), since Barlow has
-// no combining circumflex.
-import { FIG_FONT, checkMathLabel, hatPoints, round1, type MathLabel } from '@lib/figures/geometry';
+import { FIG_FONT, checkMathLabel, round1, type MathLabel } from '@lib/figures/geometry';
 
 interface Props extends MathLabel {
   x: number;
@@ -21,12 +19,9 @@ interface Props extends MathLabel {
   anchor?: 'start' | 'middle' | 'end';
 }
 
-const { x, y, symbol, sub, after, before, bold = false, hat = false, size = 'label', anchor = 'middle' } = Astro.props;
+const { x, y, symbol, sub, after, before, bold = false, size = 'label', anchor = 'middle' } = Astro.props;
 try {
   checkMathLabel(symbol, sub, after, before);
-  if (hat && (sub !== undefined || after !== undefined || before !== undefined || anchor !== 'middle')) {
-    throw new Error('a hat goes over a lone symbol, centred (no sub, before, after or side anchor).');
-  }
 } catch (error) {
   throw new Error(`<FigMath> on "${Astro.locals.starlightRoute.id}": ${error instanceof Error ? error.message : String(error)}`);
 }
@@ -35,4 +30,3 @@ const shift = round1(0.3 * fontSize);
 ---
 
 <text class="atlas-fig-math" font-size={fontSize} text-anchor={anchor === 'middle' ? undefined : anchor} x={x} y={y}>{before !== undefined && <tspan>{before}</tspan>}<tspan class={bold ? 'atlas-fig-math-bold' : undefined} font-style={bold ? undefined : 'italic'} dx={before !== undefined ? 3 : undefined}>{symbol}</tspan>{sub !== undefined && <tspan font-size={FIG_FONT.small} dy={shift}>{sub}</tspan>}{after !== undefined && <tspan dy={sub !== undefined ? -shift : undefined} dx="3">{after}</tspan>}</text>
-{hat && <polyline class="atlas-fig-arrow" points={hatPoints(x, y, fontSize)}></polyline>}

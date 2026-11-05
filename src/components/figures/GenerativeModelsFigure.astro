@@ -1,0 +1,88 @@
+---
+// cv/vae-gan, "Minh họa": two ways to make an image, two bands. Both z boxes are accent: the lesson's lead asks
+// where z comes from.
+// VAE, a U: the top row runs right (image x → encoder → one box "μ, σ", the KL loss named beside it); an arrow
+// drops into "sample z", where the noise ε comes in from the right; the bottom row runs back left (decoder →
+// rebuilt image), so the rebuilt image sits under the input and the reconstruction loss is a short dashed link
+// between them (no head: it compares, nothing flows).
+// GAN: noise z → G → fake image; the real image (from the training data, never through G) under it; both go
+// into D, a tall box on the right, then down to "real or fake?".
+// ⊙ is not in Barlow's subsets: the formula of z is in the caption. Narrow layout only. Words:
+// src/data/figures/generative-models.ts; symbols with FigMath / FigFormula.
+import { GENERATIVE_MODELS } from '@data/figures/generative-models';
+import type { Formula } from '@lib/figures/geometry';
+import { anchor, mainAndSmall, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = GENERATIVE_MODELS[getPageLocale(Astro.locals.starlightRoute)];
+const l = t.labels;
+
+// VAE: top row y 28–83, bottom row y 120–175.
+const A = { y: 28, height: 55 } as const;
+const B = { y: 120, height: 55 } as const;
+const image: Box = { x: 8, width: 72, ...A };
+const encoder: Box = { x: 100, width: 96, ...A };
+const musigma: Box = { x: 216, width: 76, ...A };
+const rebuilt: Box = { x: 8, width: 72, ...B };
+const decoder: Box = { x: 100, width: 96, ...B };
+const sample: Box = { x: 216, width: 76, ...B };
+const eps: Box = { x: 312, width: 40, ...B };
+const muSigma: Formula = [{ symbol: 'μ', bold: true }, ',', { symbol: 'σ', bold: true }];
+const lossX = image.x + image.width / 2;
+
+// GAN: title at y 212; rows y 228–283 and 295–350; D spans both; the verdict under D.
+const GAN_TITLE = 212;
+const C = { y: 228, height: 55 } as const;
+const D_ROW = { y: 295, height: 55 } as const;
+const noise: Box = { x: 8, width: 56, ...C };
+const generator: Box = { x: 84, width: 88, ...C };
+const fake: Box = { x: 192, width: 76, ...C };
+const real: Box = { x: 192, width: 76, ...D_ROW };
+const disc: Box = { x: 288, y: C.y, width: 64, height: D_ROW.y + D_ROW.height - C.y };
+const verdict: Box = { x: 232, y: disc.y + disc.height + 24, width: 120, height: 36 };
+const height = verdict.y + verdict.height + 8;
+---
+
+<FigureFrame id="generative-models" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigText x={8} y={14} lines={l.vae} anchor="start" />
+    <FigText x={48} y={14} lines={l.vaeName} size="small" anchor="start" />
+    <FigNode {...image} math={{ symbol: 'x', bold: true }} lines={l.image} />
+    <FigArrow from={anchor(image, 'right')} to={anchor(encoder, 'left')} />
+    <FigNode {...encoder} lines={l.encoder} />
+    <FigArrow from={anchor(encoder, 'right')} to={anchor(musigma, 'left')} />
+    <FigNode {...musigma} math={muSigma} />
+    <FigText x={musigma.x + musigma.width + 8} y={A.y + A.height / 2} lines={l.kl} size="small" anchor="start" />
+    <FigArrow from={anchor(musigma, 'bottom')} to={anchor(sample, 'top')} />
+
+    <FigNode {...sample} math={{ symbol: 'z', bold: true }} lines={l.sample} tone="accent" />
+    <FigNode {...eps} math={{ symbol: 'ε', bold: true }} />
+    <FigText x={eps.x + eps.width / 2} y={B.y + B.height + 12} lines={l.noiseNote} size="small" />
+    <FigArrow from={anchor(eps, 'left')} to={anchor(sample, 'right')} />
+    <FigArrow from={anchor(sample, 'left')} to={anchor(decoder, 'right')} />
+    <FigNode {...decoder} lines={l.decoder} />
+    <FigArrow from={anchor(decoder, 'left')} to={anchor(rebuilt, 'right')} />
+    <FigNode {...rebuilt} {...mainAndSmall(l.rebuilt)} />
+    <FigArrow from={[lossX, A.y + A.height]} to={[lossX, B.y]} tone="alt" head={false} />
+    <FigText x={lossX + 8} y={(A.y + A.height + B.y) / 2} lines={l.reconstruction} size="small" anchor="start" />
+
+    <FigText x={8} y={GAN_TITLE} lines={l.gan} anchor="start" />
+    <FigText x={48} y={GAN_TITLE} lines={l.ganName} size="small" anchor="start" />
+    <FigNode {...noise} math={{ symbol: 'z', bold: true }} lines={l.noise} tone="accent" />
+    <FigArrow from={anchor(noise, 'right')} to={anchor(generator, 'left')} />
+    <FigNode {...generator} math={{ symbol: 'G' }} lines={l.generator} />
+    <FigArrow from={anchor(generator, 'right')} to={anchor(fake, 'left')} />
+    <FigNode {...fake} lines={l.fake} />
+    <FigNode {...real} lines={l.real} />
+    <FigText x={real.x - 8} y={D_ROW.y + D_ROW.height / 2} lines={l.realNote} size="small" anchor="end" />
+    <FigArrow from={anchor(fake, 'right')} to={[disc.x, anchor(fake, 'right')[1]]} />
+    <FigArrow from={anchor(real, 'right')} to={[disc.x, anchor(real, 'right')[1]]} />
+    <FigNode {...disc} math={{ symbol: 'D' }} lines={l.discriminator} />
+    <FigArrow from={[verdict.x + verdict.width / 2, disc.y + disc.height]} to={[verdict.x + verdict.width / 2, verdict.y]} />
+    <FigNode {...verdict} lines={l.verdict} />
+  </Fragment>
+</FigureFrame>

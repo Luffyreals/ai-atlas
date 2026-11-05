@@ -20,7 +20,8 @@ opt_d = torch.optim.Adam(D.parameters(), lr=2e-4, betas=(0.5, 0.999))
 ones, zeros = torch.ones(64, 1), torch.zeros(64, 1)
 
 for epoch in range(1, 101):
-    for idx in torch.randperm(len(X)).split(64, drop_last=True)[:28]:
+    # 28 lô đủ 64 ảnh mỗi epoch (bỏ 5 ảnh dư để lô nào cũng đủ nhãn)
+    for idx in torch.randperm(len(X))[:28 * 64].view(28, 64):
         real, fake = X[idx], G(torch.randn(64, Z))
         # Bước D: thật -> nhãn 1, giả -> nhãn 0 (detach: không sửa G)
         loss_d = (F.binary_cross_entropy_with_logits(D(real), ones)

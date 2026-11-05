@@ -1,0 +1,76 @@
+---
+// cv/semantic-segmentation, "Minh họa": the lesson's TinyUNet as a U, read from the top left down to the bottom
+// and up to the top right. Left, the contracting path: input image, e1, max pooling, e2, max pooling; the
+// bottom in the middle; right, the expanding path: upsample, d2, upsample, d1, 1 × 1 convolution, output mask.
+// Every block holds its spatial size (FigFormula row: "32 × 32"), its name and its channels; blocks get
+// narrower towards the bottom. The two skip connections (e1 → d1, e2 → d2) are dashed arrows straight across
+// (tone alt: the kit has no accent arrow; llm-lessons.md 2.9.1), named once under the top one. The path names
+// stand under each side. Narrow layout only. Words: src/data/figures/unet.ts; numbers as in tiny-unet.vi.py.
+import { UNET } from '@data/figures/unet';
+import type { Formula } from '@lib/figures/geometry';
+import { anchor, mainAndSmall, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = UNET[getPageLocale(Astro.locals.starlightRoute)];
+const l = t.labels;
+
+const size = (side: number): Formula => [String(side), '×', String(side)];
+// Rows: the top (input, mask: 3 lines), level 1 (e1, d1), level 2 (e2, d2), the bottom.
+const TOP = { y: 8, height: 72 } as const;
+const L1 = { y: 104, height: 72 } as const;
+const L2 = { y: 208, height: 72 } as const;
+const BOTTOM = { y: 312, height: 72 } as const;
+const input: Box = { x: 8, width: 120, ...TOP };
+const mask: Box = { x: 232, width: 120, ...TOP };
+const e1: Box = { x: 8, width: 112, ...L1 };
+const d1: Box = { x: 240, width: 112, ...L1 };
+const e2: Box = { x: 24, width: 96, ...L2 };
+const d2: Box = { x: 240, width: 96, ...L2 };
+const bottom: Box = { x: 136, width: 88, ...BOTTOM };
+const NAMES_Y = BOTTOM.y + BOTTOM.height + 16;
+const height = NAMES_Y + 16;
+
+// Vertical arrows run down x 68 on the left and up x 292 on the right; the arrows into and out of the bottom
+// bend at its middle height.
+const LEFT_X = 68;
+const RIGHT_X = 292;
+const bottomY = anchor(bottom, 'left')[1];
+const gap = (above: { y: number; height: number }, below: { y: number }) => (above.y + above.height + below.y) / 2;
+const skipLabelY = anchor(e1, 'right')[1] + 14;
+---
+
+<FigureFrame id="unet" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigNode {...input} math={size(32)} {...mainAndSmall(l.input)} />
+    <FigArrow from={[LEFT_X, TOP.y + TOP.height]} to={[LEFT_X, L1.y]} />
+    <FigNode {...e1} math={size(32)} {...mainAndSmall(l.e1)} />
+    <FigArrow from={[LEFT_X, L1.y + L1.height]} to={[LEFT_X, L2.y]} />
+    <FigText x={LEFT_X + 8} y={gap(L1, L2)} lines={l.pool} size="small" anchor="start" />
+    <FigNode {...e2} math={size(16)} {...mainAndSmall(l.e2)} />
+    <FigArrow from={[LEFT_X, L2.y + L2.height]} via={[[LEFT_X, bottomY]]} to={anchor(bottom, 'left')} />
+    <FigText x={LEFT_X + 8} y={gap(L2, BOTTOM)} lines={l.pool} size="small" anchor="start" />
+
+    <FigNode {...bottom} math={size(8)} {...mainAndSmall(l.bottom)} />
+
+    <FigArrow from={anchor(bottom, 'right')} via={[[RIGHT_X, bottomY]]} to={[RIGHT_X, L2.y + L2.height]} />
+    <FigText x={RIGHT_X - 8} y={gap(L2, BOTTOM)} lines={l.up} size="small" anchor="end" />
+    <FigNode {...d2} math={size(16)} {...mainAndSmall(l.d2)} />
+    <FigArrow from={[RIGHT_X, L2.y]} to={[RIGHT_X, L1.y + L1.height]} />
+    <FigText x={RIGHT_X - 8} y={gap(L1, L2)} lines={l.up} size="small" anchor="end" />
+    <FigNode {...d1} math={size(32)} {...mainAndSmall(l.d1)} />
+    <FigArrow from={[RIGHT_X, L1.y]} to={[RIGHT_X, TOP.y + TOP.height]} />
+    <FigText x={RIGHT_X - 8} y={gap(TOP, L1)} lines={l.head} size="small" anchor="end" />
+    <FigNode {...mask} math={size(32)} {...mainAndSmall(l.mask)} />
+
+    <FigArrow from={anchor(e1, 'right')} to={anchor(d1, 'left')} tone="alt" />
+    <FigText x={180} y={skipLabelY} lines={l.skip} size="small" />
+    <FigArrow from={anchor(e2, 'right')} to={anchor(d2, 'left')} tone="alt" />
+
+    <FigText x={LEFT_X} y={NAMES_Y} lines={l.down} />
+    <FigText x={RIGHT_X} y={NAMES_Y} lines={l.upward} />
+  </Fragment>
+</FigureFrame>

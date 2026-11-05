@@ -1,0 +1,33 @@
+---
+// ConvolutionViz for cv/cnn-image-classification (docs/architecture/cv-lessons.md, section 1.1). The only file a
+// lesson imports: <ConvolutionViz />, no props, no client:* in MDX. Here, at build time: UI strings, the image
+// description of the page locale, and KaTeX for the two titles (X, K). The island computes the four feature maps
+// itself from the 8 × 8 image (convolution.ts: + and × only), the same at build time and in the browser.
+// The island hydrates 200px before it scrolls into view. Styles: viz.css, through Starlight's customCss.
+import ConvolutionVizIsland from './convolution-viz/ConvolutionVizIsland';
+import { DIGIT_FOUR_8, DIGIT_FOUR_CONVOLUTION } from '@data/datasets/pixel-digits';
+import { getStrings } from '@i18n/ui';
+import { renderInlineMarkup } from '@lib/inline-markup';
+import { getPageLocale } from '@lib/page-locale';
+
+const route = Astro.locals.starlightRoute;
+const locale = getPageLocale(route);
+const strings = getStrings(Astro.locals.t, 'vizConvolution');
+const tCommon = getStrings(Astro.locals.t, 'common');
+---
+
+<div class="atlas-viz not-content" lang={locale} data-pagefind-ignore>
+  <ConvolutionVizIsland
+    client:visible={{ rootMargin: '200px' }}
+    image={DIGIT_FOUR_8.pixels}
+    description={DIGIT_FOUR_8.description[locale]}
+    config={DIGIT_FOUR_CONVOLUTION}
+    labels={{
+      imageTitleHtml: renderInlineMarkup(strings.imageTitle),
+      kernelTitleHtml: renderInlineMarkup(strings.kernelTitle),
+      positionHtml: renderInlineMarkup(strings.positionLabel),
+    }}
+    strings={strings}
+  />
+  <noscript><p class="atlas-viz-noscript">{tCommon.needsScript}</p></noscript>
+</div>

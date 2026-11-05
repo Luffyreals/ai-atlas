@@ -1,0 +1,343 @@
+---
+title: Self-supervised learning với ảnh
+description: Ảnh thì rẻ, nhãn thì đắt. Học biểu diễn ảnh không cần nhãn bằng bài toán phụ, học đối chiếu (SimCLR, MoCo), BYOL, DINO và MAE, rồi đo bằng linear probe.
+quiz:
+  - question: 'Bạn huấn luyện SimCLR với lô $B = 512$ ảnh. Với một góc nhìn $i$, mẫu số của $\ell_{i,j}$ có bao nhiêu số hạng, và bao nhiêu trong đó là mẫu âm?'
+    options:
+      - '512 số hạng, 511 mẫu âm'
+      - '1 024 số hạng, 1 022 mẫu âm'
+      - '1 023 số hạng, 1 022 mẫu âm'
+      - '1 023 số hạng, 511 mẫu âm'
+    answer: 2
+    explanation: 'Lô có $2B = 1\,024$ góc nhìn. Mẫu số bỏ đúng một số hạng là chính góc nhìn $i$, còn $2B - 1 = 1\,023$. Trong đó một số hạng là cặp dương $j$, còn lại $2(B-1) = 1\,022$ mẫu âm: cả hai góc nhìn của mọi ảnh khác đều là mẫu âm, không chỉ một.'
+  - question: 'Một bạn thử SimCLR chỉ với augmentation "cắt ngẫu nhiên", không đổi màu. Loss giảm rất nhanh, gần như đoán đúng mọi cặp dương, nhưng linear probe lại thấp. Giải thích nào hợp lý nhất?'
+    options:
+      - 'Batch quá lớn nên mô hình học thuộc lòng'
+      - 'Hai mảnh cắt từ cùng ảnh có phân bố màu giống nhau, nên mô hình chỉ cần so màu là ghép đúng, không phải học hình dạng'
+      - 'Nhiệt độ $\tau$ quá lớn nên loss không giảm'
+      - 'Cắt ngẫu nhiên làm mất nhãn của ảnh'
+    answer: 1
+    explanation: 'Bài báo SimCLR chỉ ra histogram màu đủ để phân biệt các ảnh. Bài toán phụ dễ quá thì có đường tắt: loss thấp mà biểu diễn không mang nội dung. Thêm đổi màu ngẫu nhiên chặn đường tắt này, nên mô hình phải dựa vào hình dạng. Loss thấp ở đây không có nghĩa là biểu diễn tốt.'
+  - question: 'BYOL không có mẫu âm. Một mạng "lười" có thể cho mọi ảnh cùng một vectơ, và khi đó online dự đoán target hoàn hảo. Điều gì trong BYOL giúp tránh lời giải sụp đổ này trong thực tế?'
+    options:
+      - 'Một predictor chỉ có ở nhánh online, cộng target là bản EMA của online và không nhận gradient'
+      - 'Hàng đợi 65 536 khóa của các lô trước'
+      - 'Che 75% patch của ảnh'
+      - 'Nhãn lớp được thêm vào ở cuối mỗi epoch'
+    answer: 0
+    explanation: 'BYOL dựa vào sự bất đối xứng: nhánh online có thêm predictor, nhánh target chỉ trôi chậm theo online (EMA) và bị stop-gradient. Bài báo không chứng minh điều này luôn tránh được sụp đổ, nhưng thực nghiệm cho thấy nó đủ. Hàng đợi là của MoCo, che patch là của MAE; không phương pháp nào ở đây dùng nhãn.'
+  - question: 'Ở MAE, ảnh $224 \times 224$ cắt patch $16 \times 16$ và che 75%. Encoder ViT xử lý bao nhiêu token patch, và vì sao điều này làm huấn luyện rẻ hơn hẳn?'
+    options:
+      - '196 token, vì encoder cần thấy cả patch bị che để tái tạo'
+      - '147 token, vì encoder chỉ bỏ đi các patch bị che'
+      - '49 token; self-attention tốn theo bình phương số token nên phần attention rẻ đi khoảng 16 lần'
+      - '49 token, nhưng chi phí không đổi vì decoder phải xử lý lại cả 196'
+    answer: 2
+    explanation: '$N = (224/16)^2 = 196$, giữ 25% còn 49 token. Encoder chỉ nhận các patch còn lại, không có mask token, nên số cặp attention giảm từ $196^2$ xuống $49^2$, tức 16 lần. Decoder có xử lý đủ 196 vị trí, nhưng nó nhỏ (dưới 10% tính toán mỗi token so với encoder) và chỉ dùng khi pre-train.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import ntXentCode from '@code/cv/self-supervised-learning/nt-xent.vi.py?raw';
+import simclrCode from '@code/cv/self-supervised-learning/simclr-digits.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu vì sao cần **học tự giám sát** (self-supervised learning) với ảnh, **bài toán phụ** (pretext task) là gì, và cách đo chất lượng biểu diễn bằng **linear probe** hoặc fine-tune.
+- Tự dẫn được hàm mất mát NT-Xent của SimCLR và giải thích được vai trò của **cặp dương** (positive pair), **mẫu âm** (negative example) và nhiệt độ $\tau$.
+- So sánh được ba họ phương pháp: học đối chiếu (SimCLR, MoCo), không cần mẫu âm (BYOL, DINO) và **mô hình hóa ảnh bị che** (masked image modeling, MAE).
+- Cài được SimCLR tí hon bằng PyTorch rồi đo nó bằng linear probe với scikit-learn.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài [Phân loại ảnh với Transformer](/vi/cv/vision-transformer/) cắt ảnh thành $N$ **patch**, đổi thành dãy token và cần rất nhiều ảnh có nhãn mới thắng CNN. Bài [Data augmentation trong CV](/vi/cv/image-augmentation/) biến đổi ảnh (cắt, lật, đổi màu, che một ô) mà không đổi nội dung: ở bài này, augmentation không còn là "thêm dữ liệu" nữa mà chính là nguồn tín hiệu học.
+:::
+
+## Trực giác
+
+### Một kho ảnh không ai gán nhãn
+
+Bạn có một triệu ảnh chụp linh kiện trong nhà máy. Chụp thì rẻ: camera chạy cả ngày. Gán nhãn thì đắt: một kỹ sư phải xem từng ảnh và ghi "lỗi hàn", "nứt", "bình thường". Sau một tháng, bạn có nhãn cho 2 000 ảnh.
+
+Học có giám sát chỉ dùng được 2 000 ảnh đó. 998 000 ảnh còn lại nằm im. Như bài ViT đã nói, mô hình lớn cần rất nhiều dữ liệu, nên 2 000 ảnh là quá ít.
+
+Câu hỏi của bài: **có cách nào để 998 000 ảnh không nhãn dạy cho mô hình biết "nhìn" không?**
+
+### Tự đặt câu hỏi, tự có đáp án
+
+Ý tưởng: đặt ra một bài toán mà đáp án nằm sẵn trong ảnh. Ví dụ, xoay ảnh một góc ngẫu nhiên rồi bắt mô hình đoán góc đã xoay. Nhãn "90 độ" do chính ta tạo ra, không tốn người gán.
+
+Muốn biết một chiếc xe đang lộn ngược, mô hình phải biết bánh xe thường ở dưới, mui xe ở trên. Tức là nó phải học được hình dạng của vật. Đó chính là thứ ta cần.
+
+Bài toán phụ chỉ là cái cớ. Học xong, ta bỏ phần đoán góc, giữ lại **bộ mã hóa** (encoder) đã biết nhìn. Rồi dùng 2 000 ảnh có nhãn để dạy nó việc thật.
+
+### Hai tấm ảnh của cùng một con mèo
+
+Cách nổi lên từ khoảng năm 2020 tinh tế hơn. Lấy một ảnh con mèo. Tạo hai bản khác nhau: bản thứ nhất cắt một góc rồi đổi màu, bản thứ hai lật ngang rồi làm mờ. Mỗi bản gọi là một **góc nhìn** (view).
+
+Hai góc nhìn trông khác nhau, nhưng vẫn là một con mèo. Ta muốn bộ mã hóa cho hai vectơ gần nhau. Còn góc nhìn của các ảnh khác trong lô (con chó, chiếc xe) thì phải cho vectơ ở xa.
+
+Để làm được, mô hình phải bỏ qua những gì augmentation làm thay đổi (màu, vị trí, độ mờ) và giữ những gì không đổi (con mèo). Đó là **học đối chiếu** (contrastive learning), cùng ý với CLIP ở bài [Ảnh + văn bản (1)](/vi/cv/clip-blip-glip/), chỉ khác là cả hai phía đều là ảnh.
+
+**Bài toán của bài: làm sao học một bộ mã hóa ảnh tốt chỉ từ ảnh không nhãn, sao cho mô hình không "ăn gian" bằng một lời giải tầm thường, và đo thế nào để biết nó học được gì?**
+
+## Lý thuyết
+
+### Ký hiệu
+
+Một lô có $B$ ảnh (bài báo SimCLR viết $N$; ở phần CV, $N$ đã là số patch). Mỗi ảnh $\mathbf{x}$ qua hai phép augmentation ngẫu nhiên thành hai góc nhìn $\tilde{\mathbf{x}}_i$, $\tilde{\mathbf{x}}_j$. Bộ mã hóa $f$ cho **biểu diễn** $\mathbf{h} = f(\tilde{\mathbf{x}})$. Một MLP nhỏ $g$ cho $\mathbf{z} = g(\mathbf{h})$. Độ tương tự cosine:
+
+$$
+\mathrm{sim}(\mathbf{u}, \mathbf{v}) = \frac{\mathbf{u}^\top \mathbf{v}}{\lVert\mathbf{u}\rVert\,\lVert\mathbf{v}\rVert}
+$$
+
+### Pretext cổ điển: xoay ảnh và ghép hình
+
+Hai bài toán phụ nổi tiếng trước năm 2020:
+
+- **Đoán góc xoay** (Gidaris và cộng sự, 2018): xoay ảnh 0, 90, 180 hoặc 270 độ, mạng phân loại 4 lớp. Đơn giản, nhưng buộc mạng biết chiều "đứng thẳng" của vật.
+- **Ghép hình** (jigsaw, Noroozi và Favaro, 2016): cắt ảnh thành 9 mảnh, xáo theo một trong 1 000 hoán vị chọn trước (trong $9! = 362\,880$ hoán vị), mạng đoán hoán vị nào. Muốn ghép đúng phải biết đầu mèo nằm trên thân mèo.
+
+Điểm yếu chung: mạng hay tìm **đường tắt** (shortcut). Bài báo ghép hình kể rằng mạng có thể ghép nhờ đường viền và thống kê cấp thấp khớp nhau giữa hai mảnh liền kề, không cần hiểu vật. Bài toán phụ do người thiết kế, và nó tốt tới đâu thì biểu diễn tốt tới đó.
+
+### Đo biểu diễn: linear probe và fine-tune
+
+Học xong, làm sao biết $f$ tốt? Có hai cách chính, đều cần một ít ảnh có nhãn:
+
+- **Linear probe** (bài báo SimCLR gọi là "linear evaluation protocol"): **đóng băng** $f$, chỉ học một bộ phân loại tuyến tính trên $\mathbf{h}$. Bộ phân loại tuyến tính rất yếu, nên nếu nó vẫn đạt độ chính xác cao thì thông tin về lớp phải nằm sẵn trong $\mathbf{h}$, gần như tách được bằng một mặt phẳng.
+- **Fine-tune**: dùng $f$ làm điểm khởi đầu rồi cập nhật cả mạng trên dữ liệu có nhãn. Gần với cách dùng thật hơn, nhưng đo cả khả năng "học lại" chứ không chỉ chất lượng biểu diễn.
+
+### SimCLR: kéo hai góc nhìn lại gần
+
+SimCLR (Chen và cộng sự, 2020) gồm bốn phần: augmentation, encoder $f$, **projection head** $g$ (MLP một lớp ẩn, ReLU) và hàm mất mát NT-Xent.
+
+**Bước 1: tạo $2B$ góc nhìn.** Mỗi ảnh trong lô cho hai góc nhìn, nên lô có $2B$ vectơ $\mathbf{z}_1, \dots, \mathbf{z}_{2B}$. Với một cặp dương $(i, j)$, bài báo không lấy mẫu âm riêng: $2(B-1)$ góc nhìn còn lại trong lô chính là mẫu âm.
+
+**Bước 2: biến bài toán thành phân loại.** Từ góc nhìn $i$, hãy "chọn đúng" góc nhìn $j$ trong số $2B - 1$ ứng viên (mọi góc nhìn trừ chính nó). Điểm của mỗi ứng viên $k$ là cosine chia nhiệt độ: $\mathrm{sim}(\mathbf{z}_i, \mathbf{z}_k)/\tau$. Qua softmax, xác suất chọn đúng $j$ là:
+
+$$
+p_{i,j} = \frac{\exp\!\big(\mathrm{sim}(\mathbf{z}_i, \mathbf{z}_j)/\tau\big)}{\sum_{k=1}^{2B} \mathbb{1}_{[k \ne i]} \exp\!\big(\mathrm{sim}(\mathbf{z}_i, \mathbf{z}_k)/\tau\big)}
+$$
+
+$\mathbb{1}_{[k \ne i]}$ bằng 1 khi $k \ne i$, bằng 0 khi $k = i$: nó bỏ cặp "một vectơ với chính nó", vì cặp này luôn có cosine bằng 1 và không dạy gì.
+
+**Bước 3: lấy cross-entropy.** Đáp án đúng là $j$, nên mất mát là âm log của xác suất đó:
+
+$$
+\ell_{i,j} = -\log p_{i,j}
+$$
+
+Muốn $\ell_{i,j}$ nhỏ, tử số phải lớn (cặp dương gần nhau) **và** mẫu số phải nhỏ (mẫu âm xa). Loss của lô là trung bình $\ell$ trên mọi cặp dương, tính cả $(i, j)$ lẫn $(j, i)$. Bài báo gọi nó là **NT-Xent** (normalized temperature-scaled cross entropy): cross-entropy trên cosine (đã chuẩn hóa) chia nhiệt độ.
+
+**Bước 4: nhiệt độ $\tau$ làm gì.** Chia cho $\tau$ nhỏ làm các khác biệt cosine phóng to, softmax nhọn lại: mẫu âm nào gần nhất (khó nhất) bị phạt nặng nhất. Khi $\tau$ rất lớn, mọi điểm $\mathrm{sim}/\tau$ gần bằng 0, mọi số hạng gần bằng nhau, nên $p_{i,j} \to 1/(2B-1)$ và
+
+$$
+\ell_{i,j} \to \log(2B - 1)
+$$
+
+dù cặp dương gần hay xa: loss không còn phân biệt được gì. Ô NumPy ở dưới kiểm cả hai đầu này.
+
+:::note[Ghi nhớ]
+NT-Xent là cross-entropy của bài toán "trong $2B - 1$ góc nhìn còn lại, đâu là bản kia của ảnh mình?". Tử số kéo cặp dương lại gần, mẫu số đẩy $2(B-1)$ mẫu âm ra xa, $\tau$ quyết định mẫu âm khó được chú ý tới mức nào.
+:::
+
+**Ba phát hiện của bài báo**, đều quan trọng khi bạn tự làm:
+
+- **Augmentation quan trọng nhất.** Không phép biến đổi đơn lẻ nào đủ. Ghép **cắt ngẫu nhiên** với **đổi màu** cho kết quả nổi bật. Lý do: chỉ cắt thì hai mảnh của cùng ảnh có histogram màu gần giống nhau, mạng chỉ cần so màu là ghép đúng. Đổi màu chặn đường tắt đó. Đổi màu mạnh giúp SimCLR, trong khi với học có giám sát nó không giúp, thậm chí làm hại.
+- **Projection head rồi bỏ đi.** Tính loss trên $\mathbf{z}$ nhưng dùng $\mathbf{h}$ cho tác vụ sau: $\mathbf{h}$ tốt hơn $\mathbf{z}$ hơn 10 điểm phần trăm ở linear probe. Giải thích của tác giả: loss ép $\mathbf{z}$ không đổi theo augmentation, nên $\mathbf{z}$ mất những thông tin như màu hay hướng, vốn có thể có ích về sau; $g$ gánh phần "vứt bỏ" đó thay cho $\mathbf{h}$.
+- **Cần lô lớn.** Lô càng lớn càng nhiều mẫu âm. Bài báo thử $B$ từ 256 tới 8 192 ($B = 8\,192$ cho 16 382 mẫu âm mỗi cặp dương, trên TPU), lợi rõ nhất khi huấn luyện ít epoch. Về $\tau$: với lô 4 096 và 100 epoch, $\tau = 0.1$ cho linear probe 64.4%, $\tau = 0.05$ còn 59.7%, $\tau = 1$ còn 58.0%. Khi huấn luyện trên 300 epoch, $\tau = 0.5$ tốt nhất trong ba giá trị 0.1, 0.5, 1.0.
+
+Kết quả: linear probe 76.5% top-1 trên ImageNet với ResNet-50 rộng gấp 4, ngang ResNet-50 thường học có giám sát (ResNet-50 thường với SimCLR đạt 69.3%).
+
+### MoCo: hàng đợi và encoder động lượng
+
+Lô 8 192 ảnh cần phần cứng mà ít ai có. MoCo (He và cộng sự, 2020) tách số mẫu âm khỏi cỡ lô.
+
+**Hàng đợi.** Giữ một **hàng đợi** (queue) các vectơ của những lô trước, $K = 65\,536$ vectơ. Mỗi bước, vectơ của lô mới vào cuối hàng, lô cũ nhất ra khỏi đầu. Mẫu âm lấy từ hàng đợi, nên lô nhỏ vẫn có hàng chục nghìn mẫu âm.
+
+**Encoder động lượng** (momentum encoder). Vấn đề: vectơ trong hàng đợi được tính bởi encoder ở các bước trước. Nếu encoder đổi nhanh, vectơ cũ và mới không còn so sánh được. MoCo dùng hai encoder: encoder truy vấn $\boldsymbol\theta_q$ học bằng gradient, và encoder khóa $\boldsymbol\theta_k$ chỉ trôi chậm theo nó:
+
+$$
+\boldsymbol\theta_k \leftarrow \lambda\,\boldsymbol\theta_k + (1 - \lambda)\,\boldsymbol\theta_q
+$$
+
+Đây là **trung bình động lũy thừa** (EMA): mỗi bước giữ $\lambda$ phần cũ, thêm $1 - \lambda$ phần mới. Bài báo viết hệ số này là $m$; bài này dùng $\lambda$ vì $m$ đã là số mẫu. Với $\lambda = 0.999$, encoder khóa đổi rất chậm nên các khóa trong hàng đợi nhất quán. Ablation của bài báo: $\lambda = 0.99$ tới $0.9999$ đều ổn, $\lambda = 0.9$ tụt rõ, $\lambda = 0$ (chép thẳng) thì loss dao động và không hội tụ.
+
+### Không cần mẫu âm: BYOL và DINO
+
+Mẫu âm có một vai trò ngầm: chống **sụp đổ biểu diễn** (representation collapse). Nếu chỉ kéo cặp dương lại gần, lời giải dễ nhất là cho mọi ảnh cùng một vectơ: cặp dương nào cũng trùng nhau, loss bằng 0, biểu diễn vô dụng. Mẫu âm cấm điều đó. Bỏ mẫu âm thì phải chống sụp đổ bằng cách khác.
+
+**BYOL** (Grill và cộng sự, 2020) xuất phát từ một quan sát lạ: lấy một mạng khởi tạo ngẫu nhiên, **cố định**, làm "thầy", rồi dạy một mạng khác dự đoán vectơ của thầy. Mạng ngẫu nhiên tự nó chỉ đạt 1.4% linear probe trên ImageNet, nhưng mạng học dự đoán nó đạt 18.8%. Trò đã giỏi hơn thầy. Vậy thì lặp lại: lấy trò làm thầy mới.
+
+BYOL làm điều đó liên tục:
+
+- Nhánh **online** gồm encoder, projector và thêm một **predictor**. Nhánh **target** có encoder và projector, trọng số là EMA của online (như encoder khóa của MoCo).
+- Online nhìn góc nhìn thứ nhất và dự đoán vectơ mà target cho với góc nhìn thứ hai. Mất mát là bình phương khoảng cách giữa hai vectơ đã chuẩn hóa, tức $2 - 2\cos$.
+- Gradient chỉ đi qua online; target bị **stop-gradient** (coi là hằng số).
+
+Sự bất đối xứng (predictor chỉ ở một nhánh, target trôi chậm, không nhận gradient) giúp BYOL không sụp đổ trong thực nghiệm, dù bài báo thừa nhận nó không cấm sụp đổ bằng chứng minh. Linear probe đạt 74.3% với ResNet-50 thường.
+
+**DINO** (Caron và cộng sự, 2021) nhìn bài toán như **tự chắt lọc** (self-distillation): **chắt lọc tri thức** (knowledge distillation) mà không có thầy cho sẵn, thầy là bản EMA của chính trò.
+
+- Trò và thầy cùng kiến trúc, cùng cho ra một phân phối xác suất (softmax trên $K$ chiều). Trò học để phân phối của mình khớp phân phối của thầy (cross-entropy).
+- **Multi-crop:** mỗi ảnh cho 2 góc nhìn toàn cục $224 \times 224$ (phủ hơn nửa ảnh) và vài góc nhìn cục bộ $96 \times 96$ (phủ dưới nửa ảnh). Thầy chỉ thấy góc nhìn toàn cục, trò thấy tất cả. Trò phải đoán được "cả bức tranh" từ một mảnh nhỏ.
+- **Chống sụp đổ bằng centering và sharpening** ở đầu ra của thầy. Có hai kiểu sụp đổ: một chiều thống trị (mọi ảnh dồn vào một "lớp"), hoặc phân phối đều (không nói gì cả). **Centering** trừ đi trung bình chạy $\mathbf{c}$ của đầu ra thầy, nên không chiều nào thống trị mãi được, nhưng lại đẩy về phân phối đều. **Sharpening** dùng nhiệt độ thầy thấp (0.04 tới 0.07, so với 0.1 của trò) làm phân phối nhọn, chống phân phối đều. Hai lực ngược nhau cân bằng lẫn nhau.
+
+Phát hiện đáng nhớ nhất của DINO: với ViT học kiểu này, **attention của token `[CLS]` ở lớp cuối tự tách vật khỏi nền**. Nhìn bản đồ attention của các đầu, bạn thấy hình con vật hay chiếc xe hiện ra rõ nét, dù mô hình chưa từng thấy một nhãn hay một mask nào. Tác giả ghi rằng tính chất này kém rõ hơn nhiều ở ViT học có giám sát và ở CNN.
+
+### Che ảnh rồi đoán lại: MAE
+
+Hướng thứ ba mượn ý từ BERT: che một phần đầu vào, bắt mô hình đoán phần bị che. MAE (He và cộng sự, 2022) làm với ảnh:
+
+1. Cắt ảnh thành patch như ViT. Che ngẫu nhiên **75%** số patch.
+2. Encoder ViT **chỉ nhận 25% patch còn lại**, không có token nào cho chỗ bị che.
+3. Một **decoder nhẹ** nhận các token đã mã hóa, chèn thêm một "mask token" học được vào mỗi chỗ bị che (kèm embedding vị trí), rồi tái tạo pixel của patch.
+4. Mất mát là MSE giữa pixel tái tạo và pixel gốc, **chỉ tính trên patch bị che**.
+
+Vì sao che nhiều tới vậy? Ảnh rất dư thừa: che 15% như BERT thì mô hình chỉ cần nội suy từ các điểm ảnh bên cạnh. Che 75% thì phải hiểu vật mới đoán lại được.
+
+Vì sao rẻ? Encoder là phần nặng, và nó chỉ xử lý một phần tư số token. Self-attention tốn theo bình phương số token, nên với ảnh $224 \times 224$ và patch 16, encoder làm việc trên 49 token thay vì 196. Decoder chỉ tốn dưới 10% tính toán mỗi token so với encoder, và bị bỏ đi sau pre-train. Tác giả báo cáo huấn luyện nhanh hơn từ 3 lần trở lên. ViT-H học bằng MAE, fine-tune trên ImageNet-1K, đạt 87.8% top-1.
+
+Một điểm khác với họ đối chiếu: biểu diễn MAE **khó tách bằng mặt phẳng hơn**. Linear probe của MAE thấp hơn MoCo v3, nhưng chỉ cần fine-tune một khối cuối của ViT-L là linear probe 73.5% lên 81.0%, và khi fine-tune vài khối thì MAE vượt MoCo v3. Tác giả nói hai cách đo "phần lớn không tương quan". Vì vậy khi đọc một bảng so sánh, hãy xem nó đo bằng cách nào.
+
+### DINOv2, và CLIP nằm ở đâu
+
+**DINOv2** (Oquab và cộng sự, 2023) mở rộng DINO: một bộ dữ liệu 142 triệu ảnh được tuyển chọn tự động (LVD-142M), ghép loss mức ảnh của DINO với loss mức patch theo kiểu che ảnh của iBOT. Mục tiêu là đặc trưng dùng được ngay khi **đóng băng**, cho nhiều tác vụ (phân loại, phân đoạn, ước lượng độ sâu) mà không cần fine-tune.
+
+**CLIP** là học đối chiếu giữa **hai phương thức**: cặp dương là (ảnh, chú thích của nó), mẫu âm là các chú thích khác trong lô. SimCLR là cùng ý trong **một** phương thức: cặp dương là hai góc nhìn của cùng ảnh. Công thức gần như nhau; khác biệt nằm ở chỗ "điều gì không đổi" do ai quy định: augmentation do người chọn, hay chú thích do người viết trên Internet.
+
+### Giới hạn
+
+- **Augmentation mã hóa giả định của bạn.** Học đối chiếu học cách bỏ qua đúng những gì augmentation thay đổi. Nếu màu quan trọng cho tác vụ (phân loại quả chín hay xanh), đổi màu mạnh sẽ làm mất thông tin đó. Bài [Data augmentation trong CV](/vi/cv/image-augmentation/) bàn cách chọn phép biến đổi.
+- **Vẫn cần nhãn để dùng.** Học tự giám sát cho bộ mã hóa, không cho bộ phân loại. Bước cuối luôn cần dữ liệu có nhãn, dù ít hơn nhiều.
+- **Tốn tính toán.** Hai góc nhìn mỗi ảnh, lô lớn, hàng trăm epoch: pre-train tự giám sát thường tốn hơn học có giám sát cùng dữ liệu. Lợi ích đến khi dùng lại bộ mã hóa cho nhiều tác vụ.
+
+## Minh họa
+
+Hình dưới vẽ khung chung của SimCLR. Hãy nhìn vào hai nhánh của cùng một ảnh: chúng dùng **cùng một** bộ mã hóa, và chỉ khác nhau ở phép augmentation. Mũi tên "kéo lại gần" nối hai vectơ của cùng ảnh, mũi tên "đẩy ra xa" nối tới vectơ của ảnh khác.
+
+{/* FIG: SelfSupervisedFigure
+    Ý: một ảnh, hai phép augmentation, hai góc nhìn qua cùng bộ mã hóa; hai vectơ của cùng ảnh được kéo gần, vectơ của ảnh khác bị đẩy xa.
+    Khối và mũi tên: (trọng tâm) ảnh gốc → tách hai nhánh "augmentation 1", "augmentation 2" → hai góc nhìn → cùng một khối "bộ mã hóa f" (vẽ một khối dùng chung, hoặc hai khối có ghi "chung trọng số") → "h" → "projection head g" → hai vectơ z; giữa hai z một mũi tên hai đầu "kéo lại gần". (nhóm thứ hai) một vectơ z của ảnh khác trong lô, nối với z của ảnh gốc bằng mũi tên "đẩy ra xa". Ghi chú nhỏ ở h: "dùng cho tác vụ sau", ở g: "bỏ đi sau khi học".
+    Nhãn: "Ảnh", "Cắt + đổi màu", "Lật + làm mờ", "Góc nhìn 1", "Góc nhìn 2", "Bộ mã hóa (chung)", "Projection head", "Kéo lại gần", "Ảnh khác trong lô", "Đẩy ra xa".
+    Chú thích: Loss NT-Xent: với mỗi góc nhìn, chọn đúng bản kia của ảnh mình trong $2B - 1$ góc nhìn còn lại; sau khi học, bỏ $g$ và dùng $\mathbf{h}$. */}
+
+Bảng dưới đặt ba họ phương pháp cạnh nhau. Các con số là của từng bài báo, đo trên ImageNet, và không so trực tiếp được với nhau vì kiến trúc và cách đo khác nhau.
+
+| Tiêu chí | Học đối chiếu (SimCLR, MoCo) | Không mẫu âm (BYOL, DINO) | Che ảnh (MAE) |
+|---|---|---|---|
+| Tín hiệu học | Chọn đúng góc nhìn kia giữa nhiều mẫu âm | Trò dự đoán đầu ra của thầy (EMA) trên góc nhìn khác | Tái tạo pixel của patch bị che |
+| Cần augmentation mạnh | Có, quan trọng nhất | Có | Gần như không: che ảnh là "augmentation" |
+| Chống sụp đổ bằng | Mẫu âm | Predictor, stop-gradient (BYOL); centering, sharpening (DINO) | Không có nguy cơ: đáp án là pixel thật |
+| Phụ thuộc cỡ lô | Nhiều (SimCLR); MoCo bớt nhờ hàng đợi | Ít hơn | Ít |
+| Kiến trúc hay gặp trong bài báo | ResNet | ResNet (BYOL), ViT (DINO) | ViT |
+| Mạnh ở | Linear probe | Linear probe, k-NN; DINO cho attention tách vật | Fine-tune, mô hình rất lớn |
+| Số trong bài báo | SimCLR: 76.5% linear (ResNet-50 rộng gấp 4) | BYOL: 74.3% linear (ResNet-50); DINO: 80.1% linear (ViT-B) | 87.8% fine-tune (ViT-H) |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: ô NumPy với Python 3.14 và NumPy 2.4 (bản có trong Pyodide), ô PyTorch với Python 3.14, PyTorch 2.15 và scikit-learn 1.9 trên CPU. Ô NumPy chạy ngay trên trang, ô PyTorch chạy trên máy bạn. Hai ô độc lập, không dùng biến của nhau.
+
+### Hàm mất mát NT-Xent bằng NumPy
+
+Ô dưới tạo 4 "ảnh" giả, mỗi ảnh là một vectơ nội dung 8 chiều (hạt giống 0). Mỗi góc nhìn là nội dung cộng nhiễu. Nhiễu nhỏ (0.1) cho cặp dương gần nhau; nhiễu lớn (3.0) cho cặp dương gần như ngẫu nhiên. Hàm `nt_xent` làm đúng ba bước ở mục Lý thuyết: cosine chia $\tau$, bỏ đường chéo bằng $-\infty$, rồi cross-entropy với đáp án là cột của cặp dương.
+
+<PythonRunner code={ntXentCode} title="NT-Xent với cặp dương gần và xa" />
+
+Đọc kết quả:
+
+- **`log(2N-1) = 1.946`:** với $B = 4$ ảnh, mỗi góc nhìn có $2B - 1 = 7$ ứng viên, và $\log 7 \approx 1.946$ là loss khi mô hình "đoán bừa". (Trong code, `N` là số ảnh của lô, tức $B$ của bài.)
+- **Cosine của cặp dương:** 0.99 ở trường hợp gần, 0.22 ở trường hợp xa.
+- **Cột `close`:** cặp dương gần thì $\tau$ nhỏ cho loss gần 0 (0.000 ở $\tau = 0.05$, 0.002 ở $\tau = 0.1$). Khi $\tau$ tăng, loss tăng dần (0.627, 1.166) và ở $\tau = 10$ đạt 1.858, sát $\log 7$: loss không còn "thưởng" cho việc cặp dương gần nhau.
+- **Cột `far`:** cặp dương xa thì $\tau$ nhỏ phạt rất nặng: 7.087 ở $\tau = 0.05$, cao hơn hẳn $\log 7$, vì có mẫu âm gần hơn cả cặp dương và $\tau$ nhỏ phóng to khác biệt đó. Ở $\tau = 10$ hai cột gần bằng nhau (1.858 và 1.933): $\tau$ quá lớn thì loss gần như không phân biệt được biểu diễn tốt và xấu.
+
+### SimCLR tí hon trên chữ số, rồi linear probe
+
+File dưới học SimCLR trên 1 797 ảnh chữ số $8 \times 8$ của `load_digits`, **không dùng nhãn**. Augmentation viết bằng PyTorch: dịch ngẫu nhiên tối đa khoảng 1 pixel, thêm nhiễu, che một ô $3 \times 3$ (cutout). Encoder $f$ là MLP $64 \to 256 \to 16$, nên biểu diễn $\mathbf{h}$ chỉ có 16 số; projection head $g$ là $16 \to 64 \to 32$. Học 40 epoch với lô 256 và $\tau = 0.5$. Phần augmentation:
+
+```python
+theta = torch.tensor([[1.0, 0, 0], [0, 1.0, 0]]).repeat(n, 1, 1)
+theta[:, :, 2] = (torch.rand(n, 2) - 0.5) * 0.5
+grid = F.affine_grid(theta, list(x.shape), align_corners=False)
+x = F.grid_sample(x, grid, align_corners=False)
+x = x + 0.1 * torch.randn_like(x)
+```
+
+Sau đó là linear probe: đóng băng $f$, lấy $\mathbf{h}$ của mọi ảnh, học hồi quy logistic của scikit-learn trên nửa dữ liệu, đo trên nửa còn lại. File so encoder đã học với một encoder cùng kiến trúc nhưng **khởi tạo ngẫu nhiên**, ở hai mức nhãn: chỉ 100 ảnh có nhãn, và cả 898 ảnh của nửa train. Cách cài PyTorch bản CPU có ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+<LocalCode
+  code={simclrCode}
+  title="SimCLR tí hon và linear probe"
+  packages={['torch', 'scikit-learn']}
+  hardware="CPU là đủ. Khoảng 20 đến 45 giây trên máy phát triển"
+  sampleVaries={false}
+>
+
+```text
+last NT-Xent loss: 1.428
+100 labels, random encoder: 0.740
+100 labels, SimCLR encoder: 0.840
+898 labels, random encoder: 0.843
+898 labels, SimCLR encoder: 0.918
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **`last NT-Xent loss: 1.428`:** lô 256 ảnh có 511 ứng viên mỗi góc nhìn, nên đoán bừa cho $\log 511 \approx 6.24$ (tự tính). Loss 1.428 nghĩa là mô hình đã nhận ra cặp dương khá tốt.
+- **Với 100 nhãn:** encoder ngẫu nhiên đạt 0.740, encoder SimCLR đạt 0.840. Cùng 16 số mỗi ảnh, nhưng 16 số do SimCLR chọn mang nhiều thông tin về chữ số hơn.
+- **Với 898 nhãn:** 0.843 so với 0.918. Khoảng cách vẫn còn: một phép chiếu ngẫu nhiên xuống 16 chiều làm mất thông tin mà thêm nhãn cũng không lấy lại được.
+
+Hai lần chạy trên máy phát triển cho kết quả trùng nhau. Máy khác (khác CPU hay khác bản PyTorch) có thể lệch vài phần nghìn.
+
+## Lỗi hay gặp
+
+:::caution[Thấy loss tự giám sát thấp là tưởng biểu diễn tốt]
+Loss của bài toán phụ chỉ nói mô hình giải bài toán phụ giỏi, không nói nó học được thứ bạn cần. SimCLR chỉ với cắt ngẫu nhiên gần như đoán đúng mọi cặp dương, nhờ so histogram màu, mà linear probe lại kém. Lời giải sụp đổ (mọi ảnh một vectơ) thậm chí cho loss bằng 0 ở các phương pháp không mẫu âm. Luôn đo bằng linear probe hoặc fine-tune trên dữ liệu có nhãn, và nên theo dõi độ lệch chuẩn của các vectơ trong lô: nó tụt về gần 0 là dấu hiệu sụp đổ.
+:::
+
+:::caution[Quên một mốc so sánh đơn giản]
+Ô PyTorch so SimCLR với encoder ngẫu nhiên, nhưng còn một mốc đơn giản hơn: đưa thẳng 64 điểm ảnh vào hồi quy logistic. Chạy thử với cùng cách chia dữ liệu, mốc này đạt 0.874 với 100 nhãn và 0.963 với 898 nhãn, cao hơn SimCLR 16 chiều của bài (tự chạy, không có trong file). Chữ số $8 \times 8$ quá dễ và quá ít; lợi thế của học tự giám sát hiện ra khi ảnh lớn, đa dạng, và có hàng triệu ảnh không nhãn. Khi báo cáo một phương pháp, hãy so với cả mốc "không học gì" (encoder ngẫu nhiên) lẫn mốc "dùng thẳng dữ liệu thô".
+:::
+
+:::caution[Dùng đầu ra của projection head cho tác vụ sau]
+Theo SimCLR, $\mathbf{h}$ trước projection head tốt hơn $\mathbf{z}$ sau nó hơn 10 điểm phần trăm ở linear probe, vì $g$ đã vứt bớt thông tin mà augmentation thay đổi. Trong code, linear probe gọi `enc(X)` (chỉ $f$), không gọi `head`. Tương tự, decoder của MAE và predictor của BYOL chỉ dùng khi pre-train. Khi tải một mô hình tự giám sát có sẵn, đọc kỹ tài liệu để lấy đúng lớp đặc trưng.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Học tự giám sát tạo nhãn từ chính ảnh (bài toán phụ) để học bộ mã hóa từ ảnh không nhãn, rồi dùng ít nhãn cho tác vụ thật. Đo bằng linear probe (đóng băng, chỉ học lớp tuyến tính) hoặc fine-tune; hai cách đo có thể xếp hạng khác nhau.
+- Học đối chiếu kéo hai góc nhìn của cùng ảnh lại gần, đẩy góc nhìn của ảnh khác ra xa. NT-Xent là cross-entropy của bài toán chọn đúng cặp dương trong $2B - 1$ ứng viên, trên cosine chia $\tau$. SimCLR cần augmentation mạnh (cắt + đổi màu) và lô lớn; MoCo thay lô lớn bằng hàng đợi và encoder động lượng.
+- Không có mẫu âm thì phải chống sụp đổ cách khác: BYOL dùng predictor, target EMA và stop-gradient; DINO dùng thầy EMA cùng centering và sharpening, và attention của ViT tự tách vật.
+- MAE che 75% patch, encoder chỉ xem phần còn lại, decoder nhẹ tái tạo pixel: rẻ, mở rộng tốt, mạnh khi fine-tune. CLIP là học đối chiếu giữa ảnh và chữ.
+
+**Đọc thêm:**
+
+- Chen, T., Kornblith, S., Norouzi, M., Hinton, G. (2020). [*A Simple Framework for Contrastive Learning of Visual Representations*](https://arxiv.org/abs/2002.05709), arXiv:2002.05709, mục 2 và 3. Công thức NT-Xent và các thí nghiệm về augmentation, viết rất dễ đọc.
+- He, K., Fan, H., Wu, Y., Xie, S., Girshick, R. (2020). [*Momentum Contrast for Unsupervised Visual Representation Learning*](https://arxiv.org/abs/1911.05722), arXiv:1911.05722, mục 3. Giả mã Algorithm 1 chỉ khoảng 20 dòng, đủ hàng đợi và cập nhật động lượng.
+- Grill, J.-B. và cộng sự (2020). [*Bootstrap Your Own Latent: A New Approach to Self-Supervised Learning*](https://arxiv.org/abs/2006.07733), arXiv:2006.07733, mục 1 và 3. Thí nghiệm mạng ngẫu nhiên làm thầy, và kiến trúc online, target.
+- Caron, M. và cộng sự (2021). [*Emerging Properties in Self-Supervised Vision Transformers*](https://arxiv.org/abs/2104.14294), arXiv:2104.14294, hình 1 và mục 3. Nên xem hình 1 để thấy attention của DINO tách vật.
+- He, K., Chen, X., Xie, S., Li, Y., Dollár, P., Girshick, R. (2022). [*Masked Autoencoders Are Scalable Vision Learners*](https://arxiv.org/abs/2111.06377), arXiv:2111.06377, mục 3 và 4. Kiến trúc MAE và bàn luận về linear probe so với fine-tune.
+- Oquab, M. và cộng sự (2023). [*DINOv2: Learning Robust Visual Features without Supervision*](https://arxiv.org/abs/2304.07193), arXiv:2304.07193. Đọc phần giới thiệu để biết vì sao đặc trưng đóng băng dùng được cho nhiều tác vụ.
+- Gidaris, S., Singh, P., Komodakis, N. (2018). [*Unsupervised Representation Learning by Predicting Image Rotations*](https://arxiv.org/abs/1803.07728), arXiv:1803.07728; và Noroozi, M., Favaro, P. (2016). [*Unsupervised Learning of Visual Representations by Solving Jigsaw Puzzles*](https://arxiv.org/abs/1603.09246), arXiv:1603.09246. Hai bài toán phụ cổ điển.
+
+<LessonProgress />

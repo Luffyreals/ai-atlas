@@ -1,0 +1,86 @@
+---
+// cv/clip-blip-glip, "Minh họa": CLIP's contrastive objective on a batch of N = 3 pairs (Radford et al., 2021).
+// Two paths meet at a 3 × 3 grid. Top left, three images drawn as shapes (a 16-gon circle, a square, a
+// triangle: closed FigArrow outlines with no head, measured by e2e) go down through the image encoder f; the
+// arrow runs on down to the column u_1..u_3 standing left of the grid, one vector per row. Top right, three
+// captions, one per grid column, go down through the text encoder g into the row v_1..v_3 over the grid. Each
+// cell is S_ij = u_i^T v_j; the diagonal (right pairs) is accent, the rest plain. A legend of two boxes left
+// of the grid says "right pair: pulled up" and "wrong pair: pushed down"; two lines under the grid name the
+// two softmaxes (rows, columns). Narrow layout only. Words: src/data/figures/clip-contrastive.ts.
+import { CLIP_CONTRASTIVE } from '@data/figures/clip-contrastive';
+import { anchor, closed, mainAndSmall, ring, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigMath from './kit/FigMath.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = CLIP_CONTRASTIVE[getPageLocale(Astro.locals.starlightRoute)];
+const l = t.labels;
+
+// Grid columns (captions, v row, cells): x 148, 216, 284, 66 wide (room for "triangle"); grid rows: y 236, 284, 332, 44 high.
+const COLS = [148, 216, 284];
+const CELL = { width: 66, height: 44 } as const;
+const ROWS = [236, 284, 332];
+const N = 3;
+
+// The images: three bare thumbnails, 36 square, x 12–124, each with its shape.
+const THUMB = { y: 36, size: 36, xs: [12, 52, 92] } as const;
+const thumbs: Box[] = THUMB.xs.map((x) => ({ x, y: THUMB.y, width: THUMB.size, height: THUMB.size }));
+const mid = (b: Box): [number, number] => [b.x + b.width / 2, b.y + b.height / 2];
+const [c0, c1, c2] = thumbs.map(mid) as [[number, number], [number, number], [number, number]];
+const shapes = [
+  ring(c0[0], c0[1], 11, 16),
+  closed([
+    [c1[0] - 10, c1[1] - 10],
+    [c1[0] + 10, c1[1] - 10],
+    [c1[0] + 10, c1[1] + 10],
+    [c1[0] - 10, c1[1] + 10],
+  ]),
+  ring(c2[0], c2[1] + 2, 12, 3),
+];
+const captions = [l.circle, l.square, l.triangle].map((lines, i) => ({ lines, box: { x: COLS[i]!, y: 26, width: CELL.width, height: 55 } as Box }));
+
+const ENC = { y: 104, height: 55 } as const;
+const imageEncoder: Box = { x: 8, width: 132, ...ENC };
+const textEncoder: Box = { x: COLS[0]!, width: COLS[2]! + CELL.width - COLS[0]!, ...ENC };
+const V_ROW = { y: 184, height: 40 } as const;
+const U_COL = { x: 100, width: 44 } as const;
+const vBox = (j: number): Box => ({ x: COLS[j]!, y: V_ROW.y, width: CELL.width, height: V_ROW.height });
+const uBox = (i: number): Box => ({ x: U_COL.x, y: ROWS[i]!, width: U_COL.width, height: CELL.height });
+const cell = (i: number, j: number): Box => ({ x: COLS[j]!, y: ROWS[i]!, width: CELL.width, height: CELL.height });
+const uLane = U_COL.x + U_COL.width / 2;
+const right: Box = { x: 8, y: ROWS[0]!, width: 84, height: 54 };
+const wrong: Box = { x: 8, y: ROWS[0]! + 66, width: 84, height: 54 };
+const gridBottom = ROWS[N - 1]! + CELL.height;
+const NOTES = { x: U_COL.x, rows: gridBottom + 18, columns: gridBottom + 38 } as const;
+const height = NOTES.columns + 16;
+const pairs = [0, 1, 2].flatMap((i) => [0, 1, 2].map((j) => ({ i, j })));
+---
+
+<FigureFrame id="clip-contrastive" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigText x={(THUMB.xs[0] + THUMB.xs[2] + THUMB.size) / 2} y={14} lines={l.images} size="small" />
+    {thumbs.map((b) => <FigNode {...b} bare />)}
+    {shapes.map((shape) => <FigArrow {...shape} head={false} />)}
+    <FigArrow from={[c1[0], THUMB.y + THUMB.size]} to={[c1[0], ENC.y]} />
+    <FigNode {...imageEncoder} math={{ symbol: 'f' }} lines={l.imageEncoder} />
+    <FigArrow from={[uLane, ENC.y + ENC.height]} to={[uLane, ROWS[0]!]} />
+
+    <FigText x={COLS[1]! + CELL.width / 2} y={14} lines={l.texts} size="small" />
+    {captions.map(({ lines, box }) => <FigNode {...box} lines={lines} />)}
+    <FigArrow from={anchor(captions[1]!.box, 'bottom')} to={[COLS[1]! + CELL.width / 2, ENC.y]} />
+    <FigNode {...textEncoder} math={{ symbol: 'g' }} lines={l.textEncoder} />
+    <FigArrow from={[COLS[1]! + CELL.width / 2, ENC.y + ENC.height]} to={[COLS[1]! + CELL.width / 2, V_ROW.y]} />
+    {[0, 1, 2].map((j) => <FigNode {...vBox(j)} math={{ symbol: 'v', sub: String(j + 1), bold: true }} />)}
+
+    {[0, 1, 2].map((i) => <FigNode {...uBox(i)} math={{ symbol: 'u', sub: String(i + 1), bold: true }} />)}
+    {pairs.map(({ i, j }) => <FigNode {...cell(i, j)} math={{ symbol: 'S', sub: `${i + 1}${j + 1}` }} tone={i === j ? 'accent' : undefined} />)}
+
+    <FigNode {...right} {...mainAndSmall(l.right)} tone="accent" />
+    <FigNode {...wrong} {...mainAndSmall(l.wrong)} />
+    <FigText x={NOTES.x} y={NOTES.rows} lines={l.rows} size="small" anchor="start" />
+    <FigText x={NOTES.x} y={NOTES.columns} lines={l.columns} size="small" anchor="start" />
+  </Fragment>
+</FigureFrame>

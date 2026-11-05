@@ -27,12 +27,33 @@ Hai VIZ cho cả phần (giới hạn 1–2 của nhiệm vụ). Lý do chọn: 
 - Điều khiển: chọn kernel; thanh trượt (hoặc nút Trước/Sau) vị trí $(i, j)$ của cửa sổ; khung cửa sổ trên ảnh, ô tương ứng trên bản đồ đặc trưng sáng lên; dòng phép tính 9 tích cộng lại hiện bên dưới, số dùng dấu chấm thập phân.
 - Toán thuần TypeScript ở `src/lib/viz/convolution.ts` (có unit test, khớp ô NumPy của bài).
 
+**Đã làm (06/11/2026).** Bài dùng: `import ConvolutionViz from '@components/viz/ConvolutionViz.astro';` rồi `<ConvolutionViz />` (không prop).
+
+- File: wrapper `src/components/viz/ConvolutionViz.astro`, island `convolution-viz/ConvolutionVizIsland.tsx`, toán `src/lib/viz/convolution.ts`, ảnh và cấu hình `DIGIT_FOUR_8`, `DIGIT_FOUR_CONVOLUTION` trong `src/data/datasets/pixel-digits.ts` (kiểu `PixelImage` mới ở `types.ts`), kit mới `kit/PixelGrid.tsx` (`PixelGrid`, `CellFrame`), test `tests/unit/viz/convolution.test.ts` với fixture SciPy `tests/unit/fixtures/cv-viz-python.ts`.
+- Ảnh: chữ số 4 tự vẽ, 8 × 8, giá trị 0 / 0.5 / 1; hai nét đứng ở cột 2 và 5, nét ngang ở hàng 4. Không lấy từ `load_digits` (ô NumPy của bài vẫn dùng `load_digits`, nên số trong VIZ khác số in ra của ô code; bài không cần trích số của VIZ).
+- Kernel (thứ tự nút): đồng nhất; làm mờ (mọi ô 1/9, hiện là "1/9"); cạnh dọc đúng bằng $\mathbf{K}$ của ô NumPy `[[1, 0, −1]] × 3`; cạnh ngang là chuyển vị của nó. Mặc định: cạnh dọc. Phép tính là tương quan chéo (không lật kernel), như PyTorch và `scipy.signal.correlate2d`; comment đầu `convolution.ts` ghi rõ.
+- Điều khiển: 4 nút `aria-pressed`; một thanh trượt 0–35 duyệt 36 ô của bản đồ theo thứ tự đọc (hàng, cột đếm từ 0 như NumPy). Bản đồ $6 \times 6$ vẽ trong khung $8 \times 8$, lùi vào một ô: mỗi ô ra nằm đúng dưới tâm cửa sổ của nó, vòng ngoài trống cho thấy padding 0 làm mất gì.
+- Màu: ảnh, kernel đồng nhất và làm mờ dùng thang xám (độ mờ = giá trị); hai kernel cạnh dùng thang phân kỳ (dương `--atlas-viz-primary`, âm `--atlas-viz-alt`, độ đậm = |giá trị| / max |giá trị|), có chú giải chữ.
+- Dòng phép tính: 9 tích xếp 3 hàng như cửa sổ (`1.0×(−1)`), rồi `= −1.5`. Dòng trạng thái giải thích từng kernel (4 câu xếp chồng, giữ chiều cao).
+- Chuỗi: namespace `vizConvolution`, 25 key.
+
 ### 1.2. `DiffusionNoiseViz` (bài 8)
 
 - **Ý duy nhất:** $\mathbf{x}_t = \sqrt{\bar\alpha_t}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon$; khi $t$ tăng, phần ảnh co lại, phần nhiễu lớn dần, tới cuối gần như nhiễu thuần.
 - Ảnh $16 \times 16$ cố định; nhiễu $\boldsymbol\epsilon$ cố định sinh bằng PRNG có seed (cùng một nhiễu ở mọi $t$, nên người đọc thấy ảnh "chìm" dần). Lịch tuyến tính của DDPM: $\beta_1 = 10^{-4}$ tới $\beta_T = 0.02$, $T = 1000$.
 - Điều khiển: thanh trượt $t$ từ 0 tới 1000; hiện $\sqrt{\bar\alpha_t}$, $\sqrt{1-\bar\alpha_t}$ và một đồ thị nhỏ hai đường này theo $t$ có dấu vị trí hiện tại.
 - Toán ở `src/lib/viz/diffusion.ts`, có unit test.
+
+**Đã làm (06/11/2026).** Bài dùng: `import DiffusionNoiseViz from '@components/viz/DiffusionNoiseViz.astro';` rồi `<DiffusionNoiseViz />` (không prop).
+
+- File: wrapper `src/components/viz/DiffusionNoiseViz.astro`, island `diffusion-noise-viz/DiffusionNoiseVizIsland.tsx`, toán `src/lib/viz/diffusion.ts`, ảnh và cấu hình `DIGIT_THREE_16`, `DIGIT_THREE_DIFFUSION` trong `pixel-digits.ts`, test `tests/unit/viz/diffusion.test.ts`.
+- Ảnh: chữ số 3 đậm tự vẽ, 16 × 16, giá trị −1 (nền), 0 (mép mềm), 1 (nét). Hiển thị: độ mờ $(v + 1)/2$, cắt về $[-1, 1]$.
+- Lịch: `linearBetas` theo đúng cách tính của `np.linspace`, `alphaBars` có $\bar\alpha_0 = 1$ ($t = 0$ là ảnh gốc). Đã so với NumPy 2.5.4 tại $t$ = 1, 10, 100, 250, 500, 750, 1000 (sai số tương đối < 1e-12): $\bar\alpha_{250} = 0.5241$, $\bar\alpha_{500} = 0.0786$, $\bar\alpha_{1000} = 4.04 \times 10^{-5}$; $\sqrt{\bar\alpha_t}$ / $\sqrt{1-\bar\alpha_t}$ hiện 0.724 / 0.690 ở $t = 250$, 0.006 / 1.000 ở $t = 1000$. Hai đường cắt nhau lần đầu ở $t = 260$.
+- Nhiễu: `gaussianNoise(2026, 256)`, Box–Muller trên mulberry32 (`createRng` của `sampling.ts`). Để HTML lúc build và lần render đầu ở trình duyệt khớp tới chữ số cuối, $\ln$ và $\cos$ tính bằng `detLn` (qua `detLog10`) và `detCos` (chuỗi Taylor), chỉ dùng $+ - \times \div$ và `Math.sqrt`; test so với `Math.log`, `Math.cos` (sai số < 1e-14) và với Box–Muller viết bằng `Math` (< 1e-12).
+- Điều khiển: thanh trượt $t$ 0–1000, bước 1, bắt đầu ở 250 (không có JS vẫn thấy ảnh lẫn nhiễu). Ba ảnh $\mathbf{x}_0$, $\boldsymbol\epsilon$, $\mathbf{x}_t$; công thức; hai dòng số (cũng là chú giải đồ thị); đồ thị nhỏ hai đường theo $t$ (`PlotFrame shape="short"`) có vạch và hai dấu ở $t$ hiện tại; dòng trạng thái ($t = 0$, giữa chừng, $\sqrt{\bar\alpha_t} < 0.1$).
+- **KaTeX qua named slot của Astro**, không qua props: riêng $\sqrt{\bar\alpha_t}$ đã khoảng 3,5 KB HTML, công thức và hai ký hiệu sẽ đẩy `props` vượt 8 KB. Slot là HTML tĩnh (`<astro-slot>`), island chỉ đặt vào chỗ. Props đo bằng `serializeProps` của Astro: 4,8 KB (ConvolutionViz: 4,1 KB).
+- Chuỗi: namespace `vizDiffusion`, 21 key. Công thức và hai ký hiệu là hằng `String.raw` trong wrapper.
+- `viz.css` thêm `.atlas-viz-panels`, `.atlas-viz-pixels`, `.atlas-viz-px` (+ `[data-sign]`), `.atlas-viz-matrix`, `.atlas-viz-sum`; `.atlas-viz-status-stack > p` thành `> *`. Cỡ sau khi bỏ comment: khoảng 2 210 byte gzip (ngân sách 2 560).
 
 ## 2. Quy ước nội dung riêng của phần CV
 

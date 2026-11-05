@@ -1,6 +1,6 @@
 ---
 title: 'Phân loại ảnh với Transformer: Attention, ViT'
-description: Tai mèo ở góc trên, đuôi ở góc dưới. CNN cần nhiều lớp mới nối được hai chỗ, ViT nối ngay từ lớp đầu bằng attention. Patch, token [CLS], chi phí N², DeiT và Swin.
+description: Tai mèo ở góc trên, đuôi ở góc dưới. ViT nối hai chỗ ngay từ lớp đầu bằng attention. Patch, token [CLS], chi phí N², DeiT và Swin.
 quiz:
   - question: 'Một CNN chỉ có các lớp tích chập $3 \times 3$, stride 1, không pooling. Sau 3 lớp, một điểm trên bản đồ đặc trưng "thấy" vùng ảnh cỡ nào? Còn một token patch ở lớp attention đầu tiên của ViT thấy bao nhiêu?'
     options:
@@ -10,22 +10,22 @@ quiz:
       - 'CNN thấy $3 \times 3$ ở mọi lớp; ViT thấy cả ảnh'
     answer: 1
     explanation: 'Mỗi lớp $3 \times 3$ nới vùng nhìn thêm 1 điểm ảnh mỗi phía, nên sau $l$ lớp là $(2l + 1) \times (2l + 1)$: với 3 lớp là $7 \times 7$. Trong self-attention không có mặt nạ, mọi trọng số $A_{ij}$ đều dương, nên mỗi patch đọc được mọi patch ngay ở lớp đầu. Phương án "$3 \times 3$ ở mọi lớp" quên rằng các lớp chồng lên nhau thì vùng nhìn cộng dồn.'
-  - question: 'ViT-B/16 học ở ảnh $224 \times 224$ (196 patch, thêm $[CLS]$ là 197 token). Bạn fine-tune ở ảnh $384 \times 384$, giữ $P = 16$. Số ô trong bảng điểm attention của mỗi đầu, mỗi lớp, tăng khoảng bao nhiêu lần?'
+  - question: 'ViT-B/16 học ở ảnh $224 \times 224$ (196 patch, thêm `[CLS]` là 197 token). Bạn fine-tune ở ảnh $384 \times 384$, giữ $P = 16$. Số ô trong bảng điểm attention của mỗi đầu, mỗi lớp, tăng khoảng bao nhiêu lần?'
     options:
       - 'Khoảng 1.7 lần, vì cạnh ảnh dài gấp khoảng 1.7'
       - 'Khoảng 2.9 lần, vì số token gấp khoảng 2.9'
       - 'Khoảng 8.6 lần'
       - 'Không đổi, vì $P$ giữ nguyên'
     answer: 2
-    explanation: '$384 / 16 = 24$, nên có $24^2 = 576$ patch, cộng $[CLS]$ là 577 token. Bảng điểm có $577^2 = 332\,929$ ô so với $197^2 = 38\,809$, gấp khoảng 8.6 lần. Số token chỉ gấp khoảng 2.9, nhưng attention chấm điểm mọi cặp, nên chi phí tăng theo bình phương. Embedding vị trí cũng phải nội suy từ lưới $14 \times 14$ lên $24 \times 24$.'
-  - question: 'Bạn bỏ embedding vị trí khỏi một ViT, rồi xáo trộn ngẫu nhiên thứ tự 16 patch của một ảnh trước khi đưa vào. Đầu ra ở token $[CLS]$ (và nhãn dự đoán) thay đổi thế nào?'
+    explanation: '$384 / 16 = 24$, nên có $24^2 = 576$ patch, cộng `[CLS]` là 577 token. Bảng điểm có $577^2 = 332\,929$ ô so với $197^2 = 38\,809$, gấp khoảng 8.6 lần. Số token chỉ gấp khoảng 2.9, nhưng attention chấm điểm mọi cặp, nên chi phí tăng theo bình phương. Embedding vị trí cũng phải nội suy từ lưới $14 \times 14$ lên $24 \times 24$.'
+  - question: 'Bạn bỏ embedding vị trí khỏi một ViT, rồi xáo trộn ngẫu nhiên thứ tự 16 patch của một ảnh trước khi đưa vào. Đầu ra ở token `[CLS]` (và nhãn dự đoán) thay đổi thế nào?'
     options:
       - 'Đổi hẳn, vì attention nhìn thấy thứ tự của các patch'
       - 'Đổi một chút, vì MLP xử lý từng vị trí riêng'
       - 'Mô hình báo lỗi vì số patch không khớp'
       - 'Không đổi: không có vị trí, ViT chỉ thấy một túi patch, nên ảnh bị xáo trộn và ảnh gốc là như nhau'
     answer: 3
-    explanation: 'Đầu ra của $[CLS]$ là tổng có trọng số của các hàng giá trị; đổi chỗ các hàng thì trọng số đổi chỗ theo, tổng không đổi. MLP và chuẩn hóa lớp làm riêng trên từng token, cũng không phụ thuộc thứ tự. Chính embedding vị trí là thứ duy nhất cho ViT biết patch nào nằm ở đâu.'
+    explanation: 'Đầu ra của `[CLS]` là tổng có trọng số của các hàng giá trị; đổi chỗ các hàng thì trọng số đổi chỗ theo, tổng không đổi. MLP và chuẩn hóa lớp làm riêng trên từng token, cũng không phụ thuộc thứ tự. Chính embedding vị trí là thứ duy nhất cho ViT biết patch nào nằm ở đâu.'
   - question: 'Một bệnh viện có 5 000 ảnh X-quang có nhãn, muốn huấn luyện từ đầu, không có mô hình học sẵn. Theo kết quả của bài báo ViT và DeiT, lựa chọn nào hợp lý nhất?'
     options:
       - 'Một CNN cỡ vừa, hoặc một ViT nhỏ kèm augmentation mạnh và regularization'
@@ -149,7 +149,7 @@ $$
 
 **Không có mặt nạ.** GPT che các vị trí ở sau, vì khi sinh chữ thì tương lai chưa có. Ảnh thì có sẵn cả tấm, không có "tương lai", nên ViT dùng encoder: patch ở góc dưới đọc được patch ở góc trên và ngược lại.
 
-**Trường nhìn toàn cục từ lớp đầu.** Vì $e^{s} > 0$ với mọi số $s$, mọi trọng số $A_{ij}$ đều dương: mỗi token nhận thông tin từ **mọi** token, ngay ở khối thứ nhất. So với CNN: một lớp $3 \times 3$, stride 1, cho mỗi điểm nhìn $3 \times 3$ điểm ảnh. Lớp thứ hai nhìn $3 \times 3$ điểm của lớp trước, mỗi điểm đó lại nhìn $3 \times 3$, nên vùng nhìn nới thêm 1 điểm ảnh mỗi phía. Sau $l$ lớp, trường tiếp nhận là $(2l + 1) \times (2l + 1)$. Muốn phủ cả chữ số $8 \times 8$ phải cần 4 lớp (tự tính: $2 \cdot 4 + 1 = 9 \ge 8$), còn ảnh $224 \times 224$ thì cần tới 112 lớp nếu không có pooling hay stride (tự tính).
+**Trường tiếp nhận toàn cục từ lớp đầu.** Vì $e^{s} > 0$ với mọi số $s$, mọi trọng số $A_{ij}$ đều dương: mỗi token nhận thông tin từ **mọi** token, ngay ở khối thứ nhất. So với CNN: một lớp $3 \times 3$, stride 1, cho mỗi điểm nhìn $3 \times 3$ điểm ảnh. Lớp thứ hai nhìn $3 \times 3$ điểm của lớp trước, mỗi điểm đó lại nhìn $3 \times 3$, nên vùng nhìn nới thêm 1 điểm ảnh mỗi phía. Sau $l$ lớp, trường tiếp nhận là $(2l + 1) \times (2l + 1)$. Muốn phủ cả chữ số $8 \times 8$ phải cần 4 lớp (tự tính: $2 \cdot 4 + 1 = 9 \ge 8$), còn ảnh $224 \times 224$ thì cần tới 112 lớp nếu không có pooling hay stride (tự tính).
 
 "Nhìn được" chưa có nghĩa là "nhìn". Bài báo ViT đo **khoảng cách attention** (attention distance) trung bình của từng đầu, một đại lượng giống trường tiếp nhận của CNN. Ở các lớp thấp, có đầu nhìn gần như cả ảnh, có đầu chỉ nhìn rất gần, giống các lớp tích chập đầu; càng lên sâu, khoảng cách càng lớn (mục 4.5). Mô hình tự học khi nào nhìn xa, khi nào nhìn gần.
 
@@ -249,7 +249,7 @@ Hình dưới vẽ đường đi của một ảnh qua ViT, từ trái sang ph�
     Ý: ảnh thành N patch, mỗi patch thành một token; token [CLS] gom thông tin từ mọi patch qua bộ mã hóa, và chỉ đầu ra của [CLS] được dùng để phân loại.
     Khối và mũi tên: (1) một ảnh vuông chia lưới 2 x 2 hoặc 3 x 3 patch đánh số theo thứ tự đọc; (2) mũi tên tới hàng N ô "patch embedding" (chiếu tuyến tính dùng chung); (3) một ô [CLS] khác màu đứng đầu hàng; (4) dấu cộng với hàng ô "vị trí 0, 1, ..., N"; (5) khối lớn "Bộ mã hóa Transformer × J" (bên trong ghi gọn: LN, attention nhiều đầu, LN, MLP, kết nối tắt); (6) từ ô ra tương ứng với [CLS] (trọng tâm, cùng màu với ô [CLS] vào), mũi tên tới "Đầu MLP" rồi "lớp: 0–9". Các ô ra của patch vẽ mờ (nhóm thứ hai), không có mũi tên đi tiếp.
     Nhãn: "Ảnh"; "Cắt patch"; "Chiếu tuyến tính"; "[CLS]"; "Vị trí"; "Bộ mã hóa Transformer"; "Đầu phân loại"; "Lớp dự đoán".
-    Chú thích: Ảnh $8 \times 8$ với $P = 4$ cho $N = 4$ patch, cộng $[CLS]$ là 5 token $D$ chiều; chỉ hàng $[CLS]$ ở lớp cuối đi vào đầu phân loại. */}
+    Chú thích: Ảnh $8 \times 8$ với $P = 4$ cho $N = 4$ patch, cộng `[CLS]` là 5 token $D$ chiều; chỉ hàng `[CLS]` ở lớp cuối đi vào đầu phân loại. */}
 
 Bảng dưới đặt CNN và các họ ViT của bài cạnh nhau. Các dòng về dữ liệu là kết luận của bài báo ViT và DeiT, không phải luật cứng.
 
@@ -277,7 +277,7 @@ Code trong bài chạy thử lần cuối tháng 11/2026: ô NumPy với Python 
 - **`patches: (4, 16) N = 4`:** $N = (8/4)^2 = 4$ patch, mỗi patch $4 \cdot 4 = 16$ số. Dòng `True` tiếp theo xác nhận patch 1 là khối trên bên phải: đọc hết hàng rồi mới xuống.
 - **`tokens Z: (5, 8)`:** 4 token patch cộng `[CLS]` ở hàng 0, mỗi token 8 chiều, đúng cỡ $(N+1) \times D$ của $\mathbf{Z}_0$.
 - **Ma trận $\mathbf{A}$ cỡ $5 \times 5$:** hàng là token hỏi (truy vấn), cột là token được hỏi (khóa). Hàng 0 là `[CLS]`: nó dồn 0.457 cho token 2 (patch 1) và chia phần còn lại cho các token khác. Với trọng số ngẫu nhiên, con số này không mang nghĩa gì; sau khi học, đây là chỗ `[CLS]` quyết định đọc patch nào.
-- **`row sums: [1. 1. 1. 1. 1.]`** và **`all weights > 0: True`:** softmax làm mỗi hàng là một phân phối, và không ô nào bằng 0. Mỗi patch nhận thông tin từ cả 5 token ngay ở lớp này: trường nhìn toàn cục.
+- **`row sums: [1. 1. 1. 1. 1.]`** và **`all weights > 0: True`:** softmax làm mỗi hàng là một phân phối, và không ô nào bằng 0. Mỗi patch nhận thông tin từ cả 5 token ngay ở lớp này: trường tiếp nhận toàn cục.
 - **Bảng cuối:** số cặp là $(N+1)^2$. Chữ số $8 \times 8$ với $P = 2$ đã có 17 token và 289 cặp; ảnh $224 \times 224$ với $P = 8$ có $616\,225$ cặp, gấp khoảng 15.9 lần $38\,809$ của $P = 16$.
 
 ### ViT tí hon so với CNN nhỏ bằng PyTorch
@@ -304,12 +304,12 @@ CNN: 16122 params, test acc 0.986
 - **CNN thắng:** 0.986 so với 0.958 trên 360 ảnh kiểm tra, tức CNN sai khoảng 5 ảnh, ViT sai khoảng 15 ảnh. Với 1 437 ảnh huấn luyện, giả định "điểm gần nhau liên quan nhau" có sẵn trong CNN là lợi thế, đúng như mục thiên kiến quy nạp: ViT phải tự học quan hệ giữa 16 patch từ chừng ấy ví dụ.
 - **Số của ViT có thể lệch chút ít trên máy bạn.** Hạt giống đã cố định, nhưng PyTorch chia phép tính cho số luồng CPU khác nhau thì thứ tự cộng số thực khác nhau, sai khác nhỏ tích lũy qua 60 epoch. Chạy lại cùng file với một luồng (`OMP_NUM_THREADS=1`), ViT cho 0.972, CNN vẫn 0.986. Kết luận không đổi.
 
-Bạn có thể thử đổi `TinyViT(P=4)`: còn 4 patch, mỗi patch 16 số, dãy ngắn hơn nhiều nên chạy nhanh hơn, nhưng mỗi token gom một vùng lớn và attention chỉ còn 25 cặp để làm việc.
+Bạn có thể thử đổi `TinyViT(P=4)`: còn 4 patch, mỗi patch 16 số, dãy ngắn hơn nhiều, nhưng mỗi token gom một vùng lớn và attention chỉ còn 25 cặp để làm việc.
 
 ## Lỗi hay gặp
 
 :::caution[Nghĩ ViT luôn tốt hơn CNN]
-ViT vượt CNN trong bài báo gốc **khi pre-train trên 14 triệu tới 300 triệu ảnh**. Trên ImageNet một mình, nó kém ResNet cùng cỡ, và trên tập dữ liệu nhỏ như `load_digits` thì CNN nhỏ ở ô PyTorch thường học nhanh và tốt hơn. Ít dữ liệu, không có mô hình học sẵn: bắt đầu từ CNN, hoặc dùng ViT đã pre-train rồi fine-tune, hoặc làm theo DeiT với augmentation mạnh. Đừng chọn mô hình theo tên gọi mới hay cũ.
+ViT vượt CNN trong bài báo gốc **khi pre-train trên 14 triệu tới 300 triệu ảnh**. Trên ImageNet một mình, nó kém ResNet cùng cỡ, và trên tập dữ liệu nhỏ như `load_digits` thì CNN nhỏ ở ô PyTorch đúng hơn (0.986 so với 0.958) dù ít tham số hơn. Ít dữ liệu, không có mô hình học sẵn: bắt đầu từ CNN, hoặc dùng ViT đã pre-train rồi fine-tune, hoặc làm theo DeiT với augmentation mạnh. Đừng chọn mô hình theo tên gọi mới hay cũ.
 :::
 
 :::caution[Quên rằng attention không biết thứ tự patch]
@@ -317,7 +317,7 @@ Self-attention không có mặt nạ là **đẳng biến hoán vị** (permutat
 :::
 
 :::caution[Đổi cỡ ảnh hay cỡ patch mà quên embedding vị trí và chi phí]
-Một ViT học ở $224 \times 224$ có đúng $N + 1 = 197$ embedding vị trí. Đưa vào ảnh $384 \times 384$ thì có 577 token, và mảng vị trí không khớp cỡ: phải nội suy hai chiều lưới vị trí từ $14 \times 14$ lên $24 \times 24$ (thư viện như `timm` có hàm làm việc này), không được cắt bớt hay lặp lại. Giảm cỡ patch để "thấy chi tiết" cũng không miễn phí: $P$ giảm nửa thì bảng attention gấp khoảng 16 lần, như bảng cuối của ô NumPy.
+Một ViT học ở $224 \times 224$ có đúng $N + 1 = 197$ embedding vị trí. Đưa vào ảnh $384 \times 384$ thì có 577 token, và mảng vị trí không khớp cỡ: phải nội suy hai chiều lưới vị trí từ $14 \times 14$ lên $24 \times 24$, không được cắt bớt hay lặp lại. Giảm cỡ patch để "thấy chi tiết" cũng không miễn phí: $P$ giảm nửa thì bảng attention gấp khoảng 16 lần, như bảng cuối của ô NumPy.
 :::
 
 ## Kiểm tra nhanh

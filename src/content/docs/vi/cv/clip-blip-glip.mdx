@@ -1,0 +1,367 @@
+---
+title: 'Ảnh + văn bản (1): CLIP, BLIP, GLIP'
+description: Phân loại ảnh theo nhãn chưa từng thấy khi huấn luyện. CLIP ghép ảnh với chữ bằng học đối chiếu, BLIP vừa hiểu vừa viết chú thích, GLIP tìm vật theo cụm từ.
+quiz:
+  - question: 'Embedding ảnh và chữ của CLIP đều có độ dài 1, nên độ tương đồng cosine nằm trong $[-1, 1]$. Nếu cố định $\tau = 1$ thay vì để mô hình học $\tau$, chuyện gì xảy ra với hàm mất mát trên một lô $N = 1\,000$ cặp?'
+    options:
+      - 'Không sao, vì cosine của cặp đúng vẫn lớn nhất nên mất mát vẫn về gần 0'
+      - 'Mô hình học nhanh hơn, vì logit nhỏ nên gradient ổn định'
+      - 'Mất mát không xuống thấp được, vì logit của cặp đúng chỉ hơn cặp sai tối đa 2, nên softmax không thể dồn xác suất vào cặp đúng'
+      - 'Mất mát âm, vì cosine có thể âm'
+    answer: 2
+    explanation: 'Với $\tau = 1$, mỗi logit nằm trong $[-1, 1]$. Dù cặp đúng có cosine 1 và cả 999 cặp sai có cosine $-1$, xác suất của cặp đúng chỉ là $e^{1} / (e^{1} + 999\,e^{-1}) \approx 0.007$, nên mất mát vẫn khoảng 4.9. Ô NumPy cũng thấy điều này ở cỡ nhỏ: với $\tau = 1$, mất mát của cặp ghép đúng là 0.930, chưa xa $\ln 4 \approx 1.386$. Chia cho $\tau$ nhỏ mới kéo giãn khoảng cách giữa các logit.'
+  - question: 'Bạn có CLIP đã huấn luyện xong và muốn phân loại ảnh vào ba nhãn mới: "xe đạp gấp", "xe đạp thể thao", "xe đạp điện". Bạn không có ảnh nào có nhãn. Cách làm đúng tinh thần zero-shot của CLIP là gì?'
+    options:
+      - 'Đưa ba câu kiểu "a photo of a folding bike" qua bộ mã hóa chữ, rồi chọn nhãn có cosine lớn nhất với embedding của ảnh'
+      - 'Thêm một lớp phân loại 3 đầu ra sau bộ mã hóa ảnh và huấn luyện lớp đó'
+      - 'Huấn luyện lại CLIP với ba nhãn mới'
+      - 'Không làm được, vì ba nhãn này không có trong 400 triệu cặp'
+    answer: 0
+    explanation: 'Ở CLIP, bộ mã hóa chữ đóng vai bộ sinh trọng số: mỗi câu nhãn thành một vectơ, và phép phân loại là tích vô hướng với embedding ảnh rồi lấy argmax. Không cần ảnh có nhãn, không cần huấn luyện. Thêm lớp phân loại mới cần dữ liệu có nhãn, tức không còn là zero-shot. Kết quả có tốt hay không là chuyện khác: phân biệt chi tiết (fine-grained) là điểm yếu được bài báo CLIP ghi nhận.'
+  - question: 'Trong một lô huấn luyện của CLIP có hai cặp mà chú thích gần như giống nhau: "a dog on the grass" và "a dog playing on grass". Hàm mất mát InfoNCE đối xứng xử lý hai cặp này thế nào?'
+    options:
+      - 'Nó nhận ra hai chú thích cùng nghĩa và bỏ qua cặp chéo'
+      - 'Nó gộp hai ảnh thành một mẫu'
+      - 'Nó không ảnh hưởng gì, vì mỗi hàng chỉ xét đường chéo'
+      - 'Nó coi ảnh 1 với chú thích 2 là cặp sai và đẩy chúng ra xa, dù thật ra chúng khớp nhau'
+    answer: 3
+    explanation: 'Nhãn của InfoNCE chỉ là "hàng $i$ khớp cột $i$". Mọi ô ngoài đường chéo đều bị đẩy xuống, kể cả ô thật ra đúng. Mẫu số của softmax chứa mọi cột, nên các ô ngoài đường chéo có ảnh hưởng, không chỉ đường chéo. BLIP (theo ALBEF) giảm vấn đề này bằng nhãn mềm từ một bộ mã hóa động lượng.'
+  - question: 'Ảnh tải từ web có chú thích gốc là "IMG_2031.jpg sale 50%". Trong CapFilt của BLIP, cặp này đi qua những bước nào?'
+    options:
+      - 'Bộ lọc xóa luôn ảnh, vì ảnh có chú thích xấu là ảnh xấu'
+      - 'Bộ sinh chú thích viết thêm một câu mô tả ảnh; bộ lọc dùng đầu ITM chấm cả câu gốc lẫn câu mới, câu nào bị đoán là không khớp ảnh thì bị bỏ'
+      - 'Bộ lọc sửa chính tả câu gốc rồi giữ lại'
+      - 'Mô hình học thẳng trên câu gốc, vì dữ liệu càng nhiều càng tốt'
+    answer: 1
+    explanation: 'CapFilt giữ ảnh và lọc chữ. Bộ sinh chú thích (bộ giải mã có điều kiện ảnh) tạo một câu mới cho mỗi ảnh web; bộ lọc (bộ mã hóa có điều kiện ảnh, fine-tune với ITC và ITM) loại câu bị đầu ITM đoán là không khớp, ở cả câu gốc lẫn câu mới. Câu "IMG_2031.jpg sale 50%" gần như chắc bị loại, còn câu do mô hình viết có thể được giữ. Học thẳng trên chữ nhiễu chính là điều bài báo BLIP cho là chưa tối ưu.'
+  - question: 'Bạn cần một hệ thống nhận câu "tìm mọi mũ bảo hiểm màu vàng" và trả về hộp bao quanh từng chiếc mũ trong ảnh công trường. Trong ba mô hình của bài, mô hình nào hợp với đầu ra này?'
+    options:
+      - 'CLIP, vì nó so ảnh với chữ'
+      - 'BLIP, vì nó viết được chú thích'
+      - 'GLIP, vì nó chấm điểm từng vùng ảnh với từng từ trong prompt, nên trả được khung cho cụm từ'
+      - 'Cả ba như nhau'
+    answer: 2
+    explanation: 'CLIP cho một vectơ cho cả ảnh, nên chỉ trả lời được "ảnh này có khớp câu không", không nói vật nằm ở đâu. BLIP sinh câu hoặc chấm cặp ảnh và câu, cũng không có khung. GLIP thay điểm phân loại của bộ phát hiện bằng điểm khớp giữa vùng và từ, $\mathbf{S}_{\text{ground}} = \mathbf{O}\mathbf{P}^\top$, nên mỗi khung được gắn với cụm từ trong prompt.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import contrastiveCode from '@code/cv/clip-blip-glip/contrastive.vi.py?raw';
+import clipZeroShotCode from '@code/cv/clip-blip-glip/clip_zero_shot.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu **học đối chiếu** (contrastive learning) giữa ảnh và chữ: hai bộ mã hóa, ma trận độ tương đồng $N \times N$, đường chéo là các cặp đúng.
+- Tự dẫn được hàm mất mát **InfoNCE** đối xứng của CLIP, và giải thích được vai trò của **nhiệt độ** (temperature) $\tau$.
+- Dùng được CLIP để **phân loại zero-shot** (không cần ảnh có nhãn) bằng prompt "a photo of a {label}", và biết vì sao gộp nhiều prompt giúp ích.
+- Phân biệt được CLIP, BLIP và GLIP: mỗi mô hình học gì, cho ra gì, dùng cho việc gì; nhận ra các giới hạn đã biết của CLIP (đếm, quan hệ vị trí, chữ trong ảnh).
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài [Phân loại ảnh với Transformer](/vi/cv/vision-transformer/) cắt ảnh thành patch và lấy vectơ ra ở **token `[CLS]`** làm đại diện cho cả ảnh; ở bài này, vectơ đó là "embedding của ảnh". Bài [Multimodal](/vi/llm/multimodal/) đã nhắc CLIP trong một đoạn để giải thích vì sao LLaVA mượn bộ mã hóa ảnh của nó; bài này mở hẳn cách CLIP được huấn luyện.
+:::
+
+## Trực giác
+
+### Bộ phân loại bị khóa vào danh sách nhãn
+
+Một mô hình phân loại ảnh học trên ImageNet có đúng 1 000 đầu ra. Nó biết "golden retriever" và "tabby cat". Nhưng bạn hỏi "ảnh này có phải xe đạp gấp không?" thì nó chịu: không có đầu ra nào cho nhãn đó. Muốn thêm nhãn, bạn phải gom ảnh, gán nhãn, rồi huấn luyện lại.
+
+Trong khi đó, Internet có hàng trăm triệu ảnh **đã có chữ đi kèm**: chú thích, alt-text, tiêu đề bài viết. Chữ đó lộn xộn, nhưng mô tả nội dung ảnh bằng ngôn ngữ tự do, không bị khóa vào một danh sách.
+
+### Trò chơi ghép đôi
+
+Hãy tưởng tượng một trò chơi. Bạn có một xấp 4 tấm ảnh và 4 mẩu chú thích, bị xáo trộn. Việc của bạn: ghép mỗi ảnh với đúng chú thích của nó.
+
+Để chơi giỏi, bạn không cần biết "nhãn lớp" nào. Bạn chỉ cần hiểu ảnh và hiểu chữ đủ để thấy chúng **nói cùng một chuyện**. Chơi trò này với 32 768 ảnh và 32 768 chú thích mỗi lượt, hàng tỉ lượt, bạn sẽ học được rất nhiều khái niệm về thế giới.
+
+Khi đã chơi giỏi, phân loại trở thành một ván ghép đôi: viết mỗi nhãn thành một câu ("a photo of a folding bike", "a photo of a cat"), rồi xem ảnh ghép với câu nào nhất. Muốn thêm nhãn mới thì chỉ cần viết thêm một câu.
+
+### Ghép xong rồi, làm gì nữa?
+
+Ghép đôi mới chỉ trả lời "ảnh và câu có khớp không". Hai việc khác còn bỏ ngỏ: **viết** câu mô tả cho ảnh (không chỉ chọn câu có sẵn), và chỉ ra **vật nằm ở đâu** trong ảnh. BLIP lo việc thứ nhất, GLIP lo việc thứ hai.
+
+Bài toán của bài này là: **làm sao học từ các cặp ảnh và chữ trên mạng một không gian chung, trong đó ảnh và câu cùng nghĩa nằm gần nhau, rồi dùng nó để phân loại theo nhãn tùy ý, viết chú thích, và tìm vật theo cụm từ?**
+
+## Lý thuyết
+
+### Ký hiệu
+
+Một **lô** (batch) có $N$ cặp (ảnh, chú thích). Ở bài này $N$ là số cặp trong lô, không phải số patch như bài ViT. Bộ mã hóa ảnh $f$ (một ViT hoặc ResNet) và bộ mã hóa chữ $g$ (một Transformer) đưa ảnh thứ $i$ và chú thích thứ $j$ về hai vectơ cùng số chiều $D_e$, gọi là **không gian embedding chung** (joint embedding space). Chia mỗi vectơ cho độ dài của nó, ta được:
+
+$$
+\mathbf{u}_i = \frac{f(\text{ảnh}_i)}{\lVert f(\text{ảnh}_i) \rVert},
+\qquad
+\mathbf{v}_j = \frac{g(\text{chữ}_j)}{\lVert g(\text{chữ}_j) \rVert}
+$$
+
+Vì $\mathbf{u}_i$ và $\mathbf{v}_j$ đều dài 1, tích vô hướng của chúng chính là **độ tương tự cosine** (cosine similarity), nằm trong $[-1, 1]$.
+
+### Bước 1: ma trận độ tương đồng $N \times N$
+
+Xếp mọi tích vô hướng thành một ma trận $\mathbf{S} \in \mathbb{R}^{N \times N}$:
+
+$$
+S_{ij} = \mathbf{u}_i^\top \mathbf{v}_j
+$$
+
+Hàng $i$ là ảnh $i$ so với mọi chú thích; cột $j$ là chú thích $j$ so với mọi ảnh. Đường chéo $S_{ii}$ là $N$ cặp đúng; $N^2 - N$ ô còn lại là các cặp ghép sai. Ta không cần ai gán nhãn: chính cách lô được tạo ra cho biết đáp án.
+
+### Bước 2: mỗi hàng là một bài phân loại $N$ lớp
+
+Nhìn hàng $i$: "trong $N$ chú thích, cái nào thuộc về ảnh $i$?". Đó là phân loại $N$ lớp với đáp án là cột $i$. Ta đổi điểm thành xác suất bằng **softmax**, sau khi chia cho nhiệt độ $\tau > 0$:
+
+$$
+p_{ij} = \frac{\exp(S_{ij} / \tau)}{\sum_{k=1}^{N} \exp(S_{ik} / \tau)}
+$$
+
+Mất mát của hàng $i$ là **cross-entropy** với đáp án là cột $i$, tức $-\ln$ của xác suất gán cho cặp đúng:
+
+$$
+\mathcal{L}_i^{\text{ảnh} \to \text{chữ}} = -\ln p_{ii} = -\ln \frac{\exp(S_{ii} / \tau)}{\sum_{k=1}^{N} \exp(S_{ik} / \tau)}
+$$
+
+Dạng "một mẫu đúng giữa nhiều mẫu sai, chấm bằng softmax" này có tên là **InfoNCE** (van den Oord và cộng sự, 2018).
+
+### Bước 3: làm đối xứng theo cột
+
+Chiều ngược lại cũng là một trò chơi: "trong $N$ ảnh, ảnh nào thuộc về chú thích $j$?". Đó là softmax theo **cột** $j$ của cùng ma trận:
+
+$$
+\mathcal{L}_j^{\text{chữ} \to \text{ảnh}} = -\ln \frac{\exp(S_{jj} / \tau)}{\sum_{k=1}^{N} \exp(S_{kj} / \tau)}
+$$
+
+Mẫu số giờ cộng theo cột (đổi chỉ số hàng $k$), còn tử số vẫn là ô trên đường chéo. CLIP lấy trung bình của hai chiều, mỗi chiều trung bình trên cả lô:
+
+$$
+\mathcal{L} = \frac{1}{2}\left(\frac{1}{N}\sum_{i=1}^{N}\mathcal{L}_i^{\text{ảnh} \to \text{chữ}} + \frac{1}{N}\sum_{j=1}^{N}\mathcal{L}_j^{\text{chữ} \to \text{ảnh}}\right)
+$$
+
+Trong code, đây chỉ là cross-entropy trên $\mathbf{S}/\tau$ và trên $\mathbf{S}^\top/\tau$, với nhãn là $0, 1, \dots, N-1$. Bài báo CLIP có giả mã chưa tới mười dòng cho đúng việc này.
+
+### Bước 4: gradient kéo đường chéo lên, đẩy phần còn lại xuống
+
+Vì sao hàm này làm đúng điều ta muốn? Viết lại mất mát hàng $i$ bằng cách tách log của phân số thành hiệu hai log:
+
+$$
+\mathcal{L}_i^{\text{ảnh} \to \text{chữ}} = -\frac{S_{ii}}{\tau} + \ln \sum_{k=1}^{N} \exp\!\left(\frac{S_{ik}}{\tau}\right)
+$$
+
+Lấy đạo hàm theo một ô $S_{ik}$ của hàng đó. Số hạng đầu chỉ chứa $S_{ii}$, nên cho $-1/\tau$ khi $k = i$ và 0 khi $k \ne i$. Số hạng sau là log của một tổng mũ; đạo hàm của nó theo $S_{ik}$ là $\frac{1}{\tau} \cdot \frac{\exp(S_{ik}/\tau)}{\sum_{k'} \exp(S_{ik'}/\tau)} = p_{ik}/\tau$. Cộng lại:
+
+$$
+\frac{\partial \mathcal{L}_i^{\text{ảnh} \to \text{chữ}}}{\partial S_{ik}} = \frac{p_{ik} - [k = i]}{\tau}
+$$
+
+Ở đây $[k = i]$ bằng 1 khi $k = i$, bằng 0 khi khác. Gradient descent đi **ngược** dấu gradient, nên:
+
+- Ô đường chéo có gradient $(p_{ii} - 1)/\tau < 0$: ô này được **kéo lên**, cho tới khi $p_{ii}$ gần 1.
+- Ô ngoài đường chéo có gradient $p_{ik}/\tau > 0$: ô này bị **đẩy xuống**, và bị đẩy mạnh hơn khi $p_{ik}$ lớn. Chú thích sai nhưng "trông giống" (gọi là **mẫu âm khó**, hard negative) bị đẩy nhiều nhất.
+
+Lô càng lớn thì mỗi ảnh có càng nhiều mẫu sai để phân biệt. CLIP dùng lô 32 768 cặp.
+
+### Bước 5: nhiệt độ $\tau$
+
+Cosine nằm trong $[-1, 1]$, nên với $\tau = 1$ hai logit chỉ chênh nhau tối đa 2. Softmax trên những logit gần nhau như vậy luôn khá phẳng: dù ghép đúng hoàn toàn, mất mát vẫn không xuống thấp được. Chia cho $\tau$ nhỏ kéo giãn khoảng cách: với $\tau = 0.01$, khoảng chênh tối đa thành 200.
+
+Nhưng $\tau$ quá nhỏ thì một cặp sai có cosine nhỉnh hơn cặp đúng một chút đã làm mất mát rất lớn, và huấn luyện dễ mất ổn định. CLIP không chọn tay mà **học** $\tau$, qua tham số $t$ với $1/\tau = e^{t}$ (học $t$ thì $\tau$ luôn dương). Theo bài báo, $\tau$ khởi tạo ở 0.07 và bị chặn để $1/\tau$ không vượt quá 100, vì vượt quá làm huấn luyện mất ổn định. Ô `LocalCode` ở dưới in ra $1/\tau = 100.0$ của checkpoint đã học: $\tau$ chạm đúng mức chặn.
+
+Chú ý: $\tau$ ở đây cùng vai trò với nhiệt độ $T$ của phần LLM (chia logit trước softmax), chỉ khác ký hiệu theo bài báo.
+
+### CLIP: dữ liệu và kết quả
+
+CLIP (Radford và cộng sự, 2021) huấn luyện từ đầu trên **400 triệu** cặp (ảnh, chữ) thu từ Internet. Nhóm tác giả thử năm bộ mã hóa ảnh ResNet và ba ViT (ViT-B/32, ViT-B/16, ViT-L/14); bộ mã hóa chữ là một Transformer. Mô hình tốt nhất (ViT-L/14 ở ảnh $336 \times 336$) đạt 76.2% độ chính xác top-1 zero-shot trên ImageNet, ngang ResNet-50 gốc mà không dùng ảnh nào trong 1.28 triệu ảnh có nhãn của ImageNet (số theo bài báo, 2021).
+
+### Phân loại zero-shot
+
+Có $K$ nhãn. Viết mỗi nhãn $k$ thành một câu, đưa qua bộ mã hóa chữ, được $\mathbf{v}_k$. Với ảnh mới có embedding $\mathbf{u}$:
+
+$$
+\hat{y} = \arg\max_{k} \; \mathbf{u}^\top \mathbf{v}_k,
+\qquad
+P(y = k \mid \text{ảnh}) = \frac{\exp(\mathbf{u}^\top \mathbf{v}_k / \tau)}{\sum_{k'=1}^{K} \exp(\mathbf{u}^\top \mathbf{v}_{k'} / \tau)}
+$$
+
+Đây đúng là một hàng của ma trận $\mathbf{S}$, với các câu nhãn đứng ở vị trí chú thích. Bài báo CLIP nhìn nó như một **hồi quy logistic nhiều lớp** không có hệ số tự do: các $\mathbf{v}_k$ chính là trọng số của lớp phân loại, và bộ mã hóa chữ là thứ **sinh ra trọng số** từ tên nhãn.
+
+**Vì sao cần prompt.** Chú thích trong dữ liệu hiếm khi là một từ đơn, nên chỉ đưa tên nhãn "crane" vừa lệch phân phối, vừa mơ hồ (cần cẩu hay con sếu?). Bài báo dùng mẫu "A photo of a {label}." làm mặc định, giúp tăng 1.3% trên ImageNet; với từng bộ dữ liệu còn thêm ngữ cảnh, ví dụ "A photo of a {label}, a type of pet.".
+
+**Gộp nhiều prompt** (prompt ensembling). Viết mỗi nhãn bằng $M$ mẫu khác nhau ("a photo of a big {label}", "a blurry photo of a {label}"…), lấy trung bình các embedding chữ rồi chuẩn hóa lại:
+
+$$
+\bar{\mathbf{v}}_k = \frac{\sum_{m=1}^{M} \mathbf{v}_k^{(m)}}{\left\lVert \sum_{m=1}^{M} \mathbf{v}_k^{(m)} \right\rVert}
+$$
+
+Chia cho $M$ rồi chuẩn hóa cho cùng kết quả như chuẩn hóa thẳng tổng, nên công thức bỏ $1/M$. Gộp trong không gian embedding nên chỉ tính một lần cho mỗi nhãn, chi phí lúc dự đoán như một prompt. Với 80 mẫu, bài báo báo cáo thêm 3.5% trên ImageNet so với một prompt mặc định; cộng cả hai cách là gần 5%.
+
+### Giới hạn của CLIP
+
+- **Đếm và việc trừu tượng.** Bài báo ghi CLIP zero-shot yếu với đếm số vật thể (CLEVRCounts) và đoán khoảng cách tới xe gần nhất (KITTI Distance), có lúc gần như đoán mò. Ô `LocalCode` thử đếm ba hình tròn.
+- **Quan hệ và vị trí.** Embedding ảnh là một vectơ cho cả ảnh, và học đối chiếu trên chú thích web ít khi buộc mô hình phân biệt thứ tự từ. Yuksekgonul và cộng sự (2023) cho thấy nhiều mô hình kiểu này, có CLIP, cư xử như "túi từ" (bag of words): khó chọn giữa "the horse is eating the grass" và "the grass is eating the horse", và với các câu quan hệ, phần lớn mô hình gần hoặc dưới mức đoán mò.
+- **Chữ trong ảnh.** CLIP đọc được chữ in khá tốt, đến mức chữ có thể đánh lừa nó: Goh và cộng sự (2021) mô tả **tấn công bằng chữ** (typographic attack), dán chữ ghi tên một vật khác lên ảnh là có thể làm đổi nhãn. Ngược lại, với chữ số viết tay của MNIST, CLIP zero-shot chỉ đạt 88%, thua cả hồi quy logistic trên điểm ảnh thô (theo bài báo CLIP).
+- **Từ đa nghĩa và phân biệt chi tiết.** "Boxer" là giống chó hay võ sĩ? Phân biệt các đời xe hay các loài hoa cũng là điểm yếu được bài báo ghi nhận.
+
+### BLIP: vừa hiểu vừa viết
+
+CLIP chỉ chấm điểm cặp, không sinh câu nào. BLIP (Li và cộng sự, 2022) muốn một mô hình làm được cả việc **hiểu** (truy xuất, hỏi đáp về ảnh) lẫn việc **sinh** (viết chú thích). Nó dựng một **hỗn hợp encoder–decoder đa phương thức** (multimodal mixture of encoder-decoder, MED), chạy được ở ba chế độ, mỗi chế độ một mục tiêu học:
+
+| Chế độ | Mục tiêu học | Làm gì |
+|---|---|---|
+| Hai bộ mã hóa riêng (ảnh, chữ) | **ITC** (image-text contrastive): học đối chiếu như CLIP | Kéo cặp đúng lại gần trong không gian chung |
+| Bộ mã hóa chữ có điều kiện ảnh: thêm cross-attention nhìn sang đặc trưng ảnh | **ITM** (image-text matching): phân loại nhị phân "khớp" hay "không khớp" | Xét kỹ từng cặp; cặp âm được lấy mẫu trong lô, ưu tiên cặp có điểm ITC cao (mẫu âm khó) |
+| Bộ giải mã chữ có điều kiện ảnh: self-attention nhân quả | **LM** (language modeling): dự đoán token kế tiếp | Viết chú thích cho ảnh |
+
+Bộ mã hóa chữ và bộ giải mã chữ dùng chung mọi tham số trừ các lớp self-attention, vì theo tác giả, khác biệt giữa "đọc" và "viết" nằm chủ yếu ở đó. ITC của BLIP theo ALBEF (Li và cộng sự, 2021): thêm một bộ mã hóa động lượng (momentum encoder) để tạo **nhãn mềm**, vì trong lô có thể có cặp "sai" mà thật ra khớp.
+
+**CapFilt: lọc chú thích nhiễu.** Chữ đi kèm ảnh web thường không mô tả ảnh ("IMG_2031.jpg", "sale 50%"). BLIP tách mô hình đã pre-train thành hai, fine-tune riêng trên COCO (bộ dữ liệu ảnh có chú thích do người viết):
+
+1. **Bộ sinh chú thích** (captioner, chế độ LM) viết một câu mới cho mỗi ảnh web, bằng top-p sampling. Tác giả thấy câu đa dạng giúp nhiều hơn câu "an toàn" của beam search.
+2. **Bộ lọc** (filter, chế độ ITM) chấm cả câu gốc lẫn câu mới; câu nào đầu ITM đoán là không khớp ảnh thì bị bỏ.
+
+Các cặp còn lại, cộng dữ liệu do người gán nhãn, thành bộ dữ liệu mới để pre-train một mô hình mới. Bộ dữ liệu gốc có 14 triệu ảnh; bài báo thử thêm tới 129 triệu ảnh (có LAION).
+
+**BLIP-2** (Li và cộng sự, 2023) đi bước tiếp: **đóng băng** cả một bộ mã hóa ảnh có sẵn lẫn một LLM có sẵn, chỉ học một cầu nối nhỏ là **Q-Former** (188 triệu tham số). Q-Former có 32 vectơ truy vấn học được, mỗi vectơ 768 chiều; chúng nhìn sang đặc trưng ảnh qua cross-attention và rút ra một bản tóm tắt $32 \times 768$, nhỏ hơn nhiều so với $257 \times 1\,024$ của ViT-L/14. Một lớp tuyến tính chiếu 32 vectơ đó sang số chiều embedding của LLM rồi đặt trước token chữ, như "prompt mềm" bằng ảnh. Cách nối ảnh vào LLM này, và cách đơn giản hơn của LLaVA, là chủ đề của bài [Ảnh + văn bản (2): LLaVA và các biến thể](/vi/cv/llava/).
+
+### GLIP: tìm vật theo cụm từ
+
+CLIP và BLIP làm việc với cả ảnh. **Phát hiện vật thể** (object detection) thì cần biết vật nằm **ở đâu**: mỗi vật một **hộp bao** (bounding box) kèm nhãn. Một bộ phát hiện kinh điển lấy đặc trưng của $R$ vùng ảnh, $\mathbf{O} \in \mathbb{R}^{R \times d}$, nhân với ma trận trọng số $\mathbf{W} \in \mathbb{R}^{c \times d}$ của $c$ lớp cố định:
+
+$$
+\mathbf{S}_{\text{cls}} = \mathbf{O}\,\mathbf{W}^\top \in \mathbb{R}^{R \times c}
+$$
+
+GLIP (Li và cộng sự, 2022) nhận ra phát hiện vật thể là một trường hợp riêng của **grounding** (phrase grounding, định vị cụm từ): cho một câu, tìm vùng ảnh ứng với từng cụm từ trong câu. Cách làm: viết danh sách lớp thành một prompt, ví dụ "person. bicycle. car. … toothbrush", đưa qua bộ mã hóa chữ thành $\mathbf{P} \in \mathbb{R}^{M \times d}$ ($M$ token), rồi thay $\mathbf{W}$ bằng $\mathbf{P}$:
+
+$$
+\mathbf{S}_{\text{ground}} = \mathbf{O}\,\mathbf{P}^\top \in \mathbb{R}^{R \times M}
+$$
+
+Mỗi ô là điểm khớp giữa một vùng và một token. Đây là cùng ý với ma trận $\mathbf{S}$ của CLIP, nhưng ở mức **vùng–từ** thay vì **ảnh–câu**. Vì prompt là chữ tự do, đổi danh sách lớp không cần đổi kiến trúc.
+
+Hai điểm khác CLIP:
+
+- **Fusion sâu** (deep fusion). CLIP chỉ gặp nhau ở tích vô hướng cuối cùng; GLIP trộn đặc trưng ảnh và chữ qua cross-attention ở vài lớp cuối của hai bộ mã hóa, nên đặc trưng ảnh "biết" câu đang hỏi gì. Tác giả cho rằng điều này quan trọng cho chất lượng.
+- **Dữ liệu grounding mở rộng bằng nhãn giả.** Một mô hình GLIP "thầy" học trên dữ liệu có người gán, rồi tự vẽ khung cho các cụm danh từ trong 24 triệu cặp ảnh và chữ từ web; mô hình "trò" học trên tổng cộng 27 triệu mẫu grounding (3 triệu có người gán).
+
+Theo bài báo (2022), GLIP-L chưa thấy ảnh COCO nào khi pre-train vẫn đạt 49.8 AP zero-shot trên COCO và 26.9 AP trên LVIS (AP, average precision, là thước đo chuẩn của phát hiện vật thể).
+
+:::note[Ghi nhớ]
+CLIP: ma trận $\mathbf{S}_{ij} = \mathbf{u}_i^\top \mathbf{v}_j$, cross-entropy theo hàng và theo cột trên $\mathbf{S}/\tau$, đường chéo là đáp án. Zero-shot là một hàng của $\mathbf{S}$ với câu nhãn ở vị trí chú thích. BLIP thêm ITM và LM để vừa hiểu vừa viết, và lọc dữ liệu bằng CapFilt. GLIP đưa cùng ý xuống mức vùng–từ: $\mathbf{S}_{\text{ground}} = \mathbf{O}\mathbf{P}^\top$.
+:::
+
+### Giới hạn của bài
+
+- Bài chỉ nói ý chính của ba mô hình; kiến trúc phát hiện vật thể (đề xuất vùng, khớp khung) thuộc phần phát hiện vật thể, chưa có bài riêng.
+- Ảnh vào LLM (LLaVA, BLIP-2 nối với LLM) thuộc bài [Ảnh + văn bản (2): LLaVA và các biến thể](/vi/cv/llava/).
+- Học đối chiếu **không cần chữ**, chỉ dùng hai góc nhìn của cùng một ảnh, thuộc bài [Self-supervised learning với ảnh](/vi/cv/self-supervised-learning/).
+
+## Minh họa
+
+Hình dưới vẽ một lô $N$ cặp của CLIP. Hãy nhìn vào ma trận ở giữa: các ô trên đường chéo là cặp đúng và được kéo lên, mọi ô còn lại bị đẩy xuống. Mỗi hàng là một bài "chọn chú thích cho ảnh", mỗi cột là một bài "chọn ảnh cho chú thích".
+
+{/* FIG: ClipContrastiveFigure — N ảnh qua bộ mã hóa ảnh thành dãy vectơ u_1..u_N (cột trái), N chú thích qua bộ mã hóa chữ thành v_1..v_N (hàng trên); ma trận N x N các tích u_i^T v_j, đường chéo tô đậm (cặp đúng, kéo lên), ô ngoài đường chéo tô nhạt (cặp sai, đẩy xuống); ghi chú "softmax theo hàng" và "softmax theo cột". */}
+
+Bảng dưới đặt ba mô hình cạnh nhau. Cột "Mục tiêu học" cho biết vì sao đầu ra của mỗi mô hình khác nhau.
+
+| Tiêu chí | CLIP (2021) | BLIP (2022) | GLIP (2022) |
+|---|---|---|---|
+| Mục tiêu học | Đối chiếu ảnh–câu (InfoNCE đối xứng) | ITC, ITM và LM cùng lúc | Khớp vùng–từ (grounding), gộp cả dữ liệu phát hiện vật thể |
+| Ảnh và chữ gặp nhau ở đâu | Chỉ ở tích vô hướng cuối | Cross-attention trong bộ mã hóa và bộ giải mã chữ | Fusion sâu ở các lớp cuối của hai bộ mã hóa |
+| Đầu ra | Một vectơ cho ảnh, một vectơ cho câu | Điểm khớp ảnh–câu, hoặc một câu chú thích | Hộp bao kèm cụm từ trong prompt |
+| Dữ liệu (theo bài báo) | 400 triệu cặp từ web | 14 triệu ảnh (tới 129 triệu), chú thích lọc bằng CapFilt | 27 triệu mẫu grounding (24 triệu có nhãn giả) |
+| Dùng cho | Phân loại zero-shot, tìm ảnh bằng chữ, bộ mã hóa ảnh cho LLM | Viết chú thích, hỏi đáp về ảnh, truy xuất | Phát hiện vật thể theo nhãn tùy ý, tìm vật theo câu |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: ô NumPy với Python 3.14 và NumPy 2.4 (bản có trong Pyodide), ô CLIP với Python 3.14, PyTorch 2.15 và transformers 5.22 trên CPU. Ô NumPy chạy ngay trên trang, ô CLIP chạy trên máy bạn. Hai ô độc lập, không dùng biến của nhau.
+
+### Ma trận tương đồng và InfoNCE bằng NumPy
+
+Ô dưới đây tạo 4 "ý" ngẫu nhiên (hạt giống 0), mỗi ý sinh một embedding ảnh và một embedding chữ bằng cách cộng hai nhiễu khác nhau, nên cặp cùng ý có tương quan. Ô chuẩn hóa, tính ma trận $\mathbf{S}$, tính mất mát đối xứng với ba giá trị $\tau$ cho cách ghép đúng và cho một cách ghép sai (ảnh $i$ với chú thích $i+1$), rồi phân loại zero-shot một "ảnh" mới của ý "dog".
+
+<PythonRunner code={contrastiveCode} title="Ma trận tương đồng, InfoNCE và zero-shot" />
+
+Đọc kết quả:
+
+- **Ma trận $4 \times 4$:** ô lớn nhất của mỗi hàng nằm trên đường chéo (0.81, 0.77, 0.71, 0.66), dù vài ô ngoài đường chéo không nhỏ, như 0.41 ở hàng 2.
+- **`log N = 1.386`:** mức mất mát khi mô hình đoán đều, $\ln 4$.
+- **`tau=1.0`:** ghép đúng chỉ được 0.930, không xa $\ln 4$, vì logit chênh nhau quá ít. Đúng điều Bước 5 nói.
+- **`tau=0.1` và `tau=0.01`:** ghép đúng xuống 0.023 rồi 0.000, nhưng ghép sai vọt lên 6.815 rồi 67.923. $\tau$ nhỏ làm mô hình "tự tin", thưởng lớn khi đúng và phạt nặng khi sai.
+- **Zero-shot:** cosine của ảnh mới với 4 câu nhãn là `[-0.57 0.78 0.23 0.25]`; chia cho $\tau = 0.07$ rồi softmax cho xác suất 0.9991 ở "dog". Dòng cuối lấy argmax theo từng hàng của $\mathbf{S}$ và ra đúng thứ tự `cat, dog, car, tree`.
+
+### CLIP thật: phân loại zero-shot ảnh tự vẽ
+
+File dưới đây tải checkpoint `openai/clip-vit-base-patch32` (bộ mã hóa ảnh ViT-B/32) qua thư viện `transformers`. Trọng số khoảng 600 MB; trên máy chạy thử, thư viện tải cả bản `pytorch_model.bin` lẫn `model.safetensors`, nên bộ nhớ đệm chiếm khoảng 1.2 GB. File vẽ ba ảnh bằng PIL (tròn đỏ, vuông xanh dương, tam giác vàng), phân loại với 5 nhãn trong đó có nhãn "bẫy" cùng màu khác hình và cùng hình khác màu, rồi thử đếm một ảnh có ba hình tròn đỏ. Cách cài PyTorch bản CPU có ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+<LocalCode
+  code={clipZeroShotCode}
+  title="CLIP phân loại zero-shot hình tự vẽ"
+  packages={['torch', 'transformers', 'pillow']}
+  hardware="CPU là đủ. Lần đầu mất vài phút để tải trọng số; các lần sau khoảng 1 phút trên máy chạy thử, phần lớn là nạp thư viện và mô hình"
+  sampleVaries={false}
+>
+
+```text
+1/tau = 100.0
+red circle: 0.940 0.056 0.001 0.002 0.001 -> a red circle
+blue square: 0.000 0.042 0.000 0.957 0.000 -> a blue square
+yellow triangle: 0.000 0.000 0.000 0.000 1.000 -> a yellow triangle
+3 circles: 0.043 0.070 0.504 0.384 -> three red circles
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **`1/tau = 100.0`:** `logit_scale` của checkpoint là $\ln 100$, đúng mức chặn của bài báo. `logits_per_image` của thư viện chính là $\mathbf{S}/\tau$, nên `softmax(dim=1)` là softmax theo hàng như công thức zero-shot.
+- **Ba hình đơn:** cả ba đều đúng. Năm số trên mỗi dòng theo thứ tự nhãn "a red circle", "a blue circle", "a red square", "a blue square", "a yellow triangle". Nhãn bẫy nhận nhiều xác suất nhất là "a blue circle": 0.056 cho hình tròn đỏ (cùng hình, khác màu) và 0.042 cho hình vuông xanh (cùng màu, khác hình).
+- **Đếm:** "three red circles" thắng với 0.504, nhưng "four red circles" vẫn nhận 0.384. So với 0.94–1.00 ở các dòng trên, mô hình kém chắc chắn hẳn khi phải đếm, khớp với giới hạn bài báo ghi nhận. Đây chỉ là một ảnh, không phải phép đo: bạn thử đổi `n=3` thành 5 hay 6 để xem.
+
+## Lỗi hay gặp
+
+:::caution[Quên chuẩn hóa embedding, hay so điểm của CLIP giữa các lần gọi]
+Bỏ bước chia cho độ dài thì tích vô hướng không còn là cosine: vectơ dài hơn được điểm cao hơn bất kể nghĩa. Khi tự lấy embedding (`get_image_features`, `get_text_features` của `transformers`) để tìm ảnh hay tự phân loại, hãy chuẩn hóa trước. Ngoài ra, xác suất zero-shot là softmax **trên danh sách nhãn bạn đưa vào**: 0.94 ở ô trên nghĩa là "trong 5 nhãn này", không phải "chắc 94% đây là hình tròn đỏ". Đổi danh sách nhãn thì xác suất đổi theo.
+:::
+
+:::caution[Nghĩ zero-shot nghĩa là cái gì cũng phân loại được]
+CLIP chỉ ghép tốt những khái niệm có nhiều trong chú thích web. Nó yếu với đếm, quan hệ vị trí ("trái", "trên"), chữ số viết tay, ảnh chuyên ngành (ảnh vệ tinh, ảnh y khoa), và có thể bị chữ dán trong ảnh đánh lừa. Trước khi dùng cho một việc mới, hãy lấy vài chục ảnh có nhãn để đo. Prompt cũng ảnh hưởng thật: thử vài mẫu câu, hoặc gộp nhiều mẫu, trước khi kết luận mô hình "không làm được".
+:::
+
+:::caution[Dùng CLIP khi cần biết vật nằm ở đâu]
+CLIP cho một vectơ cho cả ảnh, nên trả lời "ảnh có mèo không", không trả lời "mèo ở đâu" hay "có mấy con mèo". Cần hộp bao theo cụm từ thì dùng mô hình kiểu GLIP; cần câu mô tả thì dùng mô hình sinh như BLIP hay mô hình ở bài [LLaVA](/vi/cv/llava/).
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- CLIP học bằng trò ghép đôi: trong lô $N$ cặp, ma trận $S_{ij} = \mathbf{u}_i^\top \mathbf{v}_j$ có đáp án trên đường chéo; mất mát là cross-entropy theo hàng và theo cột trên $\mathbf{S}/\tau$ (InfoNCE đối xứng). Gradient kéo đường chéo lên, đẩy mạnh nhất các mẫu âm khó.
+- $\tau$ quyết định softmax sắc hay phẳng: lớn quá thì không học được, nhỏ quá thì mất ổn định. CLIP học $\tau$, khởi tạo 0.07, chặn $1/\tau \le 100$.
+- Zero-shot: viết nhãn thành câu ("a photo of a {label}"), lấy argmax cosine. Gộp nhiều prompt thêm vài phần trăm. Giới hạn: đếm, quan hệ, chữ trong ảnh, khái niệm hiếm.
+- BLIP thêm ITM và LM để vừa hiểu vừa viết, và lọc chú thích web bằng CapFilt; BLIP-2 nối bộ mã hóa ảnh và LLM đóng băng qua Q-Former. GLIP coi phát hiện vật thể là grounding: $\mathbf{S}_{\text{ground}} = \mathbf{O}\mathbf{P}^\top$ giữa vùng và từ.
+
+**Đọc thêm:**
+
+- Radford, A. và cộng sự (2021). [*Learning Transferable Visual Models From Natural Language Supervision*](https://arxiv.org/abs/2103.00020), arXiv:2103.00020, mục 2.3 (hình 3: giả mã hàm mất mát), mục 3.1.4 (prompt và gộp prompt) và mục 6 (giới hạn). Bài gốc của CLIP, viết dễ đọc.
+- van den Oord, A., Li, Y., Vinyals, O. (2018). [*Representation Learning with Contrastive Predictive Coding*](https://arxiv.org/abs/1807.03748), arXiv:1807.03748, mục 2.3. Nguồn của tên InfoNCE; bối cảnh khác (dự đoán chuỗi), cùng dạng hàm mất mát.
+- Li, J., Li, D., Xiong, C., Hoi, S. (2022). [*BLIP: Bootstrapping Language-Image Pre-training for Unified Vision-Language Understanding and Generation*](https://arxiv.org/abs/2201.12086), arXiv:2201.12086, mục 3. Ba mục tiêu ITC, ITM, LM và CapFilt. Phần tiếp theo: Li, J., Li, D., Savarese, S., Hoi, S. (2023). [*BLIP-2*](https://arxiv.org/abs/2301.12597), arXiv:2301.12597, mục 3 (Q-Former).
+- Li, L. H., Zhang, P., Zhang, H. và cộng sự (2022). [*Grounded Language-Image Pre-training*](https://arxiv.org/abs/2112.03857), arXiv:2112.03857, mục 3.1–3.3. Cách viết phát hiện vật thể thành grounding và cách mở rộng dữ liệu bằng nhãn giả.
+- Yuksekgonul, M., Bianchi, F., Kalluri, P., Jurafsky, D., Zou, J. (2023). [*When and Why Vision-Language Models Behave like Bags-Of-Words, and What to Do About It?*](https://arxiv.org/abs/2210.01936), arXiv:2210.01936, mục 2. Bộ kiểm tra ARO về quan hệ và thứ tự từ; giải thích vì sao học đối chiếu trên dữ liệu truy xuất bỏ qua thứ tự. Đọc cùng: Goh, G. và cộng sự (2021), [*Multimodal Neurons in Artificial Neural Networks*](https://distill.pub/2021/multimodal-neurons/), Distill, về tấn công bằng chữ.
+
+<LessonProgress />

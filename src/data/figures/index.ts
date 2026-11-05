@@ -2,8 +2,10 @@
 // name of <Name>Figure.astro without "Figure", the name of its words file here, and the element ids
 // fig-<id>, fig-<id>-desc. tests/unit/viz/figure-conventions.test.ts keeps components, files and keys in step.
 import { AGENT_LOOP } from './agent-loop';
+import { CLIP_CONTRASTIVE } from './clip-contrastive';
 import { CONTAINER_IMAGE } from './container-image';
 import { ENCODER_DECODER } from './encoder-decoder';
+import { GENERATIVE_MODELS } from './generative-models';
 import { LORA } from './lora';
 import { ML_FAMILIES } from './ml-families';
 import { ML_WORKFLOW } from './ml-workflow';
@@ -14,6 +16,9 @@ import { RAG_PIPELINE } from './rag-pipeline';
 import { REGULARIZATION_GEOMETRY } from './regularization-geometry';
 import { RESIDUAL_BLOCK } from './residual-block';
 import { RLHF_STAGES } from './rlhf-stages';
+import { SEGMENTATION_TASKS } from './segmentation-tasks';
+import { UNET } from './unet';
+import { VIT } from './vit';
 import type { FigureText } from './types';
 
 export const FIGURES = {
@@ -30,5 +35,9 @@ export const FIGURES = {
   parallelism: PARALLELISM,
   'container-image': CONTAINER_IMAGE,
   'residual-block': RESIDUAL_BLOCK,
+  vit: VIT,
+  unet: UNET,
+  'segmentation-tasks': SEGMENTATION_TASKS,
+  'clip-contrastive': CLIP_CONTRASTIVE,
 } as const satisfies Record<string, FigureText<string>>;
 export type FigureId = keyof typeof FIGURES;
