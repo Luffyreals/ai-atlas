@@ -90,8 +90,6 @@ export interface MathLabel {
   after?: string;
   before?: string;
   bold?: boolean;
-  /** A hat over the symbol, \hat{x} (cv-lessons.md 4): only for a lone symbol (no sub, before or after). */
-  hat?: boolean;
 }
 
 /**
@@ -252,22 +250,4 @@ export function formulaSpans(parts: Formula, fontSize: number): FormulaSpan[] {
     }
   }
   return spans;
-}
-
-/**
- * "x1,y1 x2,y2 x3,y3": a hat (the circumflex of \hat{x}) over a lone symbol of FigMath centred on (x, y),
- * drawn as a FigArrow-style polyline, since Barlow's subsets have no combining circumflex (U+0302). It sits
- * over the x-height of a lower-case letter: 0.2 em above the centre to 0.5 em, 0.25 em each side.
- */
-export function hatPoints(x: number, y: number, fontSize: number): string {
-  const half = 0.25 * fontSize;
-  const foot = y - 0.2 * fontSize;
-  const tip = y - 0.45 * fontSize;
-  return [
-    [x - half, foot],
-    [x, tip],
-    [x + half, foot],
-  ]
-    .map(([px, py]) => `${round1(px!)},${round1(py!)}`)
-    .join(' ');
 }

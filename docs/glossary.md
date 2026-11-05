@@ -483,3 +483,125 @@ Truy xuất tài liệu, đồ thị tri thức, agent và công cụ.
 | Trị riêng | Eigenvalue | Dịch |
 | Vectơ | Vector | Dịch |
 | Vectơ riêng | Eigenvector | Dịch. Hướng mà ma trận chỉ co giãn, không xoay: $\mathbf{H}\mathbf{v} = \lambda\mathbf{v}$ |
+
+## Thị giác máy tính
+
+Khái niệm của phần CV (5b): tích chập, phân vùng ảnh, ảnh và văn bản, sinh ảnh, học tự giám sát. "Receptive field" thống nhất là "trường tiếp nhận".
+
+| Tiếng Việt | Tiếng Anh | Cách dùng |
+|---|---|---|
+| AnyRes | AnyRes (any resolution) | Giữ. Cắt ảnh lớn thành lưới $a \times b$ mảnh cộng một ảnh thu nhỏ; $N = (ab+1)T$ |
+| ASPP | Atrous Spatial Pyramid Pooling | Giữ. Nhiều nhánh tích chập giãn với rate khác nhau chạy song song (DeepLab) |
+| Autoencoder | Autoencoder | Giữ. Bộ mã hóa nén, bộ giải mã dựng lại |
+| Backbone | Backbone | Giữ, lần đầu có thể ghi "mạng xương sống" |
+| Bài toán phụ | Pretext task | Dịch, lần đầu kèm "pretext task". Bài toán tự đặt ra, nhãn sinh từ chính dữ liệu, chỉ để học biểu diễn |
+| Bản đồ đặc trưng | Feature map | Dịch. Đầu ra của một kernel; số bản đồ là số kênh ra |
+| Bất biến | Invariant, invariance | Dịch. $f(T(\mathbf{X})) = f(\mathbf{X})$: biến đổi đầu vào không đổi dự đoán (phân loại) |
+| Biến ẩn | Latent variable | Dịch. $\mathbf{z}$ mô tả ảnh bằng vài con số |
+| Cặp dương, mẫu âm | Positive pair, negative example | Dịch. Hai góc nhìn của cùng một ảnh; góc nhìn của ảnh khác |
+| Cắt co giãn ngẫu nhiên | Random resized crop | Dịch, lần đầu kèm tiếng Anh |
+| Câu nhắc định dạng câu trả lời | Response formatting prompt | Dịch. Câu thêm sau câu hỏi kiểu VQA để mô hình biết khi nào trả lời ngắn |
+| Chia sẻ trọng số | Weight sharing | Dịch |
+| Chuẩn hóa theo lô | Batch normalization | Dịch, lần đầu kèm tiếng Anh |
+| Classifier-free guidance | Classifier-free guidance | Giữ. Trộn dự đoán có và không có điều kiện: $\boldsymbol\epsilon_\varnothing + s(\boldsymbol\epsilon_{\mathbf{c}} - \boldsymbol\epsilon_\varnothing)$ |
+| Co giãn kết hợp | Compound scaling | Dịch. EfficientNet: $d = \alpha^\phi$, $w = \beta^\phi$, $r = \gamma^\phi$ |
+| Cutout, mixup, CutMix | Cutout, mixup, CutMix | Giữ (tên kỹ thuật) |
+| Cửa sổ dịch chuyển | Shifted window | Dịch. Swin tính attention trong cửa sổ $M \times M$ và dời lưới cửa sổ $\lfloor M/2 \rfloor$ ở khối kế tiếp |
+| Dịch ảnh sang ảnh | Image-to-image translation | Dịch |
+| Đẳng biến hoán vị | Permutation equivariance | Dịch. Đổi chỗ các token vào thì đầu ra chỉ đổi chỗ theo; tính chất của self-attention không có embedding vị trí |
+| Đẳng biến tịnh tiến | Translation equivariance | Dịch. Dịch đầu vào thì đầu ra dịch theo; có sẵn ở tích chập |
+| Điểm gợi ý | Point prompt | Dịch |
+| Đồng biến | Equivariant, equivariance | Dịch. $f(T(\mathbf{X})) = T(f(\mathbf{X}))$: đầu ra đổi theo đúng phép đó (segmentation, detection) |
+| Động cơ dữ liệu | Data engine | Dịch |
+| ELBO | Evidence lower bound | Giữ, lần đầu ghi "cận dưới". $\mathbb{E}_q[\log p_\theta(\mathbf{x}\mid\mathbf{z})] - D_{\mathrm{KL}}(q_\phi \parallel p(\mathbf{z}))$ |
+| Encoder động lượng | Momentum encoder | Giữ "encoder", dịch "động lượng". Bản sao của encoder, trọng số là EMA của encoder chính |
+| Fusion sâu | Deep fusion | Giữ "fusion". Trộn đặc trưng ảnh và chữ qua cross-attention trong các lớp mã hóa (GLIP) |
+| GAN | Generative adversarial network | Giữ viết tắt |
+| GAN có điều kiện | Conditional GAN (cGAN) | Dịch "có điều kiện" |
+| Ghép đôi | Bipartite matching | Dịch. Mỗi vật thật ghép với đúng một dự đoán |
+| Góc nhìn | View | Dịch, lần đầu kèm "view". Một bản augmentation của ảnh trong học đối chiếu |
+| Gộp nhiều prompt | Prompt ensembling | Dịch, kèm tiếng Anh. Lấy trung bình embedding của nhiều mẫu câu cho cùng một nhãn |
+| Gộp patch | Patch merging | Dịch. Ghép mỗi nhóm $2 \times 2$ patch thành một, giảm số token và tăng số kênh (Swin) |
+| Hallucination đối tượng | Object hallucination | Giữ "hallucination". Nói tới vật không có trong ảnh |
+| Hệ số guidance | Guidance scale | Dịch. Số $s$ trong classifier-free guidance |
+| Hiện tượng ô bàn cờ | Checkerboard artifacts | Dịch. Hoa văn do chồng lấn không đều khi kernel không chia hết cho stride |
+| Học chuyển giao | Transfer learning | Dịch, lần đầu kèm tiếng Anh |
+| Hộp bao | Bounding box | Dịch, lần đầu kèm tiếng Anh. Hình chữ nhật $[x_1, y_1, x_2, y_2]$ quanh vật; không dùng "khung bao" |
+| InfoNCE | InfoNCE | Giữ. Cross-entropy chọn một mẫu đúng giữa nhiều mẫu sai trong lô; CLIP dùng bản đối xứng theo hàng và cột |
+| Instance segmentation | Instance segmentation | Giữ, lần đầu ghi "phân vùng từng đối tượng". Mỗi vật đếm được một mask, kèm lớp và điểm |
+| IoU, mIoU | Intersection over Union, mean IoU | Giữ. $\text{IoU}_k = \text{TP}_k/(\text{TP}_k+\text{FP}_k+\text{FN}_k)$; mIoU là trung bình đều các lớp |
+| ITC, ITM | Image-text contrastive, image-text matching | Giữ viết tắt. Đối chiếu ảnh–chữ; phân loại nhị phân "khớp hay không" |
+| Kernel | Kernel (filter) | Giữ, lần đầu có thể ghi "bộ lọc". Ký hiệu $\mathbf{K}$, cỡ $k \times k$ |
+| Kênh | Channel | Dịch. $C$, $C_{\text{in}}$, $C_{\text{out}}$ |
+| Khoảng cách attention | Attention distance | Dịch. Khoảng cách trung bình trên ảnh mà một đầu attention gom thông tin |
+| Không gian embedding chung | Joint embedding space | Dịch. Không gian mà ảnh và chữ cùng nghĩa nằm gần nhau, như của CLIP |
+| Kim tự tháp đặc trưng | Feature pyramid | Dịch. Các bản đồ đặc trưng nhiều độ phân giải, đều mang nghĩa |
+| Latent diffusion | Latent diffusion | Giữ. Chạy diffusion trên latent của một autoencoder thay vì trên điểm ảnh, như Stable Diffusion |
+| Lịch nhiễu | Noise schedule | Dịch. Dãy $\beta_1, \dots, \beta_T$; DDPM dùng lịch tuyến tính $10^{-4} \to 0.02$ với $T = 1000$. Ở phần CV, $T$ là số bước, khác nhiệt độ $T$ của phần LLM |
+| Linear probe | Linear probe, linear evaluation | Giữ. Đóng băng bộ mã hóa, chỉ học một bộ phân loại tuyến tính trên đặc trưng |
+| Loss không bão hòa | Non-saturating loss | Dịch. $G$ làm lớn $\log D(G(\mathbf{z}))$ |
+| Lỗi top-5 | Top-5 error | Dịch "lỗi", giữ "top-5" |
+| Lớp kết nối đầy đủ | Fully connected layer | Dịch |
+| Mạng toàn tích chập | Fully convolutional network (FCN) | Dịch, viết tắt FCN. Chỉ có tích chập, nhận ảnh cỡ bất kỳ |
+| Masked attention | Masked attention | Giữ. Cross-attention chỉ trong mask của lớp trước, ngoài vùng là $-\infty$ |
+| Mất mát nhất quán chu trình | Cycle consistency loss | Dịch. $\lVert F(G(\mathbf{x})) - \mathbf{x}\rVert_1 + \lVert G(F(\mathbf{y})) - \mathbf{y}\rVert_1$ |
+| Mẫu âm khó | Hard negative | Dịch, lần đầu kèm tiếng Anh. Mẫu sai nhưng điểm tương đồng cao, bị đẩy mạnh nhất |
+| Mẹo tham số hóa lại | Reparameterization trick | Dịch. $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$ để gradient đi qua bước lấy mẫu |
+| Mode collapse | Mode collapse | Giữ, lần đầu ghi "sụp mode" |
+| Monte Carlo | Monte Carlo | Giữ. Ước lượng kỳ vọng bằng trung bình trên nhiều mẫu |
+| Mô hình hóa ảnh bị che | Masked image modeling | Dịch, lần đầu kèm tiếng Anh. Che một phần ảnh rồi đoán lại, như MAE |
+| Mô hình khuếch tán | Diffusion model | Dịch, lần đầu kèm "diffusion model"; hay gọi tắt "diffusion". Thêm nhiễu Gauss qua $T$ bước rồi học đi ngược |
+| Mô hình sinh | Generative model | Dịch. Học phân phối của dữ liệu để lấy mẫu ra mẫu mới |
+| Nhãn giả | Pseudo label | Dịch. Nhãn do mô hình "thầy" tự gán cho dữ liệu chưa có nhãn |
+| Nhánh co, nhánh giãn | Contracting path, expansive path | Dịch. Hai nhánh của UNet (encoder, decoder) |
+| NMS | Non-maximum suppression | Giữ, lần đầu ghi "triệt tiêu điểm không cực đại" |
+| Nối ngang | Lateral connection | Dịch. Trong FPN: tích chập $1\times1$ rồi cộng vào nhánh từ trên xuống |
+| Nội suy song tuyến tính, láng giềng gần nhất | Bilinear, nearest-neighbor interpolation | Dịch |
+| Nối tắt (UNet) | Skip connection | Dịch. Đưa bản đồ của nhánh co sang nhánh giãn cùng tầng; UNet nối kênh, FCN và FPN cộng. Khác "kết nối tắt" (residual) |
+| Output stride | Output stride | Giữ. Tỉ lệ cạnh ảnh vào trên cạnh bản đồ đầu ra |
+| Panoptic segmentation | Panoptic segmentation | Giữ, lần đầu ghi "phân vùng toàn cảnh". Mỗi pixel một cặp (lớp, mã đối tượng) |
+| PatchGAN | PatchGAN | Giữ. Bộ phân biệt chấm từng mảnh $N \times N$ |
+| Phát hiện vật thể | Object detection | Dịch. Tìm vị trí (khung bao) và nhãn của từng vật |
+| Phân loại ảnh | Image classification | Dịch |
+| Phân loại mask | Mask classification | Dịch. Dự đoán tập mask, mỗi mask một nhãn |
+| Phân loại zero-shot | Zero-shot classification | Giữ "zero-shot". Phân loại theo nhãn viết bằng chữ, không cần ảnh có nhãn |
+| Phân phối chuẩn nhiều chiều | Multivariate normal | Dịch. $\mathcal{N}(\boldsymbol\mu, \mathrm{diag}(\boldsymbol\sigma^2))$ |
+| Phân vùng ngữ nghĩa | Semantic segmentation | Thường giữ "semantic segmentation". Gán một lớp cho từng pixel, không tách từng vật |
+| Phân vùng theo gợi ý | Promptable segmentation | Dịch. Bài toán của SAM |
+| Phép biến đổi hình học | Geometric transformation | Dịch. Dời chỗ pixel: lật, cắt, xoay, co giãn; phải áp cả lên mask, hộp bao |
+| Phép biến đổi quang học | Photometric transformation | Dịch. Đổi giá trị pixel: độ sáng, tương phản, màu, nhiễu, làm mờ; mask, hộp giữ nguyên |
+| Pixel accuracy | Pixel accuracy | Giữ. Tỉ lệ pixel đoán đúng; bị lớp lớn chi phối |
+| Pooling | Pooling | Giữ, lần đầu có thể ghi "gộp". Max pooling $2 \times 2$, stride 2 thu nhỏ một nửa mỗi chiều |
+| POPE | Polling-based Object Probing Evaluation | Giữ tên. Đo bịa bằng câu hỏi có/không về vật trong ảnh |
+| PQ | Panoptic quality | Giữ. Ghép đoạn ở IoU > 0.5, $\text{PQ} = \text{SQ} \times \text{RQ}$ |
+| Projection head | Projection head | Giữ. MLP nhỏ sau encoder, loss tính trên đầu ra của nó, bỏ đi sau khi học. Khác projector của LLM đa phương thức |
+| Q-Former | Querying Transformer | Giữ. Cầu nối của BLIP-2: các truy vấn học được rút đặc trưng từ bộ mã hóa ảnh đóng băng |
+| Quá trình thuận | Forward process | Dịch. Chuỗi thêm nhiễu cố định, không có gì để học; dạng đóng $\mathbf{x}_t = \sqrt{\bar\alpha_t}\mathbf{x}_0 + \sqrt{1-\bar\alpha_t}\boldsymbol\epsilon$ |
+| RandAugment, AutoAugment | RandAugment, AutoAugment | Giữ. RandAugment có hai tham số $N$ (số phép), $M$ (độ mạnh) |
+| RoI | Region of interest | Giữ, lần đầu ghi "vùng quan tâm" |
+| RoIAlign, RoIPool | RoIAlign, RoIPool | Giữ. RoIAlign không làm tròn tọa độ, dùng nội suy song tuyến tính |
+| RPN | Region proposal network | Giữ, lần đầu ghi "mạng đề xuất vùng" |
+| SQ, RQ | Segmentation quality, recognition quality | Giữ. SQ là IoU trung bình của các cặp ghép được, RQ là F1 |
+| Stop-gradient | Stop-gradient | Giữ. Coi một nhánh là hằng số khi lan truyền ngược |
+| Stride, padding | Stride, padding | Giữ, lần đầu ghi "bước nhảy", "đệm". Ký hiệu $s$, $p$ |
+| Sụp đổ biểu diễn | Representation collapse | Dịch, lần đầu kèm "collapse". Mọi ảnh cho cùng một vectơ: loss thấp mà biểu diễn vô dụng |
+| Suy giảm (mạng sâu) | Degradation problem | Dịch. Mạng sâu hơn có lỗi huấn luyện cao hơn; khác overfitting |
+| Tái tạo | Reconstruction | Dịch. Số hạng $\mathbb{E}_q[\log p_\theta(\mathbf{x}\mid\mathbf{z})]$ |
+| Tấn công bằng chữ | Typographic attack | Dịch, kèm tiếng Anh. Dán chữ lên ảnh để đổi nhãn mà CLIP đoán |
+| Test-time augmentation | Test-time augmentation (TTA) | Giữ, viết tắt TTA. Lấy trung bình dự đoán trên vài bản biến đổi của ảnh test |
+| Thiên kiến quy nạp | Inductive bias | Dịch, lần đầu kèm tiếng Anh. Giả định có sẵn trong kiến trúc trước khi thấy dữ liệu, ví dụ tính cục bộ và đẳng biến tịnh tiến của CNN |
+| Thing, stuff | Thing, stuff | Giữ. Thing là lớp đếm được, stuff là vùng không đếm được |
+| Tích chập | Convolution | Dịch. Trượt kernel trên ảnh, mỗi vị trí cộng tổng tích thành một số. Thư viện học sâu thực ra làm tương quan chéo (không lật kernel) |
+| Tích chập chuyển vị | Transposed convolution | Dịch; có bài gọi là "deconvolution". Phóng lên bằng kernel học được |
+| Tích chập giãn | Dilated (atrous) convolution | Dịch, lần đầu kèm cả hai tên tiếng Anh. Rate $r$; $k_\text{eff} = k + (k-1)(r-1)$ |
+| Tích chập tách theo chiều sâu | Depthwise separable convolution | Dịch, lần đầu kèm tiếng Anh. Gồm depthwise (mỗi kênh một kernel) và pointwise $1 \times 1$ |
+| Tiên nghiệm | Prior | Dịch. $p(\mathbf{z}) = \mathcal{N}(\mathbf{0}, \mathbf{I})$ |
+| Token chắt lọc | Distillation token | Dịch, lần đầu kèm tiếng Anh. Token thêm vào của DeiT, học theo nhãn do mô hình thầy dự đoán |
+| Token xuống dòng | Newline token (image newline) | Dịch. Token học được đặt sau mỗi hàng đặc trưng ảnh để LLM biết chỗ ngắt hàng |
+| Truy vấn vật thể | Object query | Dịch. Mỗi truy vấn trả về một vật hoặc "không có vật" |
+| Trường tiếp nhận | Receptive field | Dịch. Vùng đầu vào ảnh hưởng tới một ô ra |
+| Tự chắt lọc | Self-distillation | Dịch. Chắt lọc tri thức mà thầy là bản EMA của chính trò, như DINO |
+| Tương quan chéo | Cross-correlation | Dịch |
+| U-Net | U-Net | Giữ. Mạng encoder–decoder đối xứng có nối tắt; dùng cho segmentation và làm mạng khử nhiễu của diffusion |
+| VAE | Variational autoencoder | Giữ viết tắt |
+| Visual instruction tuning | Visual instruction tuning | Giữ, lần đầu ghi "fine-tune theo chỉ dẫn có ảnh". Instruction tuning trên mẫu (ảnh, chỉ dẫn, câu trả lời) |

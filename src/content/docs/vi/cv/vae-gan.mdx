@@ -2,14 +2,14 @@
 title: 'Sinh ảnh (1): VAE, GAN, CycleGAN, Pix2Pix'
 description: 'Làm sao máy vẽ ra ảnh chưa từng có? VAE nén ảnh thành phân phối rồi lấy mẫu, GAN cho hai mạng đấu nhau; Pix2Pix và CycleGAN biến ảnh này thành ảnh kia.'
 quiz:
-  - question: 'Trong VAE, bạn lấy $\mathbf{z}$ thẳng từ $\mathcal{N}(\boldsymbol\mu, \mathrm{diag}(\boldsymbol\sigma^2))$ bằng một hàm lấy mẫu có sẵn, thay vì viết $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$. Code vẫn chạy. Điều gì hỏng?'
+  - question: 'Trong VAE, bạn lấy $\mathbf{z}$ thẳng từ $\mathcal{N}(\boldsymbol\mu, \mathrm{diag}(\boldsymbol\sigma^2))$ bằng `torch.distributions.Normal(mu, sigma).sample()`, thay vì viết $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$. Code vẫn chạy. Điều gì hỏng?'
     options:
       - 'Không có gì hỏng, hai cách cho cùng một phân phối của $\mathbf{z}$ nên cùng một gradient'
       - 'Hàm mất mát tái tạo không còn gradient chảy về bộ mã hóa, nên $\boldsymbol\mu$ và $\boldsymbol\sigma$ chỉ học từ số hạng KL'
       - 'Số hạng KL không còn tính được bằng công thức dạng đóng'
       - 'Bộ giải mã không nhận được $\mathbf{z}$ nữa'
     answer: 1
-    explanation: 'Phân phối của $\mathbf{z}$ đúng là như nhau, nhưng phép lấy mẫu thẳng không phải một hàm khả vi của $\boldsymbol\mu, \boldsymbol\sigma$, nên lan truyền ngược dừng ở đó (PyTorch còn tách $\mathbf{z}$ khỏi đồ thị). Số hạng KL vẫn tính bằng công thức theo $\boldsymbol\mu, \boldsymbol\sigma$ nên vẫn có gradient: bộ mã hóa chỉ còn bị kéo về $\mathcal{N}(\mathbf{0}, \mathbf{I})$ và không học mã hóa ảnh. Viết $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$ đưa phần ngẫu nhiên vào $\boldsymbol\epsilon$, đường từ loss về $\boldsymbol\mu, \boldsymbol\sigma$ là phép cộng và nhân thường.'
+    explanation: 'Phân phối của $\mathbf{z}$ đúng là như nhau, nhưng phép lấy mẫu thẳng không phải một hàm khả vi của $\boldsymbol\mu, \boldsymbol\sigma$, nên lan truyền ngược dừng ở đó (`sample()` chạy trong `torch.no_grad()`, nên $\mathbf{z}$ ra đời đã tách khỏi đồ thị; PyTorch dành `rsample()` cho đúng mẹo tham số hóa lại). Số hạng KL vẫn tính bằng công thức theo $\boldsymbol\mu, \boldsymbol\sigma$ nên vẫn có gradient: bộ mã hóa chỉ còn bị kéo về $\mathcal{N}(\mathbf{0}, \mathbf{I})$ và không học mã hóa ảnh. Viết $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$ đưa phần ngẫu nhiên vào $\boldsymbol\epsilon$, đường từ loss về $\boldsymbol\mu, \boldsymbol\sigma$ là phép cộng và nhân thường.'
   - question: 'Giữ bộ sinh $G$ cố định. Ở một ảnh $\mathbf{x}$, mật độ dữ liệu thật là $p_{\text{data}}(\mathbf{x}) = 0.3$ và mật độ ảnh giả là $p_g(\mathbf{x}) = 0.1$. Bộ phân biệt tối ưu $D^*(\mathbf{x})$ bằng bao nhiêu?'
     options: ['$0.3$', '$0.5$', '$0.75$', '$0.25$']
     answer: 2
@@ -143,12 +143,12 @@ $$
 \mathcal{L}_{\text{ELBO}}
 &= \mathbb{E}_{q}\big[\log p_\theta(\mathbf{x} \mid \mathbf{z})\big]
  + \mathbb{E}_{q}\left[\log \frac{p(\mathbf{z})}{q_\phi(\mathbf{z} \mid \mathbf{x})}\right] \\
-&= \underbrace{\mathbb{E}_{q}\big[\log p_\theta(\mathbf{x} \mid \mathbf{z})\big]}_{\text{tái tạo}}
- - \underbrace{D_{\mathrm{KL}}\big(q_\phi(\mathbf{z} \mid \mathbf{x}) \parallel p(\mathbf{z})\big)}_{\text{kéo về tiên nghiệm}}
+&= \underbrace{\mathbb{E}_{q}\big[\log p_\theta(\mathbf{x} \mid \mathbf{z})\big]}_{\text{(1)}}
+ - \underbrace{D_{\mathrm{KL}}\big(q_\phi(\mathbf{z} \mid \mathbf{x}) \parallel p(\mathbf{z})\big)}_{\text{(2)}}
 \end{aligned}
 $$
 
-Dòng thứ hai đổi dấu vì $\log(p/q) = -\log(q/p)$. Số hạng **tái tạo** lớn khi bộ giải mã dựng lại được $\mathbf{x}$ từ $\mathbf{z}$ rút trong đám mây của $\mathbf{x}$. Số hạng **KL** nhỏ khi đám mây gần $\mathcal{N}(\mathbf{0}, \mathbf{I})$. Đây là hai lực đã nói ở trên. Khi huấn luyện, ta làm nhỏ $-\mathcal{L}_{\text{ELBO}}$, lấy trung bình trên các ảnh của một lô.
+Dòng thứ hai đổi dấu vì $\log(p/q) = -\log(q/p)$. Số hạng (1) là số hạng **tái tạo** (reconstruction): nó lớn khi bộ giải mã dựng lại được $\mathbf{x}$ từ $\mathbf{z}$ rút trong đám mây của $\mathbf{x}$. Số hạng (2) là **KL** kéo $q_\phi$ về tiên nghiệm: nó nhỏ khi đám mây gần $\mathcal{N}(\mathbf{0}, \mathbf{I})$. Đây là hai lực đã nói ở trên. Khi huấn luyện, ta làm nhỏ $-\mathcal{L}_{\text{ELBO}}$, lấy trung bình trên các ảnh của một lô.
 
 ### KL dạng đóng với Gauss chéo
 
@@ -331,7 +331,7 @@ File dưới đây dựng một VAE bằng MLP: bộ mã hóa $64 \to 128 \to (\
   code={vaeCode}
   title="VAE tí hon trên load_digits"
   packages={['torch', 'scikit-learn']}
-  hardware="CPU là đủ, không cần GPU, không tải gì từ mạng. Mô hình rất nhỏ; trên máy phát triển đang chạy nhiều việc khác cùng lúc, lần chạy mẫu mất gần 6 phút"
+  hardware="CPU là đủ, không cần GPU, không tải gì từ mạng. Khoảng 6 giây trên máy phát triển khi rảnh, phần lớn là nạp PyTorch; có thể vài phút khi máy đang bận"
   sampleVaries={false}
 >
 
@@ -364,23 +364,34 @@ Hãy thử đổi `J = 2` thành `J = 8`: tái tạo sẽ tốt hơn, KL lớn h
 
 ### GAN tí hon trên chữ số $8 \times 8$
 
-File thứ hai huấn luyện một GAN bằng MLP trên cùng bộ ảnh, đưa về $[-1, 1]$ cho khớp lớp Tanh ở đầu ra của $G$. $G$: $16 \to 128 \to 64$, $D$: $64 \to 128 \to 1$ (ra logit, LeakyReLU 0.2). Mỗi bước cập nhật $D$ một lần rồi $G$ một lần, với loss không bão hòa (nhãn 1 cho ảnh giả ở bước $G$). Adam với $0.0002$ và $\beta_1 = 0.5$, như DCGAN. File in loss hai bên và trung bình $D(\text{thật})$, $D(\text{giả})$ trên lô cuối của vài epoch. Cuối cùng, nó sinh 1 000 ảnh và nhờ một bộ hồi quy logistic (học trên ảnh thật) đoán xem mỗi ảnh là chữ số nào, để xem $G$ có sinh đủ mười chữ số không.
+File thứ hai huấn luyện một GAN bằng MLP trên cùng bộ ảnh, đưa về $[-1, 1]$ cho khớp lớp Tanh ở đầu ra của $G$. $G$: $16 \to 128 \to 64$, $D$: $64 \to 128 \to 1$ (ra logit, LeakyReLU 0.2). Mỗi bước cập nhật $D$ một lần rồi $G$ một lần, với loss không bão hòa (nhãn 1 cho ảnh giả ở bước $G$). Adam với $0.0002$ và $\beta_1 = 0.5$, như DCGAN. Ở vài epoch, file in loss hai bên của lô cuối, cùng trung bình đầu ra của $D$ trên ảnh thật (`D(real)`) và trên ảnh giả (`D(fake)`) của lô đó. Cuối cùng, nó sinh 1 000 ảnh và nhờ một bộ hồi quy logistic (học trên ảnh thật) đoán xem mỗi ảnh là chữ số nào, để xem $G$ có sinh đủ mười chữ số không.
 
 <LocalCode
   code={ganCode}
   title="GAN tí hon trên load_digits"
   packages={['torch', 'scikit-learn', 'numpy']}
-  hardware="CPU là đủ, không cần GPU, không tải gì từ mạng"
+  hardware="CPU là đủ, không cần GPU, không tải gì từ mạng. Khoảng 10 giây trên máy phát triển khi rảnh; có thể vài phút khi máy đang bận"
   sampleVaries={false}
 >
 
 ```text
-GAN_OUTPUT
+epoch   1  loss D 1.229  loss G 0.571  D(real) 0.68  D(fake) 0.57
+epoch  10  loss D 1.263  loss G 0.642  D(real) 0.60  D(fake) 0.53
+epoch  25  loss D 1.139  loss G 0.791  D(real) 0.61  D(fake) 0.46
+epoch  50  loss D 1.295  loss G 0.780  D(real) 0.52  D(fake) 0.46
+epoch 100  loss D 1.268  loss G 0.785  D(real) 0.53  D(fake) 0.46
+digits among 1000 fakes: [ 77  90 148 115 128 112  81  64 104  81]
 ```
 
 </LocalCode>
 
-GAN_READING
+Đọc kết quả:
+
+- **`D(real)` và `D(fake)` cùng dồn về gần 0.5** (0.53 và 0.46 ở epoch 100): bộ phân biệt không còn tách được ảnh thật với ảnh giả một cách rõ ràng, đúng hướng của điểm cân bằng $D^* = 1/2$. Hai số không bằng hẳn 0.5 và còn lên xuống giữa các epoch: hai mạng nhỏ và trò chơi không hội tụ gọn như phân tích lý thuyết.
+- **Loss không giảm dần như khi huấn luyện bộ phân loại.** Loss $D$ đi lên xuống quanh 1.1 tới 1.3, gần mức $2\ln 2 \approx 1.386$ của một bộ phân biệt đoán 0.5 cho mọi ảnh. Loss $G$ **tăng** từ 0.571 lên khoảng 0.78, tức $-\ln 0.46$: lúc đầu $D$ còn ngây thơ nên dễ lừa, về sau $D$ giỏi hơn nên lừa khó hơn. Loss $G$ tăng ở đây không có nghĩa $G$ tệ đi.
+- **Mười chữ số đều có mặt**, mỗi chữ số từ 64 đến 148 trong 1 000 ảnh giả (lý tưởng là khoảng 100 mỗi chữ số). Lần chạy này không bị sụp mode. Phép đếm chỉ kiểm độ **đa dạng**: bộ phân loại luôn gán một chữ số nào đó, kể cả cho ảnh xấu, nên nó không nói ảnh có đẹp hay không.
+
+Hãy thử bỏ `.detach()` ở bước $D$, hoặc đổi nhãn `ones` ở bước $G$ thành loss bão hòa (làm nhỏ $-$BCE với nhãn `zeros`), rồi xem hai số `D(fake)` và bảng đếm thay đổi thế nào.
 
 ## Lỗi hay gặp
 

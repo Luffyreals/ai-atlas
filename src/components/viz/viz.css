@@ -499,8 +499,69 @@
   display: grid;
 }
 
-.atlas-viz-status-stack > p {
+.atlas-viz-status-stack > * {
   grid-area: 1 / 1;
+}
+
+/* Pictures side by side (an image, a feature map), --atlas-viz-cols of them: a title over a square of pixels,
+   the squares lined up at the bottom when one title wraps. */
+.atlas-viz-panels {
+  display: grid;
+  grid-template-columns: repeat(var(--atlas-viz-cols, 2), minmax(0, 1fr));
+  gap: 16px 12px;
+}
+
+.atlas-viz-panels > div {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* viewBox in cells, one rect per pixel; the value is its fill-opacity over the plot background. */
+.atlas-viz-pixels {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: auto;
+  aspect-ratio: 1;
+  background: var(--atlas-viz-plot-bg);
+  overflow: visible;
+}
+
+.atlas-viz-px {
+  fill: var(--atlas-viz-ink);
+  shape-rendering: crispEdges;
+}
+
+/* A map with both signs: the classic orange and blue pair, told apart with colour blindness too. */
+.atlas-viz-px[data-sign='+'] {
+  fill: var(--atlas-viz-primary);
+}
+
+.atlas-viz-px[data-sign='-'] {
+  fill: var(--atlas-viz-alt);
+}
+
+/* A 3 × 3 matrix between two bracket rules, and a worked sum beside it. */
+.atlas-viz-matrix {
+  display: inline-grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 2px 12px;
+  padding: 2px 8px;
+  border-inline: 2px solid var(--atlas-viz-muted);
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.atlas-viz-sum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  gap: 8px 32px;
+}
+
+.atlas-viz-sum p {
+  margin: 0;
 }
 
 .atlas-viz-near {

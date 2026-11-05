@@ -1,0 +1,353 @@
+---
+title: 'Ảnh + văn bản (2): LLaVA và các biến thể'
+description: Có CLIP, có LLM, có projector, vẫn thiếu dữ liệu hội thoại về ảnh. LLaVA nhờ GPT-4 chỉ đọc chữ sinh dữ liệu, LLaVA-1.5 sửa định dạng, AnyRes đổi độ phân giải lấy token, POPE đo bịa.
+quiz:
+  - question: 'Một người đưa ảnh vào LLaVA-NeXT (mảnh $336 \times 336$, patch 14) và cho phép lưới $3 \times 3$ mảnh, cộng một ảnh thu nhỏ. Bỏ qua token xuống dòng, số token ảnh là bao nhiêu, và ảnh có vừa cửa sổ 4 096 token của Vicuna-1.5 không?'
+    options:
+      - '576, vừa thoải mái, vì bộ mã hóa luôn nhận ảnh $336 \times 336$'
+      - '5 184, không vừa'
+      - '5 760, không vừa: riêng token ảnh đã vượt cửa sổ'
+      - '1 728, vừa, vì chỉ tính ba mảnh mỗi hàng'
+    answer: 2
+    explanation: 'Mỗi mảnh cho $(336/14)^2 = 576$ token. Lưới $3 \times 3$ có 9 mảnh, cộng ảnh thu nhỏ là $9 + 1 = 10$ lượt qua bộ mã hóa, nên $10 \cdot 576 = 5\,760$ token, lớn hơn 4 096. Phương án 5 184 quên ảnh thu nhỏ. Phương án 576 nhầm: bộ mã hóa nhận $336 \times 336$ cho mỗi mảnh, nhưng AnyRes cho nhiều mảnh đi qua nó.'
+  - question: 'GPT-4 dùng để sinh dữ liệu LLaVA-Instruct-158K chỉ nhận chữ. Vậy làm sao nó viết được câu hỏi và câu trả lời về một tấm ảnh?'
+    options:
+      - 'Tác giả tả lại từng ảnh bằng tay cho GPT-4'
+      - 'GPT-4 đọc chú thích và khung tọa độ đối tượng của ảnh (có sẵn trong COCO), rồi viết hội thoại như thể đang nhìn ảnh'
+      - 'Ảnh được đổi thành token ảnh rồi đưa vào GPT-4'
+      - 'GPT-4 đoán nội dung ảnh từ tên file'
+    answer: 1
+    explanation: 'Chú thích kể cảnh, khung tọa độ cho biết vật gì nằm ở đâu: đủ để một mô hình chỉ đọc chữ "tưởng tượng" ra ảnh. Người chỉ viết vài ví dụ mẫu cho mỗi loại câu trả lời. Hệ quả: chi tiết nào chú thích và khung không có thì GPT-4 không biết, và lỗi của chú thích đi thẳng vào dữ liệu.'
+  - question: 'LLaVA-1.5 trộn thêm dữ liệu VQA học thuật, nơi đáp án chỉ là một từ. Vì sao tác giả thêm câu "Answer the question using a single word or phrase." vào sau các câu hỏi đó?'
+    options:
+      - 'Để mô hình biết khi nào được yêu cầu trả lời ngắn; thiếu câu này, mô hình dễ trả lời cụt cả khi người dùng muốn câu dài'
+      - 'Để giảm số token ảnh'
+      - 'Vì Vicuna không sinh được câu dài'
+      - 'Để GPT-4 chấm điểm dễ hơn'
+    answer: 0
+    explanation: 'Cùng một kiểu câu hỏi, dữ liệu VQA đòi một từ, dữ liệu LLaVA đòi một đoạn. Câu định dạng là tín hiệu tách hai trường hợp. Bài báo LLaVA-1.5 nêu InstructBLIP làm ví dụ ngược: học nhiều đáp án ngắn và trả lời ngắn cả khi người dùng muốn chi tiết. Câu này không đụng tới ảnh nên không đổi số token ảnh.'
+  - question: 'Trên một bộ POPE cân bằng (một nửa câu hỏi có đáp án "Yes", một nửa "No"), một mô hình luôn trả lời "Yes". Điều nào đúng?'
+    options:
+      - 'Recall bằng 1 nên mô hình rất tốt'
+      - 'Accuracy 0.5, precision 0.5, recall 1, tỉ lệ "Yes" bằng 1: các con số cho thấy mô hình bịa ra mọi đối tượng được hỏi'
+      - 'Precision bằng 1 vì mọi câu "Yes" đều được chấm'
+      - 'Không đo được, vì POPE cần câu trả lời dài'
+    answer: 1
+    explanation: 'Coi "Yes" là lớp dương. Mọi câu có đáp án Yes đều đúng nên recall bằng 1; mọi câu có đáp án No đều sai nên chỉ một nửa số câu "Yes" là đúng: precision 0.5, accuracy 0.5. Vì thế POPE báo cả tỉ lệ "Yes": nó lộ ra thói quen gật đầu. Recall cao một mình không nói gì.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import MultimodalFigure from '@components/figures/MultimodalFigure.astro';
+import tokenBudgetCode from '@code/cv/llava/token-budget.vi.py?raw';
+import askCode from '@code/cv/llava/ask.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu cách LLaVA tạo dữ liệu **visual instruction tuning** (fine-tune theo chỉ dẫn có ảnh): GPT-4 chỉ đọc chữ, nhận chú thích và khung tọa độ, viết ra ba loại câu trả lời.
+- Giải thích được ba thay đổi của LLaVA-1.5, nhất là vì sao một câu nhắc định dạng câu trả lời lại quan trọng.
+- Tự tính được số token ảnh của **AnyRes** (LLaVA-NeXT, LLaVA-OneVision) và biết một ảnh chiếm bao nhiêu phần cửa sổ ngữ cảnh.
+- Đọc được kết quả đánh giá: benchmark nào đo gì, **hallucination đối tượng** (object hallucination) là gì và POPE đo nó ra sao.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài [Ảnh + văn bản (1): CLIP, BLIP, GLIP](/vi/cv/clip-blip-glip/) cho bạn bộ mã hóa ảnh đã học ghép ảnh với chữ, và Q-Former của BLIP-2. Kiến trúc LLaVA cơ bản (bộ mã hóa ảnh → projector → LLM, hai giai đoạn huấn luyện, 576 token mỗi ảnh $336 \times 336$) đã có ở bài [Multimodal](/vi/llm/multimodal/); bài này không nhắc lại mà đi tiếp từ đó.
+:::
+
+## Trực giác
+
+Giả sử bạn đã lắp xong mô hình theo bài Multimodal: bộ mã hóa ảnh của CLIP, một projector, một LLM như Vicuna. Mọi bộ phận đều có sẵn. Bạn hỏi nó: "Trong ảnh có bao nhiêu quả táo?" Nó trả lời lan man, hoặc chỉ lặp lại một câu chú thích.
+
+Vì sao? Vì phần nối mới chỉ học **ghép** ảnh với chú thích ngắn kiểu "một con mèo trên bàn". Nó chưa từng thấy ai hỏi về ảnh rồi trả lời theo yêu cầu. Muốn vậy, bạn cần hàng trăm nghìn mẫu dạng (ảnh, chỉ dẫn, câu trả lời). Đầu năm 2023, gần như chưa có bộ dữ liệu nào như thế, và thuê người viết thì rất tốn.
+
+Giải được chuyện dữ liệu rồi, bạn sẽ gặp tiếp ba chuyện:
+
+- **Dài hay ngắn?** Có câu hỏi cần một từ ("Màu gì?"), có câu cần cả đoạn ("Tả kỹ bức ảnh"). Trộn hai loại dữ liệu không khéo, mô hình trả lời cụt mọi lúc.
+- **Chi tiết nhỏ.** Bộ mã hóa chỉ nhận ảnh $336 \times 336$. Một tờ hóa đơn dài bị co lại cỡ đó thì chữ nhòe hết.
+- **Đo thế nào?** Mô hình nói trôi chảy chưa chắc đã đúng. Nó có thể tả một cái ghế không hề có trong ảnh.
+
+Bài toán của bài này là: **lấy dữ liệu hội thoại về ảnh ở đâu, dạy mô hình trả lời đúng độ dài, cho nó nhìn ảnh độ phân giải cao mà không làm nổ cửa sổ ngữ cảnh, và đo xem nó có bịa không?**
+
+## Lý thuyết
+
+### Dữ liệu: để GPT-4 "nhìn" ảnh qua chữ
+
+Ý của LLaVA (Liu và cộng sự, 2023): GPT-4 khi đó chỉ nhận chữ, nhưng ảnh trong bộ COCO đã có sẵn hai loại mô tả bằng chữ.
+
+- **Chú thích** (caption): vài câu tả cảnh từ nhiều góc.
+- **Hộp bao** (bounding box): mỗi đối tượng có tên lớp và tọa độ, cho biết vật gì nằm ở đâu.
+
+Đưa hai thứ này cho GPT-4, nó "thấy" ảnh đủ để viết ra câu hỏi và câu trả lời. Ảnh thật không bao giờ được gửi đi. Tác giả viết tay vài ví dụ mẫu cho mỗi loại câu trả lời, dùng làm ví dụ trong prompt (few-shot). Theo bài báo, đó là phần chú thích duy nhất do người làm trong cả quá trình.
+
+GPT-4 sinh ra ba loại, tổng cộng 158K mẫu (LLaVA-Instruct-158K):
+
+| Loại | Số mẫu | Dạng |
+|---|---:|---|
+| Hội thoại (conversation) | 58K | Nhiều lượt hỏi đáp: vật gì, ở đâu, đang làm gì, đếm số lượng |
+| Mô tả chi tiết (detailed description) | 23K | Một đoạn văn tả kỹ cả ảnh |
+| Suy luận phức tạp (complex reasoning) | 77K | Câu hỏi cần suy luận nhiều bước dựa trên cảnh, ví dụ "vì sao", "điều gì có thể xảy ra" |
+
+Cách làm này rẻ và nhanh, nhưng có cái giá. GPT-4 chỉ biết những gì chú thích và hộp bao nói. Chú thích sai hay thiếu thì dữ liệu sai hay thiếu theo. Câu trả lời của GPT-4 cũng dài và tự tin, nên mô hình học theo giọng đó, kể cả khi nó không chắc. Bạn sẽ gặp lại điểm này ở phần đánh giá.
+
+### Hàm mất mát: chỉ tính trên câu trả lời
+
+Mỗi mẫu gồm ảnh $\mathbf{X}_v$, chỉ dẫn $\mathbf{X}_{\text{instruct}}$ (câu hỏi, cộng các lượt hội thoại trước đó nếu có) và câu trả lời $\mathbf{X}_a$ dài $L_a$ token. LLaVA huấn luyện LLM sinh câu trả lời từng token một, như mọi LLM:
+
+$$
+p(\mathbf{X}_a \mid \mathbf{X}_v, \mathbf{X}_{\text{instruct}})
+= \prod_{i=1}^{L_a} p_{\boldsymbol\theta}\big(x_i \mid \mathbf{X}_v, \mathbf{X}_{\text{instruct}}, \mathbf{X}_{a,<i}\big)
+$$
+
+Đọc từ trái sang phải: xác suất của cả câu trả lời bằng tích xác suất của từng token $x_i$. Mỗi token được đoán khi đã biết ảnh, chỉ dẫn và các token trả lời đứng trước nó ($\mathbf{X}_{a,<i}$). $\boldsymbol\theta$ là các tham số đang được học (projector, và LLM ở giai đoạn 2).
+
+Lấy logarit để tích thành tổng, rồi đổi dấu để có đại lượng cần làm nhỏ nhất:
+
+$$
+\mathcal{L} = -\sum_{i=1}^{L_a} \log p_{\boldsymbol\theta}\big(x_i \mid \mathbf{X}_v, \mathbf{X}_{\text{instruct}}, \mathbf{X}_{a,<i}\big)
+$$
+
+Đây chính là cross-entropy của bài toán đoán token kế tiếp, chỉ khác ở chỗ tổng chạy **trên các token của câu trả lời**. Token ảnh và token câu hỏi vẫn nằm trong chuỗi để làm ngữ cảnh, nhưng không bị chấm điểm. Lý do: ta muốn mô hình học trả lời, không học chép lại câu hỏi.
+
+### LLaVA-1.5: ba thay đổi nhỏ
+
+LLaVA-1.5 (Liu và cộng sự, 2023, bài báo "Improved Baselines") giữ nguyên khung, đổi ba chỗ:
+
+1. **Projector MLP hai lớp** thay cho một lớp tuyến tính (công thức ở bài Multimodal).
+2. **Bộ mã hóa CLIP ViT-L/14 ở $336 \times 336$**, độ phân giải cao nhất của CLIP khi đó, nên mỗi ảnh có $(336/14)^2 = 24^2 = 576$ token.
+3. **Thêm dữ liệu học thuật.** Bộ dữ liệu giai đoạn 2 lên 665K mẫu: 158K của LLaVA, cộng các bộ hỏi đáp về ảnh (VQAv2, GQA, OKVQA, A-OKVQA), đọc chữ trong ảnh (OCRVQA, TextCaps), chỉ vùng ảnh (RefCOCO, Visual Genome) và 40K hội thoại chỉ có chữ (ShareGPT). Giai đoạn 1 dùng 558K cặp ảnh và chú thích. Với bản 13B, tác giả báo cáo cả quá trình mất khoảng một ngày trên một máy 8 GPU A100.
+
+Chỗ tinh tế nằm ở ý 3. Đáp án của VQAv2 thường chỉ là một từ ("yes", "2", "red"). Đáp án của LLaVA-Instruct là cả đoạn. Nếu trộn thẳng, mô hình không biết lúc nào nên ngắn, lúc nào nên dài. Bài báo lấy InstructBLIP làm ví dụ: học nhiều đáp án ngắn, nó trả lời ngắn cả khi người dùng muốn chi tiết.
+
+Cách sửa của LLaVA-1.5 rất đơn giản: thêm vào sau mỗi câu hỏi kiểu VQA một **câu nhắc định dạng câu trả lời** (response formatting prompt):
+
+```text
+Answer the question using a single word or phrase.
+```
+
+Giờ mô hình có tín hiệu rõ ràng: có câu này thì trả lời một từ, không có thì trả lời bình thường. Một dòng chữ, nhưng nó cho phép dùng chung dữ liệu học thuật (đáp án đáng tin, dễ chấm) với dữ liệu hội thoại (tự nhiên, dài) mà không làm hỏng nhau.
+
+### Độ phân giải cao: AnyRes
+
+CLIP chỉ nhận ảnh vuông $336 \times 336$. Ảnh to hơn thì phải co lại, và chữ nhỏ, vật nhỏ mất đi. Bản LLaVA-1.5-HD trong bài báo LLaVA-1.5 thử một cách khác: **cắt ảnh thành lưới mảnh**, cho từng mảnh qua bộ mã hóa, rồi thêm **một bản thu nhỏ của cả ảnh** để mô hình vẫn thấy toàn cảnh. LLaVA-NeXT (còn gọi LLaVA-1.6, công bố trên blog ngày 30/1/2024) đưa cách này thành bản phát hành, gọi là **AnyRes** (độ phân giải bất kỳ).
+
+**Bước 1: chọn lưới.** Mô hình có sẵn một danh sách lưới cho phép, mỗi lưới là $a$ hàng $\times$ $b$ cột mảnh. Blog LLaVA-NeXT liệt kê $2 \times 2$, $1 \times \{2, 3, 4\}$ và $\{2, 3, 4\} \times 1$, tức ảnh tới $672 \times 672$, $336 \times 1344$, $1344 \times 336$. Cấu hình của các checkpoint LLaVA-NeXT phát hành trên Hugging Face liệt kê ít lưới hơn, tới $1008 \times 336$, nên ô code dưới đây chỉ dùng các lưới trong danh sách đó. Ảnh được co giãn giữ tỉ lệ vào lưới hợp nhất với kích thước và tỉ lệ của nó, phần thừa được đệm.
+
+**Bước 2: đếm token.** Gọi $S$ là cạnh một mảnh, $P$ là cỡ patch. Một mảnh cho $T$ token:
+
+$$
+T = \left(\frac{S}{P}\right)^2
+$$
+
+Lưới có $ab$ mảnh, mỗi mảnh $T$ token. Cộng thêm ảnh thu nhỏ, cũng là một mảnh cỡ $S \times S$ nên cũng $T$ token:
+
+$$
+N_{\text{AnyRes}} = ab \cdot T + T = (ab + 1)\,T
+$$
+
+Với $S = 336$, $P = 14$ thì $T = 576$. Lưới $2 \times 2$ cho $(4 + 1) \cdot 576 = 2\,880$ token: gấp 5 lần một ảnh LLaVA-1.5.
+
+**Bước 3: chi tiết cài đặt.** Bản cài đặt trong `transformers` còn thêm một **token xuống dòng** sau mỗi hàng đặc trưng của phần lưới, để LLM biết chỗ ngắt hàng khi lưới bị trải thành một dãy. Lưới $a$ hàng mảnh có $a\sqrt{T}$ hàng đặc trưng, nên số token thành
+
+$$
+N = (ab + 1)\,T + a\sqrt{T}
+$$
+
+Với lưới $2 \times 2$: $2\,880 + 2 \cdot 24 = 2\,928$. Bản cài đặt cũng bỏ các hàng, cột đặc trưng chỉ chứa phần đệm, nên với ảnh lệch tỉ lệ, con số thật nhỏ hơn công thức một chút. Ô code bên dưới tính công thức này, ô chạy trên máy đếm số token mà processor thật tạo ra.
+
+**Cái giá.** Vicuna-1.5, LLM của LLaVA-1.5 và một số bản LLaVA-NeXT, có cửa sổ 4 096 token (trường `max_position_embeddings` trong cấu hình của checkpoint). Một ảnh $2 \times 2$ đã chiếm 2 928 token, tức hơn 70% cửa sổ. Thêm nữa, chi phí attention tăng theo bình phương độ dài chuỗi.
+
+### LLaVA-OneVision: chia ngân sách token
+
+LLaVA-OneVision (Li và cộng sự, 2024) dùng cùng mẫu bộ mã hóa → MLP hai lớp → LLM, nhưng đổi linh kiện: bộ mã hóa SigLIP ở $384 \times 384$ và LLM họ Qwen-2 (0.5B, 7B, 72B). Patch vẫn là 14, nên mỗi mảnh có $\lfloor 384/14 \rfloor^2 = 27^2 = 729$ token (phần lẻ 6 điểm ảnh ở mép bị bỏ).
+
+Điểm mới là một **ngân sách token** chung cho ba tình huống: một ảnh, nhiều ảnh và video.
+
+- **Một ảnh:** AnyRes với lưới lớn. Nếu tổng $L = (ab + 1)\,T$ vượt ngưỡng $\tau$, mỗi mảnh bị nội suy song tuyến (bilinear interpolation) xuống còn $T_{\text{mới}} = \tau / (ab + 1)$ token, để tổng không quá $\tau$. Ở giai đoạn huấn luyện cuối, tối đa khoảng $729 \times 10$ token.
+- **Nhiều ảnh:** mỗi ảnh chỉ dùng độ phân giải gốc, 729 token.
+- **Video:** mỗi khung hình ở độ phân giải gốc rồi bị nén bớt token, để nhét được nhiều khung hơn.
+
+Tác giả chọn các mức sao cho số token tối đa của ba tình huống gần bằng nhau. Ý chung: **cửa sổ ngữ cảnh là cố định, nên càng nhiều ảnh thì mỗi ảnh càng ít token.** Trước đó, LLaVA-NeXT-Interleave (Li và cộng sự, 2024) đã huấn luyện cùng một mô hình cho dữ liệu xen kẽ nhiều ảnh, video và đa góc nhìn 3D.
+
+### Các biến thể khác: chỗ nối và dữ liệu
+
+Các mô hình cùng thời với LLaVA khác nhau chủ yếu ở hai chỗ: **nối ảnh vào LLM bằng gì** và **học từ dữ liệu nào**.
+
+- **MiniGPT-4** (Zhu và cộng sự, 2023): lấy nguyên bộ mã hóa ViT-G/14 (từ EVA-CLIP) và Q-Former của BLIP-2, thêm **một lớp chiếu tuyến tính** sang Vicuna. Chỉ lớp chiếu được học, mọi phần khác đóng băng. Giai đoạn hai fine-tune trên khoảng 3 500 mô tả ảnh chi tiết đã được lọc lại, vì sau giai đoạn một mô hình hay lặp từ và viết câu cụt.
+- **InstructBLIP** (Dai và cộng sự, 2023): cũng dựng trên BLIP-2, nhưng đưa **chỉ dẫn vào cả Q-Former**, để phần trích đặc trưng ảnh biết câu hỏi là gì. Chỉ Q-Former được học, bộ mã hóa ảnh và LLM đóng băng. Dữ liệu là 26 bộ công khai đổi sang dạng chỉ dẫn, 13 bộ để học và 13 bộ giữ lại để thử zero-shot.
+- **Qwen-VL** (Bai và cộng sự, 2023): bộ mã hóa ViT-bigG của OpenCLIP, nối bằng **một lớp cross-attention** với 256 vectơ truy vấn học được, nên mọi ảnh luôn thành đúng 256 token. Giai đoạn hai tăng ảnh lên $448 \times 448$. Mô hình được dạy thêm việc chỉ ra vị trí (grounding) và đọc chữ trong ảnh.
+- **ShareGPT4V** (Chen và cộng sự, 2023): đóng góp chính là **dữ liệu**. 100K chú thích rất chi tiết do GPT-4V (bản GPT-4 nhìn được ảnh) viết, rồi một mô hình viết chú thích học từ đó sinh thêm thành 1.2 triệu. Theo bài báo, thay chú thích này vào dữ liệu fine-tune giúp LLaVA-7B, LLaVA-1.5-13B và Qwen-VL-Chat-7B có điểm cao hơn trên MME và MMBench.
+- **ViP-LLaVA** (Cai và cộng sự, 2023): người dùng **vẽ thẳng lên ảnh** (khung, mũi tên) để chỉ vùng mình hỏi, không cần tọa độ hay cách mã hóa vùng riêng.
+
+Có hai trường phái nối. Q-Former và adapter của Qwen-VL **nén** ảnh thành một số token cố định (32 hay 256), nên rẻ và dễ đoán chi phí. LLaVA **giữ mọi patch** (576, rồi hàng nghìn với AnyRes), tốn hơn nhưng không bỏ chi tiết nào trước khi LLM kịp nhìn.
+
+### Đánh giá: benchmark và hallucination
+
+Không có một con số duy nhất cho "mô hình hiểu ảnh tốt". Mỗi benchmark đo một khía cạnh:
+
+| Benchmark | Đo gì |
+|---|---|
+| VQAv2 (Goyal và cộng sự, 2017) | Hỏi đáp ngắn về ảnh; mỗi câu hỏi đi với hai ảnh gần giống nhau nhưng đáp án khác, để mô hình không đoán được chỉ từ câu hỏi |
+| GQA (Hudson và Manning, 2019) | Suy luận tổ hợp về quan hệ giữa các vật trong cảnh |
+| TextVQA (Singh và cộng sự, 2019) | Câu hỏi phải đọc chữ trong ảnh mới trả lời được: 45 336 câu trên 28 408 ảnh |
+| MME (Fu và cộng sự, 2023) | 14 tác vụ con về nhận biết và suy luận, câu hỏi viết tay để tránh rò rỉ từ bộ dữ liệu công khai |
+| MMBench (Liu và cộng sự, 2023) | Trắc nghiệm tiếng Anh và tiếng Trung, chấm khách quan theo cách CircularEval |
+| MMMU (Yue và cộng sự, 2023) | 11.5K câu hỏi cỡ đại học, 30 môn học |
+| LLaVA-Bench (Liu và cộng sự, 2023) | Câu hỏi mở; GPT-4 chấm, điểm tính tương đối so với câu trả lời của chính GPT-4 chỉ đọc chữ |
+
+Dòng cuối cần đọc kỹ. Con số 85.1 của LLaVA trên LLaVA-Bench (COCO) là **điểm tương đối so với GPT-4**, do GPT-4 chấm, trên 90 câu hỏi. Nó không phải độ chính xác.
+
+**Hallucination đối tượng** là khi mô hình nói tới một vật không có trong ảnh. Bài báo POPE (Li và cộng sự, 2023) cho thấy nhiều mô hình kiểu này mắc lỗi nặng, nhất là với các vật **hay xuất hiện** trong dữ liệu chỉ dẫn, hoặc **hay đi cùng** với vật có trong ảnh. Nhóm tác giả cũng nghiêng về giả thuyết rằng dữ liệu chỉ dẫn do LLM sinh ra, dài và chi tiết, góp phần gây ra lỗi này.
+
+**POPE** (Polling-based Object Probing Evaluation) đổi việc đo bịa thành bài toán phân loại có/không:
+
+1. Lấy các vật có thật trong ảnh, từ nhãn có sẵn hoặc từ một công cụ phân đoạn như SEEM.
+2. Chọn các vật **không** có trong ảnh theo ba cách: ngẫu nhiên (random); vật phổ biến nhất trong bộ dữ liệu (popular); vật hay đi cùng các vật có thật (adversarial). Ví dụ ảnh có bàn ăn thì hỏi về cái nĩa.
+3. Hỏi mỗi vật bằng mẫu `Is there a/an <object> in the image?`, số câu có đáp án Yes và No bằng nhau (tỉ lệ 1:1).
+
+Vì đáp án chỉ là Yes hay No, việc chấm không phụ thuộc cách mô hình hành văn. Coi "Yes" là lớp dương. Trên $n_{\text{yes}}$ câu có đáp án Yes và $n_{\text{no}}$ câu có đáp án No, gọi $TP$ là số câu Yes được trả lời Yes, $FP$ là số câu No bị trả lời Yes. Khi đó
+
+$$
+\text{precision} = \frac{TP}{TP + FP}, \qquad
+\text{recall} = \frac{TP}{n_{\text{yes}}}, \qquad
+\text{tỉ lệ Yes} = \frac{TP + FP}{n_{\text{yes}} + n_{\text{no}}}
+$$
+
+$FP$ chính là số lần bịa. Một mô hình gật đầu với mọi câu có recall bằng 1 nhưng precision chỉ 0.5 (vì $n_{\text{yes}} = n_{\text{no}}$), và tỉ lệ Yes bằng 1. Bài báo POPE ghi nhận vài mô hình trả lời Yes gần 99% số câu, và điểm của các mô hình giảm dần từ random sang popular rồi adversarial. Kết quả POPE của LLaVA-1.5 trong bài báo của nó cũng giảm theo đúng thứ tự đó.
+
+:::note[Ghi nhớ]
+LLaVA = kiến trúc đơn giản + dữ liệu do GPT-4 chỉ đọc chữ sinh ra. LLaVA-1.5 thêm dữ liệu học thuật kèm câu nhắc định dạng. AnyRes đổi độ phân giải lấy token: $N = (ab + 1)\,T$, cộng token xuống dòng. POPE đo bịa bằng câu hỏi có/không, và luôn xem cả tỉ lệ Yes.
+:::
+
+### Giới hạn
+
+- **Bài chỉ nói về ảnh vào, chữ ra.** Sinh ảnh thuộc các bài [Sinh ảnh (1): VAE, GAN, CycleGAN, Pix2Pix](/vi/cv/vae-gan/) và [Sinh ảnh (2): Diffusion, Stable Diffusion, LoRA](/vi/cv/diffusion-models/).
+- **Điểm benchmark thay đổi theo cách chấm.** Bài không xếp hạng mô hình; số nào trích ra đều kèm bài báo và năm.
+- **Mô hình nhỏ chạy được trên máy kém hơn nhiều** so với các bản 7B trở lên trong bài báo. Ô chạy trên máy dưới đây chỉ dùng ảnh rất đơn giản.
+
+## Minh họa
+
+Hình dưới là sơ đồ nối chuỗi của bài Multimodal. Với bài này, hãy nhìn vào dải token ảnh: với LLaVA-1.5 nó dài 576 token, với AnyRes lưới $2 \times 2$ nó dài gần 3 000 token, trong khi dải token chữ phía sau vẫn chỉ vài chục.
+
+{/* FIG: ảnh qua bộ mã hóa ảnh và projector thành token ảnh, nằm chung một chuỗi với token chữ của LLM. */}
+<MultimodalFigure />
+
+Bảng dưới là một mẫu dữ liệu theo khuôn LLaVA-Instruct-158K, tự soạn cho bài (dữ liệu thật bằng tiếng Anh). Hãy để ý dòng đầu: đó là tất cả những gì GPT-4 biết về ảnh. Mọi câu trả lời phía dưới chỉ được dựa vào nó.
+
+| Vai trò | Nội dung |
+|---|---|
+| Ngữ cảnh cho GPT-4 | Chú thích: "Một con mèo xám nằm trên bàn bếp. Cạnh nó có hai quả táo đỏ và một con dao." Hộp bao: mèo [0.10, 0.35, 0.55, 0.80]; táo [0.60, 0.50, 0.70, 0.62]; táo [0.72, 0.52, 0.82, 0.64]; dao [0.58, 0.70, 0.90, 0.75] |
+| Người dùng (hội thoại) | Trên bàn có mấy quả táo? |
+| Trợ lý | Có hai quả táo đỏ, nằm bên phải con mèo. |
+| Người dùng (mô tả chi tiết) | Hãy tả kỹ bức ảnh. |
+| Trợ lý | Một con mèo xám nằm dài ở nửa trái của bàn bếp. Bên phải là hai quả táo đỏ đặt cạnh nhau, phía dưới chúng là một con dao nằm ngang… |
+| Người dùng (suy luận phức tạp) | Có điều gì đáng lo trong cảnh này không? |
+| Trợ lý | Con dao nằm gần mép bàn và gần con mèo. Nếu mèo vờn quả táo, dao có thể rơi xuống. Nên cất dao đi. |
+
+Bảng thứ hai đặt các biến thể cạnh nhau. Cột "Token ảnh" là số token mỗi ảnh mà LLM phải đọc. Các ô ghi "tự tính" lấy từ công thức $(S/P)^2$ và $(ab + 1)\,T$, không phải số in trong bài báo.
+
+| Mô hình | Năm | Bộ mã hóa ảnh | Chỗ nối | Độ phân giải | Token ảnh |
+|---|---:|---|---|---|---|
+| LLaVA | 2023 | CLIP ViT-L/14 | Một lớp tuyến tính | $224 \times 224$ | 256 (tự tính) |
+| MiniGPT-4 | 2023 | EVA-CLIP ViT-G/14 + Q-Former | Q-Former, rồi một lớp tuyến tính | $224 \times 224$ (như BLIP-2) | 32 (số truy vấn của Q-Former BLIP-2) |
+| InstructBLIP | 2023 | ViT-g/14 + Q-Former | Q-Former nhận cả chỉ dẫn | $224 \times 224$ | 32 (như trên) |
+| Qwen-VL | 2023 | OpenCLIP ViT-bigG | Một lớp cross-attention, 256 truy vấn | $448 \times 448$ | 256 |
+| LLaVA-1.5 | 2023 | CLIP ViT-L/14 | MLP hai lớp | $336 \times 336$ | 576 (tự tính) |
+| LLaVA-NeXT | 2024 | CLIP ViT-L/14 | MLP hai lớp, AnyRes | Tới $672 \times 672$ | Tới 2 880, chưa kể token xuống dòng (tự tính) |
+| LLaVA-OneVision | 2024 | SigLIP | MLP hai lớp, AnyRes có ngưỡng | Mảnh $384 \times 384$ | 729 mỗi mảnh; tới khoảng $729 \times 10$ một ảnh |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: ô Python thuần với Python 3.14 (Pyodide), ô chạy trên máy với Python 3.14, PyTorch 2.15 và `transformers` 5.22 trên CPU. Ô đầu chạy ngay trên trang, ô thứ hai chạy trên máy bạn. Hai ô độc lập, không dùng biến của nhau.
+
+### Ngân sách token ảnh
+
+Ô dưới đây tính số token của một ảnh ở ba cỡ bộ mã hóa, số token AnyRes cho vài lưới mảnh $336 \times 336$ (có và không có token xuống dòng), rồi kiểm công thức với mảnh $384 \times 384$ của LLaVA-OneVision. Cuối cùng, nó đếm xem bao nhiêu ảnh vừa cửa sổ 4 096 token khi chừa 500 token cho chữ.
+
+<PythonRunner code={tokenBudgetCode} title="Token ảnh: một ảnh, AnyRes, nhiều ảnh" />
+
+Đọc kết quả:
+
+- **Một ảnh:** 256, 576, 729 là $16^2$, $24^2$, $27^2$. Với 384, phép chia $384 / 14 \approx 27.4$ bị làm tròn xuống.
+- **Bảng AnyRes:** cột `no-newline` là $(ab + 1) \cdot 576$; lưới $2 \times 2$ cho 2 880. Cột `with-newline` cộng $24a$ token xuống dòng, nên lưới $2 \times 1$ (hai hàng) thêm 48 token còn lưới $1 \times 2$ (một hàng) chỉ thêm 24, dù cả hai cùng có 1 728 token đặc trưng.
+- **Bốn dòng `check`:** 1 485, 2 214, 3 699, 5 157 khớp đúng số mà processor của LLaVA-OneVision đếm được ở ô chạy trên máy bên dưới.
+- **Dòng cuối:** cửa sổ 4 096 chứa được 6 ảnh LLaVA-1.5 nhưng chỉ 1 ảnh AnyRes $2 \times 2$. Đó là lý do LLaVA-OneVision hạ số token mỗi ảnh khi có nhiều ảnh.
+
+### Hỏi một mô hình kiểu LLaVA trên máy bạn
+
+File dưới đây dùng LLaVA-OneVision bản 0.5B (checkpoint `llava-hf/llava-onevision-qwen2-0.5b-ov-hf`, SigLIP cộng Qwen2-0.5B). Lần đầu chạy, `transformers` tải khoảng 1.8 GB. Code vẽ một ảnh bằng PIL (ba hình tròn đỏ, một hình vuông xanh dương trên nền trắng), đếm số token ảnh mà processor tạo ra cho bốn cỡ ảnh, rồi hỏi mô hình hai câu. Mô hình giải mã tham lam (`do_sample=False`), nên trên cùng phiên bản thư viện, câu trả lời không đổi giữa các lần chạy. Cách cài PyTorch bản CPU có ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+<LocalCode
+  code={askCode}
+  title="LLaVA-OneVision 0.5B trả lời về ảnh tự vẽ"
+  packages={['torch', 'transformers', 'pillow']}
+  hardware="CPU, khoảng 4 GB RAM trống; lần đầu tải 1.8 GB. Khoảng 1.5 đến 2.5 phút trên máy phát triển"
+  sampleVaries={false}
+>
+
+```text
+384x384: 1485 image tokens
+768x384: 2214 image tokens
+768x768: 3699 image tokens
+1152x768: 5157 image tokens
+Q: How many red circles are in the image?
+A: There are three red circles in the image.
+Q: What color is the square?
+A: The square is blue.
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Bốn dòng đầu:** ảnh $384 \times 384$ cần lưới $1 \times 1$ cộng ảnh thu nhỏ: $2 \cdot 729 + 27 = 1\,485$ token. Ảnh $768 \times 384$ là lưới một hàng hai cột: $3 \cdot 729 + 27 = 2\,214$. Ảnh $1152 \times 768$ đã lên 5 157 token. Ảnh đơn giản đến mấy, số token cũng chỉ phụ thuộc kích thước.
+- **Hai câu trả lời:** đúng cả hai: ba hình tròn đỏ, hình vuông màu xanh dương. Ảnh này cố ý dễ: nền trắng, hình tách rời, màu thuần. Với ảnh chụp thật, nhiều vật chồng lên nhau, một mô hình 0.5B dễ đếm sai hơn nhiều; đừng lấy hai câu đúng ở đây làm bằng chứng mô hình "biết đếm".
+- **Thời gian:** trên máy phát triển, cả file chạy hết trong khoảng 1.5 đến 2.5 phút (sau khi đã tải xong mô hình), mỗi câu hỏi vài chục giây. Phần lớn thời gian là để xử lý 1 485 token ảnh trước khi sinh chữ đầu tiên; chữ của câu hỏi chỉ khoảng chục token.
+
+## Lỗi hay gặp
+
+:::caution[Nghĩ dữ liệu của LLaVA do người viết, hay GPT-4 đã nhìn ảnh]
+LLaVA-Instruct-158K do GPT-4 chỉ đọc chữ sinh ra từ chú thích và hộp bao. Người chỉ viết vài ví dụ mẫu. Nên dữ liệu mang theo lỗi của chú thích (thiếu vật, sai màu) và giọng văn dài, tự tin của GPT-4. Khi một mô hình kiểu LLaVA tả thêm chi tiết không có trong ảnh, một phần nguyên nhân nằm ở đây. Với ảnh quan trọng (y tế, giấy tờ), hãy kiểm lại từng chi tiết mô hình nêu.
+:::
+
+:::caution[Đẩy độ phân giải lên mà quên token ảnh chiếm cửa sổ ngữ cảnh]
+AnyRes giúp đọc chữ nhỏ, nhưng lưới $2 \times 2$ đã tốn khoảng 5 lần token so với một ảnh 576 token. Với cửa sổ 4 096 token, một ảnh như vậy cộng một đoạn hội thoại dài là hết chỗ, và mô hình sẽ bị cắt mất phần đầu cuộc trò chuyện. Trước khi gửi nhiều ảnh lớn, hãy đếm số token như ô code (hoặc đọc `input_ids` của processor), rồi co ảnh lại nếu không cần chi tiết.
+:::
+
+:::caution[Đọc một con số benchmark như độ chính xác]
+85.1 của LLaVA trên LLaVA-Bench là điểm tương đối so với GPT-4, do GPT-4 chấm; nó không có nghĩa là đúng 85.1% câu. Điểm cao trên benchmark hỏi đáp cũng không nói gì về chuyện bịa: hãy xem POPE, và xem cả tỉ lệ Yes. Khi so hai mô hình, chỉ so số trên cùng một benchmark, cùng cách chấm, cùng bài báo.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- LLaVA giải bài toán dữ liệu bằng GPT-4 chỉ đọc chữ: đưa chú thích và hộp bao của ảnh COCO, nhận về 158K mẫu ba loại (hội thoại 58K, mô tả chi tiết 23K, suy luận 77K). Hàm mất mát chỉ tính trên token của câu trả lời.
+- LLaVA-1.5: projector MLP, CLIP ở $336 \times 336$ (576 token), thêm dữ liệu học thuật kèm câu nhắc "Answer the question using a single word or phrase." để mô hình biết lúc nào trả lời ngắn.
+- AnyRes (LLaVA-NeXT, LLaVA-OneVision) cắt ảnh lớn thành $ab$ mảnh cộng một ảnh thu nhỏ: $N = (ab + 1)\,T$ token, cộng token xuống dòng. Độ phân giải cao đổi lấy token; OneVision đặt ngưỡng để một ảnh, nhiều ảnh và video có ngân sách gần bằng nhau.
+- Đánh giá cần nhiều benchmark. Hallucination đối tượng đo bằng POPE: câu hỏi có/không về vật có thật và vật bị chọn ngẫu nhiên, phổ biến hoặc hay đi cùng; luôn xem cả precision và tỉ lệ Yes.
+
+**Đọc thêm:**
+
+- Liu, H., Li, C., Wu, Q., Lee, Y. J. (2023). [*Visual Instruction Tuning*](https://arxiv.org/abs/2304.08485), arXiv:2304.08485, mục 3 (sinh dữ liệu bằng GPT-4) và phụ lục có prompt mẫu. Nên đọc để thấy GPT-4 được "cho xem" ảnh bằng chữ như thế nào.
+- Liu, H., Li, C., Li, Y., Lee, Y. J. (2023). [*Improved Baselines with Visual Instruction Tuning*](https://arxiv.org/abs/2310.03744), arXiv:2310.03744, mục 3 (câu nhắc định dạng, MLP, dữ liệu) và phần LLaVA-1.5-HD. Ngắn, nhiều thí nghiệm loại bỏ từng thành phần.
+- Liu, H., Li, C., Li, Y., Li, B., Zhang, Y., Shen, S., Lee, Y. J. (2024). [*LLaVA-NeXT: Improved reasoning, OCR, and world knowledge*](https://llava-vl.github.io/blog/2024-01-30-llava-next/), blog dự án LLaVA, 30/1/2024. Các lưới AnyRes và dữ liệu của LLaVA-NeXT.
+- Li, B., Zhang, Y., Guo, D. và cộng sự (2024). [*LLaVA-OneVision: Easy Visual Task Transfer*](https://arxiv.org/abs/2408.03326), arXiv:2408.03326, phần về AnyRes có ngưỡng và phân bổ token cho một ảnh, nhiều ảnh, video.
+- Li, Y., Du, Y., Zhou, K., Wang, J., Zhao, W. X., Wen, J.-R. (2023). [*Evaluating Object Hallucination in Large Vision-Language Models*](https://arxiv.org/abs/2305.10355), arXiv:2305.10355, EMNLP 2023. Bài báo POPE: ba cách chọn vật không có trong ảnh và vì sao mô hình hay bịa vật phổ biến.
+
+<LessonProgress />

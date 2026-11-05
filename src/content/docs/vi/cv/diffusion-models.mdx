@@ -1,0 +1,455 @@
+---
+title: 'Sinh ảnh (2): Diffusion, Stable Diffusion, LoRA'
+description: Làm hỏng ảnh bằng nhiễu từng chút, rồi dạy mạng gỡ nhiễu ngược lại. DDPM, DDIM, latent diffusion của Stable Diffusion, classifier-free guidance và LoRA.
+quiz:
+  - question: 'Khi huấn luyện DDPM với $T = 1000$, một lô cần ảnh nhiễu $\mathbf{x}_{700}$ của mỗi ảnh gốc. Cách làm đúng và rẻ nhất là gì?'
+    options:
+      - 'Thêm nhiễu 700 lần liên tiếp, mỗi lần theo $\beta_t$, vì quá trình thuận định nghĩa từng bước'
+      - 'Tính $\bar\alpha_{700}$ một lần rồi lấy $\mathbf{x}_{700} = \sqrt{\bar\alpha_{700}}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_{700}}\,\boldsymbol\epsilon$ với một nhiễu $\boldsymbol\epsilon$'
+      - 'Cho mạng $\boldsymbol\epsilon_\theta$ chạy ngược từ $\mathbf{x}_{1000}$ về $\mathbf{x}_{700}$'
+      - 'Cộng $700\,\beta_{700}$ lần nhiễu vào ảnh gốc'
+    answer: 1
+    explanation: 'Tổng của các nhiễu Gauss độc lập vẫn là một nhiễu Gauss, nên 700 bước gộp được thành một bước với hệ số $\sqrt{\bar\alpha_{700}}$ và $\sqrt{1-\bar\alpha_{700}}$. Thêm nhiễu 700 lần cho cùng phân phối nhưng tốn gấp 700 lần. Phương án cuối sai vì các $\beta_t$ không bằng nhau và hệ số của ảnh gốc cũng co lại theo tích $\bar\alpha_t$, không theo tổng.'
+  - question: 'Autoencoder của Stable Diffusion v1 có hệ số thu nhỏ $f = 8$ và latent 4 kênh. Bạn sinh ảnh $768 \times 768 \times 3$. Latent lớn bao nhiêu, và nhỏ hơn ảnh bao nhiêu lần?'
+    options:
+      - '$96 \times 96 \times 4$, nhỏ hơn 48 lần, như với ảnh $512 \times 512$'
+      - '$64 \times 64 \times 4$, vì latent luôn có cỡ cố định'
+      - '$96 \times 96 \times 4$, nhỏ hơn 64 lần, vì mỗi cạnh chia 8'
+      - '$96 \times 96 \times 3$, nhỏ hơn 64 lần'
+    answer: 0
+    explanation: 'Mỗi cạnh chia 8: $768/8 = 96$, kênh đổi từ 3 thành 4. Số phần tử giảm $8 \cdot 8 \cdot 3/4 = 48$ lần, không phụ thuộc cỡ ảnh. Phương án "64 lần" quên rằng latent có 4 kênh, nhiều hơn 3 kênh màu của ảnh.'
+  - question: 'Với classifier-free guidance $\tilde{\boldsymbol\epsilon} = \boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing) + s\,\big(\boldsymbol\epsilon_\theta(\mathbf{x}_t, \mathbf{c}) - \boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing)\big)$, đặt $s = 1$ thì sao?'
+    options:
+      - 'Mô hình bỏ qua câu lệnh, sinh ảnh không điều kiện'
+      - 'Ảnh bám câu lệnh mạnh nhất có thể'
+      - 'Chỉ còn dự đoán có điều kiện $\boldsymbol\epsilon_\theta(\mathbf{x}_t, \mathbf{c})$: có dùng câu lệnh nhưng không khuếch đại'
+      - 'Mỗi bước phải chạy mạng ba lần'
+    answer: 2
+    explanation: 'Thay $s = 1$: hai số hạng $\boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing)$ triệt tiêu, còn đúng dự đoán có điều kiện. Sinh không điều kiện là $s = 0$. Guidance chỉ "đẩy thêm" theo hướng câu lệnh khi $s > 1$, ví dụ 7.5 là mặc định trong script của Stable Diffusion v1.'
+  - question: 'Một lớp cross-attention trong U-Net có $d = 640$ kênh, đặc trưng chữ có 768 chiều. Bạn gắn LoRA hạng $r = 4$ chỉ vào hai phép chiếu `to_k` và `to_v` (mỗi phép biến 768 chiều thành 640 chiều). Có bao nhiêu tham số được huấn luyện?'
+    options:
+      - '983 040'
+      - '10 240'
+      - '5 632'
+      - '11 264'
+    answer: 3
+    explanation: 'Mỗi phép chiếu $d_{\text{in}} = 768$, $d_{\text{out}} = 640$ học $r(d_{\text{in}} + d_{\text{out}}) = 4 \cdot 1\,408 = 5\,632$ số; hai phép chiếu là $11\,264$. Số 983 040 là $2 \cdot 768 \cdot 640$, tức fine-tune đầy đủ hai ma trận. Số 10 240 nhầm $d_{\text{in}}$ bằng 640.'
+  - question: 'Bạn đã huấn luyện xong một DDPM với $T = 1000$. Muốn sinh ảnh bằng DDIM chỉ 50 bước, bạn cần gì?'
+    options:
+      - 'Huấn luyện lại mạng với $T = 50$'
+      - 'Không cần huấn luyện lại: DDIM dùng đúng mạng $\boldsymbol\epsilon_\theta$ đó, chỉ đổi cách đi ngược'
+      - 'Huấn luyện thêm một mạng phân loại để dẫn đường'
+      - 'Không làm được, vì DDPM bắt buộc đi đủ 1000 bước'
+    answer: 1
+    explanation: 'DDIM giữ nguyên mục tiêu huấn luyện của DDPM. Ở mỗi bước nó ước lượng $\hat{\mathbf{x}}_0$ từ nhiễu dự đoán, rồi dùng dạng đóng nhảy thẳng tới một bước nhỏ hơn nhiều, nên bỏ qua được phần lớn các bước. Mạng phân loại là cách dẫn đường cũ (classifier guidance), không liên quan tới số bước.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import forwardNoiseCode from '@code/cv/diffusion-models/forward-noise.vi.py?raw';
+import tinyDdpmCode from '@code/cv/diffusion-models/tiny-ddpm.vi.py?raw';
+import loraAttentionCode from '@code/cv/diffusion-models/lora-attention.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu ý tưởng của **mô hình khuếch tán** (diffusion model): làm hỏng ảnh bằng nhiễu từng chút một, rồi dạy một mạng gỡ nhiễu ngược lại.
+- Tự dẫn được dạng đóng $\mathbf{x}_t = \sqrt{\bar\alpha_t}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon$ của DDPM, và hiểu vì sao mạng chỉ cần **dự đoán nhiễu** bằng một hàm mất mát MSE.
+- Giải thích được ba mảnh của Stable Diffusion: **latent diffusion** (khử nhiễu trong không gian nén của VAE), điều kiện văn bản qua **cross-attention**, và **classifier-free guidance**.
+- Đếm được số tham số khi gắn LoRA vào attention của U-Net, và cài được một DDPM tí hon bằng PyTorch.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Ở bài [Sinh ảnh (1): VAE, GAN, CycleGAN, Pix2Pix](/vi/cv/vae-gan/), **VAE** nén ảnh thành một **biến ẩn** (latent variable) $\mathbf{z}$ nhỏ rồi giải mã lại, học ổn định nhưng ảnh thường hơi mờ. **GAN** cho bộ sinh $G$ đấu với bộ phân biệt $D$, ảnh sắc nét nhưng huấn luyện dễ mất ổn định và hay sinh thiếu đa dạng.
+:::
+
+## Trực giác
+
+### Nhỏ một giọt mực vào cốc nước
+
+Nhỏ một giọt mực vào cốc nước. Lúc đầu bạn còn thấy rõ hình giọt mực. Vài giây sau nó loang ra. Vài phút sau, cả cốc chỉ còn một màu xám đều. Hiện tượng đó gọi là **khuếch tán** (diffusion), và nó chỉ đi một chiều: không ai thấy cốc nước xám tự gom lại thành giọt mực.
+
+Mô hình khuếch tán làm điều tương tự với ảnh. Lấy một ảnh, cộng thêm một chút nhiễu ngẫu nhiên. Lặp lại vài trăm lần. Cuối cùng ảnh chỉ còn là nhiễu thuần, không ai đoán được ảnh gốc.
+
+Phần thú vị là đi ngược lại. Mỗi bước thêm nhiễu chỉ làm hỏng ảnh **một chút**. Nhìn một ảnh hơi nhiễu, việc đoán "phần nào là nhiễu vừa thêm vào" không quá khó. Nếu dạy được một mạng làm việc nhỏ đó, ta cho nó chạy ngược từ nhiễu thuần: mỗi bước gỡ một chút nhiễu, và sau đủ số bước, một ảnh mới hiện ra.
+
+### Vì sao không sinh ảnh trong một bước?
+
+GAN và VAE sinh ảnh trong một lần chạy mạng: từ $\mathbf{z}$ ra thẳng ảnh. Đó là một bước nhảy rất xa, từ nhiễu tới một ảnh hoàn chỉnh. GAN học bước nhảy đó bằng một cuộc đấu khó giữ cân bằng; VAE học bằng một hàm mất mát tái tạo nên ảnh dễ bị mờ.
+
+Diffusion chia bước nhảy xa thành nghìn bước ngắn. Mỗi bước là một bài toán hồi quy bình thường: nhìn ảnh nhiễu, đoán nhiễu. Huấn luyện ổn định như học một mạng hồi quy, không có cuộc đấu nào. Đổi lại, sinh một ảnh phải chạy mạng nhiều lần.
+
+### Từ chữ số tới "phi hành gia cưỡi ngựa"
+
+Trên chữ số $8 \times 8$, ý tưởng này chạy được ngay. Nhưng ảnh $512 \times 512$ màu có gần 800 nghìn số, và chạy mạng nghìn lần trên ngần ấy số rất tốn. Ta còn muốn điều khiển ảnh bằng một câu lệnh, như "một phi hành gia cưỡi ngựa". Và muốn dạy mô hình một phong cách mới mà không huấn luyện lại gần một tỉ tham số.
+
+Ba mong muốn đó dẫn tới ba mảnh của Stable Diffusion trong bài: khử nhiễu trong không gian nén, điều kiện bằng chữ, và LoRA.
+
+**Bài toán của bài này: làm sao dạy một mạng đảo ngược quá trình thêm nhiễu, để đi từ nhiễu thuần tới một ảnh mới; làm việc đó thế nào cho rẻ trên ảnh lớn, theo đúng một câu lệnh, và tinh chỉnh với rất ít tham số?**
+
+## Lý thuyết
+
+### Ký hiệu
+
+Ảnh gốc là $\mathbf{x}_0$, ảnh sau $t$ bước thêm nhiễu là $\mathbf{x}_t$, với $t = 1, \dots, T$. **Ở bài này $T$ là số bước khuếch tán**, không phải nhiệt độ $T$ khi lấy mẫu token ở phần LLM. Ở mỗi bước có một số nhỏ $\beta_t$ gọi là **phương sai nhiễu** của bước đó; dãy $\beta_1, \dots, \beta_T$ gọi là **lịch nhiễu** (noise schedule). Ta đặt thêm:
+
+$$
+\alpha_t = 1 - \beta_t,
+\qquad
+\bar\alpha_t = \prod_{s=1}^{t} \alpha_s = \alpha_1 \alpha_2 \cdots \alpha_t
+$$
+
+$\boldsymbol\epsilon \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ là nhiễu Gauss chuẩn cùng cỡ với ảnh: mỗi phần tử độc lập, trung bình 0, phương sai 1. DDPM (Ho, Jain, Abbeel, 2020) đưa điểm ảnh về đoạn $[-1, 1]$ trước, để ảnh và nhiễu có thang đo tương đương.
+
+### Quá trình thuận: thêm nhiễu từng bước
+
+Một bước thêm nhiễu của DDPM là:
+
+$$
+\mathbf{x}_t = \sqrt{\alpha_t}\,\mathbf{x}_{t-1} + \sqrt{1 - \alpha_t}\,\boldsymbol\epsilon_{t-1}
+$$
+
+trong đó $\boldsymbol\epsilon_{t-1}$ là một nhiễu chuẩn mới, độc lập với mọi bước trước. Đây là **quá trình thuận** (forward process). Nó không có gì để học: chỉ là công thức cố định.
+
+Vì sao nhân ảnh với $\sqrt{\alpha_t}$ chứ không giữ nguyên? Nếu mỗi phần tử của $\mathbf{x}_{t-1}$ có phương sai 1, thì phần ảnh đóng góp phương sai $\alpha_t$, phần nhiễu đóng góp $1 - \alpha_t$, cộng lại vẫn là 1. Thang đo của ảnh giữ nguyên qua mọi bước, không phình ra. Chỉ có tỉ lệ giữa "ảnh" và "nhiễu" thay đổi.
+
+DDPM dùng $T = 1000$ và lịch tuyến tính: $\beta_t$ tăng đều từ $\beta_1 = 10^{-4}$ tới $\beta_T = 0.02$. Bước đầu thêm rất ít nhiễu, bước cuối thêm nhiều hơn.
+
+### Dạng đóng: nhảy thẳng tới bước $t$
+
+Muốn có $\mathbf{x}_{500}$, phải thêm nhiễu 500 lần sao? Không cần. Ta dẫn một công thức đi thẳng từ $\mathbf{x}_0$.
+
+**Bước 1: thay một bước vào bước kế.** Viết $\mathbf{x}_{t-1}$ theo $\mathbf{x}_{t-2}$ bằng chính công thức trên, rồi thay vào công thức của $\mathbf{x}_t$:
+
+$$
+\begin{aligned}
+\mathbf{x}_t &= \sqrt{\alpha_t}\Big(\sqrt{\alpha_{t-1}}\,\mathbf{x}_{t-2} + \sqrt{1-\alpha_{t-1}}\,\boldsymbol\epsilon_{t-2}\Big) + \sqrt{1-\alpha_t}\,\boldsymbol\epsilon_{t-1} \\
+&= \sqrt{\alpha_t\alpha_{t-1}}\,\mathbf{x}_{t-2} + \sqrt{\alpha_t(1-\alpha_{t-1})}\,\boldsymbol\epsilon_{t-2} + \sqrt{1-\alpha_t}\,\boldsymbol\epsilon_{t-1}
+\end{aligned}
+$$
+
+Dòng thứ hai chỉ là nhân $\sqrt{\alpha_t}$ vào trong ngoặc.
+
+**Bước 2: gộp hai nhiễu thành một.** Hai số hạng cuối là hai nhiễu Gauss độc lập, trung bình 0, phương sai lần lượt $\alpha_t(1-\alpha_{t-1})$ và $1-\alpha_t$. Tổng của hai biến Gauss độc lập vẫn là Gauss, và phương sai của tổng bằng tổng phương sai:
+
+$$
+\alpha_t(1-\alpha_{t-1}) + (1-\alpha_t) = 1 - \alpha_t\alpha_{t-1}
+$$
+
+Vậy hai số hạng đó có cùng phân phối với $\sqrt{1-\alpha_t\alpha_{t-1}}\,\bar{\boldsymbol\epsilon}$, với $\bar{\boldsymbol\epsilon}$ là một nhiễu chuẩn duy nhất:
+
+$$
+\mathbf{x}_t = \sqrt{\alpha_t\alpha_{t-1}}\,\mathbf{x}_{t-2} + \sqrt{1-\alpha_t\alpha_{t-1}}\,\bar{\boldsymbol\epsilon}
+$$
+
+**Bước 3: lặp lại tới $\mathbf{x}_0$.** Công thức vừa có giống hệt công thức một bước, chỉ thay $\alpha_t$ bằng tích $\alpha_t\alpha_{t-1}$. Thay tiếp $\mathbf{x}_{t-2}$, rồi $\mathbf{x}_{t-3}$, mỗi lần tích dài thêm một thừa số. Tới $\mathbf{x}_0$, tích là $\bar\alpha_t$:
+
+$$
+\mathbf{x}_t = \sqrt{\bar\alpha_t}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon,
+\qquad \boldsymbol\epsilon \sim \mathcal{N}(\mathbf{0}, \mathbf{I})
+$$
+
+Đây là kết quả chính của quá trình thuận. Với lịch của DDPM (số lấy từ ô NumPy bên dưới):
+
+| $t$ | $\sqrt{\bar\alpha_t}$ (phần ảnh) | $\sqrt{1-\bar\alpha_t}$ (phần nhiễu) |
+|---:|---:|---:|
+| 100 | 0.9471 | 0.3209 |
+| 250 | 0.7239 | 0.6899 |
+| 500 | 0.2803 | 0.9599 |
+| 1000 | 0.0064 | 1.0000 |
+
+Ở $t = 1000$, ảnh chỉ còn hệ số 0.0064: $\mathbf{x}_T$ gần như là nhiễu chuẩn thuần. Đó là lý do việc sinh ảnh có thể bắt đầu từ một nhiễu chuẩn bất kỳ.
+
+:::note[Ghi nhớ]
+$\mathbf{x}_t = \sqrt{\bar\alpha_t}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon$. Với $\bar\alpha_t$ tính sẵn, ta có ảnh nhiễu ở **bất kỳ** bước nào chỉ bằng một phép cộng, không phải chạy qua các bước trước.
+:::
+
+### Huấn luyện: dự đoán nhiễu
+
+Nhìn lại dạng đóng. Nếu biết $\mathbf{x}_t$, biết $t$, và biết đúng nhiễu $\boldsymbol\epsilon$ đã cộng vào, ta giải ra được ảnh gốc:
+
+$$
+\mathbf{x}_0 = \frac{\mathbf{x}_t - \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon}{\sqrt{\bar\alpha_t}}
+$$
+
+(chuyển số hạng nhiễu sang vế trái rồi chia cho $\sqrt{\bar\alpha_t}$). Vậy "đoán nhiễu" và "đoán ảnh sạch" là hai cách nói của cùng một việc. DDPM chọn cho mạng đoán nhiễu. Gọi mạng đó là $\boldsymbol\epsilon_\theta(\mathbf{x}_t, t)$: nhận ảnh nhiễu và số bước, trả ra một tensor cùng cỡ ảnh. Mạng biết $t$ nên biết ảnh đang nhiễu nhiều hay ít.
+
+Ho và cộng sự dẫn hàm mất mát từ một cận dưới của log-likelihood (mục 3 của paper), rồi thấy dạng rút gọn, bỏ các trọng số, cho ảnh đẹp hơn. Dạng rút gọn đó chỉ là MSE giữa nhiễu thật và nhiễu đoán:
+
+$$
+\mathcal{L}_{\text{simple}} = \mathbb{E}_{\mathbf{x}_0,\, t,\, \boldsymbol\epsilon}\Big[\big\lVert \boldsymbol\epsilon - \boldsymbol\epsilon_\theta\big(\sqrt{\bar\alpha_t}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon,\; t\big)\big\rVert^2\Big]
+$$
+
+Một bước huấn luyện (Thuật toán 1 của paper) vì thế rất gọn: lấy một ảnh $\mathbf{x}_0$, chọn $t$ ngẫu nhiên đều trong $1, \dots, T$, sinh một $\boldsymbol\epsilon$, tạo $\mathbf{x}_t$ bằng dạng đóng, rồi đi một bước gradient descent trên $\lVert \boldsymbol\epsilon - \boldsymbol\epsilon_\theta(\mathbf{x}_t, t)\rVert^2$. Dạng đóng là thứ làm việc này rẻ: mỗi mẫu chỉ cần một phép cộng, dù $t = 900$.
+
+Trong DDPM, $\boldsymbol\epsilon_\theta$ là một **U-Net**: mạng tích chập có nhánh co và nhánh giãn đối xứng, đầu ra cùng cỡ đầu vào (xem bài [Semantic segmentation](/vi/cv/semantic-segmentation/)). Số bước $t$ được đổi thành một vectơ kiểu embedding vị trí hình sin của Transformer rồi cộng vào từng khối của mạng. Một mạng dùng chung cho mọi $t$.
+
+### Lấy mẫu: đi ngược từng bước
+
+Đã có $\boldsymbol\epsilon_\theta$, ta sinh ảnh mới theo Thuật toán 2 của paper. Bắt đầu từ $\mathbf{x}_T \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$, rồi với $t = T, T-1, \dots, 1$:
+
+$$
+\mathbf{x}_{t-1} = \frac{1}{\sqrt{\alpha_t}}\left(\mathbf{x}_t - \frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\,\boldsymbol\epsilon_\theta(\mathbf{x}_t, t)\right) + \sigma_t\,\mathbf{z}
+$$
+
+với $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ khi $t > 1$ và $\mathbf{z} = \mathbf{0}$ ở bước cuối. Đọc công thức từ trong ra ngoài:
+
+- **Trừ đi một phần nhiễu dự đoán.** Mạng đoán toàn bộ nhiễu tích lũy $\boldsymbol\epsilon$; bước này chỉ gỡ phần ứng với một bước, nên nhân với hệ số nhỏ $\beta_t/\sqrt{1-\bar\alpha_t}$.
+- **Chia cho $\sqrt{\alpha_t}$.** Quá trình thuận đã nhân ảnh với $\sqrt{\alpha_t}$; chia ra là trả lại thang đo cũ.
+- **Cộng thêm một chút nhiễu mới** $\sigma_t\mathbf{z}$. Từ một $\mathbf{x}_t$ có nhiều $\mathbf{x}_{t-1}$ hợp lý, không chỉ một. Thêm nhiễu là lấy mẫu một trong số đó, giữ cho ảnh đa dạng. Paper thử $\sigma_t^2 = \beta_t$ và một lựa chọn khác, thấy kết quả tương tự.
+
+Phần trong ngoặc là trung bình của bước ngược mà paper dẫn ra (phương trình 11), bài này không dẫn lại chi tiết. Điều cần nhớ: mỗi bước gọi mạng một lần, nên lấy mẫu DDPM tốn $T = 1000$ lần chạy U-Net cho một ảnh.
+
+### DDIM: ít bước hơn, không cần huấn luyện lại
+
+1000 lần chạy mạng là chậm. DDIM (Song, Meng, Ermon, 2021) giữ nguyên mạng $\boldsymbol\epsilon_\theta$ đã huấn luyện, chỉ đổi cách đi ngược. Ở bước $t$, nó ước lượng ảnh sạch bằng công thức giải ngược ở trên:
+
+$$
+\hat{\mathbf{x}}_0 = \frac{\mathbf{x}_t - \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon_\theta(\mathbf{x}_t, t)}{\sqrt{\bar\alpha_t}}
+$$
+
+rồi dùng lại chính dạng đóng để nhảy tới một bước $t' < t$ bất kỳ, với nhiễu là nhiễu vừa đoán:
+
+$$
+\mathbf{x}_{t'} = \sqrt{\bar\alpha_{t'}}\,\hat{\mathbf{x}}_0 + \sqrt{1-\bar\alpha_{t'}}\,\boldsymbol\epsilon_\theta(\mathbf{x}_t, t)
+$$
+
+Đây là bản tất định của DDIM: không cộng nhiễu mới. Vì $t'$ có thể cách $t$ hàng chục bước, chỉ cần khoảng 50 bước thay vì 1000. Paper báo cáo DDIM cho ảnh chất lượng cao nhanh hơn DDPM 10 tới 50 lần tính theo thời gian chạy.
+
+### Latent diffusion: khử nhiễu trong không gian nén
+
+Ảnh $512 \times 512 \times 3$ có $786\,432$ số. Chạy U-Net hàng chục lần trên ngần ấy số, cho mỗi ảnh, là đắt; huấn luyện còn đắt hơn. Phần lớn số đó mô tả chi tiết nhỏ mà mắt khó nhận ra.
+
+Rombach và cộng sự (2022) đề xuất **latent diffusion**: tách việc thành hai phần.
+
+1. **Một autoencoder, huấn luyện một lần.** Bộ mã hóa $\mathcal{E}$ nén ảnh $\mathbf{x}$ thành latent $\mathbf{z} = \mathcal{E}(\mathbf{x})$ nhỏ hơn nhiều, bộ giải mã $\mathcal{D}$ dựng lại ảnh. Autoencoder chính của paper có một phạt KL nhẹ về phía phân phối chuẩn, họ hàng gần của VAE ở bài trước.
+2. **Diffusion chạy trên latent.** Mọi công thức ở trên giữ nguyên, chỉ thay ảnh $\mathbf{x}_0$ bằng latent $\mathbf{z}_0$. Hàm mất mát là $\mathbb{E}\big[\lVert \boldsymbol\epsilon - \boldsymbol\epsilon_\theta(\mathbf{z}_t, t)\rVert^2\big]$. Sinh xong latent thì cho qua $\mathcal{D}$ một lần để ra ảnh.
+
+Ở Stable Diffusion v1, autoencoder có hệ số thu nhỏ $f = 8$ và latent 4 kênh: ảnh $H \times W \times 3$ thành latent $H/8 \times W/8 \times 4$. Với ảnh $512 \times 512 \times 3$:
+
+$$
+\frac{512 \cdot 512 \cdot 3}{64 \cdot 64 \cdot 4} = \frac{786\,432}{16\,384} = 48
+$$
+
+Diffusion làm việc trên một tensor nhỏ hơn 48 lần (tự tính). Paper thử $f$ từ 1 tới 32 và thấy $f = 4$ và $f = 8$ cân bằng tốt nhất giữa chất lượng và chi phí; $f$ quá lớn làm mất chi tiết.
+
+### Điều kiện bằng chữ: cross-attention
+
+Để ảnh theo câu lệnh $y$, latent diffusion cho câu lệnh qua một bộ mã hóa chữ $\tau_\theta$, rồi chèn kết quả vào U-Net bằng **cross-attention**. Gọi $\boldsymbol\varphi(\mathbf{z}_t)$ là đặc trưng của U-Net ở một tầng, trải phẳng thành dãy vị trí. Một lớp cross-attention tính:
+
+$$
+\mathbf{Q} = \boldsymbol\varphi(\mathbf{z}_t)\,\mathbf{W}_Q,
+\quad
+\mathbf{K} = \tau_\theta(y)\,\mathbf{W}_K,
+\quad
+\mathbf{V} = \tau_\theta(y)\,\mathbf{W}_V
+$$
+
+rồi $\mathrm{softmax}(\mathbf{Q}\mathbf{K}^\top/\sqrt{d})\,\mathbf{V}$ như mọi attention. Truy vấn đến từ ảnh, khóa và giá trị đến từ chữ: mỗi vị trí trong latent "hỏi" các token của câu lệnh xem mình nên vẽ gì. Paper viết các tích này theo cột ($\mathbf{W}_Q\,\boldsymbol\varphi$); bài viết theo hàng cho khớp với bài [Multimodal](/vi/llm/multimodal/).
+
+Trong paper, mô hình chữ-ra-ảnh dùng một Transformer học cùng U-Net làm $\tau_\theta$. **Stable Diffusion v1** (2022), xây trên latent diffusion, thay nó bằng bộ mã hóa chữ của CLIP ViT-L/14 và **đóng băng** bộ mã hóa này. Theo README chính thức, mô hình có U-Net 860 triệu tham số và bộ mã hóa chữ 123 triệu tham số, huấn luyện trên một tập con của LAION-5B, trước ở $256 \times 256$ rồi tinh chỉnh ở $512 \times 512$. Vì CLIP đã học ghép ảnh với chữ (bài [CLIP, BLIP, GLIP](/vi/cv/clip-blip-glip/)), đặc trưng chữ của nó vốn mang nghĩa "trông như thế nào".
+
+### Classifier-free guidance
+
+Mô hình có điều kiện thường "nghe lời" chưa đủ: ảnh hợp lý, nhưng không bám sát câu lệnh. **Classifier-free guidance** (Ho và Salimans, 2022) khuếch đại ảnh hưởng của câu lệnh mà không cần thêm mạng nào.
+
+**Khi huấn luyện:** thỉnh thoảng thay câu lệnh bằng một câu lệnh rỗng $\varnothing$ (bản Stable Diffusion v1-4 bỏ điều kiện 10% số lần). Nhờ vậy một mạng học được hai việc: đoán nhiễu khi có câu lệnh, $\boldsymbol\epsilon_\theta(\mathbf{x}_t, \mathbf{c})$, và khi không có, $\boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing)$.
+
+**Khi lấy mẫu:** mỗi bước chạy mạng hai lần rồi trộn. Paper viết với trọng số $w$:
+
+$$
+\tilde{\boldsymbol\epsilon} = (1+w)\,\boldsymbol\epsilon_\theta(\mathbf{x}_t, \mathbf{c}) - w\,\boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing)
+$$
+
+Thêm rồi bớt $\boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing)$, rồi gom theo $(1+w)$, ta được dạng mà thư viện hay dùng, với **hệ số guidance** $s = 1 + w$:
+
+$$
+\begin{aligned}
+\tilde{\boldsymbol\epsilon} &= \boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing) + (1+w)\,\boldsymbol\epsilon_\theta(\mathbf{x}_t, \mathbf{c}) - (1+w)\,\boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing) \\
+&= \boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing) + s\,\big(\boldsymbol\epsilon_\theta(\mathbf{x}_t, \mathbf{c}) - \boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing)\big)
+\end{aligned}
+$$
+
+Hiệu trong ngoặc là "hướng mà câu lệnh kéo ảnh đi". $s = 0$ là sinh không điều kiện, $s = 1$ là dùng đúng dự đoán có điều kiện, $s > 1$ đi xa hơn theo hướng đó. Script lấy mẫu của Stable Diffusion v1 mặc định $s = 7.5$. Paper cho thấy tăng guidance đổi độ đa dạng lấy độ bám và độ rõ của từng ảnh: quá mạnh thì ảnh kém đa dạng.
+
+### LoRA cho diffusion
+
+Bạn muốn mô hình vẽ theo phong cách tranh của mình, hay vẽ đúng con mèo nhà bạn. Fine-tune cả U-Net 860 triệu tham số thì tốn bộ nhớ, và mỗi phong cách là một bản sao vài GB.
+
+**LoRA** (Hu và cộng sự, 2022) ra đời cho LLM, đã dẫn chi tiết ở bài [Đánh giá mô hình và PEFT](/vi/llm/evaluation-peft/). Nhắc lại: với một ma trận đóng băng $\mathbf{W}_0 \in \mathbb{R}^{d_{\text{out}} \times d_{\text{in}}}$, LoRA học thêm $\mathbf{B} \in \mathbb{R}^{d_{\text{out}} \times r}$ và $\mathbf{A} \in \mathbb{R}^{r \times d_{\text{in}}}$ hạng $r$ nhỏ:
+
+$$
+\mathbf{h} = \mathbf{W}_0\mathbf{x} + \frac{\alpha}{r}\,\mathbf{B}\mathbf{A}\mathbf{x}
+$$
+
+mỗi ma trận học $r(d_{\text{in}} + d_{\text{out}})$ số, và $\mathbf{B} = \mathbf{0}$ lúc đầu nên mô hình xuất phát đúng từ mô hình gốc.
+
+Với Stable Diffusion, chỗ tự nhiên để gắn LoRA là **attention của U-Net**: bốn phép chiếu truy vấn, khóa, giá trị và đầu ra (`to_q`, `to_k`, `to_v`, `to_out`) của mọi lớp self-attention và cross-attention. Script huấn luyện LoRA của thư viện `diffusers` làm đúng như vậy, hạng mặc định $r = 4$. Cross-attention là nơi chữ gặp ảnh, nên chỉnh nó là chỉnh cách mô hình hiểu câu lệnh thành hình.
+
+Đếm thử một lớp cross-attention ở tầng $d = 320$ kênh, đặc trưng chữ 768 chiều, $r = 4$: `to_q` và `to_out` là $320 \to 320$, mỗi cái $4 \cdot 640 = 2\,560$ số; `to_k` và `to_v` là $768 \to 320$, mỗi cái $4 \cdot 1\,088 = 4\,352$ số. Cộng lại $13\,824$ số. Trên cả 32 lớp attention của U-Net, ô PyTorch bên dưới đếm được $797\,184$ số, khoảng 0.09% của U-Net. Lưu ở 32 bit là khoảng 3.2 MB (tự tính), thay vì vài GB.
+
+**DreamBooth** (Ruiz và cộng sự, 2023) là một cách tinh chỉnh khác: dạy mô hình một đối tượng cụ thể từ vài ảnh, gắn nó với một từ định danh hiếm trong câu lệnh. DreamBooth gốc tinh chỉnh cả mô hình; trong thực tế người ta hay ghép nó với LoRA để rẻ hơn.
+
+:::note[Ghi nhớ]
+Stable Diffusion = autoencoder nén ảnh ($f = 8$, latent 4 kênh) + U-Net dự đoán nhiễu trên latent + bộ mã hóa chữ CLIP đóng băng, nối vào U-Net bằng cross-attention + classifier-free guidance khi lấy mẫu. LoRA gắn vào các phép chiếu của attention để tinh chỉnh với chưa tới 0.1% tham số.
+:::
+
+### Giới hạn
+
+- **Lấy mẫu chậm.** Mỗi bước một lần chạy mạng, hai lần nếu có guidance. DDIM giảm còn khoảng 50 bước; còn nhiều cách nhanh hơn nữa ngoài phạm vi bài.
+- **Lịch nhiễu không phải luật cố định.** Stable Diffusion v1 dùng lịch khác lịch $10^{-4} \to 0.02$ của DDPM (hộp "Lỗi hay gặp" bên dưới); ô PyTorch của bài cũng phải đổi lịch vì $T$ nhỏ.
+- **Chất lượng phụ thuộc autoencoder.** Chi tiết bị mất khi nén thì diffusion không lấy lại được, ví dụ chữ nhỏ hay khuôn mặt xa.
+
+## Minh họa
+
+Hình dưới cho thấy dạng đóng của quá trình thuận trên một ảnh nhỏ. Thanh trượt chọn bước $t$; ảnh $\mathbf{x}_t$ được trộn từ ảnh gốc và **một nhiễu cố định**, nên bạn thấy chính ảnh đó chìm dần vào cùng một lớp nhiễu. Đồ thị nhỏ vẽ hai hệ số $\sqrt{\bar\alpha_t}$ và $\sqrt{1-\bar\alpha_t}$ theo $t$, có dấu ở bước hiện tại. Hãy thử:
+
+1. Đặt $t = 100$: ảnh vẫn rõ, hệ số ảnh là 0.9471, hệ số nhiễu 0.3209.
+2. Kéo tới $t = 250$: hai hệ số gần bằng nhau (0.7239 và 0.6899), hai đường trên đồ thị sắp cắt nhau. Ảnh vẫn nhận ra được nhưng đã lốm đốm.
+3. Kéo tới $t = 500$: hệ số ảnh chỉ còn 0.2803. Nhìn kỹ mới thấy bóng của hình.
+4. Kéo hết tới $t = 1000$: hệ số ảnh 0.0064, ảnh là nhiễu thuần. Đây là điểm xuất phát khi sinh ảnh.
+
+{/* VIZ: DiffusionNoiseViz
+    Ý: x_t = sqrt(ᾱ_t) x_0 + sqrt(1 − ᾱ_t) ε; khi t tăng, phần ảnh co lại, phần nhiễu lớn dần, tới t = 1000 gần như nhiễu thuần.
+    Tương tác: thanh trượt t từ 0 tới 1000 (bước 1); ảnh x_t vẽ lại ngay; hiện hai số sqrt(ᾱ_t), sqrt(1 − ᾱ_t) với 4 chữ số thập phân; đồ thị nhỏ hai đường theo t, có vạch dọc ở t hiện tại.
+    Dữ liệu: ảnh 16 × 16 cố định (thang [−1, 1]); nhiễu ε cố định sinh bằng PRNG có seed, dùng chung cho mọi t. Lịch tuyến tính DDPM: β_1 = 1e-4 tới β_T = 0.02, T = 1000. Số phải khớp ô NumPy của bài (t = 100: 0.9471 / 0.3209; 250: 0.7239 / 0.6899; 500: 0.2803 / 0.9599; 1000: 0.0064 / 1.0000). Toán ở src/lib/viz/diffusion.ts.
+    Ký hiệu: t, T, β_t, ᾱ_t, x_0, x_t, ε, đúng như mục Lý thuyết. */}
+
+Bảng dưới đặt ba họ mô hình sinh ảnh cạnh nhau. Hãy nhìn hai dòng "Huấn luyện" và "Sinh một ảnh": diffusion đổi tốc độ sinh lấy sự ổn định khi học.
+
+| Tiêu chí | VAE | GAN | Diffusion |
+|---|---|---|---|
+| Ý tưởng | Nén ảnh thành $\mathbf{z}$ rồi giải mã | $G$ sinh ảnh giả, $D$ phân biệt thật giả | Thêm nhiễu từng bước, học gỡ nhiễu ngược lại |
+| Huấn luyện | Ổn định: tái tạo cộng KL | Khó giữ cân bằng giữa $G$ và $D$ | Ổn định: MSE trên nhiễu |
+| Sinh một ảnh | Một lần chạy bộ giải mã | Một lần chạy $G$ | Hàng chục tới 1000 lần chạy mạng |
+| Chất lượng ảnh | Thường hơi mờ | Sắc nét | Sắc nét |
+| Đa dạng | Tốt | Dễ sụp mode (mode collapse) | Tốt |
+| Vai trò trong Stable Diffusion | Autoencoder nén ảnh thành latent | Không dùng | U-Net khử nhiễu trên latent |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: ô NumPy với Python 3.14, NumPy 2.4, scikit-learn 1.8 và matplotlib (bản có trong Pyodide); hai ô PyTorch với Python 3.14, PyTorch 2.15 và scikit-learn 1.9 trên CPU. Ô NumPy chạy ngay trên trang, hai ô PyTorch chạy trên máy bạn. Các ô độc lập, không dùng biến của nhau. Ô NumPy lần đầu chạy lâu hơn, vì trình duyệt phải tải thêm scikit-learn và matplotlib.
+
+### Quá trình thuận trên một chữ số
+
+Ô dưới đây lấy chữ số đầu tiên của `load_digits` (một số 0, ảnh $8 \times 8$), đưa về $[-1, 1]$, rồi dùng dạng đóng với lịch tuyến tính của DDPM để tạo $\mathbf{x}_t$ ở $t = 0, 100, 250, 500, 1000$, cùng một nhiễu $\boldsymbol\epsilon$. Phần cuối kiểm lại phép dẫn: thêm nhiễu **từng bước** 500 lần cho 20 000 bản sao của một điểm ảnh $x_0 = 1$, rồi so trung bình và độ lệch chuẩn với dạng đóng.
+
+<PythonRunner
+  code={forwardNoiseCode}
+  title="Thêm nhiễu theo dạng đóng của DDPM"
+  figureAlt={['Năm ảnh xám 8 × 8 xếp thành một hàng, ghi t = 0, 100, 250, 500, 1000. Ảnh t = 0 là chữ số 0 rõ nét, hình vòng sáng trên nền tối. Ảnh t = 100 vẫn thấy rõ vòng, hơi lốm đốm. Ảnh t = 250 còn nhận ra vòng nhưng nhiễu đã nhiều. Ảnh t = 500 gần như chỉ thấy đốm sáng tối ngẫu nhiên. Ảnh t = 1000 là nhiễu thuần.']}
+/>
+
+Đọc kết quả:
+
+- **Năm dòng đầu** là bảng ở mục Lý thuyết. Hai hệ số cắt nhau ngay sau $t = 250$; tới $t = 1000$ phần ảnh chỉ còn 0.0064.
+- **Hình:** cùng một nhiễu, nên từ trái sang phải bạn thấy đúng một chữ số chìm dần, như trong VIZ.
+- **Hai dòng cuối:** thêm nhiễu từng bước cho trung bình 0.2742 và độ lệch chuẩn 0.9624; dạng đóng cho 0.2803 và 0.9599. Chênh lệch nằm trong sai số của 20 000 mẫu (độ lệch chuẩn của trung bình mẫu khoảng $0.96/\sqrt{20\,000} \approx 0.007$). 500 bước nhỏ thật sự gộp được thành một bước.
+
+### Một DDPM tí hon trên dữ liệu hai chiều
+
+Ảnh thật cần U-Net và GPU. Để thấy cả vòng huấn luyện và lấy mẫu chạy trên CPU, file dưới đây thay ảnh bằng **điểm hai chiều**: 2000 điểm hình hai nửa vầng trăng (`make_moons`), chuẩn hóa về trung bình 0, độ lệch chuẩn 1. Mạng $\boldsymbol\epsilon_\theta$ là một MLP nhận $(x, y, t/T)$ và trả về 2 số. Vòng huấn luyện là Thuật toán 1, vòng lấy mẫu là Thuật toán 2 với $\sigma_t^2 = \beta_t$, đúng các công thức ở trên.
+
+Vì chỉ có $T = 100$ bước, lịch được nhân 10 lần: $\beta_t$ từ $10^{-3}$ tới $0.2$. Giữ lịch gốc với $T = 100$ thì $\bar\alpha_T$ chỉ khoảng 0.36, $\mathbf{x}_T$ còn rất nhiều dữ liệu, và việc bắt đầu lấy mẫu từ nhiễu chuẩn sẽ sai. Cách cài PyTorch bản CPU có ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+<LocalCode
+  code={tinyDdpmCode}
+  title="DDPM tí hon: huấn luyện và lấy mẫu trên hai nửa vầng trăng"
+  packages={['torch', 'scikit-learn']}
+  hardware="CPU là đủ, không cần GPU. Khoảng 2 phút trên máy phát triển, có thể lâu hơn trên máy chậm hoặc đang bận"
+>
+
+```text
+step    0  loss 0.895
+step 1000  loss 0.192
+step 2000  loss 0.214
+step 3000  loss 0.236
+step 4000  loss 0.197
+step 5000  loss 0.243
+noise x_T: mean dist 0.262, within 0.1: 35%
+samples x_0: mean dist 0.042, within 0.1: 90%
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Loss** giảm nhanh từ 0.895 xuống quanh 0.2 rồi dao động. Loss không về 0, và điều đó là bình thường: ở $t$ lớn, $\mathbf{x}_t$ gần như toàn nhiễu, không mạng nào đoán đúng được chính xác nhiễu nào đã cộng vào. Mỗi lô lấy $t$ ngẫu nhiên, nên loss nhảy lên xuống theo lô.
+- **Hai dòng cuối** đo khoảng cách từ mỗi điểm tới điểm thật gần nhất. 1000 điểm nhiễu ban đầu $\mathbf{x}_T$ cách trung bình 0.262, chỉ 35% nằm trong bán kính 0.1 của dữ liệu thật (con số này không nhỏ vì hai nửa vầng trăng phủ khá rộng vùng giữa). Sau 100 bước đi ngược, khoảng cách còn 0.042 và 90% điểm nằm sát dữ liệu: các điểm đã gom lại thành hai nửa vầng trăng.
+
+Số của bạn có thể lệch một chút so với kết quả mẫu, tùy phiên bản PyTorch và CPU.
+
+### Đếm tham số LoRA trong attention của U-Net
+
+File thứ hai tự viết một lớp `LoRALinear` đúng công thức $\mathbf{W}_0\mathbf{x} + \frac{\alpha}{r}\mathbf{B}\mathbf{A}\mathbf{x}$, gắn vào bốn phép chiếu của một lớp attention có cỡ như U-Net của Stable Diffusion v1, rồi đếm tham số cho cả 32 lớp attention (16 khối Transformer, mỗi khối một self-attention và một cross-attention). Không tải mô hình nào, chỉ dựng các lớp tuyến tính đúng cỡ.
+
+<LocalCode
+  code={loraAttentionCode}
+  title="Tham số LoRA trong attention của U-Net"
+  packages={['torch']}
+  hardware="CPU là đủ. Vài giây, phần lớn là thời gian nạp PyTorch"
+  sampleVaries={false}
+>
+
+```text
+cross-attn d=320: full 696640, LoRA r=4: 13824
+same output at init: True
+LoRA r=4 on all 32 attention layers: 797184
+share of an 860M U-Net: 0.093%
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **`full 696640, LoRA r=4: 13824`:** lớp cross-attention có gần 700 nghìn tham số (nhiều nhất ở `to_k`, `to_v` vì nhận 768 chiều), LoRA chỉ học 13 824, khớp phép đếm tay ở mục Lý thuyết.
+- **`same output at init: True`:** $\mathbf{B} = \mathbf{0}$ nên lúc đầu lớp LoRA cho đúng đầu ra của lớp gốc, trên một latent $64 \times 64$ (4 096 vị trí).
+- **`797184` và `0.093%`:** cả U-Net chỉ học khoảng 0.8 triệu số. Con số này trùng với số tham số mà thư viện `peft` báo khi gắn LoRA $r = 4$ vào U-Net dựng theo cấu hình Stable Diffusion v1 trong `diffusers` (kiểm riêng, không nằm trong bài).
+
+## Lỗi hay gặp
+
+:::caution[Nghĩ mạng học vẽ cả bức ảnh trong một bước]
+Mạng $\boldsymbol\epsilon_\theta$ chỉ học một việc nhỏ: nhìn ảnh nhiễu ở bước $t$ và đoán nhiễu. Ảnh hiện ra là kết quả của hàng chục tới hàng nghìn lần gọi mạng liên tiếp. Vì vậy "số bước lấy mẫu" là một nút chỉnh thật: quá ít bước với cách lấy mẫu DDPM thì ảnh còn nhiễu hoặc méo; hãy đổi sang bộ lấy mẫu kiểu DDIM thay vì cắt bớt bước của DDPM.
+:::
+
+:::caution[Thêm nhiễu từng bước khi huấn luyện, hay chép lịch nhiễu sang chỗ khác]
+Khi huấn luyện, luôn dùng dạng đóng $\sqrt{\bar\alpha_t}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon$; thêm nhiễu $t$ lần cho cùng phân phối nhưng chậm hơn $t$ lần. Lịch nhiễu cũng gắn với $T$ và với mô hình: lịch $10^{-4} \to 0.02$ chỉ hợp với $T = 1000$ (ô PyTorch phải nhân 10 khi $T = 100$), còn cấu hình Stable Diffusion v1 dùng lịch khác, từ 0.00085 tới 0.012 và tuyến tính theo căn bậc hai. Sinh ảnh bằng một mô hình có sẵn thì dùng đúng lịch của nó, đọc từ file cấu hình. Và nhớ đưa dữ liệu về thang mà mô hình dùng, như $[-1, 1]$ của DDPM.
+:::
+
+:::caution[Đặt hệ số guidance càng cao càng tốt, hay nghĩ LoRA làm mô hình nhỏ đi]
+Hệ số $s$ lớn làm ảnh bám câu lệnh hơn, nhưng đổi lại mất đa dạng, và quá cao thì ảnh dễ gắt màu, méo. Bắt đầu từ mặc định của mô hình (7.5 với Stable Diffusion v1) rồi chỉnh. Guidance cũng làm mỗi bước tốn gấp đôi, vì mạng chạy hai lần. Còn LoRA chỉ làm nhỏ **phần được huấn luyện** và file lưu: khi chạy vẫn cần đủ U-Net 860 triệu tham số, như ở bài [Đánh giá mô hình và PEFT](/vi/llm/evaluation-peft/).
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Diffusion thêm nhiễu Gauss vào ảnh qua $T$ bước nhỏ (ở đây $T$ là số bước, không phải nhiệt độ), rồi học đi ngược. Nhờ tổng các Gauss độc lập vẫn là Gauss, ta nhảy thẳng tới bước bất kỳ: $\mathbf{x}_t = \sqrt{\bar\alpha_t}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon$.
+- DDPM huấn luyện mạng $\boldsymbol\epsilon_\theta(\mathbf{x}_t, t)$ đoán nhiễu bằng MSE, rồi sinh ảnh bằng 1000 bước ngược từ nhiễu thuần. DDIM dùng cùng mạng, nhảy qua nhiều bước, chỉ cần khoảng 50.
+- Stable Diffusion chạy diffusion trên latent của một autoencoder (ảnh $512 \times 512 \times 3$ thành latent $64 \times 64 \times 4$, nhỏ hơn 48 lần), nhận câu lệnh qua bộ mã hóa chữ CLIP và cross-attention, và dùng classifier-free guidance $\boldsymbol\epsilon_\varnothing + s(\boldsymbol\epsilon_{\mathbf{c}} - \boldsymbol\epsilon_\varnothing)$ để bám câu lệnh.
+- LoRA gắn vào các phép chiếu attention của U-Net: với $r = 4$ chỉ khoảng 0.8 triệu tham số, chưa tới 0.1% U-Net, đủ để dạy một phong cách hay một đối tượng.
+
+**Đọc thêm:**
+
+- Ho, J., Jain, A., Abbeel, P. (2020). [*Denoising Diffusion Probabilistic Models*](https://arxiv.org/abs/2006.11239), arXiv:2006.11239, mục 2, 3.2 và Thuật toán 1, 2. Nguồn gốc của mọi công thức DDPM trong bài; mục 3.2 dẫn bước ngược.
+- Song, J., Meng, C., Ermon, S. (2021). [*Denoising Diffusion Implicit Models*](https://arxiv.org/abs/2010.02502), arXiv:2010.02502, mục 4. Cách đi ngược tất định, ít bước, dùng lại mạng của DDPM.
+- Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B. (2022). [*High-Resolution Image Synthesis with Latent Diffusion Models*](https://arxiv.org/abs/2112.10752), arXiv:2112.10752, mục 3. Latent diffusion và cross-attention; nền của Stable Diffusion. Thông số của Stable Diffusion v1 nằm ở [README của CompVis](https://github.com/CompVis/stable-diffusion).
+- Ho, J., Salimans, T. (2022). [*Classifier-Free Diffusion Guidance*](https://arxiv.org/abs/2207.12598), arXiv:2207.12598, mục 3. Ngắn; công thức guidance và thí nghiệm về đổi đa dạng lấy chất lượng.
+- Hu, E. J. và cộng sự (2022). [*LoRA: Low-Rank Adaptation of Large Language Models*](https://arxiv.org/abs/2106.09685), arXiv:2106.09685; Ruiz, N. và cộng sự (2023). [*DreamBooth: Fine Tuning Text-to-Image Diffusion Models for Subject-Driven Generation*](https://arxiv.org/abs/2208.12242), arXiv:2208.12242; và hướng dẫn [*LoRA*](https://huggingface.co/docs/diffusers/training/lora) của Hugging Face `diffusers`, cho biết các lớp được gắn LoRA trong U-Net.
+
+<LessonProgress />

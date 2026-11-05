@@ -1,6 +1,6 @@
 ---
 title: 'Phân loại ảnh với CNN: AlexNet → VGG → ResNet → MobileNet → EfficientNet'
-description: Vì sao tích chập hợp với ảnh, đếm tham số và kích thước đầu ra, rồi đi qua AlexNet, VGG, ResNet, MobileNet, EfficientNet và ý chính của từng mạng.
+description: Vì sao tích chập hợp với ảnh, cách tính tham số và cỡ đầu ra, rồi ý chính của AlexNet, VGG, ResNet, MobileNet và EfficientNet.
 quiz:
   - question: 'Ảnh xám $28 \times 28$ đi qua một lớp tích chập kernel $5 \times 5$, padding 0, stride 1, rồi max pooling $2 \times 2$ stride 2. Bản đồ đặc trưng cuối có cỡ bao nhiêu?'
     options: ['$24 \times 24$', '$12 \times 12$', '$14 \times 14$', '$11 \times 11$']
@@ -16,11 +16,11 @@ quiz:
     explanation: 'Tỉ lệ là $1/C_{\text{out}} + 1/k^2 = 1/256 + 1/9 \approx 0.115$, tức ít hơn khoảng 8.7 lần. Phần depthwise thì rẻ thật (cỡ $1/256$), nhưng phần pointwise $1 \times 1$ vẫn phải trộn 256 kênh thành 256 kênh, và phần này chiếm gần hết chi phí còn lại.'
   - question: 'Vì sao thêm kết nối tắt (đầu ra $= F(\mathbf{x}) + \mathbf{x}$) giúp huấn luyện được mạng rất sâu như ResNet-152?'
     options:
+      - 'Nếu một khối không giúp gì, nó chỉ cần đẩy $F(\mathbf{x})$ về gần 0 để thành ánh xạ đồng nhất, việc dễ hơn nhiều so với học ánh xạ đồng nhất từ đầu'
       - 'Đường tắt thêm nhiều tham số, nên mạng mạnh hơn'
       - 'Đường tắt chủ yếu chống overfitting, vì mạng sâu học thuộc dữ liệu'
-      - 'Nếu một khối không giúp gì, nó chỉ cần đẩy $F(\mathbf{x})$ về gần 0 để thành ánh xạ đồng nhất, việc dễ hơn nhiều so với học ánh xạ đồng nhất từ đầu'
       - 'Đường tắt bỏ được hàm kích hoạt ReLU'
-    answer: 2
+    answer: 0
     explanation: 'Mạng thường 56 lớp có lỗi trên chính tập huấn luyện cao hơn mạng 20 lớp, nên vấn đề là khó tối ưu, không phải overfitting. Với kết nối tắt, "không làm gì" chỉ cần trọng số nhỏ, nên thêm lớp không làm mạng tệ đi. Đường tắt đồng nhất không thêm tham số nào.'
   - question: 'Bạn gấp đôi số kênh của mọi lớp tích chập trong một CNN, giữ nguyên số lớp và cỡ ảnh. Số phép tính của các lớp tích chập tăng khoảng bao nhiêu?'
     options: ['Gấp 2', 'Gấp 4', 'Gấp 8', 'Không đổi']
@@ -51,7 +51,7 @@ import countParamsCode from '@code/cv/cnn-image-classification/count-params.vi.p
 Sau bài này, bạn sẽ:
 
 - Hiểu vì sao **tích chập** (convolution) hợp với ảnh: nhìn cục bộ, chia sẻ trọng số, nên ít tham số hơn **lớp kết nối đầy đủ** (fully connected layer) hàng trăm nghìn lần.
-- Tự tính được kích thước đầu ra $\lfloor (H + 2p - k)/s \rfloor + 1$, số tham số của một lớp, và **trường nhìn** (receptive field) của một chồng lớp.
+- Tự tính được kích thước đầu ra $\lfloor (H + 2p - k)/s \rfloor + 1$, số tham số của một lớp, và **trường tiếp nhận** (receptive field) của một chồng lớp.
 - Kể được ý chính của từng mạng trong dòng **phân loại ảnh** (image classification): AlexNet, VGG, ResNet, MobileNet, EfficientNet, và bài toán mỗi mạng giải.
 - Cài được tích chập 2D bằng NumPy, huấn luyện một CNN nhỏ bằng PyTorch, đếm tham số các mạng có sẵn trong torchvision.
 
@@ -153,9 +153,9 @@ Dấu $\lfloor \cdot \rfloor$ (làm tròn xuống) có vì bước cuối có th
 
 Pooling dùng đúng công thức này: max pooling $2 \times 2$ với $s = 2$, $p = 0$ cho $\lfloor (H - 2)/2 \rfloor + 1 = H/2$ khi $H$ chẵn. VGG dùng $k = 3$, $p = 1$, $s = 1$ cho mọi lớp tích chập để giữ nguyên cỡ, rồi để pooling lo việc thu nhỏ: $224 \to 112 \to 56 \to 28 \to 14 \to 7$.
 
-### Trường nhìn
+### Trường tiếp nhận
 
-Một ô của bản đồ đặc trưng "thấy" bao nhiêu điểm ảnh gốc? Vùng đó gọi là **trường nhìn**. Một lớp $3 \times 3$: mỗi ô thấy $3 \times 3$ điểm ảnh. Xếp thêm một lớp $3 \times 3$ nữa: mỗi ô của lớp thứ hai nhìn $3 \times 3$ ô của lớp thứ nhất, các ô này chồng lên nhau và mỗi ô nhìn $3 \times 3$ điểm ảnh, nên tổng cộng thấy $5 \times 5$. Mỗi lớp $k \times k$, stride 1, nới trường nhìn thêm $k - 1$:
+Một ô của bản đồ đặc trưng "thấy" bao nhiêu điểm ảnh gốc? Vùng đó gọi là **trường tiếp nhận**. Một lớp $3 \times 3$: mỗi ô thấy $3 \times 3$ điểm ảnh. Xếp thêm một lớp $3 \times 3$ nữa: mỗi ô của lớp thứ hai nhìn $3 \times 3$ ô của lớp thứ nhất, các ô này chồng lên nhau và mỗi ô nhìn $3 \times 3$ điểm ảnh, nên tổng cộng thấy $5 \times 5$. Mỗi lớp $k \times k$, stride 1, nới trường tiếp nhận thêm $k - 1$:
 
 $$
 r_L = 1 + L\,(k - 1)
@@ -167,10 +167,10 @@ $$
 r_L = 1 + \sum_{l=1}^{L} (k_l - 1) \prod_{m=1}^{l-1} s_m
 $$
 
-Tích các stride đứng trước cho biết một bước ở lớp $l$ dài bao nhiêu điểm ảnh gốc. Ví dụ CNN nhỏ ở ô PyTorch: tích chập $3 \times 3$ (trường nhìn 3), max pooling $2 \times 2$ stride 2 (thêm $1 \cdot 1$, thành 4), tích chập $3 \times 3$ sau một stride 2 (thêm $2 \cdot 2$, thành 8), pooling nữa (thêm $1 \cdot 2$, thành 10). Mỗi ô của bản đồ cuối thấy vùng $10 \times 10$, rộng hơn cả ảnh $8 \times 8$ (phần thừa rơi vào vùng đệm). Đó là cách mạng sâu "nhìn" được cả vật lớn dù mỗi kernel chỉ nhỏ $3 \times 3$.
+Tích các stride đứng trước cho biết một bước ở lớp $l$ dài bao nhiêu điểm ảnh gốc. Ví dụ CNN nhỏ ở ô PyTorch: tích chập $3 \times 3$ (trường tiếp nhận 3), max pooling $2 \times 2$ stride 2 (thêm $1 \cdot 1$, thành 4), tích chập $3 \times 3$ sau một stride 2 (thêm $2 \cdot 2$, thành 8), pooling nữa (thêm $1 \cdot 2$, thành 10). Mỗi ô của bản đồ cuối thấy vùng $10 \times 10$, rộng hơn cả ảnh $8 \times 8$ (phần thừa rơi vào vùng đệm). Đó là cách mạng sâu "nhìn" được cả vật lớn dù mỗi kernel chỉ nhỏ $3 \times 3$.
 
 :::note[Ghi nhớ]
-Một lớp tích chập có $k^2 C_{\text{in}} C_{\text{out}} + C_{\text{out}}$ tham số, không phụ thuộc cỡ ảnh. Cỡ đầu ra mỗi chiều là $\lfloor (H + 2p - k)/s \rfloor + 1$. Xếp chồng lớp nhỏ thì trường nhìn lớn dần; stride và pooling làm nó lớn nhanh hơn.
+Một lớp tích chập có $k^2 C_{\text{in}} C_{\text{out}} + C_{\text{out}}$ tham số, không phụ thuộc cỡ ảnh. Cỡ đầu ra mỗi chiều là $\lfloor (H + 2p - k)/s \rfloor + 1$. Xếp chồng lớp nhỏ thì trường tiếp nhận lớn dần; stride và pooling làm nó lớn nhanh hơn.
 :::
 
 ### AlexNet (2012): mạng sâu trên GPU
@@ -183,7 +183,7 @@ Theo bài báo, khác biệt đến từ **ReLU** thay cho tanh (học nhanh hơ
 
 VGG (Simonyan và Zisserman, 2014, đăng ở ICLR 2015) hỏi: nếu chỉ dùng kernel nhỏ nhất có trái, phải, trên, dưới, tức $3 \times 3$, rồi xếp thật nhiều lớp thì sao? Mạng có 16 tới 19 lớp có trọng số, mọi tích chập $3 \times 3$, stride 1, padding 1, thêm 5 lớp max pooling. VGG về nhất phần định vị và nhì phần phân loại ở ILSVRC 2014.
 
-Vì sao ba lớp $3 \times 3$ tốt hơn một lớp $7 \times 7$? Theo công thức trường nhìn, ba lớp $3 \times 3$ cũng thấy $1 + 3 \cdot 2 = 7$ điểm mỗi chiều. Nhưng với $C$ kênh vào và ra:
+Vì sao ba lớp $3 \times 3$ tốt hơn một lớp $7 \times 7$? Theo công thức trường tiếp nhận, ba lớp $3 \times 3$ cũng thấy $1 + 3 \cdot 2 = 7$ điểm mỗi chiều. Nhưng với $C$ kênh vào và ra:
 
 $$
 3 \cdot (3^2 C^2) = 27 C^2 \quad \text{so với} \quad 7^2 C^2 = 49 C^2
@@ -315,7 +315,7 @@ Code trong bài chạy thử lần cuối tháng 11/2026: hai ô NumPy với Pyt
 
 ### Đếm tham số và phép tính
 
-Ô thứ hai chỉ dùng Python thuần. Nó làm lại ba phép đếm của mục Lý thuyết: lớp kết nối đầy đủ so với tích chập, tích chập thường so với tách theo chiều sâu (lớp $14 \times 14 \times 512$ của MobileNet), và ba lớp $3 \times 3$ so với một lớp $7 \times 7$ kèm trường nhìn. Các phép đếm bỏ qua hệ số tự do cho gọn.
+Ô thứ hai chỉ dùng Python thuần. Nó làm lại ba phép đếm của mục Lý thuyết: lớp kết nối đầy đủ so với tích chập, tích chập thường so với tách theo chiều sâu (lớp $14 \times 14 \times 512$ của MobileNet), và ba lớp $3 \times 3$ so với một lớp $7 \times 7$ kèm trường tiếp nhận. Các phép đếm bỏ qua hệ số tự do cho gọn.
 
 <PythonRunner code={paramsCode} title="Đếm tham số: kết nối đầy đủ, tích chập, depthwise separable" />
 
@@ -323,7 +323,7 @@ Code trong bài chạy thử lần cuối tháng 11/2026: hai ô NumPy với Pyt
 
 - **50 331 648 so với 432:** cùng biến ảnh $32 \times 32 \times 3$ thành 16 kênh $32 \times 32$, tích chập ít hơn khoảng 116 nghìn lần.
 - **462.4M và 52.3M phép nhân-cộng:** trùng với bảng 3 trong bài báo MobileNet. Tỉ lệ 0.1131 khớp đúng $1/512 + 1/9$, tức ít hơn khoảng 8.8 lần.
-- **110 592 so với 200 704:** với $C = 64$, đúng $27C^2$ và $49C^2$ của VGG. Ba dòng cuối cho trường nhìn $3, 5, 7$: ba lớp $3 \times 3$ thấy bằng một lớp $7 \times 7$.
+- **110 592 so với 200 704:** với $C = 64$, đúng $27C^2$ và $49C^2$ của VGG. Ba dòng cuối cho trường tiếp nhận $3, 5, 7$: ba lớp $3 \times 3$ thấy bằng một lớp $7 \times 7$.
 
 ### CNN nhỏ học trên ảnh chữ số
 
@@ -349,7 +349,7 @@ epoch 30  train loss 0.014  test acc 0.975
 Đọc kết quả:
 
 - **`params: 1898`:** lớp tích chập đầu $3^2 \cdot 1 \cdot 8 + 8 = 80$, lớp thứ hai $3^2 \cdot 8 \cdot 16 + 16 = 1\,168$, lớp cuối $64 \cdot 10 + 10 = 650$. Tổng 1 898, đúng công thức đếm.
-- **`feature maps: (1, 16, 2, 2)`:** sau hai lần pooling, mỗi ảnh còn 16 bản đồ $2 \times 2$, tức 64 số vào lớp cuối. Mỗi ô của bản đồ này có trường nhìn $10 \times 10$, bao trọn ảnh.
+- **`feature maps: (1, 16, 2, 2)`:** sau hai lần pooling, mỗi ảnh còn 16 bản đồ $2 \times 2$, tức 64 số vào lớp cuối. Mỗi ô của bản đồ này có trường tiếp nhận $10 \times 10$, bao trọn ảnh.
 - **`test acc 0.975`:** sau 30 epoch, mạng chưa tới 2 000 tham số đoán đúng 97.5% ảnh chưa thấy. Số này có thể lệch chút ít trên máy hoặc bản PyTorch khác.
 
 Ở ô NumPy bạn tự đặt kernel cạnh dọc; ở đây `loss.backward()` tính gradient của $\mathcal{L}$ theo từng ô của mọi kernel, và mạng tự học ra kernel của mình.
@@ -405,7 +405,7 @@ Bài báo ResNet nói rõ mạng thường sâu bị **lỗi huấn luyện** ca
 **Ý chính:**
 
 - Tích chập trượt một kernel nhỏ trên ảnh: nhìn cục bộ và dùng chung trọng số, nên một lớp chỉ có $k^2 C_{\text{in}} C_{\text{out}} + C_{\text{out}}$ tham số, không phụ thuộc cỡ ảnh, và mẫu được nhận ra ở mọi vị trí.
-- Cỡ đầu ra mỗi chiều là $\lfloor (H + 2p - k)/s \rfloor + 1$. Xếp chồng lớp nhỏ thì trường nhìn lớn dần, $r_L = 1 + L(k - 1)$ khi stride bằng 1.
+- Cỡ đầu ra mỗi chiều là $\lfloor (H + 2p - k)/s \rfloor + 1$. Xếp chồng lớp nhỏ thì trường tiếp nhận lớn dần, $r_L = 1 + L(k - 1)$ khi stride bằng 1.
 - AlexNet (2012) đưa CNN sâu lên GPU; VGG (2014) xếp chồng kernel $3 \times 3$; ResNet (2015–2016) cho khối học phần dư $\mathbf{y} = F(\mathbf{x}) + \mathbf{x}$ nên huấn luyện được mạng rất sâu.
 - MobileNet (2017) tách tích chập thành depthwise và pointwise, chi phí còn khoảng $1/C_{\text{out}} + 1/k^2$; EfficientNet (2019) co giãn độ sâu, độ rộng, độ phân giải cùng lúc theo một hệ số $\phi$.
 

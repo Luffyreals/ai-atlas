@@ -1,6 +1,6 @@
 ---
 title: 'Semantic Segmentation: FCN, UNet, FPN, DeepLab, HRNet'
-description: Xe tự lái cần biết từng pixel là đường, người hay xe. Bài toán gán nhãn pixel, cross-entropy theo pixel, IoU và mIoU, và năm họ mô hình FCN, UNet, FPN, DeepLab, HRNet.
+description: Xe tự lái cần biết từng pixel là đường, người hay xe. Gán nhãn từng pixel, cross-entropy theo pixel, IoU, mIoU và năm họ FCN, UNet, FPN, DeepLab, HRNet.
 quiz:
   - question: 'Ảnh đường phố có 4 lớp: đường 60% số pixel, trời 25%, nhà 13%, người đi bộ 2%. Một mô hình đoán đúng mọi pixel, trừ pixel người đi bộ: nó gán hết chúng cho lớp đường. Điều nào đúng?'
     options:
@@ -288,17 +288,23 @@ File dưới đây tự sinh 512 ảnh huấn luyện và 128 ảnh kiểm tra $
   code={unetCode}
   title="UNet hai tầng học tách hình tròn và hình vuông"
   packages={['torch', 'numpy']}
-  hardware="CPU là đủ. HARDWARE_TIME"
-  sampleVaries={false}
+  hardware="CPU là đủ. Một đến hai phút cho cả hai lần huấn luyện trên máy phát triển"
 >
 
 ```text
-SAMPLE_OUTPUT
+skip=True: acc 0.987, IoU [0.996 0.879 0.83 ], mIoU 0.902
+skip=False: acc 0.953, IoU [0.983 0.676 0.46 ], mIoU 0.706
 ```
 
 </LocalCode>
 
-UNET_EXPLAIN
+Đọc kết quả:
+
+- **Có nối tắt:** mIoU 0.902 trên 128 ảnh chưa thấy khi huấn luyện; hình tròn 0.879, hình vuông 0.83. Sau 20 lượt qua dữ liệu, UNet nhỏ đã phân biệt được hai hình cùng độ sáng chỉ nhờ hình dạng.
+- **Bỏ nối tắt:** cùng kiến trúc, cùng hạt giống, chỉ khác là nhánh giãn không nhận bản đồ của nhánh co. mIoU tụt còn 0.706, IoU hình vuông còn 0.46. Mọi thông tin vị trí phải đi qua đáy $8 \times 8$, nên các góc vuông và đường biên bị nhòe, đúng điều mục Lý thuyết dự đoán.
+- **Pixel accuracy** chỉ giảm từ 0.987 xuống 0.953: lại thêm một ví dụ cho thấy nó che mất khác biệt mà mIoU thấy rõ.
+
+Dù đã đặt hạt giống, số có thể lệch ở chữ số thứ hai, thứ ba trên máy khác: số luồng CPU đổi thứ tự cộng số thực, và sai khác nhỏ lớn dần qua hàng trăm bước huấn luyện. Trên máy phát triển, chạy với 4 luồng cho mIoU 0.908 và 0.704. Khoảng cách giữa có và không có nối tắt thì giữ nguyên.
 
 ## Lỗi hay gặp
 

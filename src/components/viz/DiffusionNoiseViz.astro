@@ -1,0 +1,44 @@
+---
+// DiffusionNoiseViz for cv/diffusion-models (docs/architecture/cv-lessons.md, section 1.2). The only file a lesson
+// imports: <DiffusionNoiseViz />, no props, no client:* in MDX. Here, at build time: UI strings, the image
+// description of the page locale, and KaTeX. The island computes ᾱ_t, the fixed noise ε and x_t itself
+// (diffusion.ts: + − × ÷ and Math.sqrt only), the same at build time and in the browser.
+// KaTeX travels as named slots, not props: √ᾱ_t alone is about 3.5 KB of HTML, so the formula and the two
+// coefficient symbols would push the island's props past their 8 KB budget (viz/README.md section 2.9). A slot is
+// static HTML that the island places where it wants (<astro-slot>), sent once, never re-rendered.
+// The island hydrates 200px before it scrolls into view. Styles: viz.css, through Starlight's customCss.
+import DiffusionNoiseVizIsland from './diffusion-noise-viz/DiffusionNoiseVizIsland';
+import { DIGIT_THREE_16, DIGIT_THREE_DIFFUSION } from '@data/datasets/pixel-digits';
+import { getStrings } from '@i18n/ui';
+import { inlineMarkupLabel, renderInlineMarkup } from '@lib/inline-markup';
+import { getPageLocale } from '@lib/page-locale';
+
+const route = Astro.locals.starlightRoute;
+const locale = getPageLocale(route);
+const strings = getStrings(Astro.locals.t, 'vizDiffusion');
+const tCommon = getStrings(Astro.locals.t, 'common');
+
+// The lesson's formula and symbols (docs/architecture/cv-lessons.md, section 2), not UI strings.
+const FORMULA = String.raw`$\mathbf{x}_t = \sqrt{\bar\alpha_t}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon$`;
+const SIGNAL = String.raw`$\sqrt{\bar\alpha_t}$`;
+const NOISE = String.raw`$\sqrt{1-\bar\alpha_t}$`;
+---
+
+<div class="atlas-viz not-content" lang={locale} data-pagefind-ignore>
+  <DiffusionNoiseVizIsland
+    client:visible={{ rootMargin: '200px' }}
+    image={DIGIT_THREE_16.pixels}
+    description={DIGIT_THREE_16.description[locale]}
+    config={DIGIT_THREE_DIFFUSION}
+    labels={{ tHtml: renderInlineMarkup(strings.tLabel), tText: inlineMarkupLabel(strings.tLabel) }}
+    strings={strings}
+  >
+    <Fragment slot="x0Title" set:html={renderInlineMarkup(strings.x0Title)} />
+    <Fragment slot="noiseTitle" set:html={renderInlineMarkup(strings.noiseTitle)} />
+    <Fragment slot="xtTitle" set:html={renderInlineMarkup(strings.xtTitle)} />
+    <Fragment slot="formula" set:html={renderInlineMarkup(FORMULA)} />
+    <Fragment slot="signalSymbol" set:html={renderInlineMarkup(SIGNAL)} />
+    <Fragment slot="noiseSymbol" set:html={renderInlineMarkup(NOISE)} />
+  </DiffusionNoiseVizIsland>
+  <noscript><p class="atlas-viz-noscript">{tCommon.needsScript}</p></noscript>
+</div>

@@ -1,0 +1,78 @@
+---
+// cv/instance-universal-segmentation, "Minh họa": one scene, three answers, as three panels stacked (narrow
+// layout). The scene is drawn as tiles, not as a picture: a band of sky on top; below it the road, two people
+// shoulder to shoulder and a car. Each panel has its name and rule on the left.
+// - Semantic: one box per class; the two people are ONE box "person" (accent), so no seam between them.
+// - Instance: sky and road are tone off (dotted, page colour: left empty; the road box is bare); person 1
+//   accent, person 2 alt (dashed), car plain, each with its number: border style and words, not colour alone.
+// - Panoptic: sky and road as in semantic, the objects as in instance.
+// Boxes touch edge to edge (a label map), so every word sits inside its own box.
+// Narrow layout only. Words: src/data/figures/segmentation-tasks.ts.
+import { SEGMENTATION_TASKS } from '@data/figures/segmentation-tasks';
+import { mainAndSmall, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = SEGMENTATION_TASKS[getPageLocale(Astro.locals.starlightRoute)];
+const l = t.labels;
+
+// A scene: x 112–352; sky 36 high, then a row 64 high: road 68, two people 62 each, car 48.
+const SCENE = { x: 112, width: 240, sky: 36, row: 64 } as const;
+const PANEL = { height: SCENE.sky + SCENE.row, gap: 16, top: 8 } as const;
+const panelY = (i: number) => PANEL.top + i * (PANEL.height + PANEL.gap);
+const scene = (y: number) => {
+  const rowY = y + SCENE.sky;
+  const at = (x: number, width: number): Box => ({ x: SCENE.x + x, y: rowY, width, height: SCENE.row });
+  return {
+    sky: { x: SCENE.x, y, width: SCENE.width, height: SCENE.sky } as Box,
+    road: at(0, 68),
+    person1: at(68, 62),
+    person2: at(130, 62),
+    people: at(68, 124),
+    car: at(192, 48),
+  };
+};
+const [semantic, instance, panoptic] = [0, 1, 2].map((i) => scene(panelY(i))) as [
+  ReturnType<typeof scene>,
+  ReturnType<typeof scene>,
+  ReturnType<typeof scene>,
+];
+const names = [
+  { name: l.semantic, rule: l.semanticRule },
+  { name: l.instance, rule: l.instanceRule },
+  { name: l.panoptic, rule: l.panopticRule },
+];
+const height = panelY(2) + PANEL.height + 8;
+---
+
+<FigureFrame id="segmentation-tasks" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    {
+      names.map(({ name, rule }, i) => (
+        <>
+          <FigText x={8} y={panelY(i) + 16} lines={name} anchor="start" />
+          <FigText x={8} y={panelY(i) + 60} lines={rule} size="small" anchor="start" />
+        </>
+      ))
+    }
+
+    <FigNode {...semantic.sky} lines={l.sky} />
+    <FigNode {...semantic.road} lines={l.road} />
+    <FigNode {...semantic.people} lines={l.people} tone="accent" />
+    <FigNode {...semantic.car} lines={l.car} />
+
+    <FigNode {...instance.sky} lines={l.empty} tone="off" />
+    <FigNode {...instance.road} tone="off" bare />
+    <FigNode {...instance.person1} {...mainAndSmall(l.person1)} tone="accent" />
+    <FigNode {...instance.person2} {...mainAndSmall(l.person2)} tone="alt" />
+    <FigNode {...instance.car} {...mainAndSmall(l.car1)} />
+
+    <FigNode {...panoptic.sky} lines={l.sky} />
+    <FigNode {...panoptic.road} lines={l.road} />
+    <FigNode {...panoptic.person1} {...mainAndSmall(l.person1)} tone="accent" />
+    <FigNode {...panoptic.person2} {...mainAndSmall(l.person2)} tone="alt" />
+    <FigNode {...panoptic.car} {...mainAndSmall(l.car1)} />
+  </Fragment>
+</FigureFrame>

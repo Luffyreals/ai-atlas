@@ -1,48 +1,46 @@
-// Words of ResidualBlockFigure (cv/cnn-image-classification): a ResNet basic block. The input goes through two
-// 3 × 3 convolutions (the residual F(x)) and is added back through the shortcut, so the block only learns
-// what to change. The symbols x, F(x) and F(x) + x are drawn with FigMath / FigFormula in the component.
-// Order of the layers as in He et al. (2016): conv, BN, ReLU, conv, BN, add, ReLU.
-// vi follows docs/architecture/cv-lessons.md section 4; en is a draft for lesson-translator.
+// Words of ResidualBlockFigure (cv/cnn-image-classification, after "Cách sửa"): a residual block. The input
+// goes through 3 × 3 convolution, ReLU, 3 × 3 convolution (the residual F(x)) and is added back through the
+// shortcut: y = F(x) + x, then a ReLU, as in He et al. (2016). The symbols x, F(x) and y = F(x) + x are drawn
+// with FigMath / FigFormula in the component; here are only the words. `conv` names both convolutions.
+// vi follows the lesson's FIG comment; en is a draft for lesson-translator.
 import type { FigureText } from './types';
 
-type Key = 'input' | 'conv1' | 'conv2' | 'residual' | 'shortcut' | 'add' | 'relu' | 'output';
+type Key = 'input' | 'conv' | 'relu' | 'residual' | 'shortcut' | 'add' | 'output';
 
 export const RESIDUAL_BLOCK = {
   vi: {
     caption:
-      'Khối dư của ResNet (He và cộng sự, 2016) tính $\\mathrm{ReLU}(F(\\mathbf{x}) + \\mathbf{x})$. Khi khối tốt nhất gần với "giữ nguyên đầu vào", hai lớp tích chập chỉ cần đẩy $F(\\mathbf{x})$ về gần $\\mathbf{0}$, dễ hơn học lại cả ánh xạ.',
+      'Khối dư tính $\\mathbf{y} = F(\\mathbf{x}) + \\mathbf{x}$ rồi qua ReLU; nếu khối không giúp gì, chỉ cần $F(\\mathbf{x}) \\approx \\mathbf{0}$. Đường tắt đồng nhất không có tham số.',
     label: 'Sơ đồ khối dư của ResNet: hai lớp tích chập cộng với đường tắt',
     description:
-      'Đầu vào x đi theo hai đường. Đường chính qua tích chập 3 × 3 kèm chuẩn hóa batch và ReLU, rồi tích chập 3 × 3 kèm chuẩn hóa batch; kết quả là phần dư F(x). ' +
-      'Đường tắt mang nguyên x vòng bên phải, không qua lớp nào. ' +
-      'Hai đường gặp nhau ở phép cộng, cho F(x) + x, rồi qua ReLU thành đầu ra.',
+      'Đầu vào x đi theo hai đường. Đường chính qua tích chập 3 × 3, ReLU, rồi tích chập 3 × 3; ba lớp này được đóng khung và ghi là phần dư F(x). ' +
+      'Đường tắt đồng nhất mang nguyên x vòng bên phải, không qua lớp nào, vào thẳng phép cộng. ' +
+      'Phép cộng cho y bằng F(x) cộng x, rồi qua ReLU thành đầu ra.',
     labels: {
       input: 'Đầu vào',
-      conv1: ['Tích chập 3 × 3', 'BN, ReLU'],
-      conv2: ['Tích chập 3 × 3', 'BN'],
-      residual: 'phần dư',
-      shortcut: ['Đường tắt:', 'giữ nguyên'],
-      add: 'Cộng',
+      conv: 'Tích chập 3 × 3',
       relu: 'ReLU',
+      residual: 'Phần dư',
+      shortcut: ['Đường tắt', '(đồng nhất)'],
+      add: 'Cộng',
       output: 'Đầu ra',
     },
   },
   en: {
     caption:
-      'A ResNet residual block (He et al., 2016) computes $\\mathrm{ReLU}(F(\\mathbf{x}) + \\mathbf{x})$. When the best block is close to "keep the input", the two convolutions only have to push $F(\\mathbf{x})$ towards $\\mathbf{0}$, which is easier than learning the whole mapping again.',
+      'A residual block computes $\\mathbf{y} = F(\\mathbf{x}) + \\mathbf{x}$, then a ReLU; if the block does not help, it only needs $F(\\mathbf{x}) \\approx \\mathbf{0}$. The identity shortcut has no parameters.',
     label: 'Diagram of a ResNet residual block: two convolutions added to a shortcut',
     description:
-      'The input x takes two paths. The main path goes through a 3 × 3 convolution with batch normalisation and ReLU, then a 3 × 3 convolution with batch normalisation; the result is the residual F(x). ' +
-      'The shortcut carries x unchanged round the right, through no layer. ' +
-      'The two paths meet at an addition, giving F(x) + x, then a ReLU gives the output.',
+      'The input x takes two paths. The main path goes through a 3 × 3 convolution, a ReLU, then a 3 × 3 convolution; these three layers are framed and named the residual F(x). ' +
+      'The identity shortcut carries x unchanged round the right, through no layer, straight into the addition. ' +
+      'The addition gives y equal to F(x) plus x, then a ReLU gives the output.',
     labels: {
       input: 'Input',
-      conv1: ['3 × 3 convolution', 'BN, ReLU'],
-      conv2: ['3 × 3 convolution', 'BN'],
-      residual: 'residual',
-      shortcut: ['Shortcut:', 'identity'],
-      add: 'Add',
+      conv: '3 × 3 convolution',
       relu: 'ReLU',
+      residual: 'Residual',
+      shortcut: ['Shortcut', '(identity)'],
+      add: 'Add',
       output: 'Output',
     },
   },

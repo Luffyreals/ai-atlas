@@ -57,12 +57,12 @@ MAE: $\mathcal{L} = \frac{1}{|\mathcal{M}|}\sum_{i \in \mathcal{M}} \lVert \hat{
 
 | Tiếng Việt | Tiếng Anh | Cách dùng |
 |---|---|---|
-| Bài toán phụ (pretext task) | Pretext task | Dịch, lần đầu kèm "pretext task". Bài toán tự đặt ra, nhãn sinh từ chính dữ liệu, chỉ để học biểu diễn |
+| Bài toán phụ | Pretext task | Dịch, lần đầu kèm "pretext task". Bài toán tự đặt ra, nhãn sinh từ chính dữ liệu, chỉ để học biểu diễn |
 | Linear probe | Linear probe, linear evaluation | Giữ. Đóng băng bộ mã hóa, chỉ học một bộ phân loại tuyến tính trên đặc trưng, để đo chất lượng biểu diễn |
 | Góc nhìn | View | Dịch, lần đầu kèm "view". Một bản augmentation của ảnh trong học đối chiếu |
 | Cặp dương, mẫu âm | Positive pair, negative example | Dịch. Hai góc nhìn của cùng ảnh; góc nhìn của ảnh khác |
 | Projection head | Projection head | Giữ. MLP nhỏ sau encoder, loss tính trên đầu ra của nó; bỏ đi sau khi học xong. Khác projector của LLM đa phương thức |
-| Encoder động lượng | Momentum encoder | Dịch "động lượng". Bản sao của encoder, trọng số là EMA của encoder chính |
+| Encoder động lượng | Momentum encoder | Giữ "encoder", dịch "động lượng". Bản sao của encoder, trọng số là EMA của encoder chính |
 | Sụp đổ biểu diễn | Representation collapse | Dịch, lần đầu kèm "collapse". Mọi ảnh cho cùng một vectơ: loss thấp mà biểu diễn vô dụng |
 | Tự chắt lọc | Self-distillation | Dịch. Chắt lọc tri thức mà thầy là bản EMA của chính trò, như DINO |
 | Mô hình hóa ảnh bị che | Masked image modeling | Dịch, lần đầu kèm tiếng Anh. Che một phần ảnh rồi đoán lại, như MAE |
@@ -70,4 +70,13 @@ MAE: $\mathcal{L} = \frac{1}{|\mathcal{M}|}\sum_{i \in \mathcal{M}} \lVert \hat{
 
 ## Kiểm chứng code
 
-(điền sau khi chạy)
+Code của bài do `lesson-writer` chạy ngày 05–06/11/2026, thư mục làm việc ở scratchpad. `.en.py` là bản sao y nguyên của `.vi.py` (`cmp` trùng).
+
+| File | Mức | Ngày | Môi trường | Kết quả |
+|---|---|---|---|---|
+| `nt-xent.vi.py`, `nt-xent.en.py` | chạy thật | 2026-11-06 | Pyodide 314.0.7 thật trong Node (`runpyo.mjs`) | Ô `PythonRunner`. Nạp khoảng 1.4–2.2 giây, chạy dưới 0.5 giây. `log(2N-1) = 1.946`; cosine cặp dương 0.99 (gần) và 0.22 (xa); loss theo $\tau$ = 0.05 / 0.1 / 0.5 / 1.0 / 10.0: gần 0.000 / 0.002 / 0.627 / 1.166 / 1.858, xa 7.087 / 3.765 / 1.877 / 1.864 / 1.933. Hai bản cho output trùng. Khớp lời văn. `ast.parse(..., feature_version=(3, 10))` qua; 34 dòng, dòng dài nhất 71 ký tự |
+| `simclr-digits.vi.py`, `simclr-digits.en.py` | chạy thật | 2026-11-06 | `.venv-cv`: Python 3.14, torch 2.15.0+cpu, scikit-learn 1.9.1, `torch.manual_seed(0)`, chạy với `-I` | Ô `LocalCode`, `sampleVaries={false}`: hai lần chạy cho output trùng từng số. 17 giây (máy rảnh) tới 45 giây (máy bận, nhiều agent chạy song song). `last NT-Xent loss: 1.428`; 100 nhãn: ngẫu nhiên 0.740, SimCLR 0.840; 898 nhãn: ngẫu nhiên 0.843, SimCLR 0.918. Kết quả mẫu trong bài chép từ lần này. `ast.parse` qua; 60 dòng, dòng dài nhất 74 ký tự. Khối ```python 5 dòng trong bài chép đúng từ file (đã kiểm từng dòng) |
+| (thử nghiệm) `scratchpad/ssl/code/raw.py` | chạy thật | 2026-11-06 | `.venv-cv` | Mốc "điểm ảnh thô + hồi quy logistic" với cùng cách chia: 100 nhãn 0.874, 898 nhãn 0.963. Số này được nêu trong hộp "Lỗi hay gặp" (ghi rõ "tự chạy, không có trong file") |
+| (thử nghiệm) `scratchpad/ssl/code/exp1.py`, `exp2.py`, `exp3.py` | chạy thật | 2026-11-05/06 | `.venv-cv` | Các bản thử trước: CNN có global average pooling (rất chậm khi máy bận, features gần hằng số nên probe không chuẩn hóa chỉ đạt mức đoán bừa); MLP và CNN với $\mathbf{h}$ 64 chiều: SimCLR chỉ hơn encoder ngẫu nhiên vài phần nghìn đến vài phần trăm, có lúc thua. Chọn $\mathbf{h}$ 16 chiều và dịch theo từng mẫu bằng `affine_grid` để khác biệt rõ |
+
+Thư mục scratchpad: `C:\Users\Dell\AppData\Local\Temp\claude\4f84e705e7298b11\a0c09d65-d7d4-455c-84cd-6993e7b18c30\scratchpad\ssl\` (`pdf\` chứa PDF và bản chữ trích, `code\` chứa bản thử). Nằm ngoài dự án, có thể bị xóa.

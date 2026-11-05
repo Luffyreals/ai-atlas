@@ -40,6 +40,10 @@ describe('linear schedule (DDPM: β from 1e-4 to 0.02, T = 1000)', () => {
     expect(formatNumber(c.noise, DIGIT_THREE_DIFFUSION.digits)).toBe(noise);
   });
 
+  it('the two curves cross (ᾱ_t first below 0.5) at t = 260, the number the chart description gives', () => {
+    expect(bars.findIndex((b) => { const c = coefficients(b); return c.noise > c.signal; })).toBe(260);
+  });
+
   it('the squares of the two coefficients add up to 1 at every t', () => {
     for (const bar of bars) {
       const c = coefficients(bar);
