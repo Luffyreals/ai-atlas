@@ -14,7 +14,7 @@ import { buildSidebar } from './src/lib/sidebar';
 
 export default defineConfig({
   // Placeholder until the Cloudflare project name / custom domain is final.
-  site: 'https://ai-atlas.pages.dev',
+  site: 'https://ai-atlas-7nb.pages.dev',
   trailingSlash: 'always',
   redirects: { '/': '/vi/' },
   markdown: {
