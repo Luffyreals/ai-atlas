@@ -103,7 +103,6 @@ export default function BpeMergeVizIsland({ words, end, merges, description, lab
           type="button"
           className="atlas-viz-toggle"
           disabled={!hydrated}
-          aria-disabled={atEnd ? 'true' : undefined}
           onClick={next}
         >
           {strings.next}
@@ -112,7 +111,6 @@ export default function BpeMergeVizIsland({ words, end, merges, description, lab
           type="button"
           className="atlas-viz-toggle"
           disabled={!hydrated}
-          aria-disabled={step === 0 ? 'true' : undefined}
           onClick={reset}
         >
           {strings.reset}
