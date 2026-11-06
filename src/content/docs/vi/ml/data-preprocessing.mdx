@@ -169,7 +169,7 @@ Bước xử lý nào học từ dữ liệu thì học chỉ trên tập train.
 **Tăng cường dữ liệu** là tạo thêm mẫu train bằng cách biến đổi mẫu có sẵn theo những cách **không làm đổi nhãn**. Mô hình học được rằng các biến đổi đó không quan trọng, nên ít học thuộc chi tiết vặt của từng mẫu.
 
 - **Ảnh**: lật ngang, xoay nhẹ, cắt một phần, đổi độ sáng. Phải chọn biến đổi hợp với bài toán: lật ngang ảnh mèo vẫn là mèo, nhưng xoay ngược chữ số 6 thành 9 thì nhãn sai. Phần Thị giác máy tính sẽ nói kỹ.
-- **Dữ liệu bảng**: cộng nhiễu nhỏ vào cột số, ví dụ $x_j + \varepsilon$ với $\varepsilon$ ngẫu nhiên nhỏ so với $\sigma_j$. Ít hiệu quả hơn với ảnh, vì khó biết biến đổi nào giữ nguyên nhãn.
+- **Dữ liệu bảng**: cộng nhiễu nhỏ vào cột số, ví dụ $x_j + \varepsilon$ với $\varepsilon$ ngẫu nhiên nhỏ so với $\sigma_j$. Cách này thường kém hiệu quả hơn ở ảnh, vì khó biết biến đổi nào giữ nguyên nhãn.
 - **Văn bản ngắn**: thay vài từ bằng từ đồng nghĩa, hoặc dịch sang ngôn ngữ khác rồi dịch ngược lại (back-translation).
 
 Chỉ tăng cường **tập train**, và chỉ sau khi đã chia. Bản biến đổi của một ảnh train mà lọt vào tập test thì gần như là mẫu trùng.
@@ -259,7 +259,7 @@ Mỗi cột thiếu đúng một ô. Bảng sau xử lý có 9 cột, toàn số
 
 <PythonRunner code={leakageCode} title="Chọn đặc trưng ngoài và trong Pipeline" />
 
-Chọn trên toàn bộ dữ liệu rồi mới kiểm định chéo cho accuracy 0.850, trên dữ liệu ngẫu nhiên. Lý do: trong 5000 cột ngẫu nhiên, luôn có vài chục cột **tình cờ** khớp với 100 nhãn. Bước chọn đã nhìn thấy nhãn của cả các fold kiểm định, nên giữ lại đúng những cột khớp tình cờ với chúng. Đặt bước chọn vào `Pipeline`, mỗi fold tự chọn trên phần train của mình, và những cột đó không còn khớp với phần kiểm định: accuracy về 0.480, đúng mức đoán bừa.
+Chọn trên toàn bộ dữ liệu rồi mới kiểm định chéo cho accuracy 0.850, trên dữ liệu ngẫu nhiên. Lý do: trong 5000 cột ngẫu nhiên, thế nào cũng có những cột **tình cờ** khớp với 100 nhãn. Bước chọn đã nhìn thấy nhãn của cả các fold kiểm định, nên giữ lại đúng những cột khớp tình cờ với chúng. Đặt bước chọn vào `Pipeline`, mỗi fold tự chọn trên phần train của mình, và những cột đó không còn khớp với phần kiểm định: accuracy về 0.480, đúng mức đoán bừa.
 
 Ví dụ này là kinh điển (sách *The Elements of Statistical Learning* gọi nó là cách sai và cách đúng để kiểm định chéo). Nó hay xảy ra với dữ liệu ít mẫu mà nhiều đặc trưng, như dữ liệu gen.
 

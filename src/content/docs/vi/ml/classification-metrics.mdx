@@ -34,6 +34,7 @@ quiz:
 
 import Prerequisites from '@components/Prerequisites.astro';
 import PythonRunner from '@components/PythonRunner.astro';
+import ThresholdViz from '@components/viz/ThresholdViz.astro';
 import Quiz from '@components/Quiz.astro';
 import LessonProgress from '@components/LessonProgress.astro';
 import confusionMatrixCode from '@code/ml/classification-metrics/confusion-matrix.vi.py?raw';
@@ -310,11 +311,7 @@ Hình dưới đặt 20 bệnh nhân lên một trục xác suất từ 0 tới 
 3. Kéo lên $t = 0.80$: không còn ca báo nhầm nào, FP = 0, precision 1.000. Nhưng recall chỉ còn 0.333, và accuracy lại **tăng** lên 0.800: accuracy thưởng cho việc bỏ sót người bệnh, vì lớp không bệnh đông hơn.
 4. Kéo lên $t = 0.95$: không còn ai bị báo có bệnh. Precision hiện "—" vì là $0/0$, recall và F1 bằng 0, còn accuracy là 0.700, đúng bằng mô hình "luôn đoán không bệnh".
 
-{/* VIZ: ThresholdViz
-    Ý: kéo ngưỡng quyết định thì precision và recall đi ngược chiều nhau; accuracy có thể tăng khi mô hình bỏ sót nhiều người bệnh hơn.
-    Tương tác: một thanh trượt ngưỡng t từ 0 tới 1, bước 0.05, mặc định 0.50. Vạch dọc trên trục xác suất di chuyển theo t; chấm có p >= t được coi là dự đoán dương (có thể tô nền vùng bên phải vạch). Ma trận nhầm lẫn 2×2 (hàng: nhãn thật dương/âm; cột: dự đoán dương/âm) và bốn số accuracy, precision, recall, F1 (3 chữ số thập phân) cập nhật ngay. Khi TP + FP = 0 thì precision hiện "—" kèm ghi chú "không có dự đoán dương (0/0)"; F1 tính bằng 2TP/(2TP + FP + FN) nên bằng 0, không cần ngoại lệ.
-    Dữ liệu: 20 bệnh nhân tự tạo, đúng như bảng ở phần Trực giác và ô code 1. y = [1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0], p = [0.93, 0.86, 0.78, 0.71, 0.63, 0.58, 0.54, 0.46, 0.42, 0.36, 0.31, 0.27, 0.22, 0.18, 0.14, 0.12, 0.09, 0.07, 0.04, 0.02]. Không có p nào là bội của 0.05, nên phép so p >= t không bị lỗi làm tròn số thực; vẫn nên tính t = k/20 rồi làm tròn 2 chữ số.
-    Ký hiệu: p (xác suất có bệnh), t (ngưỡng), TP, FP, FN, TN, Accuracy, Precision, Recall, F1, đúng như mục Lý thuyết. */}
+<ThresholdViz />
 
 ## Ví dụ code
 

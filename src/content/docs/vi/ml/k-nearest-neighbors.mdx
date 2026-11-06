@@ -134,10 +134,10 @@ Một cách đo khác là **khoảng cách Manhattan** (Manhattan distance): c�
 **Phân loại.** Mỗi láng giềng bỏ một phiếu cho nhãn của mình. Lớp nhiều phiếu nhất thắng:
 
 $$
-\hat{y} = \arg\max_{c} \sum_{i \in \mathcal{N}_k(\mathbf{x})} \mathbb{1}\left[y^{(i)} = c\right]
+\hat{y} = \arg\max_{c} \sum_{i \in \mathcal{N}_k(\mathbf{x})} \mathbb{I}\left[y^{(i)} = c\right]
 $$
 
-- $\mathbb{1}[\cdot]$ bằng 1 khi điều trong ngoặc đúng, bằng 0 khi sai. Tổng của nó là số phiếu của lớp $c$.
+- $\mathbb{I}[\cdot]$ bằng 1 khi điều trong ngoặc đúng, bằng 0 khi sai. Tổng của nó là số phiếu của lớp $c$.
 - $\arg\max_c$ nghĩa là "lớp $c$ làm tổng lớn nhất".
 
 Với điểm $(-0.4, 0.6)$ và $k = 5$, lớp 0 có 4 phiếu, lớp 1 có 1 phiếu, nên $\hat{y} = 0$.
@@ -165,7 +165,7 @@ Tô màu mọi điểm của mặt phẳng theo lớp mà KNN dự đoán, bạn
 Với phân loại, MSE không còn hợp: đoán lớp 1 khi đáp án là lớp 0 thì "sai bao nhiêu"? Thước đo đơn giản nhất là **độ chính xác** (accuracy), tỉ lệ mẫu đoán đúng:
 
 $$
-\text{accuracy} = \frac{1}{m}\sum_{i=1}^{m}\mathbb{1}\left[\hat{y}^{(i)} = y^{(i)}\right]
+\text{accuracy} = \frac{1}{m}\sum_{i=1}^{m}\mathbb{I}\left[\hat{y}^{(i)} = y^{(i)}\right]
 $$
 
 Đếm số mẫu đoán đúng, chia cho tổng số mẫu. 15 điểm test đúng 11 điểm thì accuracy là $11/15 \approx 0.733$. Accuracy càng **lớn** càng tốt, ngược với MSE. Nó cũng có điểm yếu, nhất là khi một lớp chiếm gần hết dữ liệu; bài [Đánh giá mô hình: Accuracy, Precision, Recall, F1](/vi/ml/classification-metrics/) sẽ nói kỹ.
@@ -214,7 +214,7 @@ Bộ hai vầng trăng không cần bước này: hai đặc trưng đã cùng t
 Bỏ phiếu đều coi láng giềng thứ nhất và láng giềng thứ $k$ như nhau. Một biến thể cho mỗi láng giềng phiếu nặng $1/d_i$, với $d_i = d\left(\mathbf{x}, \mathbf{x}^{(i)}\right)$:
 
 $$
-\hat{y} = \arg\max_{c} \sum_{i \in \mathcal{N}_k(\mathbf{x})} \frac{1}{d_i}\,\mathbb{1}\left[y^{(i)} = c\right]
+\hat{y} = \arg\max_{c} \sum_{i \in \mathcal{N}_k(\mathbf{x})} \frac{1}{d_i}\,\mathbb{I}\left[y^{(i)} = c\right]
 $$
 
 Điểm càng gần, phiếu càng nặng. Với điểm $(-0.4, 0.6)$ và $k = 5$, lớp 1 được $1/0.155 \approx 6.44$, lớp 0 được $1/0.443 + 1/0.511 + 1/0.539 + 1/0.566 \approx 7.84$. Lớp 0 vẫn thắng, nhưng sát nút hơn nhiều so với 4 phiếu với 1. Trong scikit-learn là `weights='distance'`. Nếu điểm truy vấn trùng hẳn một điểm train ($d_i = 0$), scikit-learn lấy luôn nhãn của điểm trùng.
