@@ -96,7 +96,9 @@
  * A table wider than the column scrolls inside its own box, so the page never scrolls sideways.
  */
 .sl-markdown-content table:not(:where(.not-content *)) {
+  display: block;
   max-width: 100%;
+  overflow-x: auto;
 }
 .sl-markdown-content .katex-display {
   overflow-x: auto;

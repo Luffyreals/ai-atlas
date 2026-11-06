@@ -372,7 +372,11 @@ So độ lớn hệ số chỉ có nghĩa khi các đặc trưng đã chuẩn h�
 
 - Hồi quy logistic tính $z = \mathbf{w}^\top\mathbf{x} + b$ rồi đưa qua sigmoid: $\hat{y} = \sigma(z) = 1/(1 + e^{-z}) = P(y = 1 \mid \mathbf{x})$. Khác đường thẳng, đầu ra luôn trong $(0, 1)$ và không bị kéo bởi những điểm "quá đúng".
 - Log-odds tuyến tính: $\ln\frac{\hat{y}}{1 - \hat{y}} = \mathbf{w}^\top\mathbf{x} + b$. Tăng $x_j$ một đơn vị thì odds nhân $e^{w_j}$. Ranh giới quyết định ở ngưỡng 0.5 là siêu phẳng $\mathbf{w}^\top\mathbf{x} + b = 0$.
-- Log loss $-\frac{1}{m}\sum_i\left[y^{(i)}\ln\hat{y}^{(i)} + (1 - y^{(i)})\ln(1 - \hat{y}^{(i)})\right]$ là $-\frac{1}{m}$ lần log-likelihood. Nó lồi, phạt nặng lỗi sai tự tin, và có gradient $\frac{1}{m}\sum_i\left(\hat{y}^{(i)} - y^{(i)}\right)x^{(i)}_j$, cùng dạng với hồi quy tuyến tính. Không có nghiệm dạng đóng, nên huấn luyện bằng gradient descent hoặc L-BFGS.
+- **Log loss** là $-\frac{1}{m}$ lần log-likelihood:
+  $$
+  \mathcal{L}(\mathbf{w}, b) = -\frac{1}{m}\sum_{i=1}^{m}\left[y^{(i)}\ln\hat{y}^{(i)} + \left(1 - y^{(i)}\right)\ln\left(1 - \hat{y}^{(i)}\right)\right]
+  $$
+  Hàm mất mát này lồi, phạt nặng lỗi sai tự tin, và có gradient $\frac{1}{m}\sum_i\left(\hat{y}^{(i)} - y^{(i)}\right)x^{(i)}_j$, cùng dạng với hồi quy tuyến tính. Không có nghiệm dạng đóng, nên huấn luyện bằng gradient descent hoặc L-BFGS.
 - `LogisticRegression` mặc định phạt L2 với `C=1`, $\lambda = \frac{1}{2mC}$: `C` nhỏ là phạt mạnh. Phạt giữ hệ số hữu hạn khi dữ liệu tách được hoàn toàn.
 
 **Đọc thêm:**
