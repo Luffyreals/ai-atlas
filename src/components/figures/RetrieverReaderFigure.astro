@@ -1,0 +1,74 @@
+---
+// nlp/question-answering, "Minh họa": open-domain QA is two steps in a row; the retriever narrows the whole store
+// to a few passages and the reader scores spans only in those. Read top-down: question → retriever (accent),
+// with the passage store (three stacked sheets) beside it, its arrow running right to left → the top-k
+// passages, three small sheets stacked with a slight offset → each sheet's own arrow (lanes on the right, the
+// top sheet the outermost, so no two cross) → reader (accent, the largest box) → answer. The question also
+// reaches the reader along a dashed blue arrow down the left edge, clear of every box. The big stack beside
+// the retriever and the three small sheets under it are the narrowing.
+// Narrow layout only. Words: src/data/figures/retriever-reader.ts.
+import { RETRIEVER_READER } from '@data/figures/retriever-reader';
+import { anchor, mainAndSmall, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = RETRIEVER_READER[getPageLocale(Astro.locals.starlightRoute)];
+const l = t.labels;
+
+// Boxes start at x 40: the dashed question → reader arrow runs down x 20.
+const EDGE = 20;
+const question: Box = { x: 40, y: 8, width: 312, height: 36 };
+const retriever: Box = { x: 40, y: 72, width: 176, height: 70 };
+// The store: a front sheet and two behind it, each 4 units up and right.
+const store: Box = { x: 236, y: 72, width: 112, height: 70 };
+const behind = [8, 4].map((d): Box => ({ ...store, x: store.x + d, y: store.y - d }));
+// Top-k: three sheets, each 28 units lower and 12 further right, so the one above shows its words.
+const SHEET = { x: 60, y: 172, width: 150, height: 36, dx: 12, dy: 28 } as const;
+const sheets = [l.top1, l.top2, l.top3].map((lines, i) => ({
+  lines,
+  box: { x: SHEET.x + i * SHEET.dx, y: SHEET.y + i * SHEET.dy, width: SHEET.width, height: SHEET.height } as Box,
+}));
+const LANES = [330, 312, 294]; // top sheet outermost
+const reader: Box = { x: 40, y: 292, width: 312, height: 70 };
+const answer: Box = { x: 40, y: 390, width: 312, height: 54 };
+const height = answer.y + answer.height + 8;
+
+const down = retriever.x + retriever.width / 2;
+const questionY = anchor(question, 'left')[1];
+const readerY = anchor(reader, 'left')[1];
+---
+
+<FigureFrame id="retriever-reader" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigNode {...question} lines={l.question} />
+    <FigArrow from={[down, question.y + question.height]} to={[down, retriever.y]} />
+    <FigArrow from={anchor(question, 'left')} via={[[EDGE, questionY], [EDGE, readerY]]} to={anchor(reader, 'left')} tone="alt" />
+
+    {behind.map((box) => <FigNode {...box} bare />)}
+    <FigNode {...store} {...mainAndSmall(l.store)} />
+    <FigArrow from={anchor(store, 'left')} to={anchor(retriever, 'right')} />
+    <FigNode {...retriever} {...mainAndSmall(l.retriever)} tone="accent" />
+
+    <FigArrow from={[down, retriever.y + retriever.height]} to={[down, SHEET.y]} />
+    <FigText x={down + 8} y={(retriever.y + retriever.height + SHEET.y) / 2} lines={l.topK} anchor="start" />
+    {
+      sheets.map(({ lines, box }, i) => (
+        <Fragment>
+          <FigNode {...box} lines={lines} />
+          <FigArrow
+            from={anchor(box, 'right')}
+            via={[[LANES[i]!, anchor(box, 'right')[1]]]}
+            to={[LANES[i]!, reader.y]}
+          />
+        </Fragment>
+      ))
+    }
+
+    <FigNode {...reader} {...mainAndSmall(l.reader)} tone="accent" />
+    <FigArrow from={anchor(reader, 'bottom')} to={anchor(answer, 'top')} />
+    <FigNode {...answer} {...mainAndSmall(l.answer)} />
+  </Fragment>
+</FigureFrame>

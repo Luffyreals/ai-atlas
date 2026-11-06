@@ -87,3 +87,61 @@ export function mainAndSmall(label: Lines): { lines: string; small: readonly str
   const [main = '', ...small] = toLines(label);
   return { lines: main, small };
 }
+
+/**
+ * One polyline through every line of an n × n grid of square cells (top-left x, y; side `cell`): the outer
+ * border, then the inner columns as a serpentine, then the inner rows (docs/architecture/nlp-lessons.md, "Lô FIG
+ * NLP"). Some border pieces are drawn twice, which does not show. One <polyline> instead of 2n + 2 lines keeps
+ * a grid within the HTML budget, and FigArrow (head={false}) draws it, so the e2e contrast check measures it.
+ */
+export function gridLines(x: number, y: number, cell: number, n: number): Pt[] {
+  if (!Number.isInteger(n) || n < 1) throw new Error(`gridLines: n must be a positive integer, got ${n}.`);
+  const at = (i: number, j: number): Pt => [round1(x + i * cell), round1(y + j * cell)];
+  const points: Pt[] = [at(0, 0), at(0, n), at(n, n), at(n, 0), at(0, 0)];
+  // Inner columns, down then up; `atTop` is where the pen is.
+  let atTop = true;
+  for (let i = 1; i < n; i++) {
+    points.push(at(i, atTop ? 0 : n), at(i, atTop ? n : 0));
+    atTop = !atTop;
+  }
+  // To the right edge, then the inner rows from that corner: right to left, then left to right.
+  points.push(at(n, atTop ? 0 : n));
+  let atRight = true;
+  for (let k = 1; k < n; k++) {
+    const j = atTop ? k : n - k;
+    points.push(at(atRight ? n : 0, j), at(atRight ? 0 : n, j));
+    atRight = !atRight;
+  }
+  return points;
+}
+
+/**
+ * Polylines drawing both diagonals (an ×) of every cell above the main diagonal of an n × n grid: the masked
+ * cells of a causal attention mask (nlp-lessons.md, "Lô FIG NLP"). One polyline per row: a zigzag goes right
+ * through the row's cells (one diagonal each), up or down the grid's right edge, and another zigzag comes back
+ * (the other diagonal). So a polyline runs only along diagonals and the grid border, never along the edge of a
+ * masked cell (the compared cell keeps its own border); one polyline for all rows cannot, since the pen would
+ * have to cross from row to row along such an edge. n - 1 polylines; none when n = 1.
+ */
+export function upperCrosses(x: number, y: number, cell: number, n: number): Pt[][] {
+  if (!Number.isInteger(n) || n < 1) throw new Error(`upperCrosses: n must be a positive integer, got ${n}.`);
+  const at = (i: number, j: number): Pt => [round1(x + i * cell), round1(y + j * cell)];
+  const rows: Pt[][] = [];
+  for (let r = 0; r < n - 1; r++) {
+    // From the top-left corner of cell (r, r + 1); `low` says the pen is on the row's bottom line.
+    let low = false;
+    const points: Pt[] = [at(r + 1, r)];
+    for (let c = r + 1; c < n; c++) {
+      low = !low;
+      points.push(at(c + 1, low ? r + 1 : r));
+    }
+    low = !low;
+    points.push(at(n, low ? r + 1 : r));
+    for (let c = n - 1; c > r; c--) {
+      low = !low;
+      points.push(at(c, low ? r + 1 : r));
+    }
+    rows.push(points);
+  }
+  return rows;
+}

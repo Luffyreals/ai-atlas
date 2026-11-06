@@ -1,6 +1,6 @@
-// Every Python program under src/code/, and every ```python block of an LLM lesson, parses as Python 3.10
-// (docs/architecture/llm-lessons.md, 2.1, 2.5 and 4.5): `openai` needs 3.10+, and the code is read on any
-// machine. One Python process for all files: ast.parse(source, filename, feature_version=(3, 10)).
+// Every Python program under src/code/, and every ```python block of an LLM or NLP lesson, parses as Python 3.10
+// (docs/architecture/llm-lessons.md, 2.1, 2.5 and 4.5; nlp-lessons.md follows the LLM pattern): `openai` needs
+// 3.10+, and the code is read on any machine. One Python process for all files: ast.parse(source, filename, feature_version=(3, 10)).
 // feature_version is best effort (Python docs), so the script also refuses an f-string that reuses its own
 // quote inside {...} (allowed only from 3.12, and the lexer of tests/unit/fixtures/python-source.ts relies on it).
 // Interpreter: $PYTHON when set, else python3, else python. Without one the test fails and says how to fix it.
@@ -134,11 +134,11 @@ function pythonFiles(): Item[] {
     .map((path) => ({ name: toPosix(path), source: readFileSync(path, 'utf8'), offset: 0 }));
 }
 
-/** ```python blocks of src/content/docs/<locale>/llm/**, without those inside MDX comments. */
+/** ```python blocks of src/content/docs/<locale>/{llm,nlp}/**, without those inside MDX comments. */
 function lessonBlocks(): Item[] {
   return readdirSync(DOCS_DIR, { recursive: true, encoding: 'utf8' })
     .map((file) => file.split('\\').join('/'))
-    .filter((file) => /^[a-z]{2}\/llm\/.+\.mdx?$/.test(file))
+    .filter((file) => /^[a-z]{2}\/(?:llm|nlp)\/.+\.mdx?$/.test(file))
     .flatMap((file) => {
       const path = join(DOCS_DIR, file);
       return codeFences(readFileSync(path, 'utf8'))
@@ -184,13 +184,18 @@ describe('the parse script (controls)', () => {
   });
 });
 
-describe('every Python file under src/code/ and every ```python block of an LLM lesson parses as Python 3.10', () => {
+describe('every Python file under src/code/ and every ```python block of an LLM or NLP lesson parses as Python 3.10', () => {
   const files = pythonFiles();
   const blocks = lessonBlocks();
 
   it('control: there are LLM files and lesson blocks to check', () => {
     expect(files.filter((item) => item.name.startsWith('src/code/llm/')).length).toBeGreaterThan(0);
-    expect(blocks.length).toBeGreaterThan(0);
+    expect(blocks.filter((item) => /\/llm\//.test(item.name)).length).toBeGreaterThan(0);
+  });
+
+  it('control: there are NLP files and lesson blocks to check', () => {
+    expect(files.filter((item) => item.name.startsWith('src/code/nlp/')).length).toBeGreaterThan(0);
+    expect(blocks.filter((item) => /\/nlp\//.test(item.name)).length).toBeGreaterThan(0);
   });
 
   it('has no syntax error', () => {

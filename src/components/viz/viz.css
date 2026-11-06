@@ -294,8 +294,10 @@
   background: none;
 }
 
-/* A sentence with a slot at its end for the token just drawn (underlined, empty until then). */
-.atlas-viz-context {
+/* A sentence with a slot at its end for the token just drawn (underlined, empty until then).
+   A part of a VIZ: a title over a table or a list (BpeMergeViz). */
+.atlas-viz-context,
+.atlas-viz-part {
   display: grid;
   gap: 4px;
 }
@@ -310,6 +312,40 @@
   min-width: 4ch;
   border-bottom: 2px solid var(--atlas-viz-primary);
   color: var(--sl-color-white);
+}
+
+/* The row or item chosen at this step: bold and in ink, not only by colour (BpeMergeViz: the pair merged). */
+.atlas-viz [data-pick] {
+  font-weight: 700;
+  color: var(--sl-color-white);
+}
+
+/* Pieces of a split word, one chip each; the piece made at this step filled with the accent and bold. */
+.atlas-viz-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.atlas-viz-chip {
+  padding: 0 6px;
+  background: var(--atlas-viz-plot-bg);
+  color: var(--sl-color-white);
+}
+
+.atlas-viz-chip[data-new] {
+  background: var(--sl-color-accent);
+  color: var(--sl-color-black);
+  font-weight: 700;
+}
+
+/* A numbered list in as many columns as fit. */
+.atlas-viz-merges {
+  margin: 0;
+  padding-inline-start: 3ch;
+  columns: 15rem;
+  column-gap: 24px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* A coefficient exactly 0: a hollow ring in ink on the zero line (not blue, so it is no test point). */
@@ -453,7 +489,7 @@
   transition: transform 0.15s ease;
 }
 
-.atlas-viz-toggle:hover:not(:disabled) {
+.atlas-viz-toggle:hover:not(:disabled, [aria-disabled='true']) {
   transform: translateY(-1px);
 }
 
@@ -469,6 +505,15 @@
 .atlas-viz-slider:disabled,
 .atlas-viz-toggle:disabled {
   color: var(--sl-color-gray-3);
+  cursor: not-allowed;
+}
+
+/* A button with nothing left to do (aria-disabled: it keeps the focus and can say why): hollow, its text muted
+   on the block (5.40 dark / 5.52 light), so it still reads. */
+.atlas-viz-toggle[aria-disabled='true'] {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--atlas-viz-muted);
+  color: var(--atlas-viz-muted);
   cursor: not-allowed;
 }
 
@@ -652,7 +697,7 @@
     transition: none;
   }
 
-  .atlas-viz-toggle:hover:not(:disabled) {
+  .atlas-viz-toggle:hover:not(:disabled, [aria-disabled='true']) {
     transform: none;
   }
 }

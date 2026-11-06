@@ -63,6 +63,7 @@ export const UI_KEYS = {
     'caption', 'plotLabel', 'rule', 'threshold', 'controls', 'thresholdLabel', 'thresholdValueText',
     'matrixLabel', 'trueLabel', 'predPositive', 'predNegative', 'actualPositive', 'actualNegative',
     'accuracy', 'precision', 'recall', 'f1', 'noPositive', 'undefinedValue', 'announce',
+  ],
   vizGradientFlow: [
     'caption', 'chartLabel', 'chartDesc', 'layerAxis', 'gradAxis', 'bar', 'lastLayer', 'controls',
     'activation', 'init', 'sigmoid', 'tanh', 'relu', 'std1', 'xavier', 'he', 'depthLabel', 'depthValueText',
@@ -74,6 +75,12 @@ export const UI_KEYS = {
     'imageTitle', 'imageLabel', 'imageDesc', 'kernelTitle', 'kernelLabel', 'productsTitle', 'product', 'sum',
     'mapTitle', 'mapLabel', 'cellLabel', 'legend', 'prev', 'next', 'identityNote', 'blurNote', 'sharpenNote',
     'sobelVerticalNote', 'sobelHorizontalNote', 'announce',
+  ],
+  vizBpeMerge: [
+    'caption', 'controls', 'next', 'reset', 'stepOf', 'vocabLabel', 'vocabValue', 'pairsStart', 'pairsLabel',
+    'pairCol', 'countCol', 'pair', 'picked', 'showAll', 'showFew', 'syllablesLabel', 'syllableCol', 'splitCol',
+    'freqCol', 'splitText', 'mergesLabel', 'mergeItem', 'noMerges', 'startNote', 'mergedNote', 'tieNote',
+    'doneNote', 'announceStep', 'announceEnd', 'resetDone',
   ],
 } as const satisfies Record<string, readonly string[]>;
 

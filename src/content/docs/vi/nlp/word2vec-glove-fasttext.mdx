@@ -1,0 +1,367 @@
+---
+title: 'Word2Vec (CBOW, Skip-gram), GloVe, FastText'
+description: Học vectơ cho từ bằng cách đoán từ xung quanh. Skip-gram, CBOW, negative sampling, GloVe, FastText với n-gram ký tự, phép tương tự vectơ và thiên lệch.
+quiz:
+  - question: 'Bạn huấn luyện SGNS với $k = 3$. Sau một bước gradient descent trên đúng một cặp thật (mèo, con) cùng 3 mẫu âm, những vectơ nào thay đổi?'
+    options:
+      - 'Mọi hàng của $\mathbf{C}$, vì mẫu số softmax chứa cả từ vựng'
+      - 'Chỉ vectơ từ đích của "mèo" và vectơ ngữ cảnh của "con"'
+      - 'Vectơ từ đích của "mèo", vectơ ngữ cảnh của "con" và vectơ ngữ cảnh của 3 mẫu âm'
+      - 'Chỉ vectơ từ đích của "mèo", bảng ngữ cảnh giữ cố định'
+    answer: 2
+    explanation: 'Hàm mất mát của một cặp chỉ chứa $\mathbf{w}$, $\mathbf{c}_{\text{pos}}$ và $k$ vectơ $\mathbf{c}_{\text{neg},i}$, nên chỉ chúng có gradient khác 0: tổng cộng $k + 2 = 5$ vectơ. Đó chính là chỗ tiết kiệm so với softmax đầy đủ, nơi mẫu số chứa mọi từ nên mọi hàng của bảng ngữ cảnh đều nhận gradient. Bảng ngữ cảnh cũng được học, không cố định.'
+  - question: 'Theo Levy và Goldberg (2014), khi SGNS với $k = 5$ (mẫu âm theo unigram thường) đạt tối ưu, $\mathbf{w} \cdot \mathbf{c} = \mathrm{PMI}(w, c) - \ln 5$, với PMI tính bằng $\ln$. Với một cặp từ xuất hiện độc lập nhau ($\mathrm{PMI} = 0$), mô hình cho xác suất "cặp thật" $\sigma(\mathbf{w} \cdot \mathbf{c})$ bằng bao nhiêu?'
+    options:
+      - '$0.5$, vì $\mathrm{PMI} = 0$ nghĩa là không biết gì'
+      - '$1/6$, vì $\sigma(-\ln 5) = 1/(1 + 5)$'
+      - '$0$, vì cặp độc lập không bao giờ là cặp thật'
+      - '$5/6$, vì có 5 mẫu âm cho mỗi mẫu dương'
+    answer: 1
+    explanation: '$\mathbf{w} \cdot \mathbf{c} = 0 - \ln 5$, và $\sigma(-\ln 5) = 1/(1 + e^{\ln 5}) = 1/6$. Lý do: với mỗi cặp thật có 5 cặp giả, và nếu hai từ độc lập thì cặp (w, c) xuất hiện trong dữ liệu thật đúng bằng tần suất nó được bốc ngẫu nhiên. Nên trong 6 lần thấy cặp này, trung bình chỉ 1 lần là thật. $0.5$ chỉ đúng khi $k = 1$.'
+  - question: 'Một mô hình Word2Vec và một mô hình FastText cùng học trên văn bản đã tách từ (nối âm tiết bằng `_`). Từ `nhà_sử_học` không có trong dữ liệu huấn luyện. Điều gì xảy ra?'
+    options:
+      - 'Cả hai tự lấy trung bình vectơ của từng âm tiết nhà, sử, học'
+      - 'Cả hai đều không có vectơ cho từ này'
+      - 'FastText tìm từ đã biết có chính tả gần nhất rồi chép vectơ của nó'
+      - 'Word2Vec không có vectơ; FastText cộng vectơ các n-gram ký tự của từ, nhiều n-gram trong đó đã gặp ở `nhà_thơ`, `văn_học`...'
+    answer: 3
+    explanation: 'Word2Vec tra bảng theo cả từ, từ lạ thì không có hàng nào. FastText biểu diễn từ bằng tổng vectơ n-gram ký tự (3 tới 6 ký tự, có `<` `>`), nên luôn ghép được vectơ, và các n-gram như `<nhà_`, `học>` đã được học từ những từ khác. Không mô hình nào tự tách theo âm tiết hay tìm từ gần nhất theo chính tả.'
+  - question: 'Bạn lấy vectơ Word2Vec của từ "đường" trong hai câu: "mẹ mua một cân đường" và "con đường này rất đẹp". Hai vectơ đó so với nhau thế nào?'
+    options:
+      - 'Giống hệt nhau, vì mỗi từ trong từ vựng chỉ có một vectơ'
+      - 'Khác nhau, vì ngữ cảnh của hai câu khác nhau'
+      - 'Khác nhau nếu dùng CBOW, giống nhau nếu dùng skip-gram'
+      - 'Bằng trung bình vectơ các từ khác trong câu'
+    answer: 0
+    explanation: 'Word2Vec, GloVe và FastText cho embedding tĩnh: học xong là một bảng tra, mỗi từ một hàng, dùng chung cho mọi câu. Vectơ của "đường" là một kiểu trung bình của nghĩa "đường ăn" và "đường đi". Ngữ cảnh chỉ ảnh hưởng lúc huấn luyện, không ảnh hưởng lúc tra. Embedding theo ngữ cảnh như BERT mới cho hai vectơ khác nhau.'
+  - question: 'Bạn lấy vectơ của "vua", trừ vectơ của "đàn_ông", cộng vectơ của "phụ_nữ", được $\mathbf{v}$. Rồi bạn tìm từ có cosine lớn nhất với $\mathbf{v}$ trong cả từ vựng. Kết quả là "vua". Kết luận nào hợp lý nhất?'
+    options:
+      - 'Mô hình hỏng, cần huấn luyện lại từ đầu'
+      - 'Phép cộng trừ vectơ không có nghĩa khi đo bằng cosine'
+      - 'Chuyện thường gặp: $\mathbf{v}$ vẫn rất gần từ đầu vào, nên cách đánh giá chuẩn loại ba từ đầu vào khỏi danh sách'
+      - 'Từ "nữ_hoàng" chắc chắn không có trong từ vựng'
+    answer: 2
+    explanation: 'Hiệu giữa vectơ "phụ_nữ" và vectơ "đàn_ông" thường nhỏ so với vectơ "vua", nên $\mathbf{v}$ vẫn nằm sát "vua". Mikolov và cộng sự (2013b) ghi rõ họ loại các từ đầu vào khỏi phép tìm. Sau khi loại, "nữ_hoàng" mới có cơ hội đứng đầu. Đây cũng là lý do không nên đọc các kết quả tương tự như bằng chứng rằng mô hình "hiểu" quan hệ.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import skipgramCode from '@code/nlp/word2vec-glove-fasttext/skipgram-ns.vi.py?raw';
+import fasttextCode from '@code/nlp/word2vec-glove-fasttext/fasttext-ngrams.vi.py?raw';
+import Word2VecFigure from '@components/figures/Word2VecFigure.astro';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu ý tưởng của **Word2Vec**: học embedding dày bằng một bài toán dự đoán giả, với hai kiến trúc **skip-gram** và **CBOW** (continuous bag-of-words).
+- Tự dẫn được hàm mất mát và gradient của **negative sampling** (skip-gram with negative sampling, SGNS), và giải thích vì sao nó rẻ hơn softmax trên cả từ vựng.
+- Đọc được hàm mất mát của **GloVe** và cách **FastText** ghép vectơ từ **n-gram ký tự** (character n-gram), kể cả cho **từ chưa gặp** (out-of-vocabulary).
+- Nhận ra giới hạn của các embedding này: **phép tương tự** (analogy) vectơ không thần kỳ như quảng cáo, embedding mang theo **thiên lệch** (bias) của dữ liệu, và mỗi từ chỉ có một vectơ dù có nhiều nghĩa.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài này dùng một **mạng nơ-ron một lớp** rất đơn giản: nhân vectơ đầu vào với một ma trận trọng số, không có hàm kích hoạt ở giữa. Khi đầu vào là vectơ **one-hot** của một từ (toàn số 0, chỉ một số 1 ở vị trí của từ đó), phép nhân với ma trận $\mathbf{W}$ chính là lấy ra một hàng của $\mathbf{W}$, nên "lớp embedding" thực chất là một bảng tra. **Sigmoid** $\sigma(z) = 1/(1 + e^{-z})$ đưa một số thực về khoảng $(0, 1)$, dùng làm xác suất cho câu hỏi có/không. **Softmax** đổi một vectơ điểm (logit) thành phân phối xác suất trên nhiều lựa chọn. **Cross-entropy** là trung bình của $-\ln$ xác suất mà mô hình gán cho đáp án đúng; nó là hàm mất mát $\mathcal{L}$ ta làm nhỏ bằng [gradient descent](/vi/ml/gradient-descent/), mỗi bước trừ $\eta$ lần gradient.
+:::
+
+## Trực giác
+
+### Từ đếm sang đoán
+
+Ở bài [Vector Semantics và Embeddings](/vi/nlp/vector-semantics-embeddings/), bạn đã gặp **giả thuyết phân bố** (distributional hypothesis): từ có nghĩa gần nhau thì xuất hiện trong ngữ cảnh giống nhau. Cách làm ở đó là **đếm**: lập ma trận từ–ngữ cảnh, đổi sang PPMI, rồi nén bằng SVD.
+
+Word2Vec (Mikolov và cộng sự, 2013) đi đường khác: **đoán**. Hãy đọc câu sau, có một chỗ trống:
+
+> Sáng nay tôi ăn một bát ____ nóng hổi.
+
+Bạn sẽ đoán "phở", "bún", "cháo", có lẽ "cơm". Bạn sẽ không đoán "mèo" hay "trà". Muốn đoán đúng, bạn phải biết phở, bún, cháo là cùng một loại thứ: món ăn đựng trong bát, ăn nóng. Một mô hình tập đoán như vậy trên hàng tỉ câu sẽ buộc phải xếp phở, bún, cháo vào cùng một vùng của không gian vectơ, dù không ai dạy nó "phở là món ăn".
+
+### Bài toán giả, sản phẩm thật
+
+Điểm lạ của Word2Vec: ta **không cần** mô hình đoán từ giỏi. Việc đoán chỉ là cái cớ. Thứ ta giữ lại sau huấn luyện là **bảng vectơ** mà mô hình dùng để đoán. Hai cách đặt câu hỏi:
+
+- **CBOW:** biết các từ xung quanh ("một", "bát", "nóng", "hổi"), đoán từ ở giữa ("phở").
+- **Skip-gram:** biết từ ở giữa ("phở"), đoán từng từ xung quanh.
+
+Dữ liệu huấn luyện là văn bản thô, không cần ai gán nhãn: mỗi câu tự tạo ra các cặp (từ, ngữ cảnh) để đoán. Người ta gọi kiểu học này là **tự giám sát** (self-supervised).
+
+Bài toán của bài này là: **từ văn bản thô, học cho mỗi từ một vectơ $d$ chiều sao cho các từ hay đi cùng ngữ cảnh giống nhau có vectơ gần nhau, và làm việc đó đủ rẻ để chạy trên hàng tỉ từ.**
+
+## Lý thuyết
+
+### Skip-gram: phát biểu bài toán
+
+Đi dọc văn bản. Ở mỗi vị trí, gọi từ ở đó là **từ đích** $w$. Các từ cách nó không quá $s$ vị trí là **từ ngữ cảnh** $c$ (cửa sổ $\pm s$, ví dụ $s = 2$). Với câu "tôi ăn một bát phở nóng hổi", từ đích "phở" cho bốn cặp: (phở, một), (phở, bát), (phở, nóng), (phở, hổi).
+
+Gọi $V$ là từ vựng, có $|V|$ từ. Mỗi từ có **hai** vectơ $d$ chiều:
+
+- $\mathbf{w}$ khi nó đóng vai từ đích, xếp thành hàng của ma trận $\mathbf{W} \in \mathbb{R}^{|V| \times d}$;
+- $\mathbf{c}$ khi nó đóng vai từ ngữ cảnh, xếp thành hàng của $\mathbf{C} \in \mathbb{R}^{|V| \times d}$.
+
+Lưu ý ký hiệu: trong bài này $\mathbf{w}$ là **vectơ của từ đích**, không phải vectơ trọng số chung như ở các bài ML. Vì sao lại cần hai vectơ? Một từ hiếm khi đứng ngay cạnh chính nó. Nếu chỉ có một vectơ, điểm của cặp (từ, chính nó) là $\mathbf{w} \cdot \mathbf{w} = \lVert\mathbf{w}\rVert^2$, luôn dương và càng lớn khi vectơ càng dài, nên mô hình có xu hướng tin mỗi từ hay đứng cạnh chính nó. Hai bảng riêng gỡ được ràng buộc đó.
+
+Skip-gram gốc cho xác suất "thấy $c$ quanh $w$" bằng softmax trên toàn bộ từ vựng:
+
+$$
+p(c \mid w) = \frac{\exp(\mathbf{c} \cdot \mathbf{w})}{\sum_{c' \in V} \exp(\mathbf{c}' \cdot \mathbf{w})}
+$$
+
+Tử số lớn khi $\mathbf{c}$ và $\mathbf{w}$ cùng hướng. Mẫu số cộng trên mọi từ $c'$ để các xác suất cộng lại bằng 1. Hàm mất mát là cross-entropy: tổng của $-\ln p(c \mid w)$ trên mọi cặp lấy từ văn bản.
+
+### Vì sao softmax trên cả từ vựng đắt
+
+Mẫu số cần $|V|$ tích vô hướng, và gradient của nó chạm tới **mọi** hàng của $\mathbf{C}$, cho **từng cặp**. Mikolov và cộng sự (2013b) huấn luyện trên một tỉ từ tin tức, từ vựng 692 nghìn từ, và nói thẳng rằng chi phí tỉ lệ với $|V|$, thường từ $10^5$ tới $10^7$, nên công thức trên "không thực tế". Một cách giảm chi phí là **softmax phân cấp** (hierarchical softmax), dùng cây nhị phân để chỉ tính khoảng $\log_2 |V|$ nút. Cách được dùng nhiều hơn, và là trọng tâm của bài, là negative sampling.
+
+### Negative sampling: đổi sang câu hỏi có/không
+
+Thay câu hỏi "trong 692 nghìn từ, từ nào đứng cạnh phở?" bằng câu hỏi dễ hơn: **"cặp (phở, bát) là cặp thật lấy từ văn bản, hay cặp ghép bừa?"** Đó là phân loại nhị phân, nên dùng sigmoid:
+
+$$
+P(+ \mid w, c) = \sigma(\mathbf{c} \cdot \mathbf{w})
+$$
+
+Dấu $+$ nghĩa là "cặp thật". Xác suất cặp là giả bằng $1 - \sigma(\mathbf{c} \cdot \mathbf{w}) = \sigma(-\mathbf{c} \cdot \mathbf{w})$.
+
+Với mỗi cặp thật $(w, c_{\text{pos}})$, ta bốc ngẫu nhiên $k$ từ $c_{\text{neg},1}, \dots, c_{\text{neg},k}$ làm **mẫu âm** (negative sample), coi các cặp $(w, c_{\text{neg},i})$ là giả. Hàm mất mát cho một cặp thật và $k$ cặp giả của nó:
+
+$$
+\mathcal{L} = -\ln \sigma(\mathbf{c}_{\text{pos}} \cdot \mathbf{w}) - \sum_{i=1}^{k} \ln \sigma(-\mathbf{c}_{\text{neg},i} \cdot \mathbf{w})
+$$
+
+- Số hạng đầu nhỏ khi $\sigma(\mathbf{c}_{\text{pos}} \cdot \mathbf{w})$ gần 1: mô hình tin cặp thật là thật.
+- Mỗi số hạng trong tổng dùng $\sigma(-z) = 1 - \sigma(z)$, tức xác suất "là giả". Nó nhỏ khi mô hình tin cặp ghép bừa là giả.
+- Mỗi cặp giờ chỉ cần $k + 1$ tích vô hướng thay cho $|V|$. Với $|V| = 692\,000$ và $k = 5$: $692\,000 / 6 \approx 115\,000$ lần ít hơn (tự tính).
+
+**Bốc mẫu âm từ đâu?** Mikolov và cộng sự thử nhiều phân phối và thấy tốt nhất là tần suất unigram **mũ 3/4**:
+
+$$
+P_{\text{neg}}(c) = \frac{\mathrm{count}(c)^{3/4}}{\sum_{c' \in V} \mathrm{count}(c')^{3/4}}
+$$
+
+Mũ 3/4 kéo từ phổ biến xuống, đẩy từ hiếm lên. Ví dụ, "của" gặp nhiều gấp 500 lần "phở" thì chỉ được bốc nhiều gấp $500^{3/4} \approx 106$ lần (tự tính). Về $k$, bài báo gợi ý 5 tới 20 với dữ liệu nhỏ, và chỉ 2 tới 5 với dữ liệu lớn.
+
+### Dẫn gradient từng bước
+
+**Bước 1: đạo hàm của $\ln \sigma$.** Sigmoid có đạo hàm $\sigma'(z) = \sigma(z)\,(1 - \sigma(z))$. Theo quy tắc dây chuyền cho $\ln$:
+
+$$
+\frac{d}{dz} \ln \sigma(z) = \frac{\sigma'(z)}{\sigma(z)} = 1 - \sigma(z)
+$$
+
+Với $\ln \sigma(-z)$, đạo hàm của phần trong $-z$ là $-1$, nên:
+
+$$
+\frac{d}{dz} \ln \sigma(-z) = -\bigl(1 - \sigma(-z)\bigr) = -\sigma(z)
+$$
+
+Dấu bằng cuối dùng lại $1 - \sigma(-z) = \sigma(z)$.
+
+**Bước 2: tích vô hướng theo từng vectơ.** Với $z = \mathbf{c} \cdot \mathbf{w}$, đạo hàm theo $\mathbf{c}$ là $\mathbf{w}$, và theo $\mathbf{w}$ là $\mathbf{c}$.
+
+**Bước 3: ghép lại.** Mỗi số hạng của $\mathcal{L}$ có dấu trừ ở trước, nên đổi dấu kết quả Bước 1 rồi nhân với Bước 2:
+
+$$
+\begin{aligned}
+\frac{\partial \mathcal{L}}{\partial \mathbf{c}_{\text{pos}}} &= \bigl[\sigma(\mathbf{c}_{\text{pos}} \cdot \mathbf{w}) - 1\bigr]\,\mathbf{w} \\
+\frac{\partial \mathcal{L}}{\partial \mathbf{c}_{\text{neg},i}} &= \sigma(\mathbf{c}_{\text{neg},i} \cdot \mathbf{w})\,\mathbf{w} \\
+\frac{\partial \mathcal{L}}{\partial \mathbf{w}} &= \bigl[\sigma(\mathbf{c}_{\text{pos}} \cdot \mathbf{w}) - 1\bigr]\,\mathbf{c}_{\text{pos}} + \sum_{i=1}^{k} \sigma(\mathbf{c}_{\text{neg},i} \cdot \mathbf{w})\,\mathbf{c}_{\text{neg},i}
+\end{aligned}
+$$
+
+Dòng thứ ba cộng hai đóng góp, vì $\mathbf{w}$ có mặt trong mọi số hạng.
+
+**Bước 4: đọc ý nghĩa.** Gradient descent cập nhật $\mathbf{c}_{\text{pos}} \leftarrow \mathbf{c}_{\text{pos}} - \eta\,\partial\mathcal{L}/\partial\mathbf{c}_{\text{pos}}$. Hệ số $\sigma(\cdot) - 1$ luôn âm, nên bước này **cộng** thêm một phần $\mathbf{w}$ vào $\mathbf{c}_{\text{pos}}$: kéo ngữ cảnh thật lại gần từ đích. Ngược lại, mỗi $\mathbf{c}_{\text{neg},i}$ bị **trừ** đi một phần $\mathbf{w}$: đẩy ra xa. Lực kéo hay đẩy tỉ lệ với mức mô hình đang sai: cặp thật mà $\sigma$ đã gần 1 thì gần như không đổi.
+
+:::note[Ghi nhớ]
+SGNS biến "đoán từ ngữ cảnh trong cả từ vựng" thành "phân biệt cặp thật với $k$ cặp ghép bừa", mẫu âm bốc theo $\mathrm{count}^{3/4}$. Mỗi bước chỉ chạm $k + 2$ vectơ: kéo $\mathbf{c}_{\text{pos}}$ về phía $\mathbf{w}$, đẩy các $\mathbf{c}_{\text{neg},i}$ ra xa, và $\mathbf{w}$ di chuyển theo cả hai.
+:::
+
+### CBOW: đoán từ giữa từ trung bình ngữ cảnh
+
+CBOW đảo vai. Ở vị trí $t$, lấy **trung bình** vectơ của các từ ngữ cảnh, gọi $\mathcal{C}_t$ là tập các vị trí đó:
+
+$$
+\mathbf{h}_t = \frac{1}{|\mathcal{C}_t|} \sum_{j \in \mathcal{C}_t} \mathbf{w}_{j}
+$$
+
+Ở đây $\mathbf{w}_j$ là hàng của $\mathbf{W}$ ứng với từ tại vị trí $j$: các từ xung quanh giờ là đầu vào. Rồi mô hình đoán từ ở giữa bằng $\sigma(\mathbf{c}_t \cdot \mathbf{h}_t)$, với $\mathbf{c}_t$ là hàng của $\mathbf{C}$ ứng với từ ở giữa, cũng kèm $k$ mẫu âm. Gradient giống hệt phần trên, chỉ thay $\mathbf{w}$ bằng $\mathbf{h}_t$, rồi chia đều cho các từ ngữ cảnh.
+
+Lấy trung bình làm mất trật tự từ, nên mới có tên "bag-of-words". Mỗi vị trí chỉ cho một lần đoán thay vì $2s$ lần, nên CBOW nhanh hơn. Trong bảng so sánh của [Mikolov và cộng sự (2013a)](https://arxiv.org/abs/1301.3781) với vectơ 1000 chiều trên 6 tỉ từ, skip-gram đúng 66.1% câu hỏi tương tự về nghĩa, so với 57.3% của CBOW; CBOW nhỉnh hơn ở câu hỏi ngữ pháp (68.9% so với 65.1%).
+
+Hình ở mục Minh họa đặt hai kiến trúc cạnh nhau trên cùng một câu.
+
+### Vài chi tiết làm Word2Vec chạy tốt
+
+- **Subsampling từ phổ biến.** Cặp (phở, của) ít thông tin vì "của" đứng cạnh gần như mọi từ. Mikolov và cộng sự bỏ mỗi lần xuất hiện của từ $w$ với xác suất $1 - \sqrt{\tau / P(w)}$, với $P(w)$ là tần suất tương đối của từ và ngưỡng $\tau \approx 10^{-5}$. Từ chiếm 1% văn bản bị bỏ khoảng 96.8% số lần (tự tính). Huấn luyện nhanh hơn nhiều lần, và vectơ của từ hiếm tốt hơn.
+- **Cửa sổ co giãn và bảng giữ lại.** Ở mỗi từ, kích thước cửa sổ được chọn ngẫu nhiên từ 1 tới $s$ (Mikolov và cộng sự, 2013a), nên từ gần được dùng thường hơn từ xa. Sau huấn luyện thường giữ $\mathbf{W}$, bỏ $\mathbf{C}$.
+
+### SGNS thật ra đang phân tích ma trận PMI
+
+Word2Vec trông khác hẳn PPMI cộng SVD ở bài trước. Levy và Goldberg (2014) chỉ ra hai cách gần nhau hơn ta tưởng. Với mẫu âm bốc theo tần suất unigram **thường** (không mũ 3/4) và số chiều $d$ đủ lớn, SGNS đạt tối ưu khi:
+
+$$
+\mathbf{w} \cdot \mathbf{c} = \mathrm{PMI}(w, c) - \ln k
+$$
+
+PMI ở đây tính bằng logarit tự nhiên $\ln$, vì sigmoid dùng $e$; bài trước dùng $\log_2$, hai cách chỉ khác một hằng số nhân. Khi mẫu âm bốc theo $\mathrm{count}^{3/4}$ như Word2Vec thật, $P(c)$ trong PMI được thay bằng phân phối ngữ cảnh **làm trơn** mũ 0.75, đúng mục làm trơn ở bài [Vector Semantics và Embeddings](/vi/nlp/vector-semantics-embeddings/) ([Levy, Goldberg và Dagan, 2015](https://aclanthology.org/Q15-1016/)).
+
+Tức là $\mathbf{W}\mathbf{C}^\top$ cố gắng tái tạo ma trận PMI **dịch xuống** một hằng số $\ln k$. Word2Vec ngầm phân tích một ma trận đồng xuất hiện, như SVD làm tường minh. Khác biệt nằm ở trọng số: SGNS chú ý cặp gặp nhiều hơn cặp hiếm, và không bao giờ phải lập ra ma trận $|V| \times |V|$. Từ kết quả này, họ đề xuất ma trận **Shifted PPMI**, $\max(\mathrm{PMI} - \ln k, 0)$, rồi SVD trên đó.
+
+### GloVe: hồi quy trên log số lần đồng xuất hiện
+
+GloVe (Pennington, Socher, Manning, 2014) đi đường ngược lại: đếm trước, học sau. Gọi $X_{ij}$ là số lần từ $j$ nằm trong cửa sổ quanh từ $i$, đếm trên cả kho văn bản. GloVe tìm vectơ sao cho tích vô hướng xấp xỉ $\ln X_{ij}$, bằng **bình phương tối thiểu có trọng số** (weighted least squares). Bài báo gọi hàm mất mát là $J$:
+
+$$
+\mathcal{L}_{\text{GloVe}} = \sum_{i, j : X_{ij} > 0} f(X_{ij}) \bigl(\mathbf{w}_i \cdot \mathbf{c}_j + b_i + b'_j - \ln X_{ij}\bigr)^2
+$$
+
+- $b_i$, $b'_j$ là hai hệ số tự do riêng cho mỗi từ, hấp thụ chuyện từ $i$ hay từ $j$ vốn phổ biến.
+- Chỉ cộng trên các ô $X_{ij} > 0$, vì $\ln 0$ không xác định. Bài báo viết tổng trên mọi ô nhưng đặt $f(0) = 0$, nên hai cách như nhau. Theo bài báo, 75–95% số ô bằng 0 tùy từ vựng và kho văn bản, nên tổng này thưa.
+- Hàm trọng số $f(x) = (x / x_{\max})^{3/4}$ khi $x < x_{\max}$, và bằng 1 khi $x \ge x_{\max}$; bài báo dùng $x_{\max} = 100$. Cặp gặp 1 lần có trọng số $0.03$, gặp 10 lần $0.18$, từ 100 lần trở lên là 1 (tự tính). Cặp hiếm, nhiều nhiễu, ít ảnh hưởng; cặp quá phổ biến không lấn át phần còn lại.
+
+Vectơ cuối của GloVe là tổng hai bảng, $\mathbf{W} + \mathbf{C}$. Ý tưởng dẫn tới GloVe là **tỉ số** xác suất: trong ví dụ của bài báo, "solid" gặp quanh "ice" nhiều hơn quanh "steam" khoảng 8.9 lần, còn "water" (liên quan cả hai) có tỉ số gần 1. Hiệu $\mathbf{w}_{\text{ice}} - \mathbf{w}_{\text{steam}}$ được thiết kế để mang thông tin tỉ số đó.
+
+### FastText: từ là tổng các mảnh ký tự
+
+Word2Vec và GloVe coi mỗi từ là một ký hiệu nguyên khối. "nhà_thơ" và "nhà_báo" chung tiền tố nhưng vectơ của chúng không chia sẻ gì, và một từ chưa từng gặp thì không có vectơ. FastText (Bojanowski và cộng sự, 2017) sửa chỗ này:
+
+1. Thêm `<` ở đầu và `>` ở cuối từ, để phân biệt tiền tố, hậu tố với phần giữa.
+2. Lấy mọi n-gram ký tự dài 3 tới 6. Từ "nhà" thành `<nh`, `nhà`, `hà>`, `<nhà`, `nhà>`, `<nhà>`.
+3. Thêm chính từ đó như một chuỗi đặc biệt (nếu nó có trong từ vựng).
+4. Mỗi n-gram $g$ có một vectơ $\mathbf{z}_g$. Vectơ của từ là **tổng** các vectơ đó, rồi huấn luyện như SGNS.
+
+Để không phải lưu một bảng cho hàng chục triệu n-gram, FastText **băm** (hash) mỗi n-gram vào một trong $K$ ô bằng hàm FNV-1a, với $K = 2 \times 10^6$. Hai n-gram khác nhau có thể rơi chung một ô; mô hình chấp nhận chút va chạm đó.
+
+Lợi ích: từ hiếm mượn được thông tin từ các mảnh chung với từ phổ biến, và từ chưa gặp vẫn có vectơ bằng cách cộng các n-gram của nó. Bài báo lấy ví dụ tiếng Phần Lan, nơi danh từ có 15 cách (case), và đo trên các ngôn ngữ như tiếng Đức, tiếng Séc, tiếng Nga: lợi ích rõ nhất ở những ngôn ngữ biến đổi hình thái nhiều.
+
+**Còn tiếng Việt thì sao?** Thành thật mà nói, lợi ích nhỏ hơn. Tiếng Việt viết theo âm tiết cách nhau bằng dấu cách, không chia đuôi theo thì hay số. Nếu tách token theo dấu cách, mỗi token là một âm tiết ngắn (thường 1 tới 7 chữ cái), nên n-gram 3–6 ký tự gần như chỉ lặp lại âm tiết đó. Lợi ích lớn hơn khi văn bản đã **tách từ**, nối âm tiết bằng `_` (bài [Tách từ](/vi/nlp/tokenization/)): `nhà_văn`, `nhà_thơ`, `nhà_báo` chung các mảnh `<nhà_`, đúng với cách tiếng Việt tạo từ ghép. FastText cũng giúp với lỗi gõ, tên riêng và từ mượn. Hai bẫy riêng của tiếng Việt:
+
+- **Văn bản không dấu là một chuỗi khác hẳn.** "người" và "nguoi" chỉ chung đúng một n-gram, `<ng` (tự đếm), nên FastText không tự nối được hai cách viết. Muốn dùng văn bản không dấu, hãy khôi phục dấu trước, hoặc học vectơ trên dữ liệu cùng kiểu.
+- **Cùng một chữ có dấu có thể là nhiều chuỗi Unicode.** Dạng dựng sẵn NFC và dạng tổ hợp NFD của "người" khác nhau từng ký tự, nên n-gram khác nhau. Chuẩn hóa Unicode (bài [Chuẩn hóa văn bản](/vi/nlp/text-normalization/)) để cùng một chữ luôn ra cùng một chuỗi.
+
+Bạn không phải tự huấn luyện để dùng thử: [Grave và cộng sự (2018)](https://aclanthology.org/L18-1550/) công bố vectơ FastText cho 157 ngôn ngữ, có tiếng Việt (`cc.vi.300.bin`, [trang tải](https://fasttext.cc/docs/en/crawl-vectors.html), giấy phép CC BY-SA 3.0). Bộ vectơ học trên Common Crawl và Wikipedia, 300 chiều, kiến trúc CBOW, n-gram ký tự dài 5. Văn bản tiếng Việt được tách từ bằng **UETsegmenter** trước khi học, nên bộ vectơ có token kiểu `nhà_văn`.
+
+### Phép tương tự vectơ và giới hạn của nó
+
+Ví dụ nổi tiếng nhất của Word2Vec: vectơ gần nhất với $\mathbf{w}_{\text{king}} - \mathbf{w}_{\text{man}} + \mathbf{w}_{\text{woman}}$ là $\mathbf{w}_{\text{queen}}$. Nói bằng tiếng Việt: "vua" trừ "đàn ông" cộng "phụ nữ" ra "nữ hoàng". Cách giải một câu "$a$ với $b$ như $a^*$ với ?":
+
+$$
+b^* = \operatorname*{arg\,max}_{x \notin \{a, b, a^*\}} \cos\bigl(\mathbf{w}_x,\ \mathbf{w}_b - \mathbf{w}_a + \mathbf{w}_{a^*}\bigr)
+$$
+
+Ý trực quan: hiệu $\mathbf{w}_{\text{woman}} - \mathbf{w}_{\text{man}}$ là một "hướng giới tính", cộng hướng đó vào "king" thì tới "queen". Nhưng có hai điều cần biết (và một hộp ở mục Lỗi hay gặp):
+
+- **Phải loại các từ đầu vào.** Điều kiện $x \notin \{a, b, a^*\}$ không phải chi tiết nhỏ. Mikolov và cộng sự (2013b) ghi rõ họ loại các từ đầu vào khỏi phép tìm. Không loại thì từ gần nhất thường chính là một từ đầu vào hoặc biến thể của nó (Jurafsky và Martin, SLP3).
+- **Chỉ chạy tốt với vài loại quan hệ.** Thủ đô–quốc gia, dạng số nhiều, so sánh hơn thì tốt; nhiều quan hệ khác thì kém hẳn.
+### Thiên lệch trong embedding
+
+Embedding học từ văn bản người viết, nên học luôn định kiến trong đó. [Bolukbasi và cộng sự (2016)](https://proceedings.neurips.cc/paper/2016/hash/a486cd07e4ac3d270571622f4f316ec5-Abstract.html) dùng vectơ Word2Vec học trên Google News và thấy phép tương tự cho ra cặp như "man : computer programmer :: woman : homemaker" (đàn ông với lập trình viên như phụ nữ với nội trợ). Họ cho thấy thiên lệch giới tính nằm gần một **hướng** trong không gian, và đề xuất cách chiếu bớt hướng đó khỏi các từ trung tính về giới. [Gonen và Goldberg (2019)](https://aclanthology.org/N19-1061/) cho thấy cách làm này chỉ che bớt: thiên lệch vẫn còn trong cách các từ xếp gần nhau. Đây vẫn là vấn đề mở (SLP3 mục 5.8).
+
+Nếu bạn dùng embedding trong hệ thống lọc hồ sơ hay chấm điểm, thiên lệch này đi thẳng vào quyết định. Hãy đo nó trên dữ liệu của bạn trước khi tin.
+
+### Tĩnh và theo ngữ cảnh
+
+Cả ba phương pháp trong bài cho **embedding tĩnh** (static embedding): mỗi từ đúng một vectơ, dùng cho mọi câu. "Đường" trong "một cân đường" và trong "con đường" có cùng một vectơ, một kiểu trung bình của hai nghĩa. **Embedding theo ngữ cảnh** (contextual embedding) cho mỗi lần xuất hiện một vectơ riêng, tính từ cả câu; bài [BERT](/vi/nlp/bert/) dạy cách làm đó.
+
+### Giới hạn
+
+- **Một vectơ cho mọi nghĩa** (mục trên). Mô hình theo ngữ cảnh ở bài [BERT](/vi/nlp/bert/) xử lý chuyện này.
+- **Từ chưa gặp:** Word2Vec và GloVe không có vectơ; FastText ghép được (ô code thứ hai).
+- **Thiên lệch của dữ liệu** đi vào vectơ, và phép tương tự có thể khuếch đại nó.
+- **Không có trật tự từ.** Trong cửa sổ, từ đứng trước hay sau từ đích đều được tính như nhau. Và nếu lấy trung bình vectơ các từ làm vectơ câu, "chó cắn mèo" và "mèo cắn chó" cho đúng cùng một vectơ.
+
+## Minh họa
+
+Hình dưới đặt hai kiến trúc của Word2Vec cạnh nhau trên cùng một câu. Hãy nhìn chiều của mũi tên: CBOW gom bốn từ xung quanh thành một vectơ rồi đoán từ giữa, còn skip-gram đi từ một từ giữa ra bốn lần đoán riêng.
+
+{/* FIG: CBOW gom ngữ cảnh lại để đoán từ giữa; skip-gram dùng từ giữa để đoán từng từ ngữ cảnh, trên cùng một câu. */}
+<Word2VecFigure />
+
+Bảng dưới so ba phương pháp theo cùng các tiêu chí.
+
+| Tiêu chí | Word2Vec (SGNS) | GloVe | FastText |
+|---|---|---|---|
+| Học từ | Từng cặp (từ, ngữ cảnh) khi quét văn bản | Bảng đếm đồng xuất hiện $X_{ij}$ của cả kho văn bản | Từng cặp, như SGNS |
+| Hàm mất mát | Phân loại cặp thật / giả bằng sigmoid | Bình phương tối thiểu có trọng số trên $\ln X_{ij}$ | Như SGNS, nhưng vectơ từ là tổng n-gram |
+| Đơn vị có vectơ | Từ | Từ | N-gram ký tự 3–6 (và từ) |
+| Từ chưa gặp | Không có vectơ | Không có vectơ | Cộng vectơ các n-gram |
+| Nối với PMI | Ngầm phân tích PMI dịch xuống $\ln k$ | Tường minh khớp $\ln X_{ij}$ | Như SGNS |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026, với Python 3.14 và NumPy 2.4 (bản có trong Pyodide). Cả hai ô chạy ngay trên trang và chạy độc lập: ô nào cũng tự import và tự tạo dữ liệu.
+
+### Skip-gram với negative sampling bằng NumPy
+
+Ô dưới dựng một **kho văn bản** (corpus) nhỏ tự viết: 180 câu từ ba khuôn câu, mỗi khuôn cho một nhóm từ. Con vật (mèo, chó, gà, vịt) đi với loại từ "con"; món ăn (phở, bún, cháo, cơm) đi với "bát"; đồ uống (trà, sữa, bia, nước) đi với "ly". Từ vựng có 40 từ, cửa sổ $\pm 2$ cho 2604 cặp (từ, ngữ cảnh). Mô hình có $d = 10$ chiều, $k = 3$ mẫu âm bốc theo $\mathrm{count}^{3/4}$, học bằng gradient descent theo lô 64 cặp, $\eta = 0.03$, 13 lượt (epoch). Dòng `gw` tính $\partial\mathcal{L}/\partial\mathbf{w}$. Ba dòng `np.add.at` trừ $\eta$ lần ba gradient vào $\mathbf{C}$ (ngữ cảnh thật), $\mathbf{C}$ (mẫu âm) và $\mathbf{W}$. Gradient của các cặp trong lô được **cộng** lại, không lấy trung bình; `np.add.at` cộng dồn đúng khi một từ xuất hiện nhiều lần trong cùng một lô.
+
+<PythonRunner code={skipgramCode} title="Skip-gram với negative sampling trên kho văn bản tiếng Việt nhỏ" />
+
+Đọc kết quả:
+
+- **Loss đi từ 2.751 xuống 1.132.** Ở đầu, mọi vectơ gần 0 nên mọi tích vô hướng gần 0 và $\sigma \approx 0.5$. Loss của một cặp thật cùng 3 mẫu âm khi đó là $4 \ln 2 \approx 2.77$ (tự tính), khớp số đầu tiên. Số in ra là trung bình trong lúc học ở mỗi lượt, nên lượt 0 đã thấp hơn 2.77 một chút.
+- **Loss không về 0, và không nên về 0.** Mẫu âm được bốc ngẫu nhiên, nên đôi khi chính là một ngữ cảnh thật. "một" đứng cạnh mọi nhóm, nên mô hình không thể chắc chắn mọi cặp chứa "một" là giả.
+- **Hàng xóm gần nhất đúng nhóm:** "mèo" gần vịt 0.99, gà 0.98, chó 0.97; "phở" gần cơm 0.99, cháo 0.99, bún 0.96; "trà" gần bia 0.96, nước 0.96, sữa 0.95. Không ai dạy mô hình đâu là con vật hay món ăn; nó tự suy ra từ ngữ cảnh.
+- **cos(mèo, phở) = 0.28,** thấp hơn hẳn trong nhóm nhưng không âm. Lý do: cả hai có "một" trong ngữ cảnh ("nuôi một con mèo", "ăn một bát phở").
+
+Thử đổi seed ở dòng `default_rng(0)`. Số cụ thể đổi, nhưng ba nhóm vẫn tách ra: ở các lần chạy thử với seed 1 và 2, mọi hàng xóm gần nhất vẫn cùng nhóm. Kho này dễ một cách cố ý; văn bản thật cần hàng triệu câu mới có kết quả tương tự. Ô cũng không làm subsampling vì kho quá nhỏ.
+
+### N-gram ký tự kiểu FastText và từ chưa gặp
+
+Ô thứ hai làm hai việc. Thứ nhất, liệt kê n-gram 3–6 ký tự của một từ, có `<` và `>`. Thứ hai, cho thấy **cơ chế** ghép vectơ cho từ chưa gặp: băm mỗi n-gram bằng FNV-1a vào 10 000 ô, mỗi ô một vectơ 300 chiều, rồi cộng lại. Lưu ý quan trọng: **các vectơ n-gram ở đây là số ngẫu nhiên** (có seed), chưa huấn luyện gì. Ô này chỉ minh họa cách ghép, không phải embedding thật.
+
+<PythonRunner code={fasttextCode} title="N-gram ký tự kiểu FastText và vectơ cho từ chưa gặp" />
+
+Đọc kết quả:
+
+- **"nhà" có 6 n-gram:** `<nh`, `nhà`, `hà>`, `<nhà`, `nhà>`, `<nhà>`. Từ ngắn đến mức n-gram 5 ký tự đã trùng với cả từ có dấu biên. Đây là chuyện thường gặp với âm tiết tiếng Việt.
+- **`nhà_văn` có 22 n-gram.** Nó chung 6 n-gram với `nhà_thơ` và với `nhà_báo` (`<nh`, `<nhà`, `<nhà_`, `hà_`, `nhà`, `nhà_`), chung 1 với `văn_học` (`văn`), không chung gì với `con_mèo`.
+- **Cosine đi theo số mảnh chung, dù vectơ là ngẫu nhiên:** 0.35 với `nhà_thơ`, 0.27 với `nhà_báo`, 0.05 với `văn_học`, -0.00 (tức là 0) với `con_mèo`. Với vectơ ngẫu nhiên 300 chiều, các mảnh khác nhau gần như vuông góc, nên cosine xấp xỉ tỉ lệ mảnh chung, khoảng $6/22 \approx 0.27$, cộng nhiễu.
+
+Trong FastText thật, vectơ n-gram được huấn luyện. Mảnh `<nhà_` gặp trong `nhà_thơ`, `nhà_báo`, nhưng cũng trong `nhà_cửa`, `nhà_máy`, nên nó học một thứ trộn giữa các nghĩa đó. Phần còn lại của từ (`_văn>`, `văn`) kéo vectơ về đúng hướng hơn. Nhờ vậy một từ chưa gặp vẫn có một vectơ hợp lý, tốt hơn hẳn việc không có gì, dù không bằng vectơ học từ nhiều lần xuất hiện thật. Thư viện `fasttext` lấy trung bình thay cho tổng; cosine không đổi vì hai cách chỉ khác nhau một hệ số.
+
+## Lỗi hay gặp
+
+:::caution[Đọc phép tương tự như bằng chứng mô hình "hiểu"]
+"Vua − đàn ông + phụ nữ = nữ hoàng" là ví dụ được chọn vì nó đẹp. Phép tìm luôn loại ba từ đầu vào, và nhiều loại quan hệ cho kết quả kém hẳn. Muốn đánh giá embedding cho việc của bạn, hãy đo trên chính tác vụ đó (phân loại, truy xuất), không dựa vào vài phép cộng trừ.
+:::
+
+:::caution[So vectơ từ hai lần huấn luyện khác nhau]
+Hai lần chạy Word2Vec, kể cả cùng dữ liệu nhưng khác seed, cho hai không gian xoay khác nhau. Cosine giữa vectơ "mèo" của lần 1 và vectơ "mèo" của lần 2 vô nghĩa. Chỉ so các vectơ **trong cùng một mô hình**. Ở ô code đầu, đổi seed làm mọi số đổi, nhưng quan hệ "mèo gần chó hơn gần phở" vẫn giữ.
+:::
+
+:::caution[Dùng vectơ tiếng Việt mà không khớp cách tách từ]
+Vectơ học trên văn bản tách theo âm tiết thì có "nhà", "văn" chứ không có "nhà_văn", và ngược lại. Ví dụ, `cc.vi.300` học trên văn bản đã tách từ bằng UETsegmenter: tra "nhà văn" theo từng âm tiết sẽ ra hai vectơ của "nhà" và "văn", không phải vectơ của `nhà_văn`. Văn bản có dấu dạng NFD hay kiểu bỏ dấu cũ/mới khác lúc huấn luyện cũng làm tra bảng trượt. Trước khi tra, hãy xử lý văn bản đúng như cách bộ vectơ được tạo: cùng chuẩn Unicode, cùng cách tách, cùng chữ hoa thường.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Word2Vec học embedding bằng một bài toán dự đoán giả trên văn bản thô. Skip-gram đoán ngữ cảnh từ từ giữa; CBOW đoán từ giữa từ trung bình ngữ cảnh. Mỗi từ có hai vectơ: $\mathbf{w}$ (từ đích) và $\mathbf{c}$ (ngữ cảnh).
+- Softmax trên cả từ vựng tốn $|V|$ phép tính cho mỗi cặp. Negative sampling thay bằng phân loại cặp thật với $k$ cặp ghép bừa: $\mathcal{L} = -\ln\sigma(\mathbf{c}_{\text{pos}} \cdot \mathbf{w}) - \sum_i \ln\sigma(-\mathbf{c}_{\text{neg},i} \cdot \mathbf{w})$, mẫu âm bốc theo $\mathrm{count}^{3/4}$. Gradient kéo ngữ cảnh thật lại gần, đẩy mẫu âm ra xa.
+- SGNS ngầm phân tích ma trận $\mathrm{PMI} - \ln k$; GloVe khớp tường minh $\ln X_{ij}$ bằng bình phương tối thiểu có trọng số $f(X_{ij})$. FastText biểu diễn từ bằng tổng vectơ n-gram ký tự 3–6, nên ghép được vectơ cho từ chưa gặp; với tiếng Việt, lợi ích rõ nhất khi văn bản đã tách từ.
+- Các embedding này là tĩnh: một vectơ mỗi từ, mang theo thiên lệch của dữ liệu, và phép tương tự vectơ chỉ đúng với vài loại quan hệ. Embedding theo ngữ cảnh ở bài [BERT](/vi/nlp/bert/) giải quyết chuyện nhiều nghĩa.
+
+**Đọc thêm:**
+
+- Jurafsky, D., Martin, J. H. (bản nháp 8/2026). [*Speech and Language Processing*, chương 5 "Embeddings"](https://web.stanford.edu/~jurafsky/slp3/5.pdf) (PDF), mục 5.5 tới 5.8. Giải thích word2vec rất kỹ, có các lưu ý về phép tương tự và thiên lệch. Bản nháp cũ đánh số chương này là 6.
+- Mikolov, T., Sutskever, I., Chen, K., Corrado, G., Dean, J. (2013b). [*Distributed Representations of Words and Phrases and their Compositionality*](https://arxiv.org/abs/1310.4546), NeurIPS 2013, mục 2. Negative sampling, phân phối mũ 3/4, subsampling. Bài báo gọi vectơ từ đích là $v_{w_I}$ và vectơ ngữ cảnh là $v'_{w_O}$, chỗ bài này viết $\mathbf{w}$ và $\mathbf{c}$.
+- Pennington, J., Socher, R., Manning, C. D. (2014). [*GloVe: Global Vectors for Word Representation*](https://aclanthology.org/D14-1162/), EMNLP 2014, mục 3. Hàm mất mát có trọng số và ví dụ ice/steam. Bài báo viết $\tilde{w}_j$ cho vectơ ngữ cảnh.
+- Bojanowski, P., Grave, E., Joulin, A., Mikolov, T. (2017). [*Enriching Word Vectors with Subword Information*](https://arxiv.org/abs/1607.04606), TACL 5, mục 3.2. Mô hình n-gram ký tự của FastText.
+- Levy, O., Goldberg, Y. (2014). [*Neural Word Embedding as Implicit Matrix Factorization*](https://proceedings.neurips.cc/paper/2014/hash/b78666971ceae55a8e87efb7cbfd9ad4-Abstract.html), NeurIPS 2014, mục 3. Chứng minh SGNS phân tích ma trận PMI dịch chuyển, nối bài này với bài trước. Bài báo viết $\log$ cho logarit tự nhiên.
+
+<LessonProgress />

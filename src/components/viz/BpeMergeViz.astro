@@ -1,0 +1,35 @@
+---
+// BpeMergeViz for nlp/tokenization (docs/architecture/viz/bpe-merge.md). The only file a lesson imports:
+// <BpeMergeViz />, no props, no client:* in MDX. Here, at build time: UI strings, the description in the page
+// locale, and KaTeX for |V| and f(w). The island runs BPE itself on the 7 syllables (bpe.ts), with the same code
+// at build time and in the browser. It hydrates 200px before it scrolls into view. Styles: viz.css, through
+// Starlight's customCss.
+import BpeMergeVizIsland from './bpe-merge-viz/BpeMergeVizIsland';
+import { BPE_SYLLABLES } from '@data/datasets/bpe-syllables';
+import { getStrings } from '@i18n/ui';
+import { renderInlineMarkup } from '@lib/inline-markup';
+import { getPageLocale } from '@lib/page-locale';
+
+const route = Astro.locals.starlightRoute;
+const locale = getPageLocale(route);
+const strings = getStrings(Astro.locals.t, 'vizBpeMerge');
+const tCommon = getStrings(Astro.locals.t, 'common');
+
+const labels = {
+  vocabHtml: renderInlineMarkup(strings.vocabLabel),
+  freqHtml: renderInlineMarkup(strings.freqCol),
+};
+---
+
+<div class="atlas-viz not-content" lang={locale} data-pagefind-ignore>
+  <BpeMergeVizIsland
+    client:visible={{ rootMargin: '200px' }}
+    words={BPE_SYLLABLES.words}
+    end={BPE_SYLLABLES.end}
+    merges={BPE_SYLLABLES.merges}
+    description={BPE_SYLLABLES.description[locale]}
+    labels={labels}
+    strings={strings}
+  />
+  <noscript><p class="atlas-viz-noscript">{tCommon.needsScript}</p></noscript>
+</div>

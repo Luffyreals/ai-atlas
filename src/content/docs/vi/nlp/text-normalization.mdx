@@ -1,0 +1,333 @@
+---
+title: Chuẩn hóa văn bản
+description: Hai chữ "Hòa" trông giống hệt nhau mà máy coi là khác. NFC và NFD, vị trí dấu thanh, chữ hoa thường, URL và số, stemming, stopword, và khi nào không nên chuẩn hóa.
+quiz:
+  - question: 'Chuỗi "Huế" gõ ở dạng NFC có `len` bằng 3. Sau `unicodedata.normalize(''NFD'', s)`, `len` bằng bao nhiêu?'
+    options:
+      - '3, vì NFD không đụng tới chữ đã dựng sẵn'
+      - '4, vì chữ có dấu tách thành hai code point'
+      - '5'
+      - '6'
+    answer: 2
+    explanation: 'NFD tách mọi chữ dựng sẵn thành chữ gốc cộng các dấu tổ hợp. "ế" mang hai dấu: dấu mũ (U+0302) và dấu sắc (U+0301), nên thành ba code point: e, U+0302, U+0301. Cộng với "H" và "u" là 5. Đáp án 4 đúng với "Hòa" (một dấu), nhưng chữ có cả dấu phụ lẫn dấu thanh tách thành ba.'
+  - question: 'Chỉ mục của bạn có tiêu đề "Hóa đơn tháng 10". Người dùng gõ "hoa don" (không dấu) và không tìm thấy gì. Cách sửa nào hợp nhất?'
+    options:
+      - 'Bỏ dấu cả chỉ mục lẫn câu truy vấn khi so khớp, giữ bản có dấu để hiển thị'
+      - 'Chỉ bỏ dấu ở câu truy vấn của người dùng, vì chỉ mục đã đúng chính tả và không nên sửa'
+      - 'Chuẩn hóa NFC cả chỉ mục lẫn câu truy vấn để hai bên dùng cùng một cách ghi dấu'
+      - 'Áp stemming Porter cho cả hai bên để đưa các dạng của từ về cùng một gốc'
+    answer: 0
+    explanation: 'So khớp chỉ đúng khi hai bên đi qua cùng một hàm chuẩn hóa. Bỏ dấu cả hai bên thì "Hóa đơn" và "hoa don" cùng thành "hoa don". Chỉ bỏ dấu câu truy vấn thì "hoa don" vẫn khác "hóa đơn" trong chỉ mục. NFC không bỏ dấu, nên không giúp gì ở đây. Porter là quy tắc cắt hậu tố tiếng Anh, không liên quan tới dấu.'
+  - question: 'Bạn bỏ stopword theo một danh sách có chữ "không", rồi huấn luyện bộ phân loại cảm xúc trên bag-of-words. Hai nhận xét "món này không ngon" và "món này ngon" sẽ ra sao?'
+    options:
+      - 'Vẫn khác nhau, vì thứ tự từ được giữ nguyên'
+      - 'Bộ phân loại tự học lại nghĩa của "không" từ các từ xung quanh'
+      - 'Khác nhau, vì chữ "món" mang cảm xúc'
+      - 'Thành cùng một đầu vào, nên chắc chắn nhận cùng một nhãn'
+    answer: 3
+    explanation: 'Sau khi bỏ "không", cả hai câu chỉ còn "món này ngon". Mô hình nhận hai đầu vào giống hệt nhau nên không thể cho hai nhãn khác nhau. Thông tin đã mất ở bước chuẩn hóa, mô hình không có cách nào học lại. Với phân tích cảm xúc, các từ phủ định như "không", "chẳng", "chưa" phải được giữ.'
+  - question: 'Bạn huấn luyện bộ phân loại trên dữ liệu đã đưa dấu thanh về kiểu "hoà", "khoẻ". Khi chạy thật, bạn chỉ áp NFC cho câu đầu vào. Người dùng gõ "hòa". Chuyện gì xảy ra?'
+    options:
+      - 'Không sao, vì NFC đã đưa cả "hòa" lẫn "hoà" về cùng một dãy code point'
+      - 'Mô hình gặp "hòa" như một từ chưa từng thấy, vì hàm chuẩn hóa lúc dùng khác lúc huấn luyện'
+      - 'Chương trình báo lỗi Unicode, vì "hòa" không có trong từ vựng của mô hình'
+      - 'Không sao, vì hai chữ hiện ra gần như nhau nên mô hình coi là một'
+    answer: 1
+    explanation: '"hòa" và "hoà" đều đã ở dạng NFC, nhưng dấu huyền nằm trên hai chữ khác nhau ("ò" và "à"), nên chúng là hai chuỗi khác nhau và NFC không gộp được. Mô hình chỉ từng thấy "hoà", nên "hòa" là từ lạ. Cách sửa: gói mọi bước chuẩn hóa vào một hàm duy nhất, gọi cùng hàm đó khi huấn luyện và khi dùng.'
+  - question: 'Thuật toán Porter biến cả "university" lẫn "universe" thành "univers", nhưng để nguyên "ran". Nhận xét nào đúng?'
+    options:
+      - 'Porter tra từ điển, nên nó biết "university" và "universe" có chung một gốc nghĩa'
+      - 'Porter sai cả hai chỗ vì bản cài đặt có lỗi, thuật toán gốc không cho kết quả như vậy'
+      - 'Hai lỗi ngược chiều: gộp hai từ khác nghĩa, và không gộp được dạng bất quy tắc của "run"'
+      - 'Kết quả cho thấy stemming gộp mạnh hơn, nên luôn tốt hơn lemmatization cho mọi bài toán'
+    answer: 2
+    explanation: 'Porter chỉ cắt hậu tố theo quy tắc, không có từ điển. Nó cắt "-ity" và "-e" nên gộp nhầm "university" với "universe". Nó không biết "ran" là quá khứ của "run", vì hai chữ không chung hậu tố nào để cắt. Lemmatization dùng từ điển và từ loại nên đưa được "ran" về "run", đổi lại chậm hơn và cần tài nguyên cho từng ngôn ngữ.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import unicodeCode from '@code/nlp/text-normalization/unicode.vi.py?raw';
+import pipelineCode from '@code/nlp/text-normalization/pipeline.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu vì sao hai chuỗi trông giống hệt nhau vẫn có thể khác nhau, và dùng **chuẩn hóa Unicode** (Unicode normalization) NFC, NFD để gộp chúng. Nhận ra chuyện dấu thanh đặt ở hai chỗ ("hòa" và "hoà") là một vấn đề khác, Unicode không tự giải quyết.
+- Cài đặt được một pipeline **chuẩn hóa văn bản** (text normalization): chữ thường, khoảng trắng, URL, email, số, dấu câu. Biết vì sao thứ tự các bước quan trọng.
+- Phân biệt **stemming** và **lemmatization**, biết vì sao tiếng Việt gần như không cần chúng. Dùng **stopword** cẩn thận.
+- Nhận ra khi nào **không** nên chuẩn hóa mạnh: mô hình subword, nhận dạng thực thể, phân tích cảm xúc.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+## Trực giác
+
+### Hai chữ "Hòa" không bằng nhau
+
+Bạn có một bảng khách hàng. Bạn gõ "Hòa" vào ô tìm kiếm, và không ra kết quả nào. Trong khi đó, chữ "Hòa" nằm ngay trên màn hình.
+
+Lý do nằm ở chỗ máy không lưu "chữ" như mắt ta thấy. Máy lưu một dãy số, mỗi số là một **code point** của Unicode. Và chữ "ò" có hai cách ghi:
+
+| Cách ghi | Trông như | Dãy code point | `len` |
+|---|---|---|---:|
+| "ò" dựng sẵn | Hòa | U+0048 U+00F2 U+0061 | 3 |
+| "o" cộng dấu huyền rời | Hòa | U+0048 U+006F U+0300 U+0061 | 4 |
+
+Hai dòng hiện ra giống hệt nhau, nhưng là hai dãy số khác nhau. Phép `==` của Python so từng code point, nên trả về `False`.
+
+Còn một chuyện nữa. Có người viết "Hòa", có người viết "Hoà": dấu huyền đặt trên "o" hay trên "a". Lần này mắt người thấy được sự khác biệt, nhưng ai cũng hiểu đó là cùng một chữ. Với máy, đây lại là hai chuỗi khác nhau, vì một bên có "ò", bên kia có "à".
+
+### Một nhận xét, nhiều cách viết
+
+Văn bản trên mạng còn lộn xộn hơn nhiều. Ba nhận xét sau cùng một ý:
+
+- "Sp OK lắm!!!"
+- "sp ok lắm"
+- "SP   ok  lắm !"
+
+Một mô hình đếm từ, như bag-of-words (biểu diễn văn bản bằng số lần xuất hiện của từng từ) hay TF-IDF (bài [Vector Semantics và Embeddings](/vi/nlp/vector-semantics-embeddings/)), thấy "OK", "ok" và "Sp", "sp", "SP" là năm từ khác nhau. Số lần xuất hiện của một ý bị chia nhỏ ra nhiều "từ", mỗi từ có ít dữ liệu hơn. Từ vựng phình to mà không thêm thông tin gì.
+
+Nhưng gộp quá tay cũng hỏng. Bỏ hết dấu thì "mà" (liên từ) và "má" (mẹ) thành một. Bỏ chữ "không" vì nó "quá phổ biến" thì "sản phẩm không tốt" thành "sản phẩm tốt".
+
+Bài toán của bài này là: **chọn một cách biến mọi cách viết của cùng một thứ về một dạng duy nhất, mà không gộp nhầm những thứ khác nhau, và dùng đúng cách đó ở mọi nơi.**
+
+## Lý thuyết
+
+### Chuẩn hóa là một hàm
+
+Gọi $f$ là hàm chuẩn hóa: nhận một chuỗi, trả về một chuỗi. Ta muốn $f$ có ba tính chất.
+
+1. **Gộp đủ.** Hai chuỗi có cùng ý nghĩa với bài toán của ta thì cho cùng kết quả. Viết $a \sim b$ cho "$a$ và $b$ là cùng một thứ", ta muốn:
+
+$$
+a \sim b \;\Rightarrow\; f(a) = f(b)
+$$
+
+2. **Không gộp nhầm.** Nếu $a$ và $b$ khác nghĩa, thì $f(a) \neq f(b)$. Hàm bỏ dấu vi phạm điều này: $f(\text{"mà"}) = f(\text{"má"}) = \text{"ma"}$.
+3. **Lũy đẳng** (idempotent): chuẩn hóa thêm lần nữa không đổi gì, $f(f(a)) = f(a)$. Nhờ vậy bạn không phải nhớ một chuỗi đã chuẩn hóa chưa.
+
+Hai yêu cầu đầu kéo về hai phía. Hàm càng mạnh thì càng gộp đủ, nhưng càng dễ gộp nhầm. Chữ "cùng một thứ" lại tùy bài toán: với công cụ tìm kiếm, "Hóa" và "hoa" có thể coi là một; với bộ nhận dạng tên riêng thì không. Vì vậy không có một hàm chuẩn hóa "đúng" cho mọi việc.
+
+Có một quy tắc không đổi: **lúc huấn luyện và lúc dùng phải áp cùng một $f$**. Mô hình chỉ biết những chuỗi nó đã thấy sau $f$.
+
+### Unicode: chữ dựng sẵn và dấu tổ hợp
+
+Unicode gán cho mỗi ký tự một số gọi là **code point**, viết dạng U+ cộng số hệ mười sáu. Chữ tiếng Việt có dấu có hai cách ghi:
+
+- **Ký tự dựng sẵn** (precomposed character): một code point cho cả chữ lẫn dấu, ví dụ "ò" là U+00F2. Unicode có sẵn mọi chữ có dấu của tiếng Việt.
+- **Dấu tổ hợp** (combining mark): chữ gốc, theo sau là một hay nhiều code point dấu, ví dụ "o" U+006F rồi dấu huyền tổ hợp U+0300. Chữ mang hai dấu, như "ệ", thành ba code point: "e", dấu nặng U+0323, dấu mũ U+0302.
+
+Hai cách ghi này là **tương đương chuẩn** (canonical equivalence): theo chuẩn Unicode, chúng là cùng một ký tự và phải hiện ra như nhau. Văn bản dạng tổ hợp sinh ra từ nhiều nguồn: bảng mã "Unicode tổ hợp" của bộ gõ Unikey, mã Windows-1258, văn bản chép từ một số phần mềm hay file PDF. Bạn không chọn được dữ liệu của mình đến từ đâu.
+
+Phụ lục số 15 của chuẩn Unicode (UAX #15) định nghĩa bốn **dạng chuẩn** (normalization form):
+
+| Dạng | Làm gì | Ví dụ |
+|---|---|---|
+| NFD | Tách hết thành chữ gốc cộng dấu tổ hợp | "ò" → "o" + U+0300 |
+| NFC | Tách như NFD, rồi ghép lại thành ký tự dựng sẵn khi có | "o" + U+0300 → "ò" |
+| NFKD | Như NFD, thêm các phép đổi **tương thích** | "ﬁ" → "f" "i" |
+| NFKC | Như NFC, thêm các phép đổi tương thích | "²" → "2", "Ａ" (chữ rộng) → "A" |
+
+Hai chuỗi tương đương chuẩn luôn cho cùng kết quả NFC, và cùng kết quả NFD. Đó đúng là tính chất "gộp đủ" ở trên. Vì NFC và NFD chỉ gộp những thứ mà Unicode coi là một, chúng không gộp nhầm. **NFC là bước nên làm đầu tiên với mọi văn bản tiếng Việt.** Nhiều văn bản trên web đã ở sẵn dạng NFC, và [Unicode FAQ về chuẩn hóa](https://www.unicode.org/faq/normalization.html) gọi NFC là dạng tốt nhất cho văn bản thông thường. UAX #15 cũng ghi rằng W3C khuyên dùng NFC cho mọi nội dung web.
+
+**Tương đương tương thích** (compatibility equivalence) thì lỏng hơn: các ký tự "giống nhau về ý" nhưng có thể khác về hình hay cách dùng. NFKC biến "x²" thành "x2", tức là có mất thông tin. Bộ tách từ SentencePiece mặc định dùng `nmt_nfkc`, một biến thể của NFKC có gộp thêm khoảng trắng ([tài liệu chuẩn hóa của SentencePiece](https://github.com/google/sentencepiece/blob/master/doc/normalization.md)); bạn sẽ gặp nó ở bài [Tách từ (Tokenizer)](/vi/nlp/tokenization/).
+
+### Vị trí dấu thanh: kiểu cũ và kiểu mới
+
+NFC giải quyết chuyện "ò" ghi bằng một hay hai code point. Nó **không** giải quyết chuyện "Hòa" và "Hoà", vì đó là hai chữ khác nhau ở mức Unicode: một bên có "ò" (U+00F2), bên kia có "à" (U+00E0). Cả hai đều đã ở dạng NFC.
+
+Tiếng Việt có hai thói quen đặt dấu thanh cùng tồn tại:
+
+- **Kiểu cũ** đặt dấu gần giữa âm tiết, vì đẹp mắt: "hòa", "khỏe", "thủy". Đa số người vẫn dùng kiểu này khi viết hằng ngày.
+- **Kiểu mới** đặt dấu trên **âm chính** (nguyên âm mang thanh điệu): "hoà", "khoẻ", "thuỷ". Sách giáo khoa của Nhà xuất bản Giáo dục thường dùng kiểu này.
+
+Cách gọi và hai ví dụ trên theo mục về dấu thanh của bài [Vietnamese alphabet trên Wikipedia](https://en.wikipedia.org/wiki/Vietnamese_alphabet).
+
+Hai kiểu chỉ khác nhau ở vài vần, chủ yếu là **oa, oe, uy khi đứng cuối âm tiết**. Khi vần có âm cuối, như "hoàng", "khoảng", "thuyền", cả hai kiểu đều đặt dấu như nhau. Với "qu", chữ "u" thuộc phụ âm đầu, nên "quý" chỉ có một cách viết. Nguyên âm có dấu phụ (ê, ơ, ô…) luôn mang dấu thanh ở cả hai kiểu: "thuế", không có "thúê".
+
+Muốn gộp, ta cần một quy tắc riêng. Mẹo là dùng chính NFD:
+
+1. Đưa chuỗi về NFD: dấu thanh tách thành một code point rời. Với o, u, y không có dấu phụ (đúng các chữ quy tắc xử lý), dấu thanh nằm ngay sau nguyên âm. Chữ có dấu phụ thì khác: "ồ" ở NFD là "o" + U+0302 + U+0300, nên quy tắc không đụng tới.
+2. Dùng [regex](/vi/nlp/regex/) tìm "o" + dấu thanh + "a" hoặc "e" ở cuối âm tiết, và "u" + dấu thanh + "y" ở cuối âm tiết. Đổi chỗ dấu và nguyên âm sau.
+3. Đưa về NFC.
+
+Bạn chọn kiểu nào làm đích cũng được. Điều quan trọng là **cả kho dữ liệu dùng một kiểu**. Bài này đưa về kiểu mới. Quy tắc trong ô code chỉ là một **tập con** (oa, oe, uy không có âm cuối), đủ cho các chữ hay gặp như hòa, hóa, khỏe, thủy, lũy, nhưng không phải bộ chuyển đổi đầy đủ.
+
+### Chữ hoa, khoảng trắng, URL và số
+
+**Chữ hoa thường.** Đưa về chữ thường làm "OK", "Ok", "ok" thành một. Python có hai hàm: `str.lower()` và `str.casefold()`. Với tiếng Việt chúng cho cùng kết quả. Khác biệt nằm ở vài chữ của ngôn ngữ khác: `"ß".lower()` giữ nguyên "ß", còn `"ß".casefold()` cho "ss". `casefold` được làm ra cho việc so khớp không phân biệt hoa thường, nên dùng nó.
+
+**Khoảng trắng.** Văn bản có thể chứa nhiều dấu cách liền nhau, tab, xuống dòng, hay dấu cách không ngắt (U+00A0) chép từ trang web. `" ".join(s.split())` gộp hết thành một dấu cách và bỏ khoảng trắng ở hai đầu, vì `split()` không tham số tách ở mọi loại khoảng trắng của Unicode. Riêng ký tự rộng 0 (U+200B) không được Unicode coi là khoảng trắng, nên vẫn còn lại.
+
+**Token giữ chỗ** (placeholder token). Mỗi URL, email, số điện thoại gần như là duy nhất. Giữ nguyên thì mỗi cái thành một "từ" chỉ xuất hiện một lần, không giúp mô hình học gì. Thay chúng bằng `<url>`, `<email>`, `<num>` thì mô hình học được điều hữu ích hơn: "ở đây có một đường link". Ta làm việc này bằng regex. **Thứ tự quan trọng:** URL và email chứa chữ số, nên phải thay chúng trước khi thay số.
+
+**Dấu câu.** Bỏ dấu câu làm "lắm!!!" và "lắm" thành một. Nhưng "!!!" nói lên mức độ, còn ":(" là cả một cảm xúc. Bỏ hay giữ tùy bài toán (xem mục cuối của phần này).
+
+### Stemming và lemmatization
+
+Tiếng Anh **biến hình** (inflection): một từ đổi dạng theo thì, số, ngôi. "run", "runs", "running", "ran" là bốn dạng của một động từ. Với công cụ tìm kiếm, người gõ "running" có lẽ cũng muốn tìm "runs". Có hai cách gộp:
+
+- **Stemming** cắt hậu tố theo quy tắc, không cần từ điển. Thuật toán của Porter (1980) là bộ stemmer tiếng Anh nổi tiếng nhất: một chuỗi các luật kiểu "bỏ -ing", "đổi -ies thành -i". Kết quả là một **gốc** (stem), không nhất thiết là từ có thật.
+- **Lemmatization** đưa từ về **dạng từ điển** (lemma), dùng từ điển và từ loại. "ran" về "run", "was" về "be", "mice" về "mouse", "better" (tính từ) về "good".
+
+Bảng dưới là kết quả của Porter, chạy bằng bản cài đặt trong thư viện NLTK:
+
+| Từ | Porter | Lemma |
+|---|---|---|
+| running, runs | run | run |
+| ran | ran | run |
+| studies, studying | studi | study |
+| was | wa | be |
+| university, universe | univers | university, universe |
+| mice | mice | mouse |
+
+Stemming nhanh và không cần tài nguyên, nhưng sai theo hai chiều. Nó **gộp nhầm** (overstemming): "university" và "universe" khác nghĩa mà cùng thành "univers". Nó **gộp thiếu** (understemming): "ran" không có hậu tố nào để cắt, nên không về được "run". Lemmatization chính xác hơn, đổi lại phải có từ điển và bộ gán từ loại cho từng ngôn ngữ.
+
+**Tiếng Việt gần như không cần cả hai.** Tiếng Việt là **ngôn ngữ đơn lập** (isolating language): từ không đổi dạng. Thì và số được nói bằng từ riêng: "đã chạy", "đang chạy", "sẽ chạy"; "con mèo", "những con mèo". Chữ "chạy" giữ nguyên trong mọi câu. Khó khăn của tiếng Việt nằm ở chỗ khác: một từ có thể gồm nhiều âm tiết ("học sinh", "máy tính"), nên phải **tách từ** đúng. Bài [Tách từ (Tokenizer)](/vi/nlp/tokenization/) bàn chuyện này.
+
+### Stopword
+
+**Stopword** là những từ rất phổ biến mà mang ít nội dung: "the", "is", "of" trong tiếng Anh; "thì", "là", "của", "các" trong tiếng Việt. Bỏ chúng làm văn bản ngắn lại, và trong truy xuất theo chủ đề, nó giúp TF-IDF tập trung vào từ mang nội dung.
+
+Nhưng "ít nội dung" là tùy bài toán. Nhiều danh sách stopword có "không", "chẳng", "chưa", "rất". Với [phân tích cảm xúc](/vi/nlp/sentiment-analysis/), bỏ chúng là thảm họa: "sản phẩm không tốt" thành "sản phẩm tốt", "không tệ" thành "tệ". Trước khi dùng một danh sách stopword có sẵn, hãy đọc nó và tự hỏi từng từ có quan trọng với bài toán của bạn không.
+
+### Bỏ dấu tiếng Việt
+
+Bỏ dấu là phép chuẩn hóa mạnh nhất với tiếng Việt. Sáu chữ "ma, má, mà, mả, mã, mạ" (ma quỷ, mẹ, liên từ, mồ mả, mã số, mạ lúa) đều thành "ma". "đ" thành "d" nên "đi" và "di" (trong "di chuyển") cũng thành một.
+
+- **Có ích** khi người dùng hay gõ không dấu, nhất là ô tìm kiếm. Áp cho **cả** chỉ mục lẫn câu truy vấn khi so khớp, và giữ bản có dấu để hiển thị.
+- **Có hại** khi đưa văn bản vào mô hình hiểu nghĩa: mô hình mất đúng thông tin mà dấu mang theo.
+
+### Khi nào không nên chuẩn hóa mạnh
+
+Các bước trên đến từ thời mô hình đếm từ, khi mỗi dạng viết là một cột riêng trong ma trận. Mô hình hiện đại thay đổi bức tranh:
+
+- **Mô hình subword và LLM học từ văn bản thô.** Bộ tách từ subword chia được gần như mọi chuỗi thành các mảnh nó đã biết (BPE mức byte thì chia được mọi chuỗi), nên hầu như không còn "từ lạ", và mô hình tự học rằng "OK" và "ok" gần nhau. Chuẩn hóa mạnh còn làm mất tín hiệu mà mô hình dùng được. Với các mô hình này, bạn thường chỉ chuẩn hóa nhẹ: NFC, gộp khoảng trắng, và để nguyên phần còn lại cho bộ tách từ của chính mô hình.
+- **Chữ hoa mang thông tin.** "Hòa" trong "chị Hòa" là tên người, "hòa" trong "hòa nhau" là động từ. Với [nhận dạng thực thể](/vi/nlp/named-entity-recognition/), chữ hoa là một trong những manh mối mạnh nhất. [README của BERT](https://github.com/google-research/bert/blob/master/README.md) ghi rằng bản "uncased" thường tốt hơn, trừ khi chữ hoa quan trọng với tác vụ, như nhận dạng thực thể hay gán nhãn từ loại. README cũng ghi bản uncased **bỏ luôn mọi dấu**, nên nó không hợp với tiếng Việt; bản đa ngôn ngữ "cased" giữ dấu.
+- **Phân tích cảm xúc.** "!!!", ":(", chữ "CHẬM" viết hoa để nhấn mạnh, và các từ phủ định đều mang cảm xúc.
+
+:::note[Ghi nhớ]
+Luôn đưa về NFC. Mọi bước khác (vị trí dấu thanh, chữ thường, token giữ chỗ, bỏ dấu câu, bỏ stopword, bỏ dấu) là một đánh đổi giữa gộp đủ và gộp nhầm, chọn theo bài toán. Gói chúng vào một hàm $f$ và dùng đúng hàm đó khi huấn luyện lẫn khi dùng.
+:::
+
+### Giới hạn
+
+- **Quy tắc dấu thanh trong bài chỉ là tập con.** Bộ chuyển đổi đầy đủ phải biết cấu trúc âm tiết (phụ âm đầu, âm đệm, âm chính, âm cuối) để không đụng vào các vần như "ua" trong "của". Quy tắc cũng phải chạy **trước** bước tách từ: trên văn bản đã tách từ kiểu `hòa_bình`, dấu `_` là `\w`, nên `\b` không khớp sau "a" và chữ giữ nguyên.
+- **Teencode và viết tắt** ("ko", "dc", "sp") cần một từ điển do người làm. Regex không đoán được "ko" là "không".
+- **Regex cho URL, số không hoàn hảo.** Ở ô thứ hai, "10đ" thành `<num> đ`: con số mất, đơn vị tách ra. Nếu giá tiền hay điểm số quan trọng, đừng thay số.
+
+## Minh họa
+
+Bảng dưới là đầu ra của ô thứ hai ở mục Ví dụ code, với câu "Shop của chị Hòa  KHÔNG tệ, giá 1.250.000đ." Chữ "Hòa" của câu đầu vào được ghi ở dạng NFD. Hãy nhìn cột `len` để thấy những thay đổi mắt không thấy được. Trình duyệt tự gộp khoảng trắng, nên trong bảng, mọi dấu cách nằm trong một cụm khoảng trắng liền nhau (tính cả tab) hoặc ở cuối chuỗi được vẽ thành ␣, còn tab (`\t` trong output) vẽ thành → (giữa "tệ," và "giá" là một tab).
+
+| Bước | `len` | Chuỗi sau bước |
+|---|---:|---|
+| (đầu vào) | 44 | `Shop của chị Hòa␣␣KHÔNG tệ,→giá 1.250.000đ.` |
+| NFC | 43 | `Shop của chị Hòa␣␣KHÔNG tệ,→giá 1.250.000đ.` |
+| chữ thường | 43 | `shop của chị hòa␣␣không tệ,→giá 1.250.000đ.` |
+| token giữ chỗ | 41 | `shop của chị hòa␣␣không tệ,→giá␣␣<num> đ.` |
+| bỏ dấu câu | 41 | `shop của chị hòa␣␣không tệ␣→giá␣␣<num> đ␣` |
+| gộp khoảng trắng | 37 | `shop của chị hòa không tệ giá <num> đ` |
+| bỏ dấu (tắt mặc định) | 37 | `shop cua chi hoa khong te gia <num> d` |
+
+Đọc từng dòng:
+
+- **NFC** không đổi gì trên màn hình, nhưng `len` giảm từ 44 xuống 43: "o" cộng dấu huyền rời đã ghép thành "ò".
+- **Token giữ chỗ** thay "1.250.000" bằng `<num>`, có thêm dấu cách hai bên để token không dính vào chữ bên cạnh. Chữ "đ" bị tách ra, đúng như mục Giới hạn đã nói.
+- **Bỏ dấu câu** thay mỗi dấu câu bằng một dấu cách, nên `len` không đổi. Bước gộp khoảng trắng ở cuối dọn hết.
+- **Bỏ dấu** làm "hòa" thành "hoa" và "không tệ" thành "khong te". Người vẫn đọc được câu này, nhưng tên "Hòa" giờ trùng với "hoa" (bông hoa).
+
+Hai câu còn lại cho thấy cái giá của các bước:
+
+| Đầu vào | Sau pipeline (mặc định) |
+|---|---|
+| `Sp OK lắm!!!␣␣␣10đ, xem tại https://example.vn/sp?id=123` | `sp ok lắm <num> đ xem tại <url>` |
+| `Giao hàng CHẬM quá :(␣␣Gọi 0912.345.678 hoặc hotro@example.vn` | `giao hàng chậm quá gọi <num> hoặc <email>` |
+
+Câu thứ hai mất cả chữ "CHẬM" viết hoa lẫn ":(". Với bộ đếm từ dùng để phân loại chủ đề, đó là dọn dẹp tốt. Với bộ phân tích cảm xúc, đó là hai tín hiệu tiêu cực bị xóa.
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026 trên Pyodide 314.0.7 (Python 3.14), chỉ dùng hai mô-đun có sẵn `re` và `unicodedata`. Cả hai ô chạy ngay trên trang và chạy độc lập.
+
+### NFC, NFD và vị trí dấu thanh
+
+Ô dưới tạo hai chữ "Hòa": `a` dùng "ò" dựng sẵn, `b` dùng "o" cộng dấu huyền rời. Nó in kết quả so sánh, độ dài, dãy code point, rồi đưa về NFC và NFD. Phần sau cài quy tắc dời dấu thanh sang kiểu mới cho vần oa, oe, uy ở cuối âm tiết.
+
+<PythonRunner code={unicodeCode} title="Hai chữ Hòa: NFC, NFD và vị trí dấu thanh" />
+
+Đọc kết quả:
+
+- **`Hòa Hòa False` rồi `3 4`.** Hai chuỗi in ra giống hệt nhau, nhưng `==` trả về `False`, và `b` dài hơn một code point. Dãy code point cho thấy chỗ khác: `U+00F2` ở `a`, `U+006F U+0300` ở `b`. Tên của U+0300 là `COMBINING GRAVE ACCENT`, tức dấu huyền tổ hợp.
+- **`True True`.** NFC của `b` bằng `a`, và NFD của `a` bằng `b`. Đưa cả hai về cùng một dạng là đủ để so sánh đúng.
+- **`Hòa Hoà False`.** `c` cũng ở dạng NFC nhưng mang "à". Không dạng chuẩn nào của Unicode gộp được `a` và `c`.
+- **Câu mẫu thành "Hoà thuận, khoẻ mạnh, thuỷ thủ, HOÁ ĐƠN, mùa hoàng hôn".** Bốn chữ đổi: hòa, khỏe, thủy, HÓA (quy tắc dùng `[oO]`, `[aA]` nên chạy cả với chữ hoa). Ba chữ giữ nguyên, đúng như mong muốn: "thủ" (không phải vần uy), "mùa" (vần ua không nằm trong quy tắc), "hoàng" (có âm cuối nên hai kiểu như nhau). Dòng cuối `True` cho thấy sau quy tắc, "Hòa" và "Hoà" đã thành một.
+
+Vì sao quy tắc chạy trên NFD? Ở dạng NFC, "ò" là một ký tự, và muốn dời dấu thì phải có bảng tra từng cặp ("ò" thành "o", "a" thành "à"…). Ở dạng NFD, dấu là một code point riêng nằm ngay sau "o", nên chỉ cần đổi chỗ hai code point bằng nhóm bắt của regex: `\1\3\2`. Đây là một lý do NFD có ích, dù dữ liệu cuối cùng luôn nên lưu ở NFC.
+
+### Pipeline bật/tắt từng bước
+
+Ô thứ hai là một pipeline gồm sáu bước, mỗi bước là một hàm nhỏ. Từ điển `ON` ở đầu file cho bật hoặc tắt từng bước. Với mỗi câu, ô in tên bước, `len` và chuỗi sau bước đó (dạng `repr`, nên bạn thấy được `\t` và dấu cách thừa). Bảng ở mục Minh họa chép từ output này.
+
+<PythonRunner code={pipelineCode} title="Pipeline chuẩn hóa có thể bật/tắt từng bước" />
+
+Những điểm cần để ý trong code:
+
+- **Thứ tự trong `slot`:** URL, rồi email, rồi số. Đổi số trước thì "id=123" trong URL thành `<num>` và URL bị cắt làm đôi.
+- **`punct` giữ token giữ chỗ.** Mẫu `(<\w+>)|[^\w\s]` khớp hoặc một token như `<num>` (nhóm 1, trả lại nguyên vẹn), hoặc một ký tự không phải chữ, số, khoảng trắng (thay bằng dấu cách). Không có nhánh đầu thì dấu `<` và `>` bị xóa và `<num>` thành `num`.
+- **`strip_tone`** dùng NFD rồi bỏ mọi ký tự thuộc loại `Mn` (dấu tổ hợp). "đ" không phải "d" cộng dấu, nên phải đổi riêng.
+
+Hãy thử sửa `ON` rồi chạy lại:
+
+1. Đặt `"strip_tone": True`: câu thứ ba thành `shop cua chi hoa khong te gia <num> d`.
+2. Đặt `"nfc": False`: ở câu thứ ba, bước `punct` biến "hòa" thành `ho a`. Ở dạng NFD, dấu huyền rời không phải `\w`, nên bị coi là dấu câu và bị thay bằng dấu cách. Đây là lý do NFC phải đứng đầu.
+3. Đặt `"lower": False`: "KHÔNG" và "CHẬM" giữ nguyên chữ hoa.
+
+## Lỗi hay gặp
+
+:::caution[Xử lý bằng regex trước khi đưa về NFC]
+Ở dạng NFD, dấu tổ hợp không khớp `\w`. Một mẫu như `[^\w\s]` sẽ xóa dấu, và `\w+` sẽ cắt "hòa" thành "ho" và "a". Ô thứ hai cho thấy điều này khi tắt bước `nfc`. Luôn gọi `unicodedata.normalize("NFC", s)` ngay khi đọc văn bản vào, trước mọi bước khác. Khi so sánh hay băm chuỗi để tìm văn bản trùng cũng vậy: bài [Chuẩn bị dữ liệu pre-train](/vi/llm/pretraining-data/) có ví dụ: bỏ bước NFC thì hai câu trùng nhau không còn bị khử trùng lặp.
+:::
+
+:::caution[Chuẩn hóa lúc huấn luyện, quên lúc dùng]
+Bạn làm sạch dữ liệu huấn luyện bằng một notebook, rồi viết lại phần xử lý đầu vào ở chỗ khác khi đưa mô hình vào dùng. Hai bên lệch nhau một bước, ví dụ một bên dời dấu thanh, bên kia không. Mô hình gặp những chuỗi nó chưa từng thấy và chất lượng giảm mà không có lỗi nào được báo. Cách tránh: viết **một** hàm `normalize(text)`, dùng cùng hàm đó ở cả hai nơi. Với công cụ tìm kiếm cũng vậy: chỉ mục và câu truy vấn phải đi qua cùng một hàm.
+:::
+
+:::caution[Bỏ stopword, bỏ dấu câu khi phân tích cảm xúc]
+Danh sách stopword có sẵn thường chứa "không", "chẳng", "rất". Bỏ chúng làm "không tốt" thành "tốt". Bỏ dấu câu làm mất ":(" và "!!!". Với bài toán cảm xúc, hãy giữ từ phủ định, và cân nhắc thay biểu tượng cảm xúc bằng token giữ chỗ (ví dụ `<sad>`) thay vì xóa.
+:::
+
+:::caution[Dùng mô hình uncased hay bỏ dấu cho tiếng Việt]
+Bản "uncased" của BERT gốc vừa đưa về chữ thường vừa bỏ mọi dấu. Với tiếng Việt, "mà", "má", "mạ" thành một trước khi mô hình kịp đọc. Hãy chọn mô hình giữ dấu (bản "cased", hay mô hình làm riêng cho tiếng Việt), và đưa văn bản thô qua đúng bộ tách từ của mô hình.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Chuẩn hóa là một hàm $f$ trên chuỗi: gộp các cách viết cùng một thứ ($a \sim b \Rightarrow f(a) = f(b)$) mà không gộp nhầm thứ khác nhau. Hàm càng mạnh càng dễ gộp nhầm, và lúc huấn luyện lẫn lúc dùng phải áp cùng một $f$.
+- Chữ có dấu ghi được bằng ký tự dựng sẵn hoặc chữ gốc cộng dấu tổ hợp. NFC và NFD gộp hai cách ghi này mà không mất thông tin; NFC luôn là bước đầu tiên. NFKC gộp thêm ký tự tương thích và có thể mất thông tin.
+- "hòa" (kiểu cũ) và "hoà" (kiểu mới) đều là NFC nhưng khác code point; cần quy tắc riêng, dễ làm trên NFD. Chữ thường dùng `casefold`; URL, email, số thay bằng token giữ chỗ, theo đúng thứ tự.
+- Stemming (Porter) cắt hậu tố theo luật, lemmatization về dạng từ điển; tiếng Việt đơn lập nên gần như không cần. Bỏ stopword, bỏ dấu câu, bỏ dấu tiếng Việt, đưa về chữ thường đều có lúc có hại: phân tích cảm xúc, nhận dạng thực thể, và mô hình subword học từ văn bản thô.
+
+**Đọc thêm:**
+
+- Whistler, K. (biên tập) (2026). [*Unicode Standard Annex #15: Unicode Normalization Forms*](https://unicode.org/reports/tr15/), Unicode 18.0.0, mục 1 và 1.2. Định nghĩa gốc của tương đương chuẩn, tương đương tương thích và bốn dạng chuẩn, có hình minh họa từng dạng.
+- Python Software Foundation. [*`unicodedata` — Unicode Database*](https://docs.python.org/3.14/library/unicodedata.html), Python 3.14. Các hàm `normalize`, `name`, `category` dùng trong bài.
+- Jurafsky, D., Martin, J. H. (bản nháp 2026). [*Speech and Language Processing*](https://web.stanford.edu/~jurafsky/slp3/), 3rd ed., chương 2 "Words and Tokens", mục 2.2 và 2.3. Hình vị, biến tố, và Unicode từ code point tới UTF-8.
+- Porter, M. F. (1980). An algorithm for suffix stripping. *Program*, 14(3), 130–137. [Trang của tác giả về thuật toán Porter](https://tartarus.org/martin/PorterStemmer/) có trích dẫn đầy đủ và bản cài đặt ở nhiều ngôn ngữ.
+- Bird, S., Klein, E., Loper, E. (2009). [*Natural Language Processing with Python*](https://www.nltk.org/book/ch03.html), chương 3, mục 3.6 "Normalizing Text". So sánh hai stemmer Porter và Lancaster với lemmatizer WordNet trên cùng một câu, có code chạy được bằng NLTK.
+
+<LessonProgress />

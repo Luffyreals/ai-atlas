@@ -1,0 +1,11 @@
+# Pinned packages of .venv-nlp/ (docs/architecture/nlp-lessons.md, section 1; decision 72).
+# Checks the code that NLP lessons show with LocalCode (transformers + torch on CPU).
+# pip install -r scripts/requirements-nlp.txt --extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1+cpu
+transformers==5.22.1
+tokenizers==0.23.3
+huggingface_hub==2.4.0
+safetensors==0.8.0
+sentencepiece==0.2.3
+numpy==2.5.4
+scikit-learn==1.9.1

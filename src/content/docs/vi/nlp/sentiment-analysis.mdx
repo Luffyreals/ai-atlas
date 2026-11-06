@@ -1,0 +1,375 @@
+---
+title: Phân tích cảm xúc
+description: Đọc một nhận xét quán ăn và đoán khách khen hay chê. Từ điển cảm xúc, Naive Bayes, hồi quy logistic trên TF-IDF n-gram, phủ định, F1 macro, fine-tune BERT.
+quiz:
+  - question: 'Hai nhận xét "quán không sạch, đồ ăn ngon" và "quán sạch, đồ ăn không ngon" đi qua `TfidfVectorizer(ngram_range=(1, 1))` rồi hồi quy logistic. Mô hình cho hai câu này xác suất tích cực thế nào?'
+    options:
+      - 'Câu thứ nhất cao hơn, vì "ngon" đứng cuối câu'
+      - 'Câu thứ hai cao hơn, vì "sạch" đứng đầu câu'
+      - 'Bằng nhau, vì hai câu có cùng các từ với cùng số lần'
+      - 'Không so được, vì TF-IDF phụ thuộc vào độ dài câu'
+    answer: 2
+    explanation: 'Với unigram, mỗi câu chỉ là một túi từ: "quán", "không", "sạch", "đồ", "ăn", "ngon", mỗi từ một lần. Hai túi giống hệt nhau nên vectơ TF-IDF giống hệt nhau, và mô hình cho đúng cùng một xác suất. Thứ tự từ bị mất hoàn toàn. Thêm bigram thì câu đầu có "không sạch", câu sau có "không ngon", và hai vectơ mới khác nhau.'
+  - question: 'Một bộ 1000 nhận xét có 950 câu tích cực, 50 câu tiêu cực. Một mô hình luôn đoán "tích cực". Độ chính xác (accuracy) và F1 macro của nó gần với cặp số nào nhất?'
+    options:
+      - 'Độ chính xác 0.50, F1 macro 0.50'
+      - 'Độ chính xác 0.95, F1 macro 0.49'
+      - 'Độ chính xác 0.95, F1 macro 0.95'
+      - 'Độ chính xác 0.95, F1 macro 0.97'
+    answer: 1
+    explanation: 'Mô hình đúng 950/1000 câu nên độ chính xác là 0.95. Lớp tích cực có precision 0.95, recall 1, nên $F_1 = 2 \cdot 0.95 / 1.95 \approx 0.974$. Lớp tiêu cực không được đoán lần nào, recall 0, $F_1 = 0$. F1 macro là trung bình không trọng số của hai lớp: khoảng 0.487. 0.97 là F1 của riêng lớp tích cực, không phải macro.'
+  - question: 'Bạn fine-tune PhoBERT để phân loại nhận xét thành ba nhãn: tiêu cực, trung tính, tích cực. Phần nào được thêm vào mô hình, và phần nào được cập nhật khi huấn luyện?'
+    options:
+      - 'Thêm một từ vựng mới gồm ba token nhãn; chỉ cập nhật bảng embedding'
+      - 'Không thêm gì; dùng đầu MLM để đoán chữ "tốt" hay "tệ" ở cuối câu'
+      - 'Thêm một lớp ba đầu ra; giữ nguyên PhoBERT, chỉ học lớp này'
+      - 'Thêm một ma trận $3 \times D$ trên vectơ `[CLS]`; cập nhật cả ma trận lẫn toàn bộ PhoBERT'
+    answer: 3
+    explanation: 'Fine-tune kiểu BERT thêm một đầu phân loại nhỏ đọc vectơ $\mathbf{h}_{\text{CLS}}$: với BERT gốc là một ma trận $3 \times D$; bản RoBERTa/PhoBERT trong `transformers` thêm một lớp ẩn $D \times D$ với tanh trước ma trận đó. Softmax ra ba xác suất, và huấn luyện toàn bộ mô hình bằng cross-entropy. Giữ nguyên PhoBERT và chỉ học lớp mới cũng chạy được (dùng BERT như bộ trích đặc trưng), nhưng đó không phải fine-tune, và thường kém hơn. Với PhoBERT, token đầu chuỗi tên là `<s>`, đóng vai trò của `[CLS]`.'
+  - question: 'Giả sử bạn đưa câu "The bill lists three dishes." vào mô hình DistilBERT fine-tune trên SST-2 và nhận `NEGATIVE 0.981`. Kết luận nào đúng nhất?'
+    options:
+      - 'Mô hình chỉ có hai nhãn, softmax buộc phải chia hết xác suất cho hai nhãn đó; 0.981 không có nghĩa câu này tiêu cực'
+      - 'Câu có cảm xúc tiêu cực ẩn mà người đọc không thấy'
+      - 'Điểm trên 0.95 thì kết quả đáng tin, chỉ cần lọc điểm thấp'
+      - 'Mô hình bị lỗi khi tải, nên chạy lại sẽ ra kết quả khác'
+    answer: 0
+    explanation: 'Mô hình học trên SST-2 chỉ có hai nhãn, nên với mọi câu nó đều phải chọn tích cực hoặc tiêu cực, và hai xác suất cộng lại bằng 1. Điểm cao chỉ nói nhãn này thắng nhãn kia, không nói câu thật sự mang cảm xúc. Ở ô của bài, câu trung tính "The restaurant opens at 9 am." được 0.997 tích cực. Lọc theo điểm không cứu được trường hợp này; cần một nhãn trung tính khi huấn luyện, hoặc một bước lọc câu không có ý kiến.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import tfidfLogregCode from '@code/nlp/sentiment-analysis/tfidf-logreg.vi.py?raw';
+import pipelineCode from '@code/nlp/sentiment-analysis/pipeline.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Phát biểu được bài toán phân tích cảm xúc (sentiment analysis) ở ba mức: cả văn bản, từng câu, và từng khía cạnh (aspect-based sentiment analysis, ABSA).
+- So sánh được ba cách làm: đếm từ theo từ điển cảm xúc (sentiment lexicon), học từ dữ liệu bằng Naive Bayes hay hồi quy logistic (logistic regression) trên TF-IDF, và fine-tune BERT.
+- Giải thích được vì sao túi từ đơn (unigram) không phân biệt được "ngon" với "không ngon", và thêm bigram giúp tới đâu.
+- Đánh giá đúng một bộ phân loại khi dữ liệu lệch lớp: đọc ma trận nhầm lẫn, tính F1 macro, và biết vì sao độ chính xác (accuracy) có thể đánh lừa.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+**Ma trận nhầm lẫn** (confusion matrix) đếm số mẫu theo cặp (nhãn thật, nhãn dự đoán); bài này đặt nhãn thật theo hàng, nhãn dự đoán theo cột. Với một lớp, **precision** là tỉ lệ đúng trong những mẫu mô hình gán cho lớp đó, **recall** là tỉ lệ mô hình tìm ra trong những mẫu thật sự thuộc lớp đó. **F1** là trung bình điều hòa của hai số: $F_1 = 2PR/(P + R)$. **F1 macro** tính F1 cho từng lớp rồi lấy trung bình không trọng số, nên lớp nhỏ nặng ngang lớp lớn.
+:::
+
+## Trực giác
+
+### Khen hay chê?
+
+Bạn mở một quán bún chả và đọc nhận xét của khách trên ứng dụng giao đồ ăn. Mỗi ngày có vài trăm dòng. Bạn muốn biết nhanh: hôm nay khách khen hay chê, và chê điều gì.
+
+| Nhận xét | Bạn hiểu là |
+|---|---|
+| Đồ ăn ngon, giao nhanh. | Khen |
+| Không ngon chút nào. | Chê |
+| Không tệ, sẽ quay lại. | Khen, dù có chữ "tệ" |
+| Đồ ăn ngon nhưng phục vụ chậm. | Khen món, chê phục vụ |
+| Ngon đến mức không muốn quay lại. | Chê, theo kiểu mỉa mai |
+| Quán mở cửa lúc 9 giờ. | Không khen không chê |
+
+Bạn đọc mấy dòng này trong vài giây. Máy thì khó hơn nhiều. Dòng thứ ba có chữ "tệ" mà là lời khen. Dòng thứ tư khen một chỗ, chê một chỗ. Dòng thứ năm chỉ toàn chữ đẹp ("ngon", "quay lại") mà ý là chê.
+
+### Thử cách đơn giản nhất: đếm từ
+
+Cách đầu tiên ai cũng nghĩ tới: lập một danh sách từ khen ("ngon", "nhanh", "sạch") và từ chê ("tệ", "chậm", "bẩn"), rồi đếm. Nhiều từ khen hơn thì là khen.
+
+Cách này chạy được với dòng một và hai, nếu bạn thêm luật "gặp chữ 'không' thì đảo dấu của từ ngay sau". Nhưng nó sai với dòng năm, vì không có luật nào nói "ngon đến mức" là mỉa mai. Nó cho dòng bốn hòa (một khen, một chê), trong khi chủ quán cần biết **món** được khen và **phục vụ** bị chê. Còn dòng sáu, cách nào cũng phải chấp nhận có một nhãn "trung tính".
+
+Pang, Lee và Vaithyanathan (2002) đã thử đúng cách này với bài phê bình phim tiếng Anh. Họ nhờ hai người tự chọn danh sách từ khen và từ chê, rồi phân loại bằng cách đếm. Kết quả chỉ đúng 58% và 64% số bài, khi đoán bừa đã được 50%. Cũng bài báo đó cho thấy một mô hình **học** trọng số của từ từ dữ liệu có nhãn đạt khoảng 73 tới 83%, tùy cấu hình.
+
+**Bài toán của bài này: cho một đoạn văn bản, đoán nó khen hay chê (hoặc trung tính), sao cho xử lý được phủ định, và đo cho đúng xem mình đoán tốt tới đâu.**
+
+## Lý thuyết
+
+### Phát biểu bài toán
+
+Đầu vào là một văn bản, ví dụ một nhận xét. Đầu ra là một nhãn $y$ trong một tập nhỏ: hai nhãn "tiêu cực" và "tích cực", ba nhãn có thêm trung tính, hoặc thang 1 tới 5 sao. Đây là bài toán **phân loại** (classification) văn bản, giống lọc thư rác hay xếp tin theo chủ đề, chỉ khác ở chỗ nhãn nói về **thái độ** của người viết chứ không về **chủ đề**.
+
+Liu (2012) chia bài toán thành ba mức chi tiết:
+
+- **Mức văn bản.** Một nhãn cho cả nhận xét. Hợp khi cả bài nói về một thứ, như một bài phê bình phim.
+- **Mức câu.** Một nhãn cho mỗi câu. Bước đầu thường là lọc câu có ý kiến khỏi câu chỉ nêu sự kiện ("Quán mở cửa lúc 9 giờ").
+- **Mức khía cạnh** (ABSA). Tìm từng khía cạnh được nhắc tới (món ăn, phục vụ, giá, không gian) và cảm xúc với từng khía cạnh. "Đồ ăn ngon nhưng phục vụ chậm" cho hai cặp: (đồ ăn, tích cực), (phục vụ, tiêu cực). Bộ dữ liệu SemEval-2014 Task 4 (Pontiki và cộng sự, 2014) có nhận xét nhà hàng và laptop được gán nhãn kiểu này.
+
+Phần còn lại của bài làm ở mức văn bản ngắn, hai nhãn. Mức câu và mức khía cạnh dùng cùng các kỹ thuật, chỉ khác đơn vị đầu vào và cách gán nhãn.
+
+### Cách 1: từ điển cảm xúc
+
+Một **từ điển cảm xúc** (sentiment lexicon) gán cho mỗi từ một điểm: "ngon" $+1$, "tuyệt" $+2$, "chậm" $-1$, "tệ" $-2$. Điểm của văn bản là tổng điểm các từ. Tổng dương thì là tích cực, âm thì tiêu cực, bằng 0 thì trung tính.
+
+Thêm một luật phủ định: gặp "không", "chẳng", "chưa" thì đảo dấu từ cảm xúc ngay sau.
+
+| Nhận xét | Từ có điểm | Tổng | Kết quả |
+|---|---|---:|---|
+| Đồ ăn ngon, giao nhanh | ngon $+1$, nhanh $+1$ | $+2$ | Tích cực, đúng |
+| Không tệ, sẽ quay lại | không tệ $-(-2) = +2$ | $+2$ | Tích cực, đúng |
+| Đồ ăn ngon nhưng phục vụ chậm | ngon $+1$, chậm $-1$ | $0$ | Trung tính, mất thông tin |
+| Ngon đến mức không muốn quay lại | ngon $+1$ | $+1$ | Tích cực, sai |
+
+Ưu điểm: không cần dữ liệu có nhãn, đọc được vì sao ra kết quả. Nhược điểm: ai đó phải viết và giữ từ điển, điểm của từ đổi theo lĩnh vực ("lâu" là khen khi nói về pin điện thoại, là chê khi nói về giao hàng), và mỗi kiểu câu khó cần một luật mới. Chương 23 của Jurafsky và Martin bàn về các từ điển cảm xúc có sẵn của tiếng Anh và cách xây chúng.
+
+### Cách 2: học từ dữ liệu có nhãn
+
+Thay vì tự gán điểm cho từ, ta thu một tập nhận xét có nhãn và để mô hình **học** điểm đó. Có hai bước.
+
+**Bước 1: đổi văn bản thành vectơ.** Cách phổ biến là TF-IDF trên túi từ, đã có ở bài [Ngữ nghĩa vectơ và embedding](/vi/nlp/vector-semantics-embeddings/): mỗi văn bản thành một vectơ $\mathbf{x}$ dài $|V|$, mỗi chiều ứng với một từ trong từ vựng, phần lớn bằng 0. Mỗi chiều cũng có thể là một **n-gram**, tức một dãy $n$ từ liền nhau. Với $n = 2$ (bigram), "đồ ăn không ngon" cho thêm các đặc trưng "đồ ăn", "ăn không", "không ngon".
+
+Tiếng Việt có một điểm riêng: dấu cách tách **âm tiết**, không tách từ (bài [Tách từ](/vi/nlp/tokenization/)). `TfidfVectorizer` của scikit-learn tách theo dấu cách và dấu câu, nên "phục vụ" thành hai đặc trưng "phục" và "vụ", và bigram "vụ chậm" là nửa từ ghép cộng một từ. Mô hình vẫn học được, vì "vụ chậm" luôn đi kèm ý chê. Mặc định, `TfidfVectorizer` còn đưa mọi chữ về chữ thường và bỏ token chỉ có một ký tự (mẫu `\w\w+`), như "ở", "à"; muốn giữ chúng thì truyền tham số `token_pattern` khác. Một bộ tách từ tiếng Việt (như RDRSegmenter của VnCoreNLP) cho đặc trưng gọn hơn, nhưng không bắt buộc với cách làm này.
+
+**Bước 2: học một bộ phân loại trên vectơ đó.** Hai lựa chọn kinh điển là Naive Bayes và hồi quy logistic.
+
+### Naive Bayes
+
+Naive Bayes chọn nhãn $y$ có xác suất lớn nhất khi biết các token $t_1, \dots, t_L$ của văn bản. Theo định lý Bayes, $P(y \mid t_1, \dots, t_L)$ tỉ lệ với $P(y)\,P(t_1, \dots, t_L \mid y)$. Giả định "ngây thơ" (naive) là các token độc lập với nhau khi đã biết nhãn, nên xác suất của cả dãy là tích xác suất từng token. Lấy logarit để tích thành tổng (và để tránh tràn số khi nhân nhiều số nhỏ):
+
+$$
+\hat{y} = \arg\max_{y} \Big[ \ln P(y) + \sum_{k=1}^{L} \ln P(t_k \mid y) \Big]
+$$
+
+$P(y)$ là tỉ lệ văn bản có nhãn $y$ trong tập huấn luyện. $P(t \mid y)$ là tỉ lệ số lần token $t$ xuất hiện trong mọi văn bản nhãn $y$, cộng 1 vào mọi số đếm (làm trơn cộng 1, add-one hay Laplace smoothing) để một từ chưa gặp ở một lớp không làm cả tổng thành $-\infty$:
+
+$$
+P(t \mid y) = \frac{\mathrm{count}(t, y) + 1}{\sum_{t'} \mathrm{count}(t', y) + |V|}
+$$
+
+Nhìn lại công thức thứ nhất: mỗi token cộng một "điểm" $\ln P(t \mid y)$ cho mỗi nhãn. Đây chính là cách từ điển cảm xúc, với điểm được **đếm** từ dữ liệu thay vì do người đặt. Naive Bayes học rất nhanh (chỉ cần đếm) và chạy tốt trên tập nhỏ. Wang và Manning (2012) thấy với văn bản ngắn, nó còn tốt hơn SVM.
+
+### Hồi quy logistic
+
+Hồi quy logistic (logistic regression) cho hai nhãn tính một tổng có trọng số của các đặc trưng, rồi ép về khoảng $(0, 1)$ bằng hàm sigmoid $\sigma(z) = 1/(1 + e^{-z})$:
+
+$$
+\hat{p} = P(y = \text{tích cực} \mid \mathbf{x}) = \sigma(\mathbf{w}^\top \mathbf{x} + b)
+$$
+
+Mỗi trọng số $w_j$ là "điểm cảm xúc" của đặc trưng $j$: dương thì đẩy về tích cực, âm thì đẩy về tiêu cực. Khác Naive Bayes, các trọng số được học **cùng nhau** bằng cách làm nhỏ cross-entropy trên tập huấn luyện ($y^{(i)} = 1$ là tích cực, $0$ là tiêu cực):
+
+$$
+\mathcal{L} = -\frac{1}{m} \sum_{i=1}^{m} \Big[ y^{(i)} \ln \hat{p}^{(i)} + \big(1 - y^{(i)}\big) \ln\big(1 - \hat{p}^{(i)}\big) \Big]
+$$
+
+Mỗi số hạng là $-\ln$ của xác suất mà mô hình gán cho nhãn đúng: nhỏ khi mô hình tự tin và đúng, rất lớn khi mô hình tự tin mà sai. `LogisticRegression` của scikit-learn cộng thêm một khoản phạt L2 (như bài [Regularization](/vi/ml/regularization/)), với độ mạnh đặt qua `C` (mặc định $C = 1$; $C$ càng nhỏ phạt càng mạnh). Khoản phạt này quan trọng ở đây, vì số đặc trưng thường lớn hơn số văn bản. Với ba nhãn trở lên, sigmoid được thay bằng softmax trên một vectơ điểm cho mỗi lớp.
+
+Vì sao học cùng nhau lại tốt hơn đếm riêng? Hai đặc trưng luôn đi cùng nhau, như "phục" và "vụ", được Naive Bayes đếm hai lần như hai bằng chứng độc lập. Hồi quy logistic thì chia trọng số giữa chúng.
+
+### Phủ định: vì sao cần n-gram
+
+Với túi từ đơn, "quán không sạch, đồ ăn ngon" và "quán sạch, đồ ăn không ngon" có **cùng** các từ với cùng số lần. Vectơ của hai câu giống hệt nhau, nên mọi mô hình trên vectơ đó cho cùng một kết quả. Chữ "không" chỉ thành một đặc trưng đứng riêng, không biết nó phủ định từ nào.
+
+Có hai cách sửa phổ biến:
+
+- **Thêm bigram.** "không ngon", "không sạch", "không tệ" thành đặc trưng riêng, có trọng số riêng. Cách này chỉ giúp với các cặp đã gặp trong tập huấn luyện, và không bắt được phủ định cách xa ("không phải là quán ngon").
+- **Gắn thẻ phủ định.** Pang và cộng sự (2002) thêm tiền tố `NOT_` cho mọi từ từ sau từ phủ định tới dấu câu đầu tiên: "không ngon lắm, giá rẻ" thành "không NOT_ngon NOT_lắm, giá rẻ". "NOT_ngon" là một đặc trưng khác "ngon".
+
+Thêm bigram giúp nhiều hay ít tùy dữ liệu. Trên bài phê bình phim dài, Pang và cộng sự thấy unigram cộng bigram không hơn unigram (Naive Bayes 80.6% so với 81.0%), vì một bài dài có đủ từ để bù cho vài chỗ phủ định. Wang và Manning (2012) thấy bigram cho lợi ích ổn định trên nhiều bộ dữ liệu cảm xúc, nhất là câu ngắn. Nhận xét quán ăn thường ngắn, và một chữ "không" đổi cả nghĩa câu. Ô code của bài cho thấy chuyện đó.
+
+### Đánh giá khi dữ liệu lệch lớp
+
+Nhận xét thật hiếm khi chia đều. Trên các ứng dụng đánh giá, khen thường nhiều hơn chê. Giả sử tập kiểm tra có 90 câu tích cực, 10 câu tiêu cực, và một mô hình lười **luôn đoán tích cực**:
+
+- **Độ chính xác** = 90/100 = 0.90. Nghe tốt.
+- **Lớp tích cực:** precision 90/100 = 0.90, recall 90/90 = 1, nên $F_1 = 2 \cdot 0.9 \cdot 1 / 1.9 \approx 0.947$.
+- **Lớp tiêu cực:** mô hình không đoán câu nào là tiêu cực, recall = 0, nên $F_1 = 0$. (Precision không xác định vì chia cho 0; scikit-learn tính là 0 và in cảnh báo.)
+- **F1 macro** = $(0.947 + 0) / 2 \approx 0.474$.
+
+Mô hình này vô dụng với chủ quán, vì không tìm được lời chê nào, mà độ chính xác vẫn 0.90. F1 macro lộ ngay điều đó. Vì vậy, với phân tích cảm xúc, hãy báo F1 macro và ma trận nhầm lẫn, không chỉ độ chính xác. Một mô hình tốt trên dữ liệu lệch có thể cần thêm: cân lại trọng số các lớp (`class_weight="balanced"` trong scikit-learn), hoặc chỉnh ngưỡng quyết định thay vì dùng 0.5.
+
+:::note[Ghi nhớ]
+Hồi quy logistic trên TF-IDF học một "điểm cảm xúc" $w_j$ cho mỗi đặc trưng. Unigram không biết "không" phủ định từ nào; bigram cho "không ngon" một trọng số riêng. Khi dữ liệu lệch lớp, đo bằng F1 macro và ma trận nhầm lẫn, vì độ chính xác thưởng cho mô hình chỉ đoán lớp đông.
+:::
+
+### Cách 3: fine-tune BERT
+
+Túi từ, kể cả có bigram, vẫn bỏ qua phần lớn thứ tự và ngữ cảnh. Một mô hình như BERT (Devlin và cộng sự, 2019) đọc cả câu theo hai chiều, nên "không" ảnh hưởng tới biểu diễn của "ngon" dù hai chữ cách nhau.
+
+Cách fine-tune cho một nhãn trên cả chuỗi đã có ở bài [BERT](/vi/nlp/bert/): lấy vectơ $\mathbf{h}_{\text{CLS}} \in \mathbb{R}^{D}$ của token `[CLS]` ở lớp cuối, thêm một ma trận $\mathbf{W} \in \mathbb{R}^{K \times D}$ với $K$ là số nhãn, rồi:
+
+$$
+\hat{\mathbf{y}} = \mathrm{softmax}(\mathbf{W}\mathbf{h}_{\text{CLS}})
+$$
+
+Huấn luyện toàn bộ mô hình (cả BERT lẫn $\mathbf{W}$) bằng cross-entropy trên tập nhận xét có nhãn, thường vài epoch. So với hồi quy logistic, công thức gần như giống hệt: vẫn là tổ hợp tuyến tính rồi softmax. Khác ở chỗ $\mathbf{h}_{\text{CLS}}$ là một vectơ dày, học được, đã mang nghĩa của cả câu, thay cho vectơ TF-IDF đếm từ.
+
+Hai lựa chọn cho tiếng Việt:
+
+- **Mô hình đa ngôn ngữ** như mBERT hay XLM-R, đưa văn bản thô vào.
+- **PhoBERT** (Nguyen và Nguyen, 2020), học riêng trên tiếng Việt. Nhớ tách từ đầu vào bằng đúng công cụ mà PhoBERT dùng lúc pre-train, như bài BERT đã nói.
+
+Một bộ dữ liệu cảm xúc tiếng Việt có thật để thử là **UIT-VSFC** (Nguyen và cộng sự, 2018): khoảng 16 nghìn câu phản hồi của sinh viên về môn học, gán ba nhãn tiêu cực, trung tính, tích cực. Dữ liệu lệch mạnh: trong 11 426 câu của tập huấn luyện, chỉ 458 câu (khoảng 4%) là trung tính, còn lại 5 325 câu tiêu cực và 5 643 câu tích cực (theo thống kê của trình xem dữ liệu trên Hugging Face). Một mô hình bỏ qua hẳn nhãn trung tính vẫn có độ chính xác cao; F1 macro thì lộ ra ngay.
+
+Mô hình dùng ở ô `LocalCode` của bài là DistilBERT (Sanh và cộng sự, 2019), một BERT thu nhỏ còn 6 lớp, đã fine-tune trên **SST-2**: phần hai nhãn của Stanford Sentiment Treebank (Socher và cộng sự, 2013), các câu phê bình phim tiếng Anh. SST gốc gán nhãn cho cả 215 154 cụm từ trong cây cú pháp của 11 855 câu, chính để mô hình học được cách phủ định và các cụm từ con đổi nghĩa cả câu.
+
+### Cách 4: hỏi thẳng một LLM
+
+Không có dữ liệu có nhãn, bạn có thể hỏi một mô hình ngôn ngữ lớn kiểu zero-shot (không ví dụ): "Nhận xét sau là tích cực, tiêu cực hay trung tính? Chỉ trả lời một từ." Cách này không cần huấn luyện, hiểu được tiếng Việt và phần nào hiểu mỉa mai, và dễ đổi sang mức khía cạnh ("liệt kê từng khía cạnh và cảm xúc"). Đổi lại, mỗi câu tốn một lần gọi, chậm và tốn tiền hơn một mô hình nhỏ, và kết quả phụ thuộc cách viết prompt. Cách viết chỉ dẫn, thêm vài ví dụ (few-shot) và ép đầu ra theo định dạng có ở bài [Prompt engineering](/vi/llm/prompt-engineering/). Dù dùng cách nào, vẫn cần một tập kiểm tra có nhãn để đo F1 macro.
+
+### Những câu khó với mọi cách
+
+- **Mỉa mai** (sarcasm). "Ngon đến mức không muốn quay lại." Chữ khen, ý chê. Cần hiểu ngữ cảnh và ý định, thứ mà túi từ không có.
+- **Kỳ vọng bị phá.** Pang và cộng sự gọi là "thwarted expectations": người viết kể một loạt điều tốt rồi mới chê ở câu cuối. Đếm từ sẽ nghiêng về khen.
+- **So sánh.** "Quán A ngon hơn quán B" khen A, chê B. Một nhãn cho cả câu không đủ; Liu (2012) dành một chương riêng cho câu so sánh.
+- **Khía cạnh trái ngược.** "Đồ ăn ngon nhưng phục vụ chậm" cần ABSA, không phải một nhãn.
+- **Lệch lĩnh vực.** Mô hình học trên phê bình phim gặp nhận xét quán ăn, hay học trên tiếng Anh gặp tiếng Việt, sẽ kém đi nhiều.
+
+### Giới hạn
+
+- **Bộ dữ liệu của ô code rất nhỏ.** Con số chỉ để thấy xu hướng; với vài chục câu, đổi vài câu là số đổi theo (xem đoạn sau ô code).
+- **Hai nhãn ép mọi câu vào khen hoặc chê.** Ô `LocalCode` cho thấy một câu trung tính bị gán tích cực gần như chắc chắn.
+- **Nhãn cảm xúc mang tính chủ quan.** Hai người gán nhãn không phải lúc nào cũng đồng ý, nhất là với nhãn trung tính, nên điểm của mô hình có trần.
+- **Thiên lệch.** Model card của mô hình DistilBERT SST-2 cho ví dụ: câu "This film was filmed in COUNTRY" được xác suất tích cực 0.89 với France nhưng 0.08 với Afghanistan. Kiểm tra mô hình trên dữ liệu của bạn trước khi dùng.
+
+## Minh họa
+
+Hai bảng dưới là ma trận nhầm lẫn mà ô code ở mục sau in ra, trên cùng 11 câu kiểm tra (6 tích cực, 5 tiêu cực). Hàng là nhãn thật, cột là nhãn dự đoán. Hãy nhìn hàng "Thật: tiêu cực": đó là chỗ unigram hỏng.
+
+**Chỉ unigram**, `ngram_range=(1, 1)`:
+
+| Nhãn thật (hàng), dự đoán (cột) | Tích cực | Tiêu cực |
+|---|---:|---:|
+| Thật: tích cực | 5 | 1 |
+| Thật: tiêu cực | 4 | 1 |
+
+**Unigram cộng bigram**, `ngram_range=(1, 2)`:
+
+| Nhãn thật (hàng), dự đoán (cột) | Tích cực | Tiêu cực |
+|---|---:|---:|
+| Thật: tích cực | 6 | 0 |
+| Thật: tiêu cực | 1 | 4 |
+
+Tính tay từ bảng thứ nhất:
+
+- **Lớp tiêu cực:** mô hình gán 2 câu là tiêu cực, đúng 1, nên precision $1/2$. Trong 5 câu tiêu cực thật, nó chỉ tìm được 1, recall $0.2$. $F_1 = 2 \cdot 0.5 \cdot 0.2 / (0.5 + 0.2) \approx 0.286$.
+- **Lớp tích cực:** precision $5/9 \approx 0.556$, recall $5/6 \approx 0.833$, $F_1 \approx 0.667$.
+- **F1 macro** $= (0.286 + 0.667)/2 \approx 0.476$, độ chính xác $6/11 \approx 0.545$. F1 macro thấp hơn hẳn độ chính xác, vì lớp tiêu cực gần như không được tìm ra.
+
+Bảng thứ hai cho F1 lớp tiêu cực $8/9 \approx 0.889$, lớp tích cực $12/13 \approx 0.923$, F1 macro $\approx 0.906$. Ở đây mô hình làm tốt cả hai lớp nên độ chính xác ($10/11 \approx 0.909$) và F1 macro gần nhau; với dữ liệu lệch như ví dụ 90/10 ở phần Lý thuyết, hai số sẽ tách xa.
+
+Bảng cuối gom các câu khó của bài và kết quả của hai mô hình trong mục Ví dụ code:
+
+| Câu | Kiểu khó | Hồi quy logistic, bigram (ô 1) | DistilBERT SST-2 (ô 2) |
+|---|---|---|---|
+| Đồ uống không tệ / Not bad at all. | Phủ định từ chê | Tích cực, đúng | POSITIVE 0.999, đúng |
+| Món này không ngon / The food was not good. | Phủ định từ khen | Tiêu cực, đúng | NEGATIVE 1.000, đúng |
+| Đồ ăn ngon nhưng phục vụ chậm / Great food, but the service was painfully slow. | Khía cạnh trái ngược | $P(\text{pos}) = 0.52$, phân vân | NEGATIVE 0.998 |
+| Ngon đến mức không muốn quay lại / Great, another hour of waiting for cold soup. | Mỉa mai | $P(\text{pos}) = 0.57$, sai | POSITIVE 0.897, sai |
+| The restaurant opens at 9 am. | Trung tính | (không thử) | POSITIVE 0.997, sai vì không có nhãn trung tính |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: ô hồi quy logistic với Python 3.14 và scikit-learn 1.8 (bản có trong Pyodide), ô DistilBERT với Python 3.14, `transformers` 5.22 và PyTorch 2.14 trên CPU. Ô thứ nhất chạy ngay trên trang; lần đầu chạy lâu hơn vì trình duyệt phải tải scikit-learn. Ô thứ hai cần PyTorch và tải model nên chạy trên máy bạn. Hai ô độc lập với nhau.
+
+### TF-IDF và hồi quy logistic trên nhận xét tiếng Việt
+
+Ô dưới dùng 43 nhận xét quán ăn tự viết để huấn luyện (25 tích cực, 18 tiêu cực) và 11 nhận xét khác để kiểm tra (6 tích cực, 5 tiêu cực). Không câu kiểm tra nào trùng với câu huấn luyện, kể cả khi đảo thứ tự từ. Tập kiểm tra được viết riêng và **cố ý có nhiều câu phủ định** (6 trên 11 câu có chữ "không"), để thấy rõ chỗ khác nhau giữa hai mô hình.
+
+Ô huấn luyện cùng một mô hình hai lần: lần đầu chỉ với unigram, lần sau thêm bigram. Mỗi lần in độ chính xác (`accuracy`), F1 macro, ma trận nhầm lẫn, các câu đoán sai, năm đặc trưng có trọng số âm nhất (`top neg`) và dương nhất (`top pos`), rồi xác suất tích cực của ba câu mới. Điểm then chốt nằm ở một dòng:
+
+```python
+vec = TfidfVectorizer(ngram_range=(1, n))  # n = 2: thêm bigram
+```
+
+<PythonRunner code={tfidfLogregCode} title="TF-IDF unigram và bigram, hồi quy logistic, nhận xét quán ăn" />
+
+Đọc kết quả:
+
+- **Unigram: độ chính xác 0.545, F1 macro 0.476.** Cả năm câu sai đều có chữ "không": "đồ uống không tệ" bị đoán chê, còn "món này không ngon", "quán không sạch, giá đắt", "bún chả không ngon, phục vụ chậm", "cà phê không ngon, quá đắt" bị đoán khen. Trong 5 câu chê, mô hình chỉ nhận ra 1. Mô hình thấy "ngon", "sạch" là từ khen, "tệ" là từ chê, và không biết chữ "không" đứng trước chúng.
+- **Đặc trưng của unigram:** "không" đứng đầu danh sách `top neg`. Trong tập huấn luyện, "không" xuất hiện nhiều hơn ở câu chê, nên mô hình coi chính chữ "không" là dấu hiệu chê. Đó là lý do "đồ uống không tệ" bị đoán sai: cả "không" lẫn "tệ" đều kéo về phía chê.
+- **Thêm bigram: độ chính xác 0.909, F1 macro 0.906.** "không ngon" lên đầu `top neg`, ngay trên chính chữ "không". Mô hình giờ có một trọng số riêng cho cụm phủ định, và bốn câu sai vì phủ định đã được sửa. Còn đúng một câu sai: "cà phê không ngon, quá đắt". Cộng phần đóng góp $w_j x_j$ của mọi đặc trưng trong câu được $-0.268$: "không ngon" góp $-0.194$, "đắt" góp $-0.043$ (cũng về phía chê), còn bốn đặc trưng "cà", "phê", "cà phê", "phê không" mỗi cái góp $+0.043$, vì "cà phê" chỉ có trong một câu khen của tập huấn luyện. Nhưng hệ số tự do $b = +0.414$, nên $z = -0.268 + 0.414 = 0.146 > 0$ và mô hình đoán khen. $b$ dương vì tập huấn luyện lệch: 25 câu khen, 18 câu chê. Thêm nữa, TF-IDF chuẩn hóa vectơ về độ dài 1, nên một câu có tới 10 đặc trưng như câu này chia nhỏ giá trị của từng đặc trưng, kể cả "không ngon".
+- **Các bigram như "vụ chậm", "vụ nhanh"** cho thấy chuyện tách theo âm tiết: "phục vụ chậm" thành "phục vụ" và "vụ chậm". Nửa sau của từ ghép cộng với tính từ vẫn là một đặc trưng tốt.
+
+Ba câu mới cho thấy giới hạn của cả hai:
+
+- "đồ ăn ngon nhưng phục vụ chậm" được $P(\text{pos}) = 0.52$ ở cả hai mô hình: một từ khen, một từ chê, gần như hòa. Một nhãn cho cả câu không diễn tả được câu này.
+- "chẳng ngon gì cả" được 0.66 rồi 0.64: vẫn bị đoán khen. Tập huấn luyện chỉ có "không", chưa có "chẳng", nên "chẳng", "gì", "cả" và mọi bigram của câu đều là đặc trưng lạ, bị bỏ qua. Chỉ còn "ngon" ($+0.181$ ở mô hình bigram) cộng với hệ số tự do $b = +0.414$; phần lớn xác suất khen đến từ $b$, tức từ việc tập huấn luyện có nhiều câu khen hơn. Bigram chỉ giúp với các cặp đã gặp.
+- "ngon đến mức không muốn quay lại" được 0.53 rồi 0.57: mỉa mai, và cả hai mô hình đều nghiêng về khen.
+
+**Con số trên một tập nhỏ không ổn định.** Trong lúc soạn bài, cả 54 câu của ô này được gộp lại rồi chia lại 40 lần bằng `StratifiedShuffleSplit(n_splits=40, test_size=11, random_state=0)`, với `LogisticRegression()` mặc định. Thêm bigram cho F1 macro cao hơn ở 35 lần, bằng nhau ở 5 lần, không lần nào thấp hơn. F1 macro trung bình là 0.445 với unigram và 0.616 với bigram, đều thấp hơn con số trên tập kiểm tra cố định. Xu hướng thì rõ, nhưng từng lần chia cho số khác nhau. Với dữ liệu thật, hãy dùng kiểm định chéo (cross-validation) và một tập kiểm tra đủ lớn.
+
+Thử tự sửa: thêm câu "chẳng ngon chút nào" vào `TRAIN_NEG` rồi chạy lại, xem xác suất của "chẳng ngon gì cả" đổi thế nào. Hay đổi `LogisticRegression()` thành `LogisticRegression(class_weight="balanced")` để cân lại hai lớp: ở lần chạy thử của bài, "cà phê không ngon, quá đắt" được đoán đúng là chê, nhưng "đồ uống không tệ" lại thành sai, F1 macro 0.909. Cân lớp dời ranh giới quyết định, không làm mô hình hiểu câu tốt hơn.
+
+### DistilBERT đã fine-tune trên SST-2
+
+Ô thứ hai dùng pipeline `"sentiment-analysis"` của thư viện `transformers` với model [`distilbert/distilbert-base-uncased-finetuned-sst-2-english`](https://huggingface.co/distilbert/distilbert-base-uncased-finetuned-sst-2-english). Theo model card, model đạt độ chính xác 91.3% trên tập dev của SST-2 (BERT-base: 92.7%). Model đọc **tiếng Anh**, nên các câu đầu vào là tiếng Anh, tương ứng với các kiểu câu khó ở phần Trực giác. Pipeline gói ba bước: tách từ, chạy mô hình, softmax trên hai logit, rồi trả về nhãn có xác suất lớn hơn cùng xác suất đó.
+
+<LocalCode
+  code={pipelineCode}
+  title="Pipeline phân loại cảm xúc với DistilBERT SST-2"
+  packages={['transformers', 'torch']}
+  hardware="CPU là đủ. Lần đầu tải model khoảng 268 MB; mỗi lần chạy sau mất từ khoảng 10 giây tới một phút tùy máy, phần lớn là nạp thư viện và model"
+  sampleVaries={false}
+>
+
+```text
+POSITIVE 1.000  The food was delicious and the staff were friendly.
+NEGATIVE 1.000  The food was not good.
+POSITIVE 0.999  Not bad at all.
+NEGATIVE 0.998  Great food, but the service was painfully slow.
+POSITIVE 0.897  Great, another hour of waiting for cold soup.
+POSITIVE 0.997  The restaurant opens at 9 am.
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Phủ định đúng cả hai chiều.** "The food was not good." ra NEGATIVE, "Not bad at all." ra POSITIVE, đều gần 1. Mô hình đọc cả câu, và dữ liệu SST có nhãn cho cả các cụm từ con như "not good".
+- **Câu có hai khía cạnh** ("Great food, but the service was painfully slow.") ra NEGATIVE 0.998. Hợp lý nếu phải chọn một nhãn, vì phần sau "but" thường nặng hơn, nhưng thông tin "món ngon" đã mất.
+- **Câu mỉa mai** ("Great, another hour of waiting for cold soup.") ra POSITIVE 0.897: sai. Chữ "Great" đứng đầu vẫn thắng.
+- **Câu trung tính** ("The restaurant opens at 9 am.") ra POSITIVE 0.997. Mô hình chỉ có hai nhãn, softmax bắt hai xác suất cộng lại bằng 1, nên nó buộc phải chọn một bên, và có thể chọn rất chắc. Điểm cao không có nghĩa câu thật sự mang cảm xúc.
+
+Model không có lấy mẫu ngẫu nhiên, nên mỗi lần chạy trên cùng máy cho cùng kết quả. Đừng đưa câu tiếng Việt vào model này: nó học trên tiếng Anh, và bản "uncased" còn bỏ dấu khi tách từ (bài [Chuẩn hóa văn bản](/vi/nlp/text-normalization/)), nên "ngon" và "ngồn" thành một.
+
+## Lỗi hay gặp
+
+:::caution[Bỏ "không", "chẳng" vì chúng nằm trong danh sách stopword]
+Nhiều danh sách stopword tiếng Việt và tiếng Anh có "không", "chẳng", "rất", "not", "very". Với phân tích cảm xúc, bỏ chúng là xóa đúng thứ quyết định nhãn: "không ngon" thành "ngon". Tương tự, đừng xóa dấu câu và biểu tượng cảm xúc như "!!!", ":(" một cách máy móc. Bài [Chuẩn hóa văn bản](/vi/nlp/text-normalization/) bàn kỹ khi nào nên và không nên chuẩn hóa.
+:::
+
+:::caution[Chỉ báo độ chính xác khi dữ liệu lệch lớp]
+Với 90% câu khen, mô hình luôn đoán "khen" đạt độ chính xác 0.90 mà không tìm được lời chê nào, F1 macro chỉ khoảng 0.474. Luôn in ma trận nhầm lẫn và F1 macro (`f1_score(..., average="macro")`), và xem recall của lớp bạn quan tâm, thường là lớp chê.
+:::
+
+:::caution[Fit `TfidfVectorizer` trên cả tập kiểm tra]
+Gọi `fit_transform` trên toàn bộ dữ liệu trước khi chia làm từ vựng và trọng số IDF "nhìn thấy" tập kiểm tra, và điểm đo được sẽ đẹp hơn thực tế. Fit trên tập huấn luyện, chỉ `transform` trên tập kiểm tra, như ô code của bài. Gọn nhất là gói hai bước vào `make_pipeline(TfidfVectorizer(), LogisticRegression())`.
+:::
+
+:::caution[Dùng một model có sẵn cho dữ liệu khác hẳn]
+Model SST-2 học trên câu phê bình phim tiếng Anh với hai nhãn. Đưa nó nhận xét tiếng Việt, tin nhắn có nhiều tiếng lóng, hay câu trung tính thì nó vẫn trả về một nhãn với điểm rất cao, không báo lỗi gì. Trước khi dùng một model cho dữ liệu của bạn, gán nhãn tay vài trăm câu của chính bạn và đo F1 macro trên đó.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Phân tích cảm xúc là phân loại văn bản theo thái độ của người viết, ở mức văn bản, câu, hoặc khía cạnh (ABSA). Câu khó: phủ định, mỉa mai, so sánh, hai khía cạnh trái ngược, câu trung tính.
+- Từ điển cảm xúc cộng điểm của từ, không cần dữ liệu có nhãn nhưng cứng nhắc. Naive Bayes và hồi quy logistic $\hat{p} = \sigma(\mathbf{w}^\top \mathbf{x} + b)$ trên TF-IDF học điểm đó từ dữ liệu. Unigram không biết "không" phủ định từ nào; bigram như "không ngon" sửa được với các cặp đã gặp (ở ô code: F1 macro 0.476 lên 0.906).
+- Khi dữ liệu lệch lớp, độ chính xác đánh lừa: luôn đoán lớp đông vẫn được 0.90 trên dữ liệu 90/10, trong khi F1 macro chỉ khoảng 0.474. Báo F1 macro và ma trận nhầm lẫn.
+- Fine-tune BERT (hay PhoBERT cho tiếng Việt) thêm $\hat{\mathbf{y}} = \mathrm{softmax}(\mathbf{W}\mathbf{h}_{\text{CLS}})$ và học cả mô hình, xử lý phủ định tốt hơn hẳn. Một LLM zero-shot không cần dữ liệu huấn luyện. Cả hai vẫn cần một tập kiểm tra có nhãn của chính bạn.
+
+**Đọc thêm:**
+
+- Nguyen, K. V. và cộng sự (2018). [*UIT-VSFC: Vietnamese Students' Feedback Corpus for Sentiment Analysis*](https://doi.org/10.1109/KSE.2018.8573337), KSE 2018, tr. 19–24. Bộ dữ liệu cảm xúc tiếng Việt khoảng 16 nghìn câu, ba nhãn, có sẵn trên [Hugging Face](https://huggingface.co/datasets/uitnlp/vietnamese_students_feedback); chỗ tốt để thử lại ô code của bài với dữ liệu thật.
+- Pang, B., Lee, L., Vaithyanathan, S. (2002). [*Thumbs up? Sentiment Classification using Machine Learning Techniques*](https://aclanthology.org/W02-1011/), EMNLP 2002, mục 4 tới 7. Bài báo mở đầu hướng học máy cho cảm xúc: danh sách từ do người chọn, Naive Bayes, MaxEnt, SVM, gắn thẻ phủ định, và phân tích vì sao cảm xúc khó hơn chủ đề.
+- Jurafsky, D., Martin, J. H. [*Speech and Language Processing*](https://web.stanford.edu/~jurafsky/slp3/), bản nháp thứ 3 (2026), chương 4 (hồi quy logistic và phân loại văn bản), phụ lục B (Naive Bayes) và chương 23 (từ điển cảm xúc). Số chương có thể đổi giữa các bản nháp; sách viết $c$ cho lớp, chỗ bài này viết $y$.
+- Liu, B. (2012). [*Sentiment Analysis and Opinion Mining*](https://doi.org/10.2200/S00416ED1V01Y201204HLT016), Morgan & Claypool. Sách tổng quan: ba mức phân tích, ý kiến như một bộ năm thành phần, phân tích theo khía cạnh và câu so sánh.
+- Socher, R. và cộng sự (2013). [*Recursive Deep Models for Semantic Compositionality Over a Sentiment Treebank*](https://aclanthology.org/D13-1170/), EMNLP 2013, mục 3. Cách xây Stanford Sentiment Treebank, nguồn của SST-2 mà model ở ô thứ hai học, và các ví dụ phủ định theo cây cú pháp.
+- Wang, S., Manning, C. D. (2012). [*Baselines and Bigrams: Simple, Good Sentiment and Topic Classification*](https://aclanthology.org/P12-2018/), ACL 2012. Bài ngắn cho thấy bigram và Naive Bayes là những đường cơ sở mạnh, nhất là với câu ngắn.
+
+<LessonProgress />

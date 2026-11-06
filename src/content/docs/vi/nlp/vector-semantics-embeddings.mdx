@@ -1,0 +1,343 @@
+---
+title: Vector Semantics và Embeddings
+description: Đoán nghĩa một từ lạ nhờ các từ xung quanh. Giả thuyết phân bố, ma trận đồng xuất hiện, TF-IDF, PPMI, cosine và SVD biến mỗi từ thành một vectơ.
+quiz:
+  - question: 'Trong một kho văn bản có $N_{\text{pair}} = 1000$ cặp (từ, ngữ cảnh). Từ $w$ có tổng số đếm 20, ngữ cảnh $c$ có tổng số đếm 50, và cặp $(w, c)$ gặp đúng 1 lần. $\mathrm{PMI}(w, c)$ bằng bao nhiêu, và nghĩa là gì?'
+    options:
+      - 'Âm, vì cặp chỉ gặp một lần'
+      - 'Bằng $\log_2 20 \approx 4.3$, vì $w$ gặp $c$ trong 1 trên 20 lần'
+      - 'Bằng 0: hai từ gặp nhau đúng bằng mức nếu chúng độc lập'
+      - 'Không tính được khi chưa có ma trận đầy đủ'
+    answer: 2
+    explanation: '$\mathrm{PMI} = \log_2 \frac{1 \cdot 1000}{20 \cdot 50} = \log_2 1 = 0$. Nếu $w$ và $c$ không liên quan, ta chờ đợi chúng gặp nhau $20 \cdot 50 / 1000 = 1$ lần, và đúng là 1 lần. Số đếm nhỏ không tự làm PMI âm: PMI chỉ so số đếm thật với mức chờ đợi đó.'
+  - question: 'Văn bản B là văn bản A chép lại ba lần liền nhau. Bạn biểu diễn cả hai bằng vectơ số đếm từ (chưa chuẩn hóa). Phép đo nào cho thấy hai văn bản cùng nội dung?'
+    options:
+      - 'Tích vô hướng, vì nó lớn nhất khi hai văn bản giống nhau'
+      - 'Độ tương tự cosine, vì nó chỉ so hướng của hai vectơ'
+      - 'Khoảng cách Euclid, vì hai vectơ có cùng các từ'
+      - 'Cả ba đều như nhau'
+    answer: 1
+    explanation: 'Vectơ của B đúng bằng 3 lần vectơ của A, nên hai vectơ cùng hướng và cosine bằng 1. Tích vô hướng cũng nhân 3 theo độ dài, nên B có tích vô hướng với A lớn hơn A với chính nó, dù không thêm nội dung gì. Khoảng cách Euclid giữa A và 3A bằng 2 lần độ dài của A, khá lớn, dù nội dung y hệt.'
+  - question: 'Kho có 4 văn bản, và từ "và" có mặt trong cả 4. Với `TfidfVectorizer` mặc định của scikit-learn, idf của "và" bằng bao nhiêu?'
+    options:
+      - '0, vì từ có mặt khắp nơi không mang thông tin gì'
+      - '$\ln 4 \approx 1.39$'
+      - '$\ln(5/4) \approx 0.22$'
+      - '1, nhờ số 1 cộng thêm ở cuối công thức'
+    answer: 3
+    explanation: 'scikit-learn tính $\ln\frac{1 + 4}{1 + 4} + 1 = 0 + 1 = 1$. Công thức sách giáo khoa $\log\frac{N}{\mathrm{df}_t}$ mới cho 0. Số 1 ở cuối giữ cho từ có mặt khắp nơi một trọng số nhỏ thay vì xóa hẳn nó. Dù vậy, "và" vẫn có idf nhỏ nhất kho, nên vẫn bị hạ so với các từ hiếm hơn.'
+  - question: 'Trong ô code đầu, $\mathrm{PPMI}(\text{chó}, \text{sủa}) = 3.17$ còn $\mathrm{PPMI}(\text{chó}, \text{con}) = 2.85$, dù "con" đứng cạnh "chó" 2 lần còn "sủa" chỉ 1 lần. Cách nào giảm được thiên lệch này?'
+    options:
+      - 'Nâng số đếm của ngữ cảnh lên lũy thừa $\alpha = 0.75$ trước khi tính $P(c)$'
+      - 'Bỏ phép $\max(0, \cdot)$, giữ cả PMI âm'
+      - 'Đổi $\log_2$ thành $\ln$'
+      - 'Tăng cửa sổ từ $\pm 2$ lên $\pm 5$'
+    answer: 0
+    explanation: 'PMI cao vì $P(\text{sủa})$ ở mẫu số rất nhỏ. Lũy thừa $0.75$ làm ngữ cảnh hiếm có xác suất lớn hơn một chút, nên PMI của chúng giảm (Levy và cộng sự, 2015). Đổi cơ số log chỉ nhân mọi PMI với cùng một hằng số, thứ tự không đổi. Bỏ $\max$ không đụng tới các ô dương này.'
+  - question: 'Đổi `d = 3` thành `d = 2` trong ô code đầu: cosine của (phở, xe_máy) sau SVD nhảy từ $0.16$ lên $0.99$. Giải thích nào đúng nhất?'
+    options:
+      - 'SVD bị lỗi số học khi $d$ quá nhỏ'
+      - 'Có ba nhóm nghĩa nhưng chỉ còn hai hướng, nên hai nhóm phải dùng chung một hướng'
+      - 'PPMI của phở và xe_máy thật ra rất giống nhau'
+      - 'Cosine không dùng được với vectơ hai chiều'
+    answer: 1
+    explanation: 'Ba giá trị suy biến đầu là $12.36$, $12.18$, $10.75$, rồi tới $8.58$: ba nhóm từ cần một không gian ba chiều để tách nhau. Giữ hai chiều thì món ăn và phương tiện bị ép vào cùng một hướng. Trên PPMI gốc, cosine của cặp này chỉ $0.10$, nên phương án thứ ba sai.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import ppmiSvdCode from '@code/nlp/vector-semantics-embeddings/ppmi-svd.vi.py?raw';
+import tfidfCode from '@code/nlp/vector-semantics-embeddings/tfidf.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu giả thuyết phân bố (distributional hypothesis): nghĩa của một từ được phản ánh qua các từ hay đứng cạnh nó, và vì sao one-hot không đo được hai từ giống nhau tới đâu.
+- Lập được ma trận từ–văn bản và ma trận từ–ngữ cảnh, rồi đổi số đếm thành trọng số bằng TF-IDF hay PPMI, và giải thích vì sao cần đổi.
+- Đo độ tương tự bằng cosine, và nén vectơ thưa (sparse) thành vectơ dày (dense) bằng SVD rút gọn, tức cách làm của LSA.
+- Cài đặt bằng NumPy và scikit-learn, và nhận ra các bẫy: mẫu tách token mặc định với tiếng Việt, thiên lệch của PMI với từ hiếm, chọn số chiều quá nhỏ.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Một **vectơ** (vector) là một dãy số, ví dụ $\mathbf{u} = (1, 0, 2)$. **Tích vô hướng** (dot product) nhân từng cặp tọa độ rồi cộng lại: $\mathbf{u} \cdot \mathbf{v} = \sum_i u_i v_i$. **Chuẩn** (norm) $\lVert \mathbf{u} \rVert = \sqrt{\mathbf{u} \cdot \mathbf{u}}$ là độ dài của vectơ. **SVD** (singular value decomposition, phân tích giá trị suy biến) viết một ma trận bất kỳ thành tích của ba ma trận $\mathbf{U}\boldsymbol{\Sigma}\mathbf{V}^\top$, trong đó $\boldsymbol{\Sigma}$ là ma trận đường chéo chứa các **giá trị suy biến** (singular value) xếp từ lớn tới nhỏ. Giữ $d$ giá trị lớn nhất và bỏ phần còn lại cho ra một bản xấp xỉ gọn của ma trận ban đầu.
+:::
+
+## Trực giác
+
+### Một từ bạn chưa từng gặp
+
+Đọc ba câu sau. Từ "thồn" là từ bịa ra, bạn chưa gặp bao giờ:
+
+> Mẹ nấu một nồi **thồn** rất thơm.
+> **Thồn** ăn nóng với rau sống thì ngon nhất.
+> Tôi ăn hai bát **thồn** mà vẫn còn thèm.
+
+Bạn đã đoán được khá nhiều: thồn là một món ăn, nấu trong nồi, múc ra bát, ăn nóng. Chắc nó gần với phở, bún, canh hơn là với xe máy hay con mèo. Không ai định nghĩa cho bạn. Bạn đoán nhờ **các từ đứng cạnh**: "nấu", "nồi", "ăn", "bát", "ngon" là những từ bạn từng thấy quanh phở và bún.
+
+Các nhà ngôn ngữ học thập niên 1950 đã nói đúng điều này. Harris (1954) cho rằng hai từ khác nghĩa bao nhiêu thì môi trường xuất hiện của chúng cũng khác nhau đại khái (roughly) chừng ấy. Firth (1957, tr. 11) viết gọn hơn: *"You shall know a word by the company it keeps"*, tức là xem một từ hay đi với những từ nào thì biết nó là từ gì. Ý tưởng này gọi là **giả thuyết phân bố**: các từ xuất hiện trong ngữ cảnh giống nhau thì có nghĩa gần nhau.
+
+### Biến "hay đi với ai" thành con số
+
+Máy tính không đoán như bạn được, nhưng nó **đếm** rất giỏi. Lấy một kho văn bản (corpus), với mỗi từ, đếm xem những từ nào hay đứng cạnh nó:
+
+| Từ | ăn | bát | nóng | nuôi | con | đường |
+|---|---:|---:|---:|---:|---:|---:|
+| phở | 5 | 4 | 3 | 0 | 0 | 0 |
+| bún | 4 | 3 | 2 | 0 | 0 | 0 |
+| mèo | 0 | 0 | 0 | 3 | 6 | 0 |
+
+(Số tự đặt để minh họa.) Mỗi hàng giờ là một dãy số, tức một **vectơ**. Phở và bún có hàng gần giống nhau, mèo thì khác hẳn. Nghĩa của từ đã thành một điểm trong không gian, và "hai từ giống nhau" thành "hai điểm gần nhau". Cách nhìn này gọi là **ngữ nghĩa vectơ** (vector semantics). Vectơ biểu diễn nghĩa của từ gọi là **embedding**.
+
+Nhưng còn nhiều chuyện phải quyết. Đếm trong phạm vi nào? Các từ như "một", "tôi", "rất" đứng cạnh mọi thứ, có nên tính ngang với "bát"? So hai vectơ bằng cách nào khi một từ phổ biến có số đếm lớn gấp trăm lần? Và vectơ dài bằng cả từ vựng, toàn số 0, có dùng được không?
+
+Bài toán của bài này là: **từ một kho văn bản thô, gán cho mỗi từ (hay mỗi văn bản) một vectơ, sao cho hai từ dùng trong ngữ cảnh giống nhau có vectơ gần nhau, và đo được "gần" bằng một con số.**
+
+## Lý thuyết
+
+### One-hot: mọi từ cách đều nhau
+
+Cách đơn giản nhất để biến từ thành vectơ: đánh số các từ trong từ vựng $V$ từ 1 tới $|V|$. Từ thứ $i$ là vectơ dài $|V|$, toàn số 0, chỉ có vị trí $i$ bằng 1. Đây là **vectơ one-hot** (one-hot vector).
+
+Với $|V| = 4$ gồm (bún, chó, mèo, phở): $\mathbf{e}_{\text{mèo}} = (0, 0, 1, 0)$, $\mathbf{e}_{\text{chó}} = (0, 1, 0, 0)$. Tích vô hướng của hai vectơ one-hot khác nhau luôn bằng 0, vì không có vị trí nào cả hai cùng khác 0. Vậy mèo "cách" chó đúng bằng mèo cách phở. One-hot chỉ nói hai từ **có phải là một** hay không, không nói chúng **giống nhau tới đâu**.
+
+Giả thuyết phân bố gợi ý cách sửa: thay vì một số 1 ở vị trí của chính từ, hãy mô tả từ bằng **các ngữ cảnh** của nó.
+
+### Ma trận từ–văn bản và ma trận từ–ngữ cảnh
+
+Có hai cách chọn "ngữ cảnh", cho hai loại ma trận (Turney và Pantel, 2010):
+
+- **Ma trận từ–văn bản** (term-document matrix): mỗi hàng là một từ, mỗi cột là một văn bản, ô $(t, j)$ là số lần từ $t$ xuất hiện trong văn bản $j$. Đọc theo **cột**, ta có vectơ của một văn bản; hai văn bản dùng nhiều từ chung thì có cột giống nhau. Đây là nền của tìm kiếm cổ điển, sẽ gặp lại ở bài [Truy xuất thông tin](/vi/nlp/information-retrieval/). Đọc theo **hàng**, ta có vectơ của một từ: hai từ hay xuất hiện trong cùng văn bản thì có hàng giống nhau.
+- **Ma trận từ–ngữ cảnh** (word-context matrix), còn gọi là **ma trận đồng xuất hiện** (co-occurrence matrix): cả hàng lẫn cột là từ. Gọi từ ở hàng là **từ đích** (target word) $w$, từ ở cột là **từ ngữ cảnh** (context word) $c$. Ô $F_{wc}$ đếm số lần $c$ nằm trong **cửa sổ** (window) $\pm s$ quanh $w$, tức cách $w$ không quá $s$ vị trí. Cửa sổ này khác \"cửa sổ ngữ cảnh\" (context window) của LLM, vốn là số token tối đa mô hình đọc được trong một lần gọi. Ma trận có kích thước $|V| \times |V|$.
+
+Ví dụ với $s = 2$ và câu "tôi ăn một bát phở nóng": từ đích "phở" ở vị trí 5, nên các từ ngữ cảnh là "một", "bát" (bên trái) và "nóng" (bên phải, câu hết ở đó). Ta cộng 1 vào ba ô $F_{\text{phở},\text{một}}$, $F_{\text{phở},\text{bát}}$, $F_{\text{phở},\text{nóng}}$, rồi làm vậy với mọi từ của mọi câu.
+
+Cửa sổ hẹp ($s$ từ 1 tới 3) thường gom các từ **cùng loại**, thay được cho nhau trong câu, như phở và bún. Cửa sổ rộng hay cả văn bản thì gom các từ **cùng chủ đề**, như phở với bát, đũa, quán.
+
+Với từ vựng thật vài chục nghìn từ, mỗi hàng dài vài chục nghìn số, mà phần lớn là 0, vì mỗi từ chỉ đứng cạnh một phần rất nhỏ của từ vựng. Ta gọi đó là **vectơ thưa** (sparse vector).
+
+### Cosine: so hướng, không so độ dài
+
+Muốn biết hai hàng $\mathbf{u}$, $\mathbf{v}$ giống nhau tới đâu, thử dùng tích vô hướng $\mathbf{u} \cdot \mathbf{v}$: nó lớn khi hai vectơ có số lớn ở cùng chỗ. Nhưng nó có một lỗi. Từ "phở" gặp 1000 lần trong kho có số đếm lớn gấp 100 lần từ "bún" gặp 10 lần, nên tích vô hướng của "phở" với **mọi** từ đều lớn. Từ phổ biến sẽ trông "giống" mọi thứ.
+
+Cách sửa là chia cho độ dài của hai vectơ. Ta được **độ tương tự cosine** (cosine similarity):
+
+$$
+\cos(\mathbf{u}, \mathbf{v}) = \frac{\mathbf{u} \cdot \mathbf{v}}{\lVert \mathbf{u} \rVert \, \lVert \mathbf{v} \rVert}
+$$
+
+Nhân $\mathbf{u}$ với một số $t > 0$ thì tử số nhân $t$, mẫu số cũng nhân $t$, nên cosine không đổi: nó chỉ nhìn **hướng** của vectơ, tức **tỉ lệ** giữa các ngữ cảnh, không nhìn tổng số lần từ xuất hiện. Đúng như tên gọi, đây là cosin của góc giữa hai vectơ: bằng 1 khi cùng hướng, 0 khi vuông góc (không có ngữ cảnh chung nào). Số đếm không bao giờ âm, nên với ma trận đếm, cosine nằm trong $[0, 1]$. Bài [RAG và chatbot hiện đại](/vi/llm/rag-chatbot/) có thêm một ví dụ tính tay.
+
+### TF-IDF: hạ trọng số của từ có mặt khắp nơi
+
+Số đếm thô còn một vấn đề nữa. Trong ma trận từ–văn bản, "và", "của", "tôi" có mặt ở gần như mọi văn bản, nên chúng chiếm phần lớn độ dài vectơ mà chẳng nói gì về nội dung. Ta muốn một trọng số **lớn** khi từ xuất hiện nhiều **trong văn bản này**, và **nhỏ** khi từ có mặt **ở mọi văn bản**. Đó là TF-IDF (term frequency – inverse document frequency), tích của hai phần.
+
+**Tần suất từ** (term frequency) $\mathrm{tf}_{t,j}$: số lần từ $t$ xuất hiện trong văn bản $j$. Một biến thể hay gặp là $1 + \log \mathrm{tf}_{t,j}$ (khi $\mathrm{tf}_{t,j} > 0$), vì một từ xuất hiện 100 lần không quan trọng gấp 100 lần từ xuất hiện 1 lần.
+
+**Tần suất văn bản ngược** (inverse document frequency). Gọi $N$ là số văn bản trong kho, $\mathrm{df}_t$ là số văn bản có chứa $t$. Dạng sách giáo khoa, theo ý tưởng của Spärck Jones (1972):
+
+$$
+\mathrm{idf}_t = \log \frac{N}{\mathrm{df}_t}
+$$
+
+Từ chỉ có trong 1 văn bản có idf lớn nhất, $\log N$. Từ có trong mọi văn bản có idf bằng $\log 1 = 0$, tức bị xóa hẳn. Trọng số cuối cùng là $\mathrm{tf}_{t,j} \times \mathrm{idf}_t$.
+
+**Phiên bản của scikit-learn.** `TfidfVectorizer` mặc định dùng tf là số đếm thô và một idf **làm trơn** (smooth), với logarit tự nhiên:
+
+$$
+\mathrm{idf}_t = \ln \frac{1 + N}{1 + \mathrm{df}_t} + 1
+$$
+
+- Cộng 1 ở tử và mẫu giống như có thêm một văn bản chứa mọi từ đúng một lần, nên không bao giờ chia cho 0.
+- Cộng 1 ở cuối để từ có mặt khắp nơi vẫn còn trọng số 1, thay vì bằng 0.
+- Sau khi nhân tf với idf, mỗi hàng (một văn bản) được chia cho chuẩn L2 của nó, nên mọi vectơ văn bản có độ dài 1. Khi đó cosine chính là tích vô hướng.
+
+Với $N = 4$: từ có trong 3 văn bản có $\mathrm{idf} = \ln(5/4) + 1 \approx 1.223$; trong 2 văn bản, $\ln(5/3) + 1 \approx 1.511$; trong 1 văn bản, $\ln(5/2) + 1 \approx 1.916$. Ô code thứ hai in đúng ba số này. Muốn dùng tf dạng log thì đặt `sublinear_tf=True` (scikit-learn dùng $1 + \ln \mathrm{tf}$).
+
+### PMI và PPMI: cặp từ gặp nhau nhiều hơn mức ngẫu nhiên bao nhiêu
+
+Ma trận từ–ngữ cảnh cũng có vấn đề của từ phổ biến: "một" đứng cạnh phở, bún, mèo, chó. Ta không cần biết **bao nhiêu lần** $w$ gặp $c$, mà cần biết chúng gặp nhau **nhiều hơn mức ngẫu nhiên** bao nhiêu.
+
+**Bước 1: đổi số đếm thành xác suất.** Gọi $N_{\text{pair}} = \sum_{w, c} F_{wc}$ là tổng mọi ô, tức tổng số cặp (từ, ngữ cảnh) đã đếm, khác với $N$ (số văn bản) ở mục TF-IDF. Ta ước lượng:
+
+$$
+P(w, c) = \frac{F_{wc}}{N_{\text{pair}}}, \qquad
+P(w) = \frac{\sum_{c} F_{wc}}{N_{\text{pair}}}, \qquad
+P(c) = \frac{\sum_{w} F_{wc}}{N_{\text{pair}}}
+$$
+
+$P(w, c)$ là xác suất bốc ngẫu nhiên một cặp trong kho và được đúng $(w, c)$. $P(w)$ là tổng của hàng $w$ chia $N_{\text{pair}}$, $P(c)$ là tổng của cột $c$ chia $N_{\text{pair}}$.
+
+**Bước 2: so với mức độc lập.** Nếu $w$ và $c$ không liên quan gì, xác suất gặp cả hai là $P(w)P(c)$. **PMI** (pointwise mutual information, thông tin tương hỗ điểm), mà Church và Hanks (1990) đưa vào ngôn ngữ học máy tính, là log của tỉ số giữa thực tế và mức đó:
+
+$$
+\mathrm{PMI}(w, c) = \log_2 \frac{P(w, c)}{P(w)\,P(c)}
+= \log_2 \frac{F_{wc} \cdot N_{\text{pair}}}{\left(\sum_{c'} F_{wc'}\right)\left(\sum_{w'} F_{w'c}\right)}
+$$
+
+Dạng thứ hai có được khi thay ba xác suất ở bước 1 vào: $N_{\text{pair}}$ ở mẫu của $P(w, c)$ và hai $N_{\text{pair}}$ ở mẫu của $P(w)P(c)$ để lại đúng một thừa số $N_{\text{pair}}$ trên tử. PMI bằng 0 khi cặp gặp nhau đúng như mức ngẫu nhiên, dương khi gặp nhiều hơn, âm khi gặp ít hơn. Với $\log_2$, PMI bằng 1 nghĩa là gặp nhau **gấp đôi** mức ngẫu nhiên. Cơ số log chỉ nhân mọi PMI với cùng một hằng số; bài này dùng $\log_2$ như Church và Hanks, bài [Word2Vec, GloVe, FastText](/vi/nlp/word2vec-glove-fasttext/) dùng $\ln$.
+
+Áp vào kho nhỏ ở ô code đầu: $N_{\text{pair}} = 180$ (biến `N` trong code), "phở" có tổng hàng 6, "bát" có tổng cột 10, và cặp (phở, bát) gặp 2 lần. Vậy $\mathrm{PMI} = \log_2 \frac{2 \cdot 180}{6 \cdot 10} = \log_2 6 \approx 2.585$: phở đứng cạnh bát gấp 6 lần mức ngẫu nhiên. Còn (phở, một) chỉ được $0.907$, vì "một" đứng cạnh đủ thứ.
+
+**Bước 3: bỏ phần âm.** Có hai lý do. Cặp chưa gặp lần nào có $F_{wc} = 0$ và $\mathrm{PMI} = \log 0 = -\infty$, không dùng được. Còn PMI âm vừa phải ("gặp nhau ít hơn mức ngẫu nhiên") cần kho văn bản cực lớn mới ước lượng tin được: với hai từ mỗi từ có xác suất cỡ $10^{-6}$, muốn khẳng định chúng gặp nhau **ít hơn** mức $10^{-12}$ thì cần quan sát rất nhiều. Vì vậy người ta dùng **PPMI** (positive PMI), thay mọi giá trị âm bằng 0:
+
+$$
+\mathrm{PPMI}(w, c) = \max\big(\mathrm{PMI}(w, c),\, 0\big)
+$$
+
+**PMI thiên vị ngữ cảnh hiếm.** Mẫu số có $P(c)$. Ngữ cảnh càng hiếm, $P(c)$ càng nhỏ, nên chỉ cần gặp $w$ một lần là PMI đã cao. Trong ô code đầu, "sủa" chỉ xuất hiện trong một câu, mà $\mathrm{PPMI}(\text{chó}, \text{sủa}) = 3.17$, cao hơn $\mathrm{PPMI}(\text{chó}, \text{con}) = 2.85$, dù "con" đứng cạnh "chó" hai lần. Các cách giảm thiên lệch:
+
+- **Bỏ các cặp quá ít.** Church và Hanks bỏ qua mọi cặp gặp nhau từ 5 lần trở xuống, vì với số đếm nhỏ, tỉ số của họ không ổn định.
+- **Làm trơn phân phối ngữ cảnh** (context distribution smoothing). Làm trơn (smoothing) là sửa nhẹ các xác suất ước lượng để vài số đếm nhỏ không quyết định kết quả. Levy, Goldberg và Dagan (2015) thay $P(c)$ bằng $P_\alpha(c) = \frac{F_c^{\,\alpha}}{\sum_{c'} F_{c'}^{\,\alpha}}$, với $F_c$ là tổng cột $c$ và $\alpha = 0.75$. Lũy thừa nhỏ hơn 1 làm ngữ cảnh hiếm có xác suất lớn hơn một chút, nên PMI của chúng giảm. Trong thí nghiệm của họ, cách này cải thiện kết quả đều đặn qua các tác vụ và cấu hình, nhất là với PPMI.
+
+### Từ vectơ thưa sang vectơ dày: SVD rút gọn
+
+Sau PPMI, mỗi từ vẫn là một hàng dài $|V|$ số, phần lớn bằng 0. Hai bất tiện: tốn bộ nhớ, và quan trọng hơn, **hai từ cùng nhóm mà không có ngữ cảnh chung nào thì cosine bằng 0**. Nếu kho chỉ có "phở ... ngon" và "bún ... thơm", vectơ thưa không nối được phở với bún, dù "ngon" và "thơm" lại hay đi cùng nhau ở chỗ khác.
+
+**SVD rút gọn** (truncated SVD) giải quyết cả hai. Gọi ma trận PPMI là $\mathbf{M} \in \mathbb{R}^{|V| \times |V|}$. SVD viết nó thành:
+
+$$
+\mathbf{M} = \mathbf{U}\boldsymbol{\Sigma}\mathbf{V}^\top
+$$
+
+Ở đây $\mathbf{V}$ in đậm là một ma trận của SVD, khác với từ vựng $V$. Các cột của $\mathbf{U}$ là những **hướng** trong không gian từ, $\boldsymbol{\Sigma}$ cho biết mỗi hướng mạnh bao nhiêu (giá trị suy biến $\sigma_1 \ge \sigma_2 \ge \dots \ge 0$). Giữ $d$ hướng mạnh nhất:
+
+$$
+\mathbf{M} \approx \mathbf{U}_d \boldsymbol{\Sigma}_d \mathbf{V}_d^\top
+$$
+
+với $\mathbf{U}_d$ là $d$ cột đầu của $\mathbf{U}$, $\boldsymbol{\Sigma}_d$ là góc $d \times d$ trên trái của $\boldsymbol{\Sigma}$. Theo định lý Eckart–Young, đây là bản xấp xỉ hạng $d$ tốt nhất của $\mathbf{M}$, theo nghĩa tổng bình phương sai số nhỏ nhất. Hàng $w$ của ma trận $\mathbf{U}_d \boldsymbol{\Sigma}_d$ là **embedding** $d$ chiều của từ $w$: chỉ còn $d$ số, thường vài trăm, thay cho $|V|$ số, và hầu như không số nào bằng 0. Đó là **vectơ dày**.
+
+Vì sao nén lại giúp? Để tái tạo $\mathbf{M}$ tốt với ít hướng, SVD phải dùng một hướng chung cho các ngữ cảnh hay đi cùng nhau (ăn, bát, nóng, ngon). Phở và bún cùng dựa vào hướng đó, nên dù không có ngữ cảnh chung trực tiếp, chúng vẫn gần nhau. Turney và Pantel gọi đây là bắt được **đồng xuất hiện bậc cao** (high-order co-occurrence): hai từ gần nhau vì ngữ cảnh của chúng giống nhau, không cần ngữ cảnh trùng khớp. Những chi tiết lẻ tẻ, như "mèo nằm ngủ" và "chó sủa", bị coi là nhiễu và bỏ đi.
+
+Deerwester và cộng sự (1990) áp SVD rút gọn lên ma trận từ–văn bản và gọi cách làm này là **LSA** (latent semantic analysis, phân tích ngữ nghĩa tiềm ẩn). Các hướng giữ lại được coi là những "chủ đề" ẩn. Cũng có người dùng $\mathbf{U}_d$ không nhân $\boldsymbol{\Sigma}_d$, hoặc nhân với $\boldsymbol{\Sigma}_d^{1/2}$; Levy và cộng sự (2015) thấy bỏ $\boldsymbol{\Sigma}$ thường cho kết quả tốt hơn trên các bộ đo tương tự từ. Ô code đầu dùng $\mathbf{U}_d \boldsymbol{\Sigma}_d$ cho khớp định nghĩa ở trên; bạn có thể thử bỏ `* S[:d]` để so. Ở kho này, cosine (phở, xe_máy) giảm từ 0.16 xuống 0.05, còn các cặp cùng nhóm gần như không đổi.
+
+**Chọn $d$ thế nào?** Không có số đúng chung. Nhìn các giá trị suy biến: nếu vài giá trị đầu lớn rồi tụt hẳn, số giá trị lớn đó là một gợi ý. Thường thì điểm tụt không rõ, nên hiểu biết về dữ liệu và kết quả trên tác vụ quan trọng hơn. Chọn quá nhỏ thì các nhóm nghĩa khác nhau bị ép vào chung một hướng; quá lớn thì giữ lại cả nhiễu. Với kho thật, người ta thường chọn vài trăm và chỉnh theo kết quả trên tác vụ.
+
+:::note[Ghi nhớ]
+Đếm ngữ cảnh của từ (ma trận từ–văn bản hay từ–ngữ cảnh), đổi số đếm thành trọng số (TF-IDF cho văn bản, PPMI cho từ), so bằng cosine. Vectơ thu được dài $|V|$ và thưa. SVD rút gọn giữ $d$ hướng mạnh nhất, cho mỗi từ một embedding dày $d$ chiều, nối được cả những từ không có ngữ cảnh chung trực tiếp.
+:::
+
+### Embedding là gì, và đánh giá thế nào
+
+**Embedding** là một vectơ số thực có số chiều cố định $d$, đại diện cho một từ (hay một câu, một văn bản), sao cho quan hệ hình học giữa các vectơ (góc, khoảng cách) phản ánh quan hệ nghĩa. Từ embedding này được giữ nguyên trong cả lĩnh vực: hàng của $\mathbf{U}_d \boldsymbol{\Sigma}_d$ là embedding, vectơ học bằng Word2Vec cũng là embedding, và lớp đầu tiên của mọi LLM là một bảng embedding.
+
+Làm sao biết embedding tốt? Có hai cách:
+
+- **Đánh giá nội tại** (intrinsic evaluation): so với phán đoán của người. Bộ **tương tự từ** (word similarity) gồm các cặp từ được người chấm điểm giống nhau, ví dụ WordSim-353 hay SimLex-999 cho tiếng Anh, ViSim-400 cho tiếng Việt (Nguyen và cộng sự, 2018). Ta tính cosine cho từng cặp, rồi đo xem thứ hạng cosine khớp thứ hạng của người tới đâu (tương quan Spearman). Một kiểu khác là bài **tương tự quan hệ** (analogy) "Hà Nội với Việt Nam như Paris với ?", sẽ gặp ở bài [Word2Vec, GloVe, FastText](/vi/nlp/word2vec-glove-fasttext/).
+- **Đánh giá ngoại tại** (extrinsic evaluation): đưa embedding vào một tác vụ thật (phân loại, tìm kiếm) và xem kết quả có tốt hơn không. Đây mới là thước đo quan trọng nhất, vì điểm nội tại cao chưa chắc giúp tác vụ của bạn.
+
+### Giới hạn
+
+- **Một từ, một vectơ.** "Đường" trong "đi trên đường" và "cho thêm đường" có chung một hàng, nên vectơ của nó là hỗn hợp của hai nghĩa. Embedding theo ngữ cảnh, như của [BERT](/vi/nlp/bert/), cho mỗi lần xuất hiện một vectơ riêng.
+- **Gần nhau chưa chắc là đồng nghĩa.** "Nóng" và "lạnh" đứng trong ngữ cảnh rất giống nhau, nên vectơ của chúng gần nhau. Hộp thứ ba ở mục Lỗi hay gặp nói thêm.
+- **Ma trận $|V| \times |V|$ rất lớn** và SVD trên nó tốn kém; thêm văn bản mới thì phải đếm lại và tính lại. [Word2Vec](/vi/nlp/word2vec-glove-fasttext/) học thẳng vectơ dày bằng cách đoán từ, từng câu một, không cần lập ma trận.
+- **Từ chưa gặp không có vectơ**, và từ hiếm có vectơ kém tin cậy. FastText ở bài sau ghép vectơ từ các mảnh ký tự để xử lý chuyện này.
+
+## Minh họa
+
+Các bảng dưới lấy từ ô code đầu ở mục sau: 12 câu ngắn về món ăn, con vật và phương tiện, cửa sổ $\pm 2$. Bảng đầu là 8 trong 33 cột của ma trận đồng xuất hiện $\mathbf{F}$. Hãy nhìn các khối số khác 0: mỗi nhóm từ có một vùng cột riêng.
+
+| Từ đích | một | bát | nóng | rất | con | cả | đường | chạy | Tổng hàng |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| phở | 1 | 2 | 1 | 1 | 0 | 0 | 0 | 0 | 6 |
+| bún | 1 | 1 | 1 | 1 | 0 | 0 | 0 | 0 | 7 |
+| mèo | 1 | 0 | 0 | 0 | 2 | 0 | 0 | 0 | 5 |
+| chó | 1 | 0 | 0 | 0 | 2 | 1 | 0 | 0 | 5 |
+| xe_máy | 0 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | 6 |
+| ô_tô | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 1 | 6 |
+
+Cột "một" và "rất" là ngữ cảnh chung của nhiều nhóm. Chúng làm cosine giữa các nhóm lớn hơn 0, và đó là lý do cần PPMI để hạ trọng số của chúng. Tổng hàng tính trên cả 33 cột, không chỉ 8 cột in ra.
+
+Bảng thứ hai là cosine của sáu cặp, tính trên hai loại vectơ: hàng PPMI (33 số, thưa) và embedding sau SVD rút gọn ($d = 3$, dày). Hãy so cột "Cùng nhóm" với hai cột số.
+
+| Cặp | Cùng nhóm | Cosine PPMI | Cosine SVD, $d = 3$ |
+|---|---|---:|---:|
+| phở, bún | có | 0.43 | 1.00 |
+| mèo, chó | có | 0.34 | 1.00 |
+| xe_máy, ô_tô | có | 0.53 | 0.98 |
+| phở, mèo | không | 0.04 | 0.07 |
+| phở, xe_máy | không | 0.10 | 0.16 |
+| chó, ô_tô | không | 0.00 | 0.01 |
+
+Trên PPMI, ba cặp cùng nhóm chỉ đạt 0.34 tới 0.53, vì mỗi từ còn những ngữ cảnh riêng lẻ ("nằm", "ngủ", "sủa") làm các vectơ lệch nhau. Sau SVD, các cặp cùng nhóm lên gần 1, còn các cặp khác nhóm vẫn gần 0.
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026 bằng Pyodide 314.0.7 (Python 3.14, NumPy 2.4, scikit-learn 1.8), đúng bản chạy trên trang. Hai ô chạy độc lập, ngay trên trang. Ô thứ hai lần đầu chạy lâu hơn, vì trình duyệt phải tải thêm scikit-learn.
+
+### PPMI, cosine và SVD bằng NumPy
+
+Ô này làm lại toàn bộ mục Lý thuyết trên 12 câu ngắn. Từ ghép như "xe máy" đã được nối bằng dấu gạch dưới, để mỗi từ là một token khi tách theo khoảng trắng (cách tách từ tiếng Việt thật có ở bài [Tách từ](/vi/nlp/tokenization/)). Code đếm $\mathbf{F}$ với cửa sổ $\pm 2$, tính PPMI, chạy SVD và giữ $d = 3$ chiều, rồi in cosine của sáu cặp trên cả hai loại vectơ.
+
+<PythonRunner code={ppmiSvdCode} title="Đồng xuất hiện, PPMI, cosine và SVD rút gọn" />
+
+Đọc kết quả:
+
+- **`|V| = 33, nonzero = 13%`.** Chỉ 13% số ô của $\mathbf{F}$ khác 0, dù kho chỉ có 12 câu. Với kho thật, tỉ lệ này còn nhỏ hơn nhiều.
+- **Giá trị suy biến `12.36 12.18 10.75 8.58 7.76`.** Không có điểm gãy rõ. Khoảng cách lớn nhất trong năm giá trị đầu nằm giữa giá trị thứ 3 và thứ 4, và ta biết trước kho có ba nhóm, nên chọn $d = 3$. Đặt $d = 4$ hay $d = 5$ cũng cho kết quả gần như vậy: cặp cùng nhóm từ 0.93 trở lên, cặp khác nhóm từ 0.26 trở xuống.
+- **Cosine.** Đúng như bảng ở mục Minh họa. Cặp (phở, xe_máy) có PPMI cosine 0.10 chứ không phải 0, vì cả hai cùng đứng cạnh "rất" ("phở này rất ngon", "xe_máy chạy rất nhanh").
+- **Tọa độ.** Tọa độ thứ nhất dương ở mọi từ: đó là một hướng chung, không phân biệt nhóm. Ba nhóm tách nhau ở hai tọa độ còn lại: món ăn có tọa độ thứ ba dương lớn (phở 2.61, bún 4.04), con vật có tọa độ thứ hai dương (2.43), phương tiện có cả tọa độ thứ hai và thứ ba âm. Mèo và chó trùng tọa độ: các ngữ cảnh làm chúng khác nhau ("nằm", "ngủ" với mèo; "sủa", "cả" với chó) quá ít, nên SVD bỏ đi như nhiễu. Dấu của từng cột trong $\mathbf{U}$ có thể đảo giữa các bản thư viện, nhưng cosine thì không đổi.
+
+Hãy thử hai thay đổi. Đổi `cos(ppmi, a, b)` thành `cos(F, a, b)` để so trên số đếm thô: cosine (phở, bún) thành 0.67, **cao hơn** PPMI. Trên kho tí hon này, PPMI đẩy các ngữ cảnh hiếm lên quá mức, đúng thiên lệch đã nói ở mục Lý thuyết; với kho thật, PPMI thường tốt hơn số đếm thô (Turney và Pantel, 2010, dẫn Bullinaria và Levy, 2007). Rồi đổi `d = 3` thành `d = 2`: câu hỏi cuối ở mục Kiểm tra nhanh nói chuyện gì xảy ra. Muốn thử làm trơn $\alpha = 0.75$, hãy nâng tổng mỗi cột lên lũy thừa 0.75 trước khi chia để tính $P(c)$: thứ tự đảo lại, $\mathrm{PPMI}(\text{chó}, \text{sủa}) = 3.016$ thấp hơn $\mathrm{PPMI}(\text{chó}, \text{con}) = 3.025$.
+
+### TF-IDF và cosine giữa văn bản bằng scikit-learn
+
+Ô này chuyển sang ma trận từ–văn bản. Bốn văn bản ngắn được đưa thẳng vào `TfidfVectorizer`, không tách từ trước, nên mỗi âm tiết là một token ("Hà Nội" thành "hà" và "nội"). Ô làm ba việc: cho thấy mẫu tách token mặc định bỏ mất chữ gì, in idf của ba từ, và tính cosine giữa mọi cặp văn bản.
+
+<PythonRunner code={tfidfCode} title="TF-IDF và cosine giữa văn bản" />
+
+Đọc kết quả:
+
+- **`dropped: ['ô', 'ở']`.** Mẫu mặc định `(?u)\b\w\w+\b` chỉ giữ token có từ hai ký tự trở lên. Với tiếng Anh, nó chỉ bỏ "a" hay "I"; với tiếng Việt, nó bỏ cả những âm tiết có nghĩa như "ở", "ô", "ý", "ủ". Ô code dùng `token_pattern=r"(?u)\b\w+\b"`: mọi dãy chữ và số, kể cả dài một ký tự, là một token, còn dấu câu bị bỏ. Bộ tách mặc định cũng chuyển hết về chữ thường (`lowercase=True`), nên "Hà" thành "hà".
+- **`shape: (4, 21)`.** scikit-learn xếp mỗi **văn bản** thành một hàng, tức chuyển vị của ma trận từ–văn bản ở mục Lý thuyết.
+- **idf: 1.223, 1.511, 1.916.** "hà" có trong 3 văn bản, "phở" trong 2, "mèo" trong 1, khớp với phép tính tay ở mục Lý thuyết.
+- **Văn bản 0.** Mọi từ trong "tôi ăn phở bò ở Hà Nội" xuất hiện một lần, nên trọng số chỉ tỉ lệ với idf: "ăn", "ở" (chỉ có ở văn bản này) được 0.46, "hà", "nội" (có ở 3 văn bản) chỉ được 0.30. Chuẩn của hàng bằng 1.00 vì đã chuẩn hóa L2.
+- **Ma trận cosine.** Văn bản 0 và 1 (cùng nói về phở bò Hà Nội) được 0.42, cao nhất. Văn bản 0 và 3 chỉ chung "Hà Nội" nên được 0.14. Văn bản 1 và 2 không có từ chung nào nên bằng 0. Đây chính là giới hạn của vectơ thưa: "con mèo nhà tôi rất lười" và một câu về "chú chó" sẽ có cosine 0 dù cùng nói về thú nuôi.
+
+## Lỗi hay gặp
+
+:::caution[Dùng mẫu tách token mặc định của scikit-learn cho tiếng Việt]
+`TfidfVectorizer` và `CountVectorizer` mặc định bỏ mọi token một ký tự, nên "ở", "ô", "ý" biến mất mà không báo gì (dòng `dropped` của ô thứ hai). Với tiếng Việt, hãy đặt `token_pattern=r"(?u)\b\w+\b"`: giữ token một ký tự mà vẫn bỏ dấu câu. Mẫu này cần văn bản ở dạng Unicode NFC. Ở dạng NFD, dấu là ký tự riêng không thuộc `\w`, nên "Hà Nội" vỡ thành "Ha", "No", "i" (xem bài [Chuẩn hóa văn bản](/vi/nlp/text-normalization/)). Mẫu `r"\S+"` chỉ hợp khi văn bản đã chuẩn hóa và bỏ dấu câu, nếu không "ngon," và "ngon" thành hai token khác nhau. Mẫu nào cũng tách "xe máy" thành hai âm tiết; cần đơn vị là từ thì tách từ trước và nối từ ghép bằng dấu gạch dưới như ô thứ nhất. Luôn in `get_feature_names_out()` ra xem một lần.
+:::
+
+:::caution[Tin PMI cao của các cặp chỉ gặp một lần]
+Trong ô đầu, $\mathrm{PPMI}(\text{mèo}, \text{ngủ}) = 3.17$, cao hơn $\mathrm{PPMI}(\text{mèo}, \text{con}) = 2.85$, chỉ vì "ngủ" xuất hiện đúng một câu. Liệt kê "ngữ cảnh đặc trưng nhất" của một từ theo PMI thô thường ra toàn từ hiếm, có khi là lỗi chính tả. Hãy đặt ngưỡng số đếm tối thiểu (Church và Hanks bỏ các cặp gặp từ 5 lần trở xuống), làm trơn $P(c)$ bằng lũy thừa $0.75$, và dùng kho văn bản đủ lớn.
+:::
+
+:::caution[Nghĩ rằng hai vectơ gần nhau là hai từ đồng nghĩa]
+Giả thuyết phân bố chỉ hứa "ngữ cảnh giống nhau". Các từ trái nghĩa ("nóng" và "lạnh", "mua" và "bán") đứng trong ngữ cảnh rất giống nhau, nên thường có cosine cao. Các từ cùng chủ đề nhưng khác loại (phở và bát) cũng gần nhau khi cửa sổ rộng. Bộ SimLex-999 được dựng riêng để tách **tương tự** (cốc, ly) khỏi **liên quan** (cốc, cà phê). Nếu ứng dụng của bạn cần đúng nghĩa đồng nghĩa, ví dụ gợi ý từ thay thế, đừng chỉ dựa vào cosine.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Giả thuyết phân bố: từ dùng trong ngữ cảnh giống nhau thì có nghĩa gần nhau. One-hot không đo được điều này, vì mọi cặp từ khác nhau đều có tích vô hướng bằng 0.
+- Ma trận từ–văn bản đếm từ trong văn bản; ma trận từ–ngữ cảnh đếm từ trong cửa sổ $\pm s$. Số đếm thô bị từ phổ biến chi phối, nên đổi thành TF-IDF ($\mathrm{tf} \times \mathrm{idf}$; scikit-learn dùng $\ln\frac{1 + N}{1 + \mathrm{df}_t} + 1$ với $N$ là số văn bản, rồi chuẩn hóa L2) hoặc PPMI ($\max(0, \log_2 \frac{P(w,c)}{P(w)P(c)})$, thiên vị ngữ cảnh hiếm).
+- Cosine $\frac{\mathbf{u} \cdot \mathbf{v}}{\lVert \mathbf{u} \rVert \lVert \mathbf{v} \rVert}$ so hướng, không so độ dài, nên từ hay văn bản dài không tự động "giống" mọi thứ.
+- SVD rút gọn (LSA) nén vectơ thưa $|V|$ chiều thành embedding dày $d$ chiều, nối được các từ không có ngữ cảnh chung trực tiếp. Mỗi từ vẫn chỉ có một vectơ; Word2Vec ở bài sau học vectơ dày trực tiếp bằng cách đoán từ.
+
+**Đọc thêm:**
+
+- Jurafsky, D., Martin, J. H. (2026). [*Speech and Language Processing*](https://web.stanford.edu/~jurafsky/slp3/), bản nháp 3rd ed. ngày 19/8/2026, chương 5 "Embeddings" (mục 5.1–5.4 và 5.9) và chương 11, mục 11.1.2 (tf-idf). Giáo trình mở, có ví dụ "ongchoi" cùng tinh thần với từ "thồn" ở đầu bài. Bản nháp này không còn mục PPMI; phần đó xem ở nguồn thứ hai.
+- Turney, P. D., Pantel, P. (2010). [*From Frequency to Meaning: Vector Space Models of Semantics*](https://arxiv.org/abs/1003.1141), *JAIR* 37, mục 2, 4.2 và 4.3. Tổng quan ba loại ma trận, các cách đặt trọng số (TF-IDF, PMI, PPMI) và bốn cách hiểu SVD rút gọn.
+- Church, K. W., Hanks, P. (1990). [*Word Association Norms, Mutual Information, and Lexicography*](https://aclanthology.org/J90-1003/), *Computational Linguistics* 16(1). Bài đưa PMI vào ngôn ngữ học máy tính, kèm nhận xét về số đếm nhỏ.
+- Deerwester, S., Dumais, S. T., Furnas, G. W., Landauer, T. K., Harshman, R. (1990). [*Indexing by Latent Semantic Analysis*](https://doi.org/10.1002/(SICI)1097-4571(199009)41:6%3C391::AID-ASI1%3E3.0.CO;2-9), *Journal of the American Society for Information Science* 41(6). Bài gốc của LSA: SVD rút gọn trên ma trận từ–văn bản.
+- Spärck Jones, K. (1972). [*A Statistical Interpretation of Term Specificity and Its Application in Retrieval*](https://doi.org/10.1108/eb026526), *Journal of Documentation* 28(1): 11–21. Nguồn của ý tưởng idf: từ có mặt trong ít văn bản thì có ích hơn khi tìm kiếm. Harris (1954) và Firth (1957) ở mục Trực giác được dẫn qua Turney và Pantel (2010), mục 2.
+- scikit-learn (2025). [*Tf–idf term weighting*](https://scikit-learn.org/1.8/modules/feature_extraction.html#tfidf-term-weighting), tài liệu bản 1.8, cùng trang API [`TfidfVectorizer`](https://scikit-learn.org/1.8/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html). Công thức idf làm trơn, chuẩn hóa L2 và tham số `token_pattern`, đúng bản chạy trên trang.
+
+<LessonProgress />

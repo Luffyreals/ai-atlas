@@ -50,6 +50,15 @@ async function enterState(page: Page, viz: Locator, state: ContrastState): Promi
 const METER = '.atlas-viz-meter';
 
 /**
+ * A table VIZ whose sliders cut rows away (SamplingViz): only such a VIZ draws the dashed outline of a removed
+ * row. A table VIZ without sliders (BpeMergeViz, docs/architecture/viz/bpe-merge.md: pair counts, one solid bar
+ * per row, stepped with buttons) never removes a row, so its solid bars are measured but no outline is required.
+ */
+async function cutsRows(viz: Locator): Promise<boolean> {
+  return (await viz.locator(METER).count()) > 0 && (await viz.getByRole('slider').count()) > 0;
+}
+
+/**
  * Enters each state a contrast test measures, and yields its name once there. Every VIZ: CONTRAST_STATES, as
  * before. A table VIZ then also gets each slider at its start in turn, the others left at their end: only a
  * cut draws a removed row, and its dashed outline needs a value before the cut above 0 (SamplingViz: with
@@ -258,7 +267,7 @@ for (const { path } of PAGES) {
         for (const viz of await hydrateAll(page)) {
           // A table VIZ must have shown a removed row's dashed outline in one of its states, or that part of
           // the check measured nothing.
-          const table = (await viz.locator(METER).count()) > 0;
+          const table = await cutsRows(viz);
           let outlines = 0;
           // Measure in every state of contrastStates, so parts hidden at first are measured too.
           for await (const pass of contrastStates(page, viz)) {
@@ -289,7 +298,7 @@ for (const { path } of PAGES) {
       await page.goto(path);
       const viz = page.locator('.atlas-viz').first();
       await hydrate(viz);
-      const table = (await viz.locator(METER).count()) > 0;
+      const table = await cutsRows(viz);
       let brokenInPlots = 0;
       const brokenInTable = new Set<string>();
       // In each state (a zero ring is only drawn in the last one), one mark of each of these kinds that the
