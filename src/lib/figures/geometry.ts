@@ -186,3 +186,6 @@ export function textLinePositions(x: number, y: number, count: number, fontSize:
   if (count < 1 || count > MAX_NODE_LINES) throw new Error(`textLinePositions: needs 1–${MAX_NODE_LINES} lines, got ${count}.`);
   return lineOffsets(count, fontSize).map((offset) => [round1(x), round1(y + offset)]);
 }
+
+export type { FormulaPart, Formula, FormulaSpan } from './formula';
+export { formulaSpans } from './formula';

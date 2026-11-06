@@ -1,0 +1,347 @@
+---
+title: 'Semantic Segmentation: FCN, UNet, FPN, DeepLab, HRNet'
+description: Xe tự lái cần biết từng pixel là đường, người hay xe. Gán nhãn từng pixel, cross-entropy theo pixel, IoU, mIoU và năm họ FCN, UNet, FPN, DeepLab, HRNet.
+quiz:
+  - question: 'Ảnh đường phố có 4 lớp: đường 60% số pixel, trời 25%, nhà 13%, người đi bộ 2%. Một mô hình đoán đúng mọi pixel, trừ pixel người đi bộ: nó gán hết chúng cho lớp đường. Điều nào đúng?'
+    options:
+      - 'Pixel accuracy 0.98 nên mô hình đủ tốt cho xe tự lái'
+      - 'Pixel accuracy là 0.98, nhưng IoU của lớp người đi bộ bằng 0, nên mIoU không vượt quá 0.75'
+      - 'mIoU cũng khoảng 0.98, vì chỉ 2% pixel sai'
+      - 'IoU của lớp đường vẫn bằng 1, vì mọi pixel đường đều được đoán đúng'
+    answer: 1
+    explanation: 'mIoU là trung bình IoU của 4 lớp, mỗi lớp cùng trọng số. Lớp người có IoU bằng 0, ba lớp kia tối đa 1, nên mIoU tối đa $3/4 = 0.75$. IoU lớp đường cũng không bằng 1: mẫu số là phần hợp, gồm cả 2% pixel người bị gán nhầm sang đường, nên IoU đường là $0.60/0.62 \approx 0.97$. Pixel accuracy che mất lỗi này vì lớp người quá nhỏ.'
+  - question: 'Một tích chập $3 \times 3$ có dilation rate $r = 4$. Kernel này phủ vùng cỡ nào trên bản đồ đặc trưng, và có bao nhiêu trọng số (một kênh vào, một kênh ra, bỏ qua bias)?'
+    options:
+      - 'Phủ $3 \times 3$, 9 trọng số, vì rate chỉ đổi stride'
+      - 'Phủ $12 \times 12$, 144 trọng số'
+      - 'Phủ $9 \times 9$, vẫn 9 trọng số'
+      - 'Phủ $9 \times 9$, 81 trọng số'
+    answer: 2
+    explanation: 'Kích thước hiệu dụng là $k + (k-1)(r-1) = 3 + 2 \cdot 3 = 9$: giữa hai trọng số liền nhau có $r - 1 = 3$ ô bị bỏ qua. Số trọng số vẫn là $3 \cdot 3 = 9$, vì atrous chỉ giãn chỗ lấy mẫu, không thêm trọng số. Rate khác stride: đầu ra vẫn giữ nguyên độ phân giải.'
+  - question: 'Ở UNet của ô PyTorch, khối `d2` nhận ghép kênh của `u2(m)` (32 kênh) và `e2` (32 kênh), nên có 64 kênh vào. Nếu đổi phép nối kênh thành phép cộng từng phần tử như FPN, khối `d2` phải nhận bao nhiêu kênh vào?'
+    options:
+      - '32'
+      - '64'
+      - '16'
+      - 'Không cộng được, vì hai bản đồ có độ phân giải khác nhau'
+    answer: 0
+    explanation: 'Phép cộng giữ nguyên số kênh: $32 + 32$ phần tử cộng thành 32 kênh, không phải 64. Cộng được vì hai bản đồ cùng $16 \times 16$ và cùng 32 kênh. Nối kênh giữ riêng hai nguồn để lớp sau tự chọn cách trộn, đổi lại tốn gấp đôi kênh vào.'
+  - question: 'Bạn thu nhỏ một ảnh và mask nhãn của nó (0 nền, 1 xe, 2 người) từ $512 \times 512$ xuống $256 \times 256$ trước khi huấn luyện. Cách nào đúng cho mask?'
+    options:
+      - 'Nội suy song tuyến tính, vì cho kết quả mượt nhất'
+      - 'Nội suy song tuyến tính rồi làm tròn về số nguyên gần nhất'
+      - 'Thu nhỏ bằng trung bình từng ô $2 \times 2$'
+      - 'Nội suy láng giềng gần nhất, để mỗi pixel giữ một nhãn có thật'
+    answer: 3
+    explanation: 'Nhãn là số thứ tự lớp, không phải độ sáng. Nội suy hay lấy trung bình ở chỗ nền (0) giáp người (2) cho ra 1, tức "xe", một lớp không hề có ở đó; làm tròn không cứu được. Ảnh thì nội suy song tuyến tính được, mask phải dùng láng giềng gần nhất. Khác với nội suy điểm số $K$ kênh rồi mới lấy argmax, như ô NumPy làm.'
+  - question: 'Lớp nội suy lên của bạn là tích chập chuyển vị kernel 3, stride 2. Ảnh ra có hoa văn ô bàn cờ mờ. Cách sửa nào nhắm đúng nguyên nhân?'
+    options:
+      - 'Tăng tốc độ học để mạng học nhanh cách xóa hoa văn'
+      - 'Nội suy song tuyến tính (hoặc gần nhất) lên 2 lần rồi tích chập $3 \times 3$ thường'
+      - 'Thêm một tích chập chuyển vị kernel 3, stride 2 nữa'
+      - 'Đổi sang stride 3 để kernel và stride bằng nhau'
+    answer: 1
+    explanation: 'Kernel 3 không chia hết cho stride 2, nên có pixel ra nhận đóng góp từ hai vị trí vào, có pixel chỉ nhận từ một: chồng lấn không đều tạo hoa văn. Nội suy rồi tích chập thường thì mọi pixel được đối xử như nhau. Xếp thêm lớp như cũ làm hoa văn nặng hơn. Stride 3 thì phóng 3 lần, không còn là phép nội suy 2 lần ta cần.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import metricsCode from '@code/cv/semantic-segmentation/metrics.vi.py?raw';
+import unetCode from '@code/cv/semantic-segmentation/tiny-unet.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Phát biểu được bài toán **semantic segmentation** (phân vùng ngữ nghĩa): gán một lớp cho từng pixel, đầu ra $H \times W \times K$, học bằng **cross-entropy theo pixel**.
+- Tính được **IoU** (intersection over union) từng lớp, **mIoU**, **pixel accuracy**, và giải thích vì sao pixel accuracy đánh lừa khi các lớp mất cân bằng.
+- Giải thích được năm cách giải cùng một mâu thuẫn "biết cái gì" và "biết ở đâu": FCN, UNet, FPN, DeepLab, HRNet. Tính được trường tiếp nhận của **tích chập giãn** (dilated convolution).
+- Phân biệt được nội suy lên song tuyến tính với **tích chập chuyển vị** (transposed convolution), và nhận ra hiện tượng ô bàn cờ.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài [Phân loại ảnh với CNN](/vi/cv/cnn-image-classification/) cho thấy CNN xếp chồng tích chập và pooling, nên bản đồ đặc trưng nhỏ dần còn số kênh tăng dần, và một ảnh $224 \times 224$ chỉ còn lưới $7 \times 7$ ở tầng cuối. Kích thước đầu ra của một lớp tích chập là $\lfloor (H + 2p - k)/s \rfloor + 1$, với kernel $k$, padding $p$, stride $s$.
+:::
+
+## Trực giác
+
+### Từ "trong ảnh có gì" tới "pixel này là gì"
+
+Một mạng phân loại nhìn ảnh chụp đường phố và trả lời: "có ô tô". Với xe tự lái, câu trả lời đó vô dụng. Xe cần biết **ô tô nằm ở đâu, đường kéo dài tới đâu, mép vỉa hè ở pixel nào**. Bác sĩ đọc ảnh chụp cắt lớp cũng vậy: "có khối u" chưa đủ, cần đường viền của khối u để đo thể tích.
+
+Semantic segmentation trả lời câu hỏi đó cho **từng pixel**: pixel này là đường, pixel kia là người, pixel nọ là trời. Kết quả là một tấm "bản đồ tô màu" cùng cỡ với ảnh. Hai người đứng cạnh nhau được tô cùng một màu "người": bài toán không đếm từng vật. Tách từng vật riêng là việc của bài [Instance và Universal Segmentation](/vi/cv/instance-universal-segmentation/).
+
+### Mâu thuẫn: "cái gì" và "ở đâu"
+
+Thử cách ngây thơ: lấy CNN phân loại, bỏ lớp cuối. Có hai vấn đề.
+
+- **Tầng sâu thì thô.** Sau 5 lần giảm nửa, lưới chỉ còn $1/32$ cạnh ảnh. Mỗi ô của lưới $7 \times 7$ ứng với một vùng $32 \times 32$ pixel: biết vùng đó "có mèo", nhưng không biết đường viền con mèo đi qua pixel nào.
+- **Tầng nông thì mù nghĩa.** Bản đồ đặc trưng ở tầng đầu còn đủ chi tiết, nhưng chỉ "thấy" vài cạnh và đốm màu, chưa biết đó là mèo hay chó.
+
+Giống như nhìn bản đồ: bản đồ thế giới cho bạn biết đây là Việt Nam, nhưng không chỉ được con hẻm. Bản đồ phường chỉ được con hẻm, nhưng nếu chỉ có nó, bạn không biết mình ở nước nào. Người tìm đường giỏi dùng **cả hai**.
+
+Cả năm họ mô hình trong bài là năm cách kết hợp hai loại thông tin này. Bài toán của bài là: **làm sao dựng một mạng nhận ảnh $H \times W$ và trả ra một nhãn cho từng pixel, vừa đúng nghĩa vừa đúng đường viền, và đo chất lượng của nó cho công bằng với cả những lớp nhỏ?**
+
+## Lý thuyết
+
+### Phát biểu bài toán
+
+Ảnh vào $\mathbf{X} \in \mathbb{R}^{H \times W \times C}$ như bài trước. Có $K$ lớp (tính cả nền). Nhãn đúng là một **mask** $\mathbf{M}$ cỡ $H \times W$, mỗi ô $M_{ij} \in \{0, 1, \dots, K-1\}$ là lớp của pixel ở hàng $i$, cột $j$.
+
+Mạng trả ra một khối điểm $\mathbf{S} \in \mathbb{R}^{H \times W \times K}$: mỗi pixel có $K$ logit, một cho mỗi lớp. Softmax áp **riêng cho từng pixel** biến $K$ logit đó thành xác suất:
+
+$$
+p_{ijk} = \frac{e^{S_{ijk}}}{\sum_{c=0}^{K-1} e^{S_{ijc}}}
+$$
+
+Nhãn đoán của pixel là lớp có xác suất lớn nhất, $\hat{y}_{ij} = \arg\max_k p_{ijk}$.
+
+So với phân loại ảnh, chỉ có một thay đổi: thay vì **một** vectơ $K$ số cho cả ảnh, ta có $H \cdot W$ vectơ như thế. Mỗi pixel là một bài phân loại nhỏ.
+
+### Hàm mất mát: cross-entropy theo pixel
+
+Vì mỗi pixel là một bài phân loại, ta dùng cross-entropy cho từng pixel rồi lấy trung bình trên cả ảnh:
+
+$$
+\mathcal{L} = -\frac{1}{HW} \sum_{i=1}^{H} \sum_{j=1}^{W} \ln p_{i j M_{ij}}
+$$
+
+Đọc từ trong ra ngoài: $p_{ijM_{ij}}$ là xác suất mạng gán cho **lớp đúng** của pixel $(i, j)$. Lấy $-\ln$ thì xác suất gần 1 cho mất mát gần 0, xác suất gần 0 cho mất mát rất lớn. Chia cho $HW$ để mất mát không phụ thuộc cỡ ảnh. Với một lô nhiều ảnh, `F.cross_entropy` của PyTorch lấy trung bình trên mọi pixel của mọi ảnh. FCN viết tổng thay vì trung bình; hai cách chỉ khác một hằng số nhân.
+
+Công thức này có một hệ quả: **lớp nhiều pixel chiếm phần lớn tổng**. Nếu 80% pixel là nền, mạng giảm được phần lớn mất mát chỉ bằng cách đoán "nền" giỏi. UNet xử lý bằng cách nhân mất mát mỗi pixel với một trọng số $w_{ij}$: lớn hơn ở lớp hiếm và ở đường biên mỏng giữa hai tế bào chạm nhau.
+
+### Đo chất lượng: pixel accuracy, IoU, mIoU
+
+Cách đo đơn giản nhất là **pixel accuracy**: tỉ lệ pixel đoán đúng.
+
+$$
+\text{acc} = \frac{\text{số pixel có } \hat{y}_{ij} = M_{ij}}{HW}
+$$
+
+Nó có cùng nhược điểm với hàm mất mát ở trên. Ô NumPy ở mục Ví dụ code dùng ảnh $64 \times 64$ có 3 323 pixel nền, 709 pixel hình tròn và chỉ 64 pixel hình vuông nhỏ. Một mô hình **bỏ sót hoàn toàn** hình vuông vẫn có pixel accuracy $4\,032 / 4\,096 \approx 0.984$.
+
+**IoU** sửa điều đó bằng cách đo **từng lớp riêng**. Gọi $A_k$ là tập pixel đoán là lớp $k$, $B_k$ là tập pixel thật sự thuộc lớp $k$:
+
+$$
+\text{IoU}_k = \frac{|A_k \cap B_k|}{|A_k \cup B_k|} = \frac{\text{TP}_k}{\text{TP}_k + \text{FP}_k + \text{FN}_k}
+$$
+
+Tử số là phần giao: pixel đoán đúng là $k$ (true positive). Mẫu số là phần hợp, tách được thành ba phần không chồng nhau: đúng là $k$ và đoán là $k$ (TP), đoán là $k$ mà sai (false positive), là $k$ mà bị bỏ sót (false negative). IoU bằng 1 khi hai vùng trùng khít, bằng 0 khi không chạm nhau. Nó phạt **cả** đoán thừa lẫn đoán thiếu.
+
+Với mô hình bỏ sót hình vuông: lớp vuông có $\text{TP} = 0$ nên $\text{IoU} = 0$. Lớp nền có $\text{TP} = 3\,323$, và 64 pixel vuông bị đoán thành nền là FP của lớp nền, nên $\text{IoU}_\text{nền} = 3\,323 / 3\,387 \approx 0.981$.
+
+**mIoU** (mean IoU) là trung bình cộng IoU của $K$ lớp, **mỗi lớp cùng trọng số** dù to hay nhỏ:
+
+$$
+\text{mIoU} = \frac{1}{K} \sum_{k=0}^{K-1} \text{IoU}_k
+$$
+
+Mô hình trên có $\text{mIoU} = (0.981 + 1 + 0)/3 \approx 0.660$, thấp hơn hẳn 0.984. Đây là độ đo chính của các bài báo segmentation; FCN gọi nó là "mean IU". Trên một tập kiểm tra, cách chuẩn là **cộng dồn** TP, FP, FN của mọi ảnh rồi mới chia, như ô PyTorch làm.
+
+:::note[Ghi nhớ]
+Mỗi pixel là một bài phân loại: logit $K$ lớp, softmax, cross-entropy lấy trung bình trên mọi pixel. Đo bằng IoU từng lớp và mIoU, không chỉ pixel accuracy, vì lớp nhỏ gần như không làm pixel accuracy nhúc nhích.
+:::
+
+### FCN: biến mạng phân loại thành mạng "toàn tích chập"
+
+FCN (Long, Shelhamer, Darrell, 2015) là bài báo mở đầu cho cách làm hiện đại. Ba ý:
+
+**Ý 1: thay lớp kết nối đầy đủ bằng tích chập.** Một lớp kết nối đầy đủ nhận bản đồ $7 \times 7 \times 512$ chính là một tích chập có kernel $7 \times 7$ phủ trọn bản đồ đó. Viết lại như vậy, mạng không còn đòi ảnh cỡ cố định. Đưa ảnh to hơn vào, thay vì một vectơ điểm, bạn nhận một **lưới** điểm: mỗi ô là dự đoán cho một vùng ảnh. Mạng chỉ gồm tích chập nên được gọi là **mạng toàn tích chập** (fully convolutional network). Cuối cùng, một tích chập $1 \times 1$ đổi số kênh thành $K$ (21 với bộ PASCAL VOC: 20 lớp và nền).
+
+**Ý 2: nội suy lên.** Lưới điểm của VGG16 nhỏ hơn ảnh 32 lần mỗi chiều. Tỉ lệ này gọi là **output stride**. FCN phóng lưới lên đúng cỡ ảnh bằng tích chập chuyển vị, khởi tạo đúng bằng nội suy song tuyến tính (mục sau). Bản này gọi là FCN-32s, và đường viền của nó rất "nhòe".
+
+**Ý 3: nối tắt từ tầng nông.** FCN-16s lấy bản đồ ở pool4 (output stride 16), cho qua tích chập $1 \times 1$ thành $K$ kênh điểm, rồi **cộng** với lưới điểm của tầng cuối đã phóng lên 2 lần. FCN-8s làm thêm một lần với pool3 (output stride 8). Tầng sâu nói "cái gì", tầng nông chỉnh lại "ở đâu".
+
+### Nội suy lên: song tuyến tính và tích chập chuyển vị
+
+Có ba cách phóng một lưới $h \times w$ lên $sh \times sw$:
+
+- **Láng giềng gần nhất** (nearest neighbor): mỗi ô thô chép ra thành khối $s \times s$. Nhanh, nhưng ra hình bậc thang.
+- **Nội suy song tuyến tính** (bilinear interpolation): mỗi pixel mới là trung bình có trọng số của 4 ô thô gần nhất, trọng số tỉ lệ với độ gần. Nội suy theo hàng trước, theo cột sau, nên gọi là "song" tuyến tính. Đường viền mượt hơn. Không có tham số học.
+- **Tích chập chuyển vị** (transposed convolution, có bài gọi là "deconvolution"): mỗi ô vào nhân với một kernel $k \times k$ **học được** rồi "đóng dấu" lên lưới ra, cách nhau $s$ ô; chỗ các dấu chồng nhau thì cộng lại. Kích thước ra (PyTorch, không có `output_padding`) là $(h - 1)s - 2p + k$. Với $k = s = 2$, $p = 0$: $(h-1) \cdot 2 + 2 = 2h$, gấp đôi, như UNet và ô PyTorch dùng.
+
+Tích chập chuyển vị có một bẫy, Odena, Dumoulin và Olah (2016) gọi là **hiện tượng ô bàn cờ** (checkerboard artifacts). Khi $k$ không chia hết cho $s$, ví dụ $k = 3$, $s = 2$, các dấu chồng nhau **không đều**: theo mỗi chiều, cứ một pixel ra nhận đóng góp từ hai ô vào thì pixel kế bên chỉ nhận từ một. Trên ảnh hai chiều, hoa văn này thành ô bàn cờ, và xếp chồng nhiều lớp làm nó nặng thêm. Cách sửa của họ: **nội suy trước** (gần nhất hoặc song tuyến tính), rồi tích chập thường. Chọn $k$ chia hết cho $s$ giảm vấn đề, nhưng tác giả lưu ý không hết hẳn.
+
+### UNet: hình chữ U đối xứng
+
+UNet (Ronneberger, Fischer, Brox, 2015) ra đời cho ảnh kính hiển vi, nơi chỉ có vài chục ảnh có nhãn và đường biên giữa hai tế bào chỉ dày vài pixel. Thiết kế gồm hai nhánh:
+
+- **Nhánh co** (contracting path, hay encoder): lặp lại "hai tích chập $3 \times 3$ + ReLU, rồi max pooling $2 \times 2$". Mỗi lần giảm nửa độ phân giải thì số kênh gấp đôi: 64, 128, 256, 512, 1024.
+- **Nhánh giãn** (expansive path, hay decoder): lặp lại "phóng lên 2 lần bằng tích chập chuyển vị $2 \times 2$ (giảm nửa số kênh), **nối kênh** với bản đồ cùng tầng của nhánh co, rồi hai tích chập $3 \times 3$". Cuối cùng một tích chập $1 \times 1$ ra $K$ kênh.
+
+Điểm khác FCN nằm ở hai chữ: **đối xứng** và **nối kênh**. FCN có một bộ giải mã rất mỏng (cộng điểm $K$ kênh). UNet có nhánh giãn dày gần bằng nhánh co, và ở mỗi tầng nó **nối** (concatenate) toàn bộ đặc trưng của nhánh co vào, không chỉ $K$ kênh điểm. Đó là **nối tắt** (skip connection): chi tiết vị trí đi thẳng từ trái sang phải chữ U, không phải đi qua đáy chữ U nơi độ phân giải thấp nhất.
+
+Bài báo gốc dùng tích chập **không đệm**, nên mỗi lớp mất một viền pixel: ô vào $572 \times 572$ cho mask $388 \times 388$, và bản đồ của nhánh co phải **cắt mép** trước khi nối. Đa số cài đặt sau này dùng padding 1 để ra đúng cỡ ảnh, như ô PyTorch của bài.
+
+### FPN: kim tự tháp đặc trưng
+
+FPN (Lin và cộng sự, 2017) vốn sinh ra cho bài toán phát hiện đối tượng, nơi vật có thể to hay nhỏ. Nó có ba đường:
+
+1. **Từ dưới lên** (bottom-up): xương sống CNN bình thường, cho các bản đồ ở output stride 4, 8, 16, 32.
+2. **Từ trên xuống** (top-down): bắt đầu từ bản đồ sâu nhất, phóng lên 2 lần bằng láng giềng gần nhất.
+3. **Nối ngang** (lateral connection): bản đồ cùng tầng của đường đi lên qua tích chập $1 \times 1$ để có $d = 256$ kênh, rồi **cộng** với bản đồ vừa phóng lên. Sau đó một tích chập $3 \times 3$ làm mịn, theo bài báo là để giảm răng cưa do phóng lên.
+
+Kết quả là một **kim tự tháp** (pyramid): mỗi tầng có độ phân giải riêng nhưng **đều mang nghĩa** của tầng sâu nhất. Panoptic FPN (Kirillov và cộng sự, 2019) gắn thêm một nhánh semantic segmentation nhẹ lên kim tự tháp này. So với UNet: FPN dùng **phép cộng** với số kênh cố định, nên rẻ hơn nối kênh; và nó giữ **mọi tầng** làm đầu ra, không chỉ tầng cuối.
+
+### DeepLab: đừng thu nhỏ quá, hãy giãn kernel
+
+Họ DeepLab của Chen và cộng sự đi hướng khác: thay vì thu nhỏ 32 lần rồi cố gắng phóng lại, **bớt thu nhỏ ngay từ đầu**. Bỏ stride ở vài tầng cuối thì output stride còn 16 hoặc 8. Nhưng làm vậy, mỗi kernel $3 \times 3$ ở tầng sâu chỉ còn "thấy" một vùng ảnh nhỏ hơn trước. Cần một cách cho kernel nhìn xa hơn mà không thêm tham số.
+
+**Tích chập giãn** (dilated hay atrous convolution, "à trous" là "có lỗ" trong tiếng Pháp) làm đúng điều đó. Viết một chiều cho gọn, theo DeepLabv3 (2017):
+
+$$
+y[i] = \sum_{t} x[i + r \cdot t]\, w[t]
+$$
+
+Ở đây $w[t]$ là trọng số thứ $t$ của kernel, và **dilation rate** $r$ là khoảng cách giữa hai vị trí lấy mẫu. $r = 1$ là tích chập thường. $r = 2$ nghĩa là lấy mẫu cách một ô.
+
+**Kích thước hiệu dụng.** Kernel có $k$ trọng số, giữa hai trọng số liền nhau có $r - 1$ ô bị bỏ qua. Có $k - 1$ khoảng như vậy, nên tổng chiều dài phủ là:
+
+$$
+k_\text{eff} = k + (k - 1)(r - 1)
+$$
+
+Với $k = 3$: $r = 2$ cho $k_\text{eff} = 5$, $r = 6$ cho 13, $r = 18$ cho 37. Số trọng số vẫn là $3 \times 3 = 9$.
+
+**Trường tiếp nhận cộng dồn.** Trường tiếp nhận (receptive field) là vùng đầu vào ảnh hưởng tới một ô ra. Với các lớp stride 1 xếp chồng, mỗi lớp nới trường tiếp nhận thêm $k_\text{eff} - 1$ ô, vì nó gom $k_\text{eff}$ ô kề nhau của lớp trước, mà mỗi ô đó đã thấy một vùng, hai vùng kề nhau lệch nhau một ô. Bắt đầu từ 1 ô:
+
+$$
+R = 1 + \sum_{\ell} (k_{\text{eff},\ell} - 1)
+$$
+
+Ba lớp $3 \times 3$ thường cho $R = 1 + 2 + 2 + 2 = 7$. Ba lớp $3 \times 3$ với $r = 1, 2, 4$ cho $R = 1 + 2 + 4 + 8 = 15$ (tự tính), cùng số tham số. Trường tiếp nhận lớn lên theo cấp số nhân thay vì cộng, mà độ phân giải không giảm.
+
+**ASPP.** Vật có nhiều cỡ, nên một rate không đủ. **ASPP** (Atrous Spatial Pyramid Pooling) chạy **song song** nhiều nhánh trên cùng bản đồ rồi nối kênh kết quả. Ở DeepLabv3 với output stride 16: một tích chập $1 \times 1$, ba tích chập $3 \times 3$ với rate 6, 12, 18, và một nhánh **đặc trưng mức ảnh** (lấy trung bình toàn bản đồ, tích chập $1 \times 1$, phóng lại). Nhánh cuối có lý do riêng: khi rate gần bằng cỡ bản đồ, phần lớn 9 vị trí lấy mẫu rơi ra ngoài vùng có dữ liệu, kernel $3 \times 3$ thoái hóa thành $1 \times 1$; nhánh trung bình toàn ảnh bù lại ngữ cảnh toàn cục.
+
+DeepLabv3+ (Chen và cộng sự, 2018) thêm một bộ giải mã nhỏ kiểu UNet để sửa đường biên, tức là ghép hai ý tưởng lại.
+
+### HRNet: không bao giờ bỏ độ phân giải cao
+
+Các họ trên đều theo một mẫu: **thu nhỏ rồi phục hồi**. HRNet (Wang và cộng sự, 2020) hỏi: sao phải đánh mất độ phân giải cao để rồi lấy lại?
+
+HRNet giữ một nhánh độ phân giải cao (1/4 cạnh ảnh) **suốt chiều dài mạng**. Mỗi giai đoạn thêm một nhánh mới thấp hơn, tới bốn nhánh song song ở 1/4, 1/8, 1/16, 1/32, số kênh $C$, $2C$, $4C$, $8C$. Định kỳ, các nhánh **trao đổi** thông tin: nhánh cao gửi xuống qua tích chập $3 \times 3$ stride 2, nhánh thấp gửi lên qua nội suy song tuyến tính và tích chập $1 \times 1$, mỗi nhánh cộng mọi thứ nhận được. Với segmentation, đầu HRNetV2 phóng mọi nhánh lên 1/4 rồi nối kênh.
+
+Hình dung lại hai tấm bản đồ: UNet đọc bản đồ thế giới rồi mới lần xuống bản đồ phường; HRNet trải cả bốn tấm trên bàn và liên tục đối chiếu.
+
+### Giới hạn
+
+- **Không tách từng vật.** Hai người đứng cạnh nhau chung một vùng "người". Đếm và tách từng vật thuộc bài [Instance và Universal Segmentation](/vi/cv/instance-universal-segmentation/).
+- **Bài chỉ nói các họ dựa trên CNN.** Các mô hình dựa trên Transformer (như Mask2Former) ở bài trên; cách Transformer xử lý ảnh ở bài [Phân loại ảnh với Transformer](/vi/cv/vision-transformer/).
+- **Nhãn pixel rất đắt.** Vẽ mask cho một ảnh tốn nhiều công hơn gán một nhãn cho cả ảnh. Bài [Data augmentation trong CV](/vi/cv/image-augmentation/) và bài [Self-supervised learning với ảnh](/vi/cv/self-supervised-learning/) bàn cách tận dụng ít nhãn.
+
+## Minh họa
+
+Hình dưới vẽ UNet nhỏ đúng như ô PyTorch của bài. Hãy nhìn các mũi tên ngang: chúng mang bản đồ $32 \times 32$ và $16 \times 16$ của nhánh co sang nhánh giãn, bỏ qua đáy chữ U chỉ còn $8 \times 8$.
+
+{/* FIG: UnetFigure
+    Ý: nhánh co giảm độ phân giải và tăng số kênh, nhánh giãn đối xứng tăng lại; nối tắt mang chi tiết từ nhánh co sang nhánh giãn cùng tầng.
+    Khối và mũi tên: hình chữ U, đọc từ trái trên xuống đáy rồi lên phải trên. Trái: "ảnh 32×32×1" → khối e1 (32×32, 16 kênh) → max pool → e2 (16×16, 32 kênh) → max pool → đáy mid (8×8, 64 kênh). Phải: mid → phóng lên (tích chập chuyển vị 2×2) → nối kênh với e2 → d2 (16×16, 32 kênh) → phóng lên → nối kênh với e1 → d1 (32×32, 16 kênh) → tích chập 1×1 → "mask 32×32, 3 lớp". Hai mũi tên ngang nét đứt từ e1 sang d1, e2 sang d2 là trọng tâm (màu nhấn). Khối nhánh co và nhánh giãn cùng màu nhóm thứ hai; đáy một màu riêng.
+    Nhãn: "Ảnh vào", "Nhánh co", "Nhánh giãn", "Nối tắt (nối kênh)", "Max pooling 2×2", "Phóng lên 2×", "Mask ra"; mỗi khối ghi cỡ, ví dụ "16×16, 32 kênh".
+    Chú thích: Mỗi tầng xuống, cạnh giảm nửa và số kênh gấp đôi; nối tắt ghép bản đồ của nhánh co vào nhánh giãn, nên khối d2 nhận $32 + 32 = 64$ kênh. Số khớp ô PyTorch của bài. */}
+
+Bảng dưới đặt năm họ cạnh nhau theo một câu hỏi chung: mỗi họ lấy lại độ phân giải và ghép "cái gì" với "ở đâu" bằng cách nào.
+
+| Tiêu chí | FCN (2015) | UNet (2015) | FPN (2017) | DeepLab v3/v3+ (2017–2018) | HRNet (2020) |
+|---|---|---|---|---|---|
+| Đường đi của độ phân giải | Thu nhỏ 32 lần, phóng lên một lần | Thu nhỏ rồi phóng lên từng tầng, đối xứng | Thu nhỏ, rồi đi ngược từ trên xuống từng tầng | Chỉ thu nhỏ 8 hoặc 16 lần | Giữ nhánh 1/4 suốt mạng, chạy song song nhánh thấp |
+| Ghép chi tiết với ngữ cảnh | Cộng điểm $K$ kênh từ pool3, pool4 | Nối kênh toàn bộ đặc trưng cùng tầng | Tích chập $1 \times 1$ rồi cộng, $d = 256$ kênh | Atrous và ASPP nhiều rate; v3+ thêm bộ giải mã | Trao đổi lặp lại giữa các nhánh |
+| Phóng lên bằng | Tích chập chuyển vị, khởi tạo song tuyến tính | Tích chập chuyển vị $2 \times 2$ | Láng giềng gần nhất | Song tuyến tính | Song tuyến tính |
+| Điểm mạnh | Đơn giản, dùng lại mạng phân loại | Đường biên sắc, học được từ ít ảnh | Đặc trưng nhiều tỉ lệ, rẻ, dùng chung cho phát hiện | Trường tiếp nhận lớn, ngữ cảnh nhiều cỡ | Bản đồ cao vừa sắc vừa giàu nghĩa |
+| Cái giá | Đường viền nhòe | Tốn bộ nhớ ở các tầng độ phân giải cao | Cần thêm đầu ra cho segmentation | Tính toán nặng ở độ phân giải 1/8 | Nhiều nhánh, tốn bộ nhớ và tính toán |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: ô NumPy với Python 3.14 và NumPy 2.4 (bản có trong Pyodide), ô PyTorch với Python 3.14 và PyTorch 2.15 trên CPU. Ô NumPy chạy ngay trên trang, ô PyTorch chạy trên máy bạn. Hai ô độc lập, không dùng biến của nhau.
+
+### IoU, mIoU và nội suy lên bằng NumPy
+
+Ô dưới đây vẽ một ảnh $64 \times 64$ có ba lớp: nền, một hình tròn bán kính 15 và một hình vuông $8 \times 8$. Hàm `report` dựng **ma trận nhầm lẫn** (confusion matrix) $K \times K$ bằng `np.bincount`: ô $(i, j)$ đếm số pixel lớp đúng $i$ bị đoán là $j$. Đường chéo là TP; tổng cột trừ TP là FP; tổng hàng trừ TP là FN. Ô thử bốn "mô hình":
+
+- `all bg`: đoán nền ở mọi pixel.
+- `no square`: đúng hết, trừ bỏ sót cả hình vuông.
+- Mô phỏng một mạng có output stride $s = 4$ và $s = 8$: lấy trung bình mask one-hot trên từng ô $s \times s$ làm lưới điểm thô, rồi phóng lên bằng láng giềng gần nhất (`nearest`) hoặc song tuyến tính (`bilin`), và lấy argmax.
+
+<PythonRunner code={metricsCode} title="IoU, mIoU, pixel accuracy và nội suy lên" />
+
+Đọc kết quả:
+
+- **`all bg`:** pixel accuracy 0.811 chỉ nhờ nền chiếm 81% ảnh, nhưng mIoU 0.270.
+- **`no square`:** pixel accuracy 0.984, IoU hình vuông 0, mIoU 0.660. Đúng các số đã tính tay ở mục Lý thuyết. Lỗi nghiêm trọng nhất (mất hẳn một vật) gần như không thấy trên pixel accuracy.
+- **Output stride 4:** song tuyến tính cho mIoU 0.925, láng giềng gần nhất 0.771. Phóng bằng láng giềng gần nhất làm đường tròn thành bậc thang (IoU 0.854 so với 0.972).
+- **Output stride 8:** hình vuông $8 \times 8$ lệch lưới nên bị chia ra nhiều ô thô, ô nào cũng nhiều nền hơn vuông. Cả hai cách phóng đều cho IoU hình vuông bằng 0, trong khi pixel accuracy vẫn 0.942 và 0.974. **Thông tin đã mất ở lưới thô thì không phép nội suy nào lấy lại được.** Đó là lý do FCN, UNet, FPN đưa chi tiết từ tầng nông sang, còn DeepLab và HRNet giữ độ phân giải cao hơn.
+
+Ô này nội suy **điểm** của 3 lớp rồi mới argmax, như FCN làm. Đừng nội suy chính mask nhãn (xem Lỗi hay gặp).
+
+### UNet tí hon bằng PyTorch
+
+File dưới đây tự sinh 512 ảnh huấn luyện và 128 ảnh kiểm tra $32 \times 32$ (hạt giống 0). Mỗi ảnh xám có nhiễu, chứa một hình tròn và một hình vuông **cùng độ sáng**, nên mạng không thể chỉ nhìn độ sáng: phải nhận ra hình dạng. Mạng là UNet hai tầng như hình ở mục Minh họa, phóng lên bằng `ConvTranspose2d(…, 2, 2)` (kernel bằng stride, không chồng lấn). File huấn luyện hai lần với cùng hạt giống: một lần đủ nối tắt, một lần thay nối tắt bằng số 0, rồi in pixel accuracy, IoU từng lớp và mIoU trên tập kiểm tra. Cách cài PyTorch bản CPU có ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+<LocalCode
+  code={unetCode}
+  title="UNet hai tầng học tách hình tròn và hình vuông"
+  packages={['torch', 'numpy']}
+  hardware="CPU là đủ. Một đến hai phút cho cả hai lần huấn luyện trên máy phát triển"
+>
+
+```text
+skip=True: acc 0.987, IoU [0.996 0.879 0.83 ], mIoU 0.902
+skip=False: acc 0.953, IoU [0.983 0.676 0.46 ], mIoU 0.706
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Có nối tắt:** mIoU 0.902 trên 128 ảnh chưa thấy khi huấn luyện; hình tròn 0.879, hình vuông 0.83. Sau 20 lượt qua dữ liệu, UNet nhỏ đã phân biệt được hai hình cùng độ sáng chỉ nhờ hình dạng.
+- **Bỏ nối tắt:** cùng kiến trúc, cùng hạt giống, chỉ khác là nhánh giãn không nhận bản đồ của nhánh co. mIoU tụt còn 0.706, IoU hình vuông còn 0.46. Mọi thông tin vị trí phải đi qua đáy $8 \times 8$, nên các góc vuông và đường biên bị nhòe, đúng điều mục Lý thuyết dự đoán.
+- **Pixel accuracy** chỉ giảm từ 0.987 xuống 0.953: lại thêm một ví dụ cho thấy nó che mất khác biệt mà mIoU thấy rõ.
+
+Dù đã đặt hạt giống, số có thể lệch ở chữ số thứ hai, thứ ba trên máy khác: số luồng CPU đổi thứ tự cộng số thực, và sai khác nhỏ lớn dần qua hàng trăm bước huấn luyện. Trên máy phát triển, chạy với 4 luồng cho mIoU 0.908 và 0.704. Khoảng cách giữa có và không có nối tắt thì giữ nguyên.
+
+## Lỗi hay gặp
+
+:::caution[Báo cáo pixel accuracy như độ đo chính]
+Pixel accuracy bị lớp lớn chi phối. Ở ô NumPy, mô hình bỏ sót cả hình vuông vẫn đạt 0.984. Với ảnh đường phố, người đi bộ, biển báo, cột đèn chỉ chiếm vài phần trăm pixel nhưng lại quan trọng nhất. Hãy báo **IoU từng lớp** và mIoU, cộng dồn TP, FP, FN trên cả tập kiểm tra rồi mới chia. Lớp không xuất hiện trong cả mask đúng lẫn mask đoán thì IoU là $0/0$: bỏ lớp đó khỏi trung bình, đừng tính là 0 hay 1.
+:::
+
+:::caution[Nội suy mask nhãn bằng song tuyến tính]
+Mask chứa **số thứ tự lớp**, không phải độ sáng. Thu nhỏ hay xoay mask bằng nội suy song tuyến tính sẽ cho ra số lẻ ở đường biên, và làm tròn cũng không cứu được: giữa nền (0) và hình vuông (2) mọc ra một viền "hình tròn" (1). Với mask, luôn dùng **láng giềng gần nhất** (ví dụ `F.interpolate(..., mode="nearest")`, hay `InterpolationMode.NEAREST` của torchvision). Khi augmentation lật hay cắt ảnh, phải lật và cắt mask **cùng một cách**.
+:::
+
+:::caution[Nghĩ phóng lên là lấy lại được chi tiết]
+Nội suy hay tích chập chuyển vị chỉ phân bổ lại thông tin đang có trong lưới thô. Ở output stride 8, hình vuông $8 \times 8$ biến mất với cả hai cách phóng. Muốn lấy lại vật nhỏ và đường biên, mạng cần đưa đặc trưng độ phân giải cao vào (nối tắt của UNet, nối ngang của FPN, bộ giải mã của DeepLabv3+) hoặc không bỏ chúng đi (HRNet).
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Semantic segmentation là phân loại từng pixel: mạng ra $H \times W \times K$ logit, softmax riêng từng pixel, học bằng cross-entropy lấy trung bình trên mọi pixel.
+- Đo bằng $\text{IoU}_k = \text{TP}_k / (\text{TP}_k + \text{FP}_k + \text{FN}_k)$ và mIoU (trung bình đều các lớp). Pixel accuracy bị lớp lớn chi phối và che mất việc bỏ sót lớp nhỏ.
+- Mâu thuẫn trung tâm: tầng sâu biết "cái gì" nhưng thô, tầng nông biết "ở đâu" nhưng ít nghĩa. FCN cộng điểm từ tầng nông; UNet dựng nhánh giãn đối xứng và nối kênh; FPN dựng kim tự tháp từ trên xuống bằng phép cộng; DeepLab bớt thu nhỏ và bù trường tiếp nhận bằng tích chập giãn ($k_\text{eff} = k + (k-1)(r-1)$) và ASPP; HRNet giữ nhánh độ phân giải cao suốt mạng.
+- Phóng lên bằng song tuyến tính không có tham số; tích chập chuyển vị học được, nhưng dễ tạo ô bàn cờ khi kernel không chia hết cho stride.
+
+**Đọc thêm:**
+
+- Long, J., Shelhamer, E., Darrell, T. (2015). [*Fully Convolutional Networks for Semantic Segmentation*](https://arxiv.org/abs/1411.4038), arXiv:1411.4038, mục 3 và 4. Cách biến mạng phân loại thành mạng toàn tích chập, và định nghĩa các độ đo ở mục 5.
+- Ronneberger, O., Fischer, P., Brox, T. (2015). [*U-Net: Convolutional Networks for Biomedical Image Segmentation*](https://arxiv.org/abs/1505.04597), arXiv:1505.04597, mục 2 và hình 1. Ngắn, hình 1 đủ để vẽ lại cả mạng; mục 3 có bản đồ trọng số cho đường biên.
+- Lin, T.-Y. và cộng sự (2017). [*Feature Pyramid Networks for Object Detection*](https://arxiv.org/abs/1612.03144), arXiv:1612.03144, mục 3. Nhánh từ trên xuống và nối ngang trong một trang.
+- Chen, L.-C., Papandreou, G., Schroff, F., Adam, H. (2017). [*Rethinking Atrous Convolution for Semantic Image Segmentation*](https://arxiv.org/abs/1706.05587), arXiv:1706.05587, mục 3; và Chen, L.-C. và cộng sự (2018). [*Encoder-Decoder with Atrous Separable Convolution for Semantic Image Segmentation*](https://arxiv.org/abs/1802.02611), arXiv:1802.02611. Tích chập giãn, ASPP, và bộ giải mã của DeepLabv3+.
+- Wang, J. và cộng sự (2020). [*Deep High-Resolution Representation Learning for Visual Recognition*](https://arxiv.org/abs/1908.07919), arXiv:1908.07919, mục 3 và 4. Kiến trúc HRNet và ba kiểu đầu ra V1, V2, V2p.
+- Odena, A., Dumoulin, V., Olah, C. (2016). [*Deconvolution and Checkerboard Artifacts*](https://distill.pub/2016/deconv-checkerboard/), Distill. Hình tương tác cho thấy vì sao chồng lấn không đều sinh ô bàn cờ.
+
+<LessonProgress />

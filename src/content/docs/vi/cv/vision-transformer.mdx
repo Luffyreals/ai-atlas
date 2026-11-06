@@ -1,0 +1,345 @@
+---
+title: 'Phân loại ảnh với Transformer: Attention, ViT'
+description: Tai mèo ở góc trên, đuôi ở góc dưới. ViT nối hai chỗ ngay từ lớp đầu bằng attention. Patch, token [CLS], chi phí N², DeiT và Swin.
+quiz:
+  - question: 'Một CNN chỉ có các lớp tích chập $3 \times 3$, stride 1, không pooling. Sau 3 lớp, một điểm trên bản đồ đặc trưng "thấy" vùng ảnh cỡ nào? Còn một token patch ở lớp attention đầu tiên của ViT thấy bao nhiêu?'
+    options:
+      - 'CNN thấy $9 \times 9$; ViT thấy $3 \times 3$ patch xung quanh'
+      - 'CNN thấy $7 \times 7$; ViT thấy cả ảnh'
+      - 'Cả hai đều thấy cả ảnh ngay từ lớp đầu'
+      - 'CNN thấy $3 \times 3$ ở mọi lớp; ViT thấy cả ảnh'
+    answer: 1
+    explanation: 'Mỗi lớp $3 \times 3$ nới vùng nhìn thêm 1 điểm ảnh mỗi phía, nên sau $l$ lớp là $(2l + 1) \times (2l + 1)$: với 3 lớp là $7 \times 7$. Trong self-attention không có mặt nạ, mọi trọng số $A_{ij}$ đều dương, nên mỗi patch đọc được mọi patch ngay ở lớp đầu. Phương án "$3 \times 3$ ở mọi lớp" quên rằng các lớp chồng lên nhau thì vùng nhìn cộng dồn.'
+  - question: 'ViT-B/16 học ở ảnh $224 \times 224$ (196 patch, thêm `[CLS]` là 197 token). Bạn fine-tune ở ảnh $384 \times 384$, giữ $P = 16$. Số ô trong bảng điểm attention của mỗi đầu, mỗi lớp, tăng khoảng bao nhiêu lần?'
+    options:
+      - 'Khoảng 1.7 lần, vì cạnh ảnh dài gấp khoảng 1.7'
+      - 'Khoảng 2.9 lần, vì số token gấp khoảng 2.9'
+      - 'Khoảng 8.6 lần'
+      - 'Không đổi, vì $P$ giữ nguyên'
+    answer: 2
+    explanation: '$384 / 16 = 24$, nên có $24^2 = 576$ patch, cộng `[CLS]` là 577 token. Bảng điểm có $577^2 = 332\,929$ ô so với $197^2 = 38\,809$, gấp khoảng 8.6 lần. Số token chỉ gấp khoảng 2.9, nhưng attention chấm điểm mọi cặp, nên chi phí tăng theo bình phương. Embedding vị trí cũng phải nội suy từ lưới $14 \times 14$ lên $24 \times 24$.'
+  - question: 'Bạn bỏ embedding vị trí khỏi một ViT, rồi xáo trộn ngẫu nhiên thứ tự 16 patch của một ảnh trước khi đưa vào. Đầu ra ở token `[CLS]` (và nhãn dự đoán) thay đổi thế nào?'
+    options:
+      - 'Đổi hẳn, vì attention nhìn thấy thứ tự của các patch'
+      - 'Đổi một chút, vì MLP xử lý từng vị trí riêng'
+      - 'Mô hình báo lỗi vì số patch không khớp'
+      - 'Không đổi: không có vị trí, ViT chỉ thấy một túi patch, nên ảnh bị xáo trộn và ảnh gốc là như nhau'
+    answer: 3
+    explanation: 'Đầu ra của `[CLS]` là tổng có trọng số của các hàng giá trị; đổi chỗ các hàng thì trọng số đổi chỗ theo, tổng không đổi. MLP và chuẩn hóa lớp làm riêng trên từng token, cũng không phụ thuộc thứ tự. Chính embedding vị trí là thứ duy nhất cho ViT biết patch nào nằm ở đâu.'
+  - question: 'Một bệnh viện có 5 000 ảnh X-quang có nhãn, muốn huấn luyện từ đầu, không có mô hình học sẵn. Theo kết quả của bài báo ViT và DeiT, lựa chọn nào hợp lý nhất?'
+    options:
+      - 'Một CNN cỡ vừa, hoặc một ViT nhỏ kèm augmentation mạnh và regularization'
+      - 'ViT-L từ đầu, vì mô hình lớn hơn luôn chính xác hơn'
+      - 'ViT với patch $1 \times 1$ để không mất chi tiết'
+      - 'Bỏ augmentation để ViT học đúng phân phối ảnh thật'
+    answer: 0
+    explanation: 'ViT ít thiên kiến quy nạp, nên khi dữ liệu ít nó overfit hơn CNN cùng cỡ: trên ImageNet (1.3 triệu ảnh), ViT-L còn kém ViT-B. CNN có sẵn giả định "điểm gần nhau liên quan nhau", phù hợp khi ít ảnh. DeiT cho thấy ViT học được trên dữ liệu vừa phải nhờ augmentation mạnh và chắt lọc tri thức. Patch $1 \times 1$ cho $N$ bằng số điểm ảnh, chi phí attention bùng nổ.'
+  - question: 'Gấp đôi cả hai cạnh ảnh, giữ cỡ patch. Chi phí phần attention của ViT và của Swin (cửa sổ $M \times M$ cố định) tăng khoảng bao nhiêu lần?'
+    options:
+      - 'Cả hai gấp 4'
+      - 'ViT gấp 16, Swin gấp 4'
+      - 'ViT gấp 4, Swin không đổi'
+      - 'Cả hai gấp 16'
+    answer: 1
+    explanation: 'Số patch $N$ gấp 4. ViT chấm điểm mọi cặp nên tăng theo $N^2$: gấp 16. Swin chỉ chấm điểm trong từng cửa sổ $M^2$ patch; số cửa sổ gấp 4 còn chi phí mỗi cửa sổ không đổi, nên tổng gấp 4, tức tuyến tính theo số patch. Phương án "Swin không đổi" quên rằng số cửa sổ tăng theo diện tích ảnh.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import patchAttentionCode from '@code/cv/vision-transformer/patch-attention.vi.py?raw';
+import tinyVitCode from '@code/cv/vision-transformer/tiny-vit.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu vì sao **self-attention** trên các patch cho mỗi vùng ảnh nhìn được cả ảnh ngay từ lớp đầu, khác với **trường tiếp nhận** (receptive field) lớn dần qua từng lớp của CNN.
+- Mô tả được đường đi của một ảnh qua **Vision Transformer** (ViT): patch embedding, **token lớp** (class token, `[CLS]`), embedding vị trí, bộ mã hóa Transformer, đầu phân loại. Tính được số token và chi phí $O(N^2)$ theo số patch.
+- Giải thích được **thiên kiến quy nạp** (inductive bias) và vì sao ViT cần nhiều dữ liệu (JFT-300M), còn DeiT học được chỉ trên ImageNet nhờ augmentation mạnh và **chắt lọc tri thức** (knowledge distillation). Nêu được ý chính của Swin: attention trong cửa sổ cục bộ được dịch chuyển.
+- Cài được phép cắt patch và scaled dot-product attention bằng NumPy, rồi huấn luyện một ViT tí hon bằng PyTorch và so với một CNN nhỏ.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài Transformer của phần Học sâu chưa xuất bản, nên nhắc ở đây phần bài này dùng; bản dài hơn, có mặt nạ nhân quả, ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/). **Self-attention** cho mỗi vị trí trong một dãy vectơ nhìn mọi vị trí của chính dãy đó: nó chấm điểm mức liên quan giữa từng cặp, đổi điểm thành trọng số bằng softmax, rồi lấy trung bình có trọng số. Mỗi vectơ được nhân với ba ma trận học được để thành **truy vấn, khóa, giá trị** (query, key, value) $\mathbf{Q}$, $\mathbf{K}$, $\mathbf{V}$: truy vấn là "tôi đang tìm gì", khóa là "tôi có gì", giá trị là "thông tin tôi đưa ra". **Attention nhiều đầu** (multi-head attention) chạy $h$ phép như vậy song song, mỗi đầu $d = D/h$ chiều, rồi ghép lại, để mỗi đầu theo dõi một kiểu quan hệ. Một **khối Transformer** gồm attention nhiều đầu và một **mạng truyền thẳng** nhỏ (MLP), mỗi phần có **chuẩn hóa lớp** (layer normalization) ở đầu vào và **kết nối tắt** (residual connection) cộng đầu vào vào đầu ra. Cắt ảnh thành patch và chiếu mỗi patch thành một vectơ đã có ở bài [Multimodal](/vi/llm/multimodal/); bài này đi tiếp phần ViT dùng các vectơ đó để phân loại.
+:::
+
+## Trực giác
+
+### Tai mèo ở góc trên, đuôi ở góc dưới
+
+Bạn nhìn một bức ảnh con mèo đang vươn vai: tai ở góc trên bên trái, đuôi cong ở góc dưới bên phải. Muốn chắc đây là **một** con mèo chứ không phải hai con vật, mắt bạn phải nối hai chỗ cách xa nhau đó lại.
+
+Ở bài [Phân loại ảnh với CNN](/vi/cv/cnn-image-classification/), mỗi lớp tích chập chỉ nhìn một ô nhỏ, ví dụ $3 \times 3$ điểm ảnh. Thông tin ở tai muốn gặp thông tin ở đuôi thì phải đi qua nhiều lớp, mỗi lớp lan ra thêm một chút, như tin đồn truyền qua hàng xóm. Pooling và stride giúp lan nhanh hơn, nhưng hai vùng xa nhau vẫn chỉ "gặp" nhau ở các lớp sâu.
+
+Giờ hãy hình dung một cuộc họp. Cắt ảnh thành lưới ô vuông (patch), mỗi ô là một người dự họp. Ngay phút đầu, mỗi người được hỏi thẳng **mọi** người khác: "bạn có gì liên quan tới tôi không?". Ô chứa tai hỏi được ô chứa đuôi ngay lập tức. Đó là self-attention trên các patch, và là ý chính của ViT.
+
+### Cái giá của cuộc họp
+
+Cuộc họp mà ai cũng nói với ai có hai cái giá.
+
+Thứ nhất, **số cặp tăng theo bình phương**. 4 người thì 16 cặp (kể cả tự hỏi mình), 200 người thì 40 nghìn cặp. Chia ảnh thành ô nhỏ hơn để thấy chi tiết thì số người tăng, và số cặp tăng nhanh hơn nhiều.
+
+Thứ hai, **không ai được dặn trước "hãy để ý người ngồi cạnh"**. CNN có sẵn giả định đó trong kiến trúc: điểm ảnh gần nhau thì liên quan, và một vật dịch sang trái vẫn là vật đó. ViT phải tự học điều này từ dữ liệu. Có đủ ảnh thì tự học lại là lợi thế, vì mô hình không bị bó buộc; ít ảnh thì nó học kém hơn CNN.
+
+Bài toán của bài này là: **làm sao dùng một Transformer, vốn làm cho chữ, để phân loại ảnh; nó tốn bao nhiêu khi ảnh lớn; và khi nào nó thắng, khi nào nó thua một CNN?**
+
+## Lý thuyết
+
+### Ký hiệu
+
+Ảnh $\mathbf{X} \in \mathbb{R}^{H \times W \times C}$ có chiều cao $H$, chiều rộng $W$, $C$ kênh màu. Cỡ patch là $P$, số patch là $N = (H/P)(W/P)$, số chiều của mỗi token là $D$, như bài [Multimodal](/vi/llm/multimodal/). Bộ mã hóa có $J$ khối, đánh số $\ell = 1, \dots, J$ (bài báo ViT viết $L$; bài này để dành $L$ cho độ dài chuỗi như phần LLM). Mỗi khối có $h$ đầu attention, mỗi đầu $d = D/h$ chiều.
+
+### Bước 1: từ ảnh tới dãy token
+
+Phần này bài [Multimodal](/vi/llm/multimodal/) đã dẫn từng bước, nên ở đây chỉ viết lại gọn. Ảnh được cắt thành $N$ patch không chồng nhau, mỗi patch trải phẳng thành vectơ hàng $\mathbf{x}_i \in \mathbb{R}^{P^2 C}$, rồi nhân với **một** ma trận chung $\mathbf{E} \in \mathbb{R}^{(P^2 C) \times D}$. ViT đặt thêm token `[CLS]` lên đầu dãy và cộng embedding vị trí (Dosovitskiy và cộng sự, 2021, phương trình 1):
+
+$$
+\mathbf{Z}_0 =
+\begin{bmatrix}
+\mathbf{x}_{\text{cls}} \\
+\mathbf{x}_1 \mathbf{E} \\
+\vdots \\
+\mathbf{x}_N \mathbf{E}
+\end{bmatrix}
++ \mathbf{E}_{\text{pos}},
+\qquad
+\mathbf{Z}_0, \mathbf{E}_{\text{pos}} \in \mathbb{R}^{(N+1) \times D}
+$$
+
+Đọc từng phần:
+
+- **$\mathbf{x}_{\text{cls}}$** là một vectơ $D$ chiều học được, giống nhau cho mọi ảnh. Nó không mang nội dung ảnh nào. Chính vì "trống" như vậy, nó là chỗ tốt để gom thông tin từ mọi patch qua các lớp attention.
+- **$\mathbf{E}_{\text{pos}}$** có $N + 1$ hàng, mỗi hàng là embedding vị trí $\mathbf{p}_i$ của bài Multimodal, cộng cho token ở vị trí đó. Dãy có $N + 1$ hàng nên ma trận vị trí cũng có $N + 1$ hàng.
+- Với chữ số $8 \times 8$ của `load_digits` ($C = 1$) và $P = 4$: $N = 2 \cdot 2 = 4$ patch, mỗi patch $16$ số, nên dãy có 5 token. Ô NumPy trong bài làm đúng phép này.
+
+### Bước 2: self-attention trên các patch
+
+Mỗi khối cho dãy token đi qua attention. Với một đầu, ba phép chiếu học được cho truy vấn, khóa, giá trị:
+
+$$
+\mathbf{Q} = \mathbf{Z}\mathbf{W}_Q, \quad
+\mathbf{K} = \mathbf{Z}\mathbf{W}_K, \quad
+\mathbf{V} = \mathbf{Z}\mathbf{W}_V,
+\qquad
+\mathbf{W}_Q, \mathbf{W}_K, \mathbf{W}_V \in \mathbb{R}^{D \times d}
+$$
+
+Ở đây $\mathbf{K}$ đậm là ma trận khóa, khác kernel tích chập của bài CNN. Rồi **scaled dot-product attention**:
+
+$$
+\mathbf{A} = \mathrm{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d}}\right),
+\qquad
+\mathrm{Attn}(\mathbf{Z}) = \mathbf{A}\mathbf{V}
+$$
+
+Đọc từng phần:
+
+- **$\mathbf{Q}\mathbf{K}^\top$** có cỡ $(N+1) \times (N+1)$. Ô $(i, j)$ là tích vô hướng của truy vấn ở token $i$ với khóa ở token $j$: patch $i$ thấy patch $j$ liên quan bao nhiêu.
+- **Chia $\sqrt{d}$** giữ cho điểm không quá lớn khi $d$ lớn, để softmax không dồn hết về một ô (lý do chi tiết ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/)).
+- **Softmax theo từng hàng** đổi điểm thành trọng số dương, cộng lại bằng 1. Hàng $i$ của $\mathbf{A}$ là cách patch $i$ chia sự chú ý của nó cho mọi token.
+- **$\mathbf{A}\mathbf{V}$**: hàng $i$ của kết quả là trung bình có trọng số của mọi hàng giá trị. Patch $i$ "đọc" thông tin của cả ảnh.
+
+**Không có mặt nạ.** GPT che các vị trí ở sau, vì khi sinh chữ thì tương lai chưa có. Ảnh thì có sẵn cả tấm, không có "tương lai", nên ViT dùng encoder: patch ở góc dưới đọc được patch ở góc trên và ngược lại.
+
+**Trường tiếp nhận toàn cục từ lớp đầu.** Vì $e^{s} > 0$ với mọi số $s$, mọi trọng số $A_{ij}$ đều dương: mỗi token nhận thông tin từ **mọi** token, ngay ở khối thứ nhất. So với CNN: một lớp $3 \times 3$, stride 1, cho mỗi điểm nhìn $3 \times 3$ điểm ảnh. Lớp thứ hai nhìn $3 \times 3$ điểm của lớp trước, mỗi điểm đó lại nhìn $3 \times 3$, nên vùng nhìn nới thêm 1 điểm ảnh mỗi phía. Sau $l$ lớp, trường tiếp nhận là $(2l + 1) \times (2l + 1)$. Muốn phủ cả chữ số $8 \times 8$ phải cần 4 lớp (tự tính: $2 \cdot 4 + 1 = 9 \ge 8$), còn ảnh $224 \times 224$ thì cần tới 112 lớp nếu không có pooling hay stride (tự tính).
+
+"Nhìn được" chưa có nghĩa là "nhìn". Bài báo ViT đo **khoảng cách attention** (attention distance) trung bình của từng đầu, một đại lượng giống trường tiếp nhận của CNN. Ở các lớp thấp, có đầu nhìn gần như cả ảnh, có đầu chỉ nhìn rất gần, giống các lớp tích chập đầu; càng lên sâu, khoảng cách càng lớn (mục 4.5). Mô hình tự học khi nào nhìn xa, khi nào nhìn gần.
+
+**Nhiều đầu.** $h$ đầu chạy song song với bộ $\mathbf{W}_Q, \mathbf{W}_K, \mathbf{W}_V$ riêng, mỗi đầu cho $N + 1$ hàng $d$ chiều. Ghép $h$ kết quả được lại $D = hd$ chiều, rồi nhân một ma trận $D \times D$ để trộn các đầu. ViT-Base dùng $D = 768$, $h = 12$, nên $d = 64$.
+
+### Bước 3: khối encoder và đầu phân loại
+
+Mỗi khối $\ell$ làm hai bước, mỗi bước có chuẩn hóa lớp ($\mathrm{LN}$) ở đầu vào và kết nối tắt ở đầu ra (phương trình 2 và 3 của bài báo):
+
+$$
+\begin{aligned}
+\mathbf{Z}'_\ell &= \mathrm{MSA}\big(\mathrm{LN}(\mathbf{Z}_{\ell-1})\big) + \mathbf{Z}_{\ell-1} \\
+\mathbf{Z}_\ell &= \mathrm{MLP}\big(\mathrm{LN}(\mathbf{Z}'_\ell)\big) + \mathbf{Z}'_\ell
+\end{aligned}
+$$
+
+$\mathrm{MSA}$ là attention nhiều đầu (multi-head self-attention) của Bước 2. $\mathrm{MLP}$ gồm hai lớp tuyến tính với hàm kích hoạt GELU ở giữa, áp riêng cho từng token; lớp ẩn của ViT-Base rộng $3\,072 = 4D$. Cách đặt $\mathrm{LN}$ trước mỗi phần (Pre-LN) giống GPT-2 ở bài Xây dựng LLM đầu tiên. Dấu cộng giữ cho mỗi khối chỉ thêm một phần hiệu chỉnh, nên chồng nhiều khối vẫn huấn luyện được.
+
+Sau $J$ khối, ViT chỉ lấy **hàng đầu**, tức trạng thái của `[CLS]`, chuẩn hóa thêm một lần rồi đưa vào đầu phân loại (phương trình 4):
+
+$$
+\mathbf{y} = \mathrm{LN}\big(\mathbf{Z}_J[0]\big),
+\qquad
+\text{logit} = \mathbf{y}\,\mathbf{W}_{\text{head}} + \mathbf{b}_{\text{head}}
+$$
+
+$\mathbf{Z}_J[0]$ là hàng 0 (token `[CLS]`) của $\mathbf{Z}_J$. $\mathbf{W}_{\text{head}}$ có $D$ hàng và số cột bằng số lớp; 10 lớp với chữ số. Softmax của logit cho xác suất từng lớp, và hàm mất mát là cross-entropy như mọi bộ phân loại. Bài báo dùng một MLP một lớp ẩn làm đầu phân loại khi pre-train, và thay bằng **một lớp tuyến tính** khởi tạo bằng 0 khi fine-tune sang bài toán mới. Thay vì `[CLS]`, có thể lấy trung bình mọi token patch (global average pooling) như ResNet; phụ lục của bài báo cho thấy hai cách cho kết quả tương tự khi chỉnh tốc độ học cho hợp.
+
+Ba cỡ trong bài báo (bảng 1). Tên như ViT-B/16 nghĩa là cỡ Base, patch $16 \times 16$.
+
+| Cỡ | Số khối $J$ | $D$ | Lớp ẩn MLP | Số đầu $h$ | Tham số |
+|---|---:|---:|---:|---:|---:|
+| ViT-Base | 12 | 768 | 3 072 | 12 | 86 triệu |
+| ViT-Large | 24 | 1 024 | 4 096 | 16 | 307 triệu |
+| ViT-Huge | 32 | 1 280 | 5 120 | 16 | 632 triệu |
+
+### Chi phí: $O(N^2)$ theo số patch
+
+Bảng điểm $\mathbf{Q}\mathbf{K}^\top$ có $(N+1)^2$ ô cho mỗi đầu ở mỗi khối. Mỗi ô là một tích vô hướng $d$ chiều, nên một đầu tốn khoảng $(N+1)^2 d$ phép nhân, và $h$ đầu tốn $(N+1)^2 hd = (N+1)^2 D$. Nhân $\mathbf{A}$ với $\mathbf{V}$ tốn thêm chừng đó. Các phép chiếu và MLP chỉ tốn tỉ lệ với $N$, vì chúng làm riêng trên từng token. Khi $N$ lớn, phần bình phương thắng.
+
+Thay $N = HW/P^2$ vào: **giảm nửa cỡ patch hay gấp đôi mỗi cạnh ảnh thì $N$ gấp 4, bảng điểm gấp khoảng 16**. Ô NumPy bên dưới in ra: ảnh $224 \times 224$ với $P = 16$ có 197 token và $38\,809$ cặp; với $P = 8$ có 785 token và $616\,225$ cặp, gấp khoảng 15.9 lần. Vì vậy ViT dùng patch tương đối lớn (14 hay 16 điểm ảnh), và tên bài báo là "một tấm ảnh đáng giá $16 \times 16$ từ".
+
+Bài báo hay fine-tune ở ảnh lớn hơn lúc pre-train. Khi đó $P$ giữ nguyên, $N$ tăng, và embedding vị trí học được cho lưới cũ không còn khớp: tác giả **nội suy hai chiều** (2D interpolation) các embedding đó theo vị trí của chúng trên ảnh (mục 3.2).
+
+### Thiên kiến quy nạp: vì sao ViT cần nhiều dữ liệu
+
+**Thiên kiến quy nạp** là những giả định có sẵn trong mô hình trước khi thấy dữ liệu. Bài báo ViT chỉ ra ba giả định của CNN, có ở mọi lớp: tính **cục bộ** (locality, điểm gần nhau liên quan nhau), cấu trúc lân cận hai chiều, và **đẳng biến tịnh tiến** (translation equivariance: dịch ảnh thì bản đồ đặc trưng dịch theo, vì cùng một kernel trượt khắp ảnh). Ở ViT, chỉ MLP là cục bộ và đẳng biến tịnh tiến, còn attention là toàn cục. Cấu trúc hai chiều chỉ được dùng ở hai chỗ: lúc cắt patch, và lúc nội suy embedding vị trí. Lúc khởi tạo, embedding vị trí không chứa thông tin gì về vị trí hai chiều; quan hệ không gian giữa các patch phải học từ đầu.
+
+Ít giả định thì mô hình linh hoạt hơn nhưng cần nhiều ví dụ hơn để tìm ra quy luật, đúng cái cân bằng của bài [Overfitting và underfitting](/vi/ml/overfitting-underfitting/). Bài báo kiểm chứng bằng ba bộ dữ liệu pre-train (mục 4.1 và 4.3):
+
+| Bộ pre-train | Số ảnh | Số lớp | Kết quả của ViT (Dosovitskiy và cộng sự, 2021) |
+|---|---:|---:|---|
+| ImageNet | 1.3 triệu | 1 000 | Kém ResNet cùng cỡ vài điểm phần trăm; ViT-Large còn kém ViT-Base |
+| ImageNet-21k | 14 triệu | 21 000 | ViT-Large và ViT-Base ngang nhau |
+| JFT-300M (nội bộ Google) | 303 triệu | 18 000 | Mô hình lớn mới thể hiện hết; vượt các mô hình ResNet làm mốc |
+
+Thí nghiệm thứ hai rõ hơn: trên tập con 9 triệu ảnh của JFT, ViT-B/32 kém hẳn ResNet-50 có chi phí tính tương đương; từ 90 triệu ảnh trở lên thì ViT-B/32 tốt hơn. Kết luận của tác giả: thiên kiến của tích chập có ích khi dữ liệu nhỏ, còn với dữ liệu lớn thì học thẳng từ dữ liệu là đủ, thậm chí tốt hơn.
+
+### DeiT: ViT chỉ với ImageNet
+
+JFT-300M là dữ liệu nội bộ, không phải ai cũng có. DeiT (Touvron và cộng sự, 2021) huấn luyện ViT **chỉ trên ImageNet**, trên một máy 8 GPU trong khoảng 53 giờ pre-train. Hai thành phần chính:
+
+- **Augmentation và regularization mạnh.** Tác giả ghi rằng Transformer cần nhiều dữ liệu hơn mô hình có sẵn giả định như tích chập, nên họ "tạo thêm dữ liệu" bằng RandAugment, Mixup, CutMix, random erasing, repeated augmentation, cộng stochastic depth. Gần như mọi kiểu augmentation họ thử đều có ích. Các phép này có ở bài [Data augmentation trong CV](/vi/cv/image-augmentation/).
+- **Token chắt lọc** (distillation token). Thêm một token học được nữa, đứng cạnh `[CLS]`, cũng đi qua mọi lớp attention. Đầu ra của `[CLS]` học nhãn thật $y$; đầu ra của token chắt lọc học nhãn mà một mô hình **thầy** (teacher) đã huấn luyện xong dự đoán, $y_t = \arg\max_c Z_t(c)$ với $Z_t$ là logit của thầy. Bản "nhãn cứng" (hard distillation) lấy trung bình hai cross-entropy:
+
+$$
+\mathcal{L} = \tfrac{1}{2}\,\mathrm{CE}\big(\mathrm{softmax}(\mathbf{z}_{\text{cls}}), y\big) + \tfrac{1}{2}\,\mathrm{CE}\big(\mathrm{softmax}(\mathbf{z}_{\text{dist}}), y_t\big)
+$$
+
+$\mathbf{z}_{\text{cls}}$ và $\mathbf{z}_{\text{dist}}$ là logit tính từ hai token đó. Điều thú vị: thầy là một CNN (RegNetY-16GF) thì trò học tốt hơn so với khi thầy là một Transformer có độ chính xác tương đương. Một cách hiểu là CNN truyền một phần thiên kiến quy nạp của nó sang ViT qua các nhãn nó đoán. Kết quả trong tóm tắt bài báo: mô hình tham chiếu 86 triệu tham số đạt 83.1% top-1 trên ImageNet không dùng dữ liệu ngoài, và tới 85.2% khi có chắt lọc.
+
+### Swin: attention trong cửa sổ dịch chuyển
+
+ViT gốc có hai điểm chưa hợp với các bài toán dày đặc như phân đoạn ảnh: chi phí bình phương theo số patch, và chỉ có một độ phân giải đặc trưng. Swin Transformer (Liu và cộng sự, 2021) sửa cả hai:
+
+- **Cửa sổ cục bộ.** Patch nhỏ $4 \times 4$; attention chỉ tính **trong** từng cửa sổ $M \times M$ patch không chồng nhau ($M = 7$ mặc định). Với lưới $h \times w$ patch và $C$ kênh (ký hiệu của bài báo, ứng với $D$ ở đây), bài báo đếm chi phí là $4hwC^2 + 2(hw)^2C$ cho attention toàn cục, và $4hwC^2 + 2M^2hwC$ cho attention trong cửa sổ. Số hạng thứ hai đổi từ bình phương sang **tuyến tính** theo số patch $hw$ khi $M$ cố định.
+- **Cửa sổ dịch chuyển** (shifted window). Cửa sổ không chồng nhau thì patch ở hai cửa sổ kề nhau không bao giờ nói chuyện. Swin xen kẽ hai cách chia: khối này chia lưới từ góc trên trái, khối sau dời lưới đi $\lfloor M/2 \rfloor$ patch mỗi chiều, nên mỗi cửa sổ mới vắt ngang các cửa sổ cũ.
+- **Phân tầng.** Sau mỗi giai đoạn, lớp **gộp patch** (patch merging) ghép từng nhóm $2 \times 2$ patch kề nhau thành một, nên số token giảm 4 lần còn số kênh tăng gấp đôi, giống cách CNN giảm độ phân giải và tăng số kênh.
+
+Để ý rằng Swin đưa tính cục bộ và cấu trúc phân tầng của CNN quay lại vào Transformer. Bài báo báo cáo 87.3% top-1 trên ImageNet-1K với bản lớn nhất Swin-L (pre-train trên ImageNet-22K), và dùng Swin làm xương sống cho phát hiện vật thể và phân đoạn ảnh.
+
+:::note[Ghi nhớ]
+ViT = cắt patch, chiếu tuyến tính, thêm `[CLS]` và vị trí, qua $J$ khối Transformer encoder, đọc `[CLS]` để phân loại. Attention cho mỗi patch nhìn cả ảnh từ lớp đầu, đổi lại chi phí $O(N^2)$ và ít thiên kiến quy nạp, nên cần nhiều dữ liệu (JFT-300M) hoặc mẹo huấn luyện (DeiT). Swin giới hạn attention trong cửa sổ dịch chuyển để chi phí tuyến tính theo số patch.
+:::
+
+### Giới hạn
+
+- **Bài chỉ nói về phân loại.** Phân đoạn ảnh dùng xương sống CNN hay Transformer có ở bài [Semantic Segmentation](/vi/cv/semantic-segmentation/).
+- **ViT học không cần nhãn** (như MAE, DINO) thuộc bài [Self-supervised learning với ảnh](/vi/cv/self-supervised-learning/); ViT học cùng chữ thuộc bài [CLIP, BLIP, GLIP](/vi/cv/clip-blip-glip/).
+- **Các mẹo tiết kiệm attention** khác (FlashAttention, attention thưa) không có trong bài; ý chung là cùng phép tính nhưng ít đọc ghi bộ nhớ hơn, hoặc bỏ bớt cặp.
+
+## Minh họa
+
+Hình dưới vẽ đường đi của một ảnh qua ViT, từ trái sang phải. Hãy nhìn vào token `[CLS]`: nó vào bộ mã hóa không mang nội dung ảnh nào, và đi ra là thứ duy nhất được đưa vào lớp phân loại.
+
+{/* FIG: VitFigure
+    Ý: ảnh thành N patch, mỗi patch thành một token; token [CLS] gom thông tin từ mọi patch qua bộ mã hóa, và chỉ đầu ra của [CLS] được dùng để phân loại.
+    Khối và mũi tên: (1) một ảnh vuông chia lưới 2 x 2 hoặc 3 x 3 patch đánh số theo thứ tự đọc; (2) mũi tên tới hàng N ô "patch embedding" (chiếu tuyến tính dùng chung); (3) một ô [CLS] khác màu đứng đầu hàng; (4) dấu cộng với hàng ô "vị trí 0, 1, ..., N"; (5) khối lớn "Bộ mã hóa Transformer × J" (bên trong ghi gọn: LN, attention nhiều đầu, LN, MLP, kết nối tắt); (6) từ ô ra tương ứng với [CLS] (trọng tâm, cùng màu với ô [CLS] vào), mũi tên tới "Đầu MLP" rồi "lớp: 0–9". Các ô ra của patch vẽ mờ (nhóm thứ hai), không có mũi tên đi tiếp.
+    Nhãn: "Ảnh"; "Cắt patch"; "Chiếu tuyến tính"; "[CLS]"; "Vị trí"; "Bộ mã hóa Transformer"; "Đầu phân loại"; "Lớp dự đoán".
+    Chú thích: Ảnh $8 \times 8$ với $P = 4$ cho $N = 4$ patch, cộng `[CLS]` là 5 token $D$ chiều; chỉ hàng `[CLS]` ở lớp cuối đi vào đầu phân loại. */}
+
+Bảng dưới đặt CNN và các họ ViT của bài cạnh nhau. Các dòng về dữ liệu là kết luận của bài báo ViT và DeiT, không phải luật cứng.
+
+| Tiêu chí | CNN (ResNet) | ViT | DeiT | Swin |
+|---|---|---|---|---|
+| Phép chính | Tích chập kernel nhỏ | Self-attention toàn cục | Như ViT, thêm token chắt lọc | Self-attention trong cửa sổ dịch chuyển |
+| Vùng nhìn ở lớp đầu | Cục bộ ($3 \times 3$, $7 \times 7$) | Cả ảnh | Cả ảnh | Một cửa sổ $M \times M$ patch |
+| Thiên kiến quy nạp | Mạnh: cục bộ, đẳng biến tịnh tiến | Yếu: chỉ ở bước cắt patch và vị trí | Yếu, bù bằng augmentation và thầy CNN | Vừa: cục bộ và phân tầng quay lại |
+| Chi phí theo số patch $N$ | Tuyến tính theo số điểm ảnh | $O(N^2)$ | $O(N^2)$ | Tuyến tính khi $M$ cố định |
+| Dữ liệu cần để học tốt | Ít tới vừa | Rất nhiều (14 triệu tới 300 triệu ảnh) | ImageNet 1.3 triệu ảnh, kèm augmentation mạnh | ImageNet-1K hoặc 22K |
+| Độ phân giải đặc trưng | Nhiều tầng | Một tầng | Một tầng | Nhiều tầng |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: ô NumPy với Python 3.14, NumPy 2.4 và scikit-learn 1.8 (bản có trong Pyodide), ô PyTorch với Python 3.14, PyTorch 2.15 và scikit-learn 1.9 trên CPU. Ô NumPy chạy ngay trên trang, ô PyTorch chạy trên máy bạn. Hai ô độc lập, không dùng biến của nhau. Ô NumPy lần đầu chạy lâu hơn, vì trình duyệt phải tải thêm scikit-learn để lấy `load_digits`.
+
+### Cắt patch và attention bằng NumPy
+
+Ô dưới đây lấy chữ số đầu tiên của `load_digits` (một chữ số 0, ảnh $8 \times 8$), cắt thành 4 patch $4 \times 4$, chiếu mỗi patch thành vectơ $D = 8$ chiều bằng một ma trận ngẫu nhiên (hạt giống 0), thêm `[CLS]` và embedding vị trí, rồi tính một đầu attention. Các ma trận ở đây ngẫu nhiên, chưa học gì: ô chỉ kiểm hình dạng và tính chất của phép tính, không kiểm ý nghĩa.
+
+<PythonRunner code={patchAttentionCode} title="Cắt chữ số thành patch, tính self-attention" />
+
+Đọc kết quả:
+
+- **`patches: (4, 16) N = 4`:** $N = (8/4)^2 = 4$ patch, mỗi patch $4 \cdot 4 = 16$ số. Dòng `True` tiếp theo xác nhận patch 1 là khối trên bên phải: đọc hết hàng rồi mới xuống.
+- **`tokens Z: (5, 8)`:** 4 token patch cộng `[CLS]` ở hàng 0, mỗi token 8 chiều, đúng cỡ $(N+1) \times D$ của $\mathbf{Z}_0$.
+- **Ma trận $\mathbf{A}$ cỡ $5 \times 5$:** hàng là token hỏi (truy vấn), cột là token được hỏi (khóa). Hàng 0 là `[CLS]`: nó dồn 0.457 cho token 2 (patch 1) và chia phần còn lại cho các token khác. Với trọng số ngẫu nhiên, con số này không mang nghĩa gì; sau khi học, đây là chỗ `[CLS]` quyết định đọc patch nào.
+- **`row sums: [1. 1. 1. 1. 1.]`** và **`all weights > 0: True`:** softmax làm mỗi hàng là một phân phối, và không ô nào bằng 0. Mỗi patch nhận thông tin từ cả 5 token ngay ở lớp này: trường tiếp nhận toàn cục.
+- **Bảng cuối:** số cặp là $(N+1)^2$. Chữ số $8 \times 8$ với $P = 2$ đã có 17 token và 289 cặp; ảnh $224 \times 224$ với $P = 8$ có $616\,225$ cặp, gấp khoảng 15.9 lần $38\,809$ của $P = 16$.
+
+### ViT tí hon so với CNN nhỏ bằng PyTorch
+
+File dưới đây dựng một ViT tí hon: patch $2 \times 2$ trên chữ số $8 \times 8$ ($N = 16$, cộng `[CLS]` là 17 token), $D = 32$, 2 khối, 4 đầu, lớp ẩn MLP $2D$. Patch embedding viết bằng `Conv2d` có kernel bằng stride bằng $P$, như bài Multimodal đã kiểm. Bộ mã hóa dùng `nn.TransformerEncoderLayer` với `norm_first=True` (Pre-LN, đúng phương trình ở Bước 3). Để so sánh, file dựng thêm một CNN nhỏ hai lớp tích chập. Cả hai học 60 epoch trên 1 437 ảnh, kiểm trên 360 ảnh còn lại, cùng bộ tối ưu AdamW. Cách cài PyTorch bản CPU có ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+<LocalCode
+  code={tinyVitCode}
+  title="ViT tí hon và CNN nhỏ trên load_digits"
+  packages={['torch', 'scikit-learn']}
+  hardware="CPU là đủ, không cần GPU. Khoảng 2 phút trên máy phát triển, có thể lâu hơn trên máy chậm hoặc đang bận"
+>
+
+```text
+ViT: 18218 params, test acc 0.958
+CNN: 16122 params, test acc 0.986
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Số tham số gần nhau:** ViT có 18 218 tham số, CNN có 16 122. Phần lớn tham số của ViT nằm ở hai khối encoder; embedding vị trí chỉ có $17 \cdot 32 = 544$ số.
+- **CNN thắng:** 0.986 so với 0.958 trên 360 ảnh kiểm tra, tức CNN sai khoảng 5 ảnh, ViT sai khoảng 15 ảnh. Với 1 437 ảnh huấn luyện, giả định "điểm gần nhau liên quan nhau" có sẵn trong CNN là lợi thế, đúng như mục thiên kiến quy nạp: ViT phải tự học quan hệ giữa 16 patch từ chừng ấy ví dụ.
+- **Số của ViT có thể lệch chút ít trên máy bạn.** Hạt giống đã cố định, nhưng PyTorch chia phép tính cho số luồng CPU khác nhau thì thứ tự cộng số thực khác nhau, sai khác nhỏ tích lũy qua 60 epoch. Chạy lại cùng file với một luồng (`OMP_NUM_THREADS=1`), ViT cho 0.972, CNN vẫn 0.986. Kết luận không đổi.
+
+Bạn có thể thử đổi `TinyViT(P=4)`: còn 4 patch, mỗi patch 16 số, dãy ngắn hơn nhiều, nhưng mỗi token gom một vùng lớn và attention chỉ còn 25 cặp để làm việc.
+
+## Lỗi hay gặp
+
+:::caution[Nghĩ ViT luôn tốt hơn CNN]
+ViT vượt CNN trong bài báo gốc **khi pre-train trên 14 triệu tới 300 triệu ảnh**. Trên ImageNet một mình, nó kém ResNet cùng cỡ, và trên tập dữ liệu nhỏ như `load_digits` thì CNN nhỏ ở ô PyTorch đúng hơn (0.986 so với 0.958) dù ít tham số hơn. Ít dữ liệu, không có mô hình học sẵn: bắt đầu từ CNN, hoặc dùng ViT đã pre-train rồi fine-tune, hoặc làm theo DeiT với augmentation mạnh. Đừng chọn mô hình theo tên gọi mới hay cũ.
+:::
+
+:::caution[Quên rằng attention không biết thứ tự patch]
+Self-attention không có mặt nạ là **đẳng biến hoán vị** (permutation equivariant): đổi chỗ các token đầu vào thì đầu ra chỉ đổi chỗ theo, còn đầu ra của `[CLS]` giữ nguyên. Thiếu embedding vị trí, ViT thấy ảnh như một túi patch: một chữ số và bản xáo trộn các ô của nó là như nhau với mô hình. Phụ lục của bài báo ViT ghi khoảng cách lớn giữa mô hình không có embedding vị trí và mô hình có. Khi tự cài, hãy kiểm `pos` thật sự được cộng, và có số hàng bằng $N + 1$.
+:::
+
+:::caution[Đổi cỡ ảnh hay cỡ patch mà quên embedding vị trí và chi phí]
+Một ViT học ở $224 \times 224$ có đúng $N + 1 = 197$ embedding vị trí. Đưa vào ảnh $384 \times 384$ thì có 577 token, và mảng vị trí không khớp cỡ: phải nội suy hai chiều lưới vị trí từ $14 \times 14$ lên $24 \times 24$, không được cắt bớt hay lặp lại. Giảm cỡ patch để "thấy chi tiết" cũng không miễn phí: $P$ giảm nửa thì bảng attention gấp khoảng 16 lần, như bảng cuối của ô NumPy.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- ViT coi ảnh như một câu: $N = HW/P^2$ patch, mỗi patch chiếu thành một token $D$ chiều, thêm token `[CLS]` và embedding vị trí, rồi cho qua $J$ khối Transformer encoder (Pre-LN, attention nhiều đầu, MLP, kết nối tắt). Đầu ra của `[CLS]` vào lớp phân loại.
+- Self-attention $\mathrm{softmax}(\mathbf{Q}\mathbf{K}^\top/\sqrt{d})\mathbf{V}$ không có mặt nạ cho mọi patch nhìn mọi patch ngay từ lớp đầu, trong khi trường tiếp nhận của CNN chỉ lớn dần, $(2l+1) \times (2l+1)$ sau $l$ lớp $3 \times 3$. Cái giá: bảng điểm $(N+1)^2$ ô, nên giảm nửa cỡ patch làm chi phí attention gấp khoảng 16.
+- ViT có ít thiên kiến quy nạp (không có sẵn tính cục bộ và đẳng biến tịnh tiến), nên cần nhiều dữ liệu: kém ResNet khi chỉ học trên ImageNet, vượt khi pre-train trên JFT-300M. DeiT học chỉ trên ImageNet nhờ augmentation mạnh và token chắt lọc học theo một thầy CNN.
+- Swin giới hạn attention trong cửa sổ $M \times M$ và dịch cửa sổ giữa các khối, nên chi phí tuyến tính theo số patch và có đặc trưng nhiều tầng như CNN.
+
+**Đọc thêm:**
+
+- Dosovitskiy, A. và cộng sự (2021). [*An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale*](https://arxiv.org/abs/2010.11929), ICLR 2021, mục 3 (phương trình 1–4, đoạn "Inductive bias"), 4.3 và 4.5. Ngắn, đủ kiến trúc, thí nghiệm theo cỡ dữ liệu và hình khoảng cách attention.
+- Touvron, H., Cord, M., Douze, M., Massa, F., Sablayrolles, A., Jégou, H. (2021). [*Training data-efficient image transformers & distillation through attention*](https://arxiv.org/abs/2012.12877), arXiv:2012.12877, mục 4 và 6. Token chắt lọc, và bảng thử bỏ từng kiểu augmentation.
+- Liu, Z., Lin, Y., Cao, Y., Hu, H., Wei, Y., Zhang, Z., Lin, S., Guo, B. (2021). [*Swin Transformer: Hierarchical Vision Transformer using Shifted Windows*](https://arxiv.org/abs/2103.14030), arXiv:2103.14030, mục 3.1 và 3.2. Hình 2 vẽ cửa sổ dịch chuyển rất dễ hiểu; phương trình 1 và 2 so chi phí.
+- Vaswani, A. và cộng sự (2017). [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762), arXiv:1706.03762, mục 3.2. Gốc của scaled dot-product attention và attention nhiều đầu.
+
+<LessonProgress />

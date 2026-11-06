@@ -184,12 +184,6 @@
   stroke-dasharray: 2 4;
 }
 
-/* The chosen value on a chart, in the colour of the fit it belongs to. */
-.atlas-viz-cursor {
-  stroke: var(--atlas-viz-primary);
-  stroke-width: 2px;
-}
-
 /* A computed point to find (a mean, a minimum): an ×, with a halo of the plot background under it. */
 .atlas-viz-marker {
   stroke: var(--atlas-viz-ink);
@@ -207,12 +201,15 @@
   stroke-width: 1.5px;
 }
 
+/* The chosen value on a chart, in the colour of the fit it belongs to; the path of gradient descent. */
+.atlas-viz-cursor,
 .atlas-viz-path {
   stroke: var(--atlas-viz-primary);
   stroke-width: 2px;
 }
 
-.atlas-viz-step {
+.atlas-viz-step,
+.atlas-viz-px[data-sign='+'] {
   fill: var(--atlas-viz-primary);
 }
 
@@ -559,8 +556,29 @@
   display: grid;
 }
 
-.atlas-viz-status-stack > p {
+.atlas-viz-status-stack > * {
   grid-area: 1 / 1;
+}
+
+/* viewBox in cells, one rect per pixel; the value is its fill-opacity over the plot background. */
+.atlas-viz-pixels {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: auto;
+  aspect-ratio: 1;
+  background: var(--atlas-viz-plot-bg);
+  overflow: visible;
+}
+
+.atlas-viz-px {
+  fill: var(--atlas-viz-ink);
+  shape-rendering: crispEdges;
+}
+
+/* A map with both signs: the classic orange and blue pair, told apart with colour blindness too. */
+.atlas-viz-px[data-sign='-'] {
+  fill: var(--atlas-viz-alt);
 }
 
 .atlas-viz-near {

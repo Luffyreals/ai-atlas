@@ -1,0 +1,420 @@
+---
+title: 'Phân loại ảnh với CNN: AlexNet → VGG → ResNet → MobileNet → EfficientNet'
+description: Vì sao tích chập hợp với ảnh, cách tính tham số và cỡ đầu ra, rồi ý chính của AlexNet, VGG, ResNet, MobileNet và EfficientNet.
+quiz:
+  - question: 'Ảnh xám $28 \times 28$ đi qua một lớp tích chập kernel $5 \times 5$, padding 0, stride 1, rồi max pooling $2 \times 2$ stride 2. Bản đồ đặc trưng cuối có cỡ bao nhiêu?'
+    options: ['$24 \times 24$', '$12 \times 12$', '$14 \times 14$', '$11 \times 11$']
+    answer: 1
+    explanation: 'Lớp tích chập: $\lfloor (28 + 0 - 5)/1 \rfloor + 1 = 24$. Pooling dùng cùng công thức với $k = 2$, $s = 2$: $\lfloor (24 - 2)/2 \rfloor + 1 = 12$. Đáp án $14 \times 14$ là quên rằng kernel $5 \times 5$ không padding đã làm mất 4 hàng và 4 cột; $24 \times 24$ là quên bước pooling.'
+  - question: 'Một lớp tích chập $3 \times 3$ có 256 kênh vào và 256 kênh ra. Thay nó bằng tích chập tách theo chiều sâu (depthwise separable) cùng cỡ đầu ra thì số phép nhân-cộng còn khoảng bao nhiêu phần?'
+    options:
+      - 'Khoảng $1/256$, vì mỗi kênh chỉ còn một kernel'
+      - 'Không đổi, vì kernel vẫn là $3 \times 3$'
+      - 'Khoảng $1/9$, tức ít hơn chừng 8.7 lần'
+      - 'Khoảng $1/3$'
+    answer: 2
+    explanation: 'Tỉ lệ là $1/C_{\text{out}} + 1/k^2 = 1/256 + 1/9 \approx 0.115$, tức ít hơn khoảng 8.7 lần. Phần depthwise thì rẻ thật (cỡ $1/256$), nhưng phần pointwise $1 \times 1$ vẫn phải trộn 256 kênh thành 256 kênh, và phần này chiếm gần hết chi phí còn lại.'
+  - question: 'Vì sao thêm kết nối tắt (đầu ra $= F(\mathbf{x}) + \mathbf{x}$) giúp huấn luyện được mạng rất sâu như ResNet-152?'
+    options:
+      - 'Nếu một khối không giúp gì, nó chỉ cần đẩy $F(\mathbf{x})$ về gần 0 để thành ánh xạ đồng nhất, việc dễ hơn nhiều so với học ánh xạ đồng nhất từ đầu'
+      - 'Đường tắt thêm nhiều tham số, nên mạng mạnh hơn'
+      - 'Đường tắt chủ yếu chống overfitting, vì mạng sâu học thuộc dữ liệu'
+      - 'Đường tắt bỏ được hàm kích hoạt ReLU'
+    answer: 0
+    explanation: 'Mạng thường 56 lớp có lỗi trên chính tập huấn luyện cao hơn mạng 20 lớp, nên vấn đề là khó tối ưu, không phải overfitting. Với kết nối tắt, "không làm gì" chỉ cần trọng số nhỏ, nên thêm lớp không làm mạng tệ đi. Đường tắt đồng nhất không thêm tham số nào.'
+  - question: 'Bạn gấp đôi số kênh của mọi lớp tích chập trong một CNN, giữ nguyên số lớp và cỡ ảnh. Số phép tính của các lớp tích chập tăng khoảng bao nhiêu?'
+    options: ['Gấp 2', 'Gấp 4', 'Gấp 8', 'Không đổi']
+    answer: 1
+    explanation: 'Chi phí một lớp là $k^2 \cdot C_{\text{in}} \cdot C_{\text{out}} \cdot H''W''$. Cả $C_{\text{in}}$ lẫn $C_{\text{out}}$ đều gấp đôi, nên tích gấp 4. Đây là lý do EfficientNet ghi số phép tính tỉ lệ với $w^2$ (độ rộng) nhưng chỉ với $d$ (độ sâu).'
+  - question: 'Trong ảnh, con mèo dịch sang trái 4 điểm ảnh. Bản đồ đặc trưng ra khỏi một lớp tích chập (stride 1, cùng kernel) thay đổi thế nào?'
+    options:
+      - 'Không đổi gì, vì tích chập không quan tâm vị trí'
+      - 'Đổi hoàn toàn, mô hình phải học lại'
+      - 'Chỉ đổi ở rìa ảnh'
+      - 'Các giá trị cũng dịch sang trái 4 ô, gần như giữ nguyên'
+    answer: 3
+    explanation: 'Cùng một kernel được áp ở mọi vị trí, nên mẫu nào dịch đi bao nhiêu thì phản hồi của nó trên bản đồ đặc trưng dịch đi bấy nhiêu (trừ phần chạm rìa). Bản đồ không đứng yên: chỉ sau pooling và các lớp gộp toàn cục, đầu ra mới gần như không đổi theo vị trí.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import conv2dCode from '@code/cv/cnn-image-classification/conv2d.vi.py?raw';
+import paramsCode from '@code/cv/cnn-image-classification/params.vi.py?raw';
+import tinyCnnCode from '@code/cv/cnn-image-classification/tiny-cnn.vi.py?raw';
+import countParamsCode from '@code/cv/cnn-image-classification/count-params.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu vì sao **tích chập** (convolution) hợp với ảnh: nhìn cục bộ, chia sẻ trọng số, nên ít tham số hơn **lớp kết nối đầy đủ** (fully connected layer) hàng trăm nghìn lần.
+- Tự tính được kích thước đầu ra $\lfloor (H + 2p - k)/s \rfloor + 1$, số tham số của một lớp, và **trường tiếp nhận** (receptive field) của một chồng lớp.
+- Kể được ý chính của từng mạng trong dòng **phân loại ảnh** (image classification): AlexNet, VGG, ResNet, MobileNet, EfficientNet, và bài toán mỗi mạng giải.
+- Cài được tích chập 2D bằng NumPy, huấn luyện một CNN nhỏ bằng PyTorch, đếm tham số các mạng có sẵn trong torchvision.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Các bài Mạng tích chập (CNN) và Các kiến trúc CNN hiện đại của phần Deep Learning chưa xuất bản, nên nhắc ở đây phần bài này dùng. Một ảnh là mảng số; phép **tích chập** trượt một ma trận nhỏ gọi là **kernel** (bộ lọc, ví dụ $3 \times 3$) trên ảnh, ở mỗi vị trí nhân từng cặp ô rồi cộng lại thành một số, và các số đó xếp thành **bản đồ đặc trưng** (feature map). Một lớp có nhiều kernel, mỗi kernel cho một bản đồ; số bản đồ là số **kênh** (channel) đầu ra, giống như ảnh màu có 3 kênh R, G, B. Sau tích chập thường có hàm kích hoạt ReLU, $\max(0, x)$, và **pooling** (gộp): max pooling $2 \times 2$ giữ số lớn nhất trong mỗi ô $2 \times 2$, nên bản đồ nhỏ đi một nửa mỗi chiều. Các số trong kernel là tham số của mạng, được học bằng **lan truyền ngược** (backpropagation) và [gradient descent](/vi/ml/gradient-descent/), y như trọng số của một mạng nơ-ron thường.
+:::
+
+## Trực giác
+
+### Bài toán: một ảnh vào, một nhãn ra
+
+Bạn có một ảnh chữ số viết tay $8 \times 8$ điểm ảnh và muốn máy nói đó là số mấy. Hay một ảnh chụp $224 \times 224$ và muốn máy nói đó là mèo, chó hay ấm trà. Đó là **phân loại ảnh**: đầu vào là ảnh, đầu ra là một nhãn trong một danh sách lớp cố định.
+
+Bài toán này có một sân thi đấu nổi tiếng: cuộc thi [ImageNet Large Scale Visual Recognition Challenge](https://arxiv.org/abs/1409.0575) (ILSVRC, Russakovsky và cộng sự, 2015), tổ chức hằng năm từ 2010. Phần phân loại có 1 000 lớp và khoảng 1.2 triệu ảnh huấn luyện. Năm mạng trong tên bài đều là mốc trên con đường này.
+
+### Thử cách đơn giản: trải phẳng ảnh
+
+Cách đầu tiên ai cũng nghĩ tới: trải ảnh thành một vectơ dài rồi cho vào mạng nơ-ron thường. Ảnh $224 \times 224 \times 3$ có 150 528 số. Một lớp kết nối đầy đủ ra chỉ 1 000 nơ-ron đã cần khoảng 150 triệu trọng số.
+
+Tệ hơn nữa là chuyện vị trí. Mỗi trọng số gắn với **một** điểm ảnh cố định. Con mèo ở góc trái và con mèo ở góc phải đi qua hai bộ trọng số khác hẳn nhau. Mạng phải học lại "tai mèo trông thế nào" ở từng chỗ trong ảnh.
+
+### Hai quan sát về ảnh
+
+- **Cục bộ.** Một cạnh, một nét, một góc chỉ cần nhìn vài điểm ảnh sát nhau. Không cần nối một điểm ở góc trên với một điểm ở góc dưới ngay từ lớp đầu.
+- **Lặp lại ở mọi nơi.** Một cạnh dọc ở bên trái hay bên phải trông như nhau. Vậy dùng **cùng một** bộ lọc cho mọi vị trí.
+
+Hãy hình dung một chiếc kính lúp nhỏ chỉ biết tìm một kiểu nét. Bạn trượt nó khắp trang giấy và ghi lại chỗ nào nó "sáng lên". Đó là một kernel. Nhiều kính lúp, mỗi chiếc tìm một kiểu nét, là một lớp tích chập. Xếp chồng nhiều lớp: lớp đầu tìm cạnh, lớp sau ghép cạnh thành nét cong, góc, rồi thành mắt, tai, rồi thành mèo.
+
+Bài toán của bài này là: **làm sao dựng một mô hình nhận ảnh làm đầu vào, ít tham số, nhận ra cùng một mẫu ở mọi vị trí, và đủ sâu để ghép mẫu nhỏ thành vật lớn; rồi làm sao cho nó sâu hơn, chính xác hơn mà vẫn rẻ?**
+
+## Lý thuyết
+
+### Phát biểu bài toán
+
+Ảnh là $\mathbf{X} \in \mathbb{R}^{H \times W \times C}$: cao $H$, rộng $W$ điểm ảnh, $C$ kênh ($C = 1$ với ảnh xám, $C = 3$ với ảnh màu). Một CNN là hàm $f_{\boldsymbol{\theta}}$ có tham số $\boldsymbol{\theta}$, biến ảnh thành một vectơ **logit**, mỗi lớp một số. Softmax đổi logit thành xác suất, lớp có xác suất cao nhất là dự đoán $\hat{y}$. Huấn luyện là chọn $\boldsymbol{\theta}$ để hàm mất mát cross-entropy $\mathcal{L}$ trên tập huấn luyện nhỏ nhất.
+
+ILSVRC chấm bằng **lỗi top-5** (top-5 error): dự đoán tính là đúng nếu nhãn thật nằm trong 5 lớp có xác suất cao nhất. Lý do: nhiều ảnh có hơn một vật, và 1 000 lớp có những lớp rất gần nhau (nhiều giống chó).
+
+### Tích chập trên một kênh
+
+Lấy ảnh một kênh $\mathbf{X}$ và kernel $\mathbf{K}$ cỡ $k \times k$. Giá trị ở ô $(i, j)$ của bản đồ đặc trưng $\mathbf{F}$ là:
+
+$$
+F_{i,j} = \sum_{u=0}^{k-1} \sum_{v=0}^{k-1} X_{i+u,\; j+v}\, K_{u,v} + b
+$$
+
+Đọc bằng lời: đặt góc trên trái của kernel lên ô $(i, j)$ của ảnh, nhân từng cặp ô chồng lên nhau, cộng cả $k^2$ tích, cộng thêm hệ số tự do $b$. Chỉ số đếm từ 0, giống NumPy, để khớp với ô code bên dưới.
+
+Lấy kernel cạnh dọc
+
+$$
+\mathbf{K} = \begin{bmatrix} 1 & 0 & -1 \\ 1 & 0 & -1 \\ 1 & 0 & -1 \end{bmatrix}
+$$
+
+Nó lấy tổng cột trái trừ tổng cột phải của cửa sổ. Vùng phẳng (hai cột bằng nhau) cho 0. Chỗ tối bên trái, sáng bên phải cho số âm; chỗ sáng bên trái, tối bên phải cho số dương. Vậy bản đồ đặc trưng "sáng lên" ở các cạnh dọc, và dấu cho biết chiều của cạnh.
+
+Trong toán, phép trên là **tương quan chéo** (cross-correlation): tích chập "đúng nghĩa" lật kernel trước khi trượt. Thư viện học sâu không lật nhưng vẫn gọi là tích chập; vì kernel được học, điều này không ảnh hưởng gì.
+
+### Nhiều kênh vào, nhiều kênh ra
+
+Ảnh màu có $C_{\text{in}} = 3$ kênh. Khi đó mỗi kernel có cỡ $k \times k \times C_{\text{in}}$: nó phủ cùng lúc cả ba kênh, và tổng ở công thức trên chạy thêm qua các kênh. Mỗi kernel vẫn cho **một** bản đồ đặc trưng. Một lớp có $C_{\text{out}}$ kernel cho $C_{\text{out}}$ bản đồ, tức đầu ra có $C_{\text{out}}$ kênh.
+
+Đếm tham số: mỗi kernel có $k^2 C_{\text{in}}$ trọng số và một hệ số tự do, có $C_{\text{out}}$ kernel, nên
+
+$$
+\text{số tham số} = k^2\, C_{\text{in}}\, C_{\text{out}} + C_{\text{out}}
+$$
+
+Con số này **không phụ thuộc cỡ ảnh** $H \times W$: cùng các kernel đó được trượt trên ảnh to hay nhỏ.
+
+So với lớp kết nối đầy đủ: biến ảnh $32 \times 32 \times 3$ thành 16 bản đồ cùng cỡ $32 \times 32$. Kết nối đầy đủ nối mỗi số ra với mọi số vào, cần $(32 \cdot 32 \cdot 3) \cdot (32 \cdot 32 \cdot 16) = 50\,331\,648$ trọng số. Tích chập $3 \times 3$ chỉ cần $3^2 \cdot 3 \cdot 16 = 432$ trọng số (ô code thứ hai in hai số này), ít hơn khoảng 116 nghìn lần. Hai quan sát ở phần Trực giác chính là hai nguồn tiết kiệm: **cục bộ** (mỗi số ra chỉ nhìn 27 số vào thay vì 3 072) và **chia sẻ trọng số** (weight sharing: mọi vị trí dùng chung một kernel).
+
+Chia sẻ trọng số còn cho một tính chất nữa: dịch ảnh đi bao nhiêu thì bản đồ đặc trưng dịch đi bấy nhiêu. Mẫu nào cũng được nhận ra dù nằm ở đâu.
+
+### Kích thước đầu ra
+
+Hai tham số nữa điều khiển việc trượt. **Padding** (đệm) $p$: thêm $p$ hàng và cột số 0 quanh ảnh. **Stride** (bước nhảy) $s$: mỗi lần kernel dời đi $s$ ô thay vì 1.
+
+Theo một chiều, ảnh sau khi đệm dài $H + 2p$. Mép trái của cửa sổ đứng được ở các vị trí $0, s, 2s, \dots$, miễn là cửa sổ còn nằm trọn trong ảnh, tức mép trái không vượt quá $H + 2p - k$. Số vị trí như vậy là số bước $s$ nằm vừa trong đoạn đó, cộng thêm vị trí 0:
+
+$$
+H' = \left\lfloor \frac{H + 2p - k}{s} \right\rfloor + 1
+$$
+
+Dấu $\lfloor \cdot \rfloor$ (làm tròn xuống) có vì bước cuối có thể bị hụt: phần thừa ở mép bị bỏ qua. Chiều rộng $W'$ tính y như vậy. Với ảnh $8 \times 8$ và $k = 3$:
+
+| Padding $p$ | Stride $s$ | Cỡ đầu ra |
+|---:|---:|---|
+| 0 | 1 | $6 \times 6$ |
+| 1 | 1 | $8 \times 8$ (giữ nguyên cỡ) |
+| 0 | 2 | $3 \times 3$ |
+| 1 | 2 | $4 \times 4$ |
+
+Pooling dùng đúng công thức này: max pooling $2 \times 2$ với $s = 2$, $p = 0$ cho $\lfloor (H - 2)/2 \rfloor + 1 = H/2$ khi $H$ chẵn. VGG dùng $k = 3$, $p = 1$, $s = 1$ cho mọi lớp tích chập để giữ nguyên cỡ, rồi để pooling lo việc thu nhỏ: $224 \to 112 \to 56 \to 28 \to 14 \to 7$.
+
+### Trường tiếp nhận
+
+Một ô của bản đồ đặc trưng "thấy" bao nhiêu điểm ảnh gốc? Vùng đó gọi là **trường tiếp nhận**. Một lớp $3 \times 3$: mỗi ô thấy $3 \times 3$ điểm ảnh. Xếp thêm một lớp $3 \times 3$ nữa: mỗi ô của lớp thứ hai nhìn $3 \times 3$ ô của lớp thứ nhất, các ô này chồng lên nhau và mỗi ô nhìn $3 \times 3$ điểm ảnh, nên tổng cộng thấy $5 \times 5$. Mỗi lớp $k \times k$, stride 1, nới trường tiếp nhận thêm $k - 1$:
+
+$$
+r_L = 1 + L\,(k - 1)
+$$
+
+Có stride thì mỗi bước sau nới rộng hơn, vì một ô ở lớp sau ứng với nhiều điểm ảnh hơn. Với lớp thứ $l$ có kernel $k_l$ và stride $s_l$:
+
+$$
+r_L = 1 + \sum_{l=1}^{L} (k_l - 1) \prod_{m=1}^{l-1} s_m
+$$
+
+Tích các stride đứng trước cho biết một bước ở lớp $l$ dài bao nhiêu điểm ảnh gốc. Ví dụ CNN nhỏ ở ô PyTorch: tích chập $3 \times 3$ (trường tiếp nhận 3), max pooling $2 \times 2$ stride 2 (thêm $1 \cdot 1$, thành 4), tích chập $3 \times 3$ sau một stride 2 (thêm $2 \cdot 2$, thành 8), pooling nữa (thêm $1 \cdot 2$, thành 10). Mỗi ô của bản đồ cuối thấy vùng $10 \times 10$, rộng hơn cả ảnh $8 \times 8$ (phần thừa rơi vào vùng đệm). Đó là cách mạng sâu "nhìn" được cả vật lớn dù mỗi kernel chỉ nhỏ $3 \times 3$.
+
+:::note[Ghi nhớ]
+Một lớp tích chập có $k^2 C_{\text{in}} C_{\text{out}} + C_{\text{out}}$ tham số, không phụ thuộc cỡ ảnh. Cỡ đầu ra mỗi chiều là $\lfloor (H + 2p - k)/s \rfloor + 1$. Xếp chồng lớp nhỏ thì trường tiếp nhận lớn dần; stride và pooling làm nó lớn nhanh hơn.
+:::
+
+### AlexNet (2012): mạng sâu trên GPU
+
+AlexNet (Krizhevsky, Sutskever, Hinton, 2012) có 5 lớp tích chập và 3 lớp kết nối đầy đủ, khoảng 60 triệu tham số. Lớp đầu dùng 96 kernel $11 \times 11 \times 3$ với stride 4 trên ảnh $224 \times 224$. Ở ILSVRC-2012, một biến thể của nó đạt lỗi top-5 15.3%, trong khi đội về nhì đạt 26.2%.
+
+Theo bài báo, khác biệt đến từ **ReLU** thay cho tanh (học nhanh hơn nhiều lần), **dropout** và **tăng cường dữ liệu** (data augmentation: cắt ngẫu nhiên, lật ngang) để bớt overfit, và hai GPU GTX 580 chạy 5 tới 6 ngày. Phần lớn tham số nằm ở các lớp kết nối đầy đủ cuối, đúng như phép đếm ở trên dự đoán: bản torchvision có khoảng 2.5 triệu tham số ở phần tích chập và 58.6 triệu ở phần kết nối đầy đủ.
+
+### VGG (2014): chỉ dùng kernel $3 \times 3$
+
+VGG (Simonyan và Zisserman, 2014, đăng ở ICLR 2015) hỏi: nếu chỉ dùng kernel nhỏ nhất có trái, phải, trên, dưới, tức $3 \times 3$, rồi xếp thật nhiều lớp thì sao? Mạng có 16 tới 19 lớp có trọng số, mọi tích chập $3 \times 3$, stride 1, padding 1, thêm 5 lớp max pooling. VGG về nhất phần định vị và nhì phần phân loại ở ILSVRC 2014.
+
+Vì sao ba lớp $3 \times 3$ tốt hơn một lớp $7 \times 7$? Theo công thức trường tiếp nhận, ba lớp $3 \times 3$ cũng thấy $1 + 3 \cdot 2 = 7$ điểm mỗi chiều. Nhưng với $C$ kênh vào và ra:
+
+$$
+3 \cdot (3^2 C^2) = 27 C^2 \quad \text{so với} \quad 7^2 C^2 = 49 C^2
+$$
+
+Lớp $7 \times 7$ tốn hơn 81%. Thêm nữa, ba lớp có ba ReLU xen giữa, nên hàm mà chồng lớp biểu diễn được "uốn" nhiều hơn một lớp. Cái giá: VGG-16 có khoảng 138 triệu tham số (phần lớn, lại, ở các lớp kết nối đầy đủ) và tốn khoảng 15.3 tỉ phép nhân-cộng mỗi ảnh.
+
+### ResNet (2015–2016): khối dư
+
+Nếu sâu hơn là tốt hơn, cứ xếp thêm lớp? He và cộng sự (2016) thấy điều ngược lại. Trên CIFAR-10, mạng thường 56 lớp có lỗi **trên chính tập huấn luyện** cao hơn mạng 20 lớp. Đây không phải overfitting (overfitting thì lỗi huấn luyện thấp, lỗi kiểm tra cao). Tác giả gọi đó là vấn đề **suy giảm** (degradation).
+
+Lập luận của họ: lấy mạng nông đã học xong, thêm các lớp làm **ánh xạ đồng nhất** (identity mapping, ra đúng bằng vào). Mạng sâu này cho đúng kết quả của mạng nông. Vậy mạng sâu hơn có ít nhất một nghiệm không tệ hơn. Thế mà gradient descent không tìm ra: học đúng ánh xạ đồng nhất qua vài lớp phi tuyến hóa ra khó.
+
+Cách sửa: gọi $H(\mathbf{x})$ là hàm mà vài lớp liên tiếp cần học. Thay vì học thẳng $H$, cho các lớp học **phần dư** $F(\mathbf{x}) = H(\mathbf{x}) - \mathbf{x}$, rồi cộng lại đầu vào qua một **kết nối tắt** (residual connection, shortcut):
+
+$$
+\mathbf{y} = F(\mathbf{x}) + \mathbf{x}
+$$
+
+Nếu ánh xạ đồng nhất là tốt nhất, các lớp chỉ cần đẩy trọng số về gần 0 để $F(\mathbf{x}) \approx \mathbf{0}$, việc dễ hơn nhiều. Thêm khối không còn làm mạng tệ đi. Đường tắt đồng nhất không thêm tham số nào và gần như không tốn phép tính (chỉ một phép cộng). Khi số kênh hay cỡ bản đồ đổi, đường tắt dùng một tích chập $1 \times 1$ để khớp chiều.
+
+Hình dưới vẽ một khối dư. Hãy nhìn đường tắt vòng qua hai lớp tích chập và gặp lại nhánh chính ở phép cộng.
+
+{/* FIG: ResidualBlockFigure
+    Ý: đầu vào đi qua hai lớp tích chập, cộng với chính nó qua đường tắt; khối chỉ cần học phần dư F(x).
+    Khối và mũi tên: x (trên cùng) → tích chập 3x3 → ReLU → tích chập 3x3 → nút cộng (trọng tâm) → ReLU → y. Một mũi tên cong từ x vòng bên phải, nối thẳng vào nút cộng (đường tắt, nhóm thứ hai, nét khác màu). Ngoặc bên trái hai lớp tích chập ghi F(x).
+    Nhãn: "Đầu vào x"; "Tích chập 3×3"; "ReLU"; "Tích chập 3×3"; "Cộng"; "Đầu ra y"; "Đường tắt (đồng nhất)"; "Phần dư F(x)".
+    Chú thích: Khối dư tính $\mathbf{y} = F(\mathbf{x}) + \mathbf{x}$; nếu khối không giúp gì, chỉ cần $F(\mathbf{x}) \approx \mathbf{0}$. Đường tắt đồng nhất không có tham số. */}
+
+Một cách nhìn bổ sung, từ bài báo tiếp theo của cùng nhóm (He và cộng sự, 2016, "Identity Mappings"): đạo hàm của $\mathbf{x}$ theo chính nó là ma trận đơn vị, nên gradient có một đường đi thẳng qua các phép cộng từ lớp cuối về lớp đầu.
+
+Mạng 50 lớp trở lên dùng khối "nút cổ chai" (bottleneck) $1 \times 1 \to 3 \times 3 \to 1 \times 1$: hạ số kênh, tích chập, rồi nâng lại, cho rẻ. ResNet-152 có 152 lớp, sâu gấp 8 lần VGG nhưng chỉ tốn 11.3 tỉ phép nhân-cộng, ít hơn VGG-16. Một tổ hợp (ensemble) các ResNet đạt lỗi top-5 3.57% và đứng nhất phần phân loại ILSVRC 2015.
+
+### MobileNet (2017): tách tích chập làm hai
+
+Đến đây mạng đã chính xác, nhưng quá nặng cho điện thoại. MobileNet (Howard và cộng sự, 2017) thay mỗi lớp tích chập thường bằng **tích chập tách theo chiều sâu** (depthwise separable convolution), gồm hai bước:
+
+1. **Depthwise:** mỗi kênh vào có **một** kernel $k \times k$ riêng, chỉ lọc trong kênh đó. Lọc không gian, không trộn kênh.
+2. **Pointwise:** một tích chập $1 \times 1$ trộn $C_{\text{in}}$ kênh thành $C_{\text{out}}$ kênh. Trộn kênh, không nhìn hàng xóm.
+
+Tích chập thường làm cả hai việc trong một bước. Đếm phép nhân-cộng trên bản đồ đầu ra cỡ $H' \times W'$: mỗi số ra của tích chập thường cần $k^2 C_{\text{in}}$ phép, có $H'W'C_{\text{out}}$ số ra; còn hai bước tách thì lần lượt cần $k^2$ phép cho mỗi số trong $H'W'C_{\text{in}}$ số, và $C_{\text{in}}$ phép cho mỗi số trong $H'W'C_{\text{out}}$ số:
+
+$$
+\begin{aligned}
+\text{thường} &= k^2\, C_{\text{in}}\, C_{\text{out}}\, H'W' \\
+\text{tách} &= k^2\, C_{\text{in}}\, H'W' + C_{\text{in}}\, C_{\text{out}}\, H'W'
+\end{aligned}
+$$
+
+Chia dòng dưới cho dòng trên, $C_{\text{in}} H'W'$ triệt tiêu, còn lại:
+
+$$
+\frac{\text{tách}}{\text{thường}} = \frac{k^2 + C_{\text{out}}}{k^2\, C_{\text{out}}} = \frac{1}{C_{\text{out}}} + \frac{1}{k^2}
+$$
+
+Với $k = 3$ và $C_{\text{out}}$ cỡ hàng trăm, số hạng $1/C_{\text{out}}$ rất nhỏ, tỉ lệ gần $1/9$: ít hơn 8 tới 9 lần. Ví dụ trong bài báo, cũng là ô code thứ hai: bản đồ $14 \times 14$, 512 kênh vào và ra, tích chập thường cần 462.4 triệu phép nhân-cộng, bản tách chỉ 52.3 triệu. Số tham số giảm cùng tỉ lệ (bỏ $H'W'$ ở cả hai dòng). Bản MobileNet đầy đủ có 4.2 triệu tham số, 569 triệu phép nhân-cộng, độ chính xác top-1 70.6% trên ImageNet. Hai siêu tham số, hệ số độ rộng $\alpha$ (nhân số kênh) và hệ số độ phân giải $\rho$ (nhân cỡ ảnh), cho bạn chọn mạng nhỏ hơn nữa.
+
+Các bản sau, MobileNetV2 (Sandler và cộng sự, 2018) và MobileNetV3 (Howard và cộng sự, 2019), thêm kết nối tắt và tìm kiến trúc tự động.
+
+### EfficientNet (2019): co giãn cả ba chiều cùng lúc
+
+Có thêm tài nguyên tính toán thì làm mạng to hơn theo chiều nào? Sâu hơn (thêm lớp, độ sâu $d$), rộng hơn (thêm kênh, độ rộng $w$), hay cho ảnh to hơn (độ phân giải $r$)? Tan và Le (2019) nhận xét: số phép tính tỉ lệ với $d$, nhưng với $w^2$ và $r^2$. Gấp đôi số kênh thì cả $C_{\text{in}}$ lẫn $C_{\text{out}}$ gấp đôi; gấp đôi cạnh ảnh thì $H'W'$ gấp 4.
+
+Họ thấy tăng riêng một chiều thì lợi ích chóng bão hòa, và đề xuất **co giãn kết hợp** (compound scaling) bằng một hệ số $\phi$ duy nhất:
+
+$$
+d = \alpha^{\phi}, \quad w = \beta^{\phi}, \quad r = \gamma^{\phi}, \qquad \alpha \cdot \beta^2 \cdot \gamma^2 \approx 2
+$$
+
+Ràng buộc $\alpha \beta^2 \gamma^2 \approx 2$ làm số phép tính, tỉ lệ với $d \cdot w^2 \cdot r^2 = (\alpha \beta^2 \gamma^2)^{\phi}$, tăng khoảng $2^{\phi}$: mỗi bậc $\phi$ gấp đôi chi phí. Các hằng số tìm bằng dò lưới nhỏ trên mạng gốc: $\alpha = 1.2$, $\beta = 1.1$, $\gamma = 1.15$ (tích $\alpha\beta^2\gamma^2 \approx 1.92$).
+
+Mạng gốc EfficientNet-B0 được tìm bằng tìm kiếm kiến trúc tự động, dùng khối của MobileNetV2 (MBConv) thêm squeeze-and-excitation. B0 có 5.3 triệu tham số, 0.39 tỉ phép tính, top-1 77.1%. Tăng $\phi$ cho B1 tới B7; theo bài báo, B7 đạt top-1 84.3%, nhỏ hơn 8.4 lần và nhanh hơn 6.1 lần so với mạng tích chập tốt nhất trước đó.
+
+### Dùng lại mạng đã huấn luyện
+
+Bạn hiếm khi huấn luyện các mạng này từ đầu. **Học chuyển giao** (transfer learning) lấy một mạng đã học trên ImageNet, thay lớp phân loại cuối bằng lớp mới có số lớp của bài toán của bạn. Có hai cách hay dùng (theo [hướng dẫn transfer learning của PyTorch](https://docs.pytorch.org/tutorials/beginner/transfer_learning_tutorial.html)): **đóng băng** (frozen) mọi lớp tích chập, chỉ học lớp cuối; hoặc fine-tune cả mạng với tốc độ học $\eta$ nhỏ. Lý do nó hiệu quả: các lớp đầu học cạnh, màu, kết cấu, những thứ chung cho hầu hết ảnh.
+
+### Giới hạn
+
+- **Tích chập nhìn cục bộ.** Quan hệ giữa hai vùng xa nhau chỉ có ở lớp sâu. Bài [Phân loại ảnh với Transformer](/vi/cv/vision-transformer/) cho mọi patch nhìn nhau ngay từ lớp đầu.
+- **Đếm tham số không phải đo tốc độ.** MobileNet ít phép tính, nhưng tốc độ thật còn tùy phần cứng và thư viện.
+- **Bài chỉ phân loại cả ảnh.** Gán nhãn cho từng điểm ảnh thuộc bài [Semantic Segmentation](/vi/cv/semantic-segmentation/); làm giàu dữ liệu ảnh thuộc bài [Image Augmentation](/vi/cv/image-augmentation/).
+
+## Minh họa
+
+Minh họa dưới đây cho bạn tự trượt một kernel $3 \times 3$ trên một chữ số $8 \times 8$. Bên trái là ảnh với khung cửa sổ, bên phải là bản đồ đặc trưng $6 \times 6$ ($p = 0$, $s = 1$). Bên dưới là dòng phép tính: chín tích cộng lại thành đúng số ở ô đang sáng. Hãy thử:
+
+1. Chọn kernel đồng nhất (chỉ ô giữa bằng 1): mỗi ô của bản đồ đặc trưng bằng đúng điểm ảnh ở giữa cửa sổ, nên bản đồ là ảnh gốc bị cắt mất viền.
+2. Chọn kernel cạnh dọc, đặt cửa sổ ở vùng nền trống: chín tích đều bằng 0, ô ra bằng 0.
+3. Dời cửa sổ sang trái và phải một nét dọc của chữ số: bên này nét ô ra âm, bên kia dương, giữa nét gần 0.
+4. Đổi sang kernel cạnh ngang ở cùng vị trí: nét dọc gần như biến mất, các nét ngang hiện lên.
+
+{/* VIZ: ConvolutionViz
+    Ý: một kernel trượt trên ảnh, mỗi vị trí cho một số là tổng tích từng ô; đổi kernel là đổi đặc trưng được phát hiện.
+    Tương tác: chọn kernel trong 4 mẫu (đồng nhất, làm mờ box blur, cạnh dọc, cạnh ngang); thanh trượt hoặc nút Trước/Sau đổi vị trí (i, j) của cửa sổ; khung cửa sổ trên ảnh và ô tương ứng trên bản đồ đặc trưng sáng lên; dòng phép tính 9 tích cộng lại hiện bên dưới, số dùng dấu chấm thập phân.
+    Dữ liệu: ảnh 8x8 cố định (chữ số vẽ tay bằng mảng số, giá trị 0–1) trong src/data/datasets/; padding 0, stride 1, bản đồ đặc trưng 6x6. Toán ở src/lib/viz/convolution.ts, có unit test khớp ô NumPy conv2d của bài (tương quan chéo, không lật kernel).
+    Ký hiệu: X (ảnh), K (kernel 3x3), F (bản đồ đặc trưng), (i, j), F_{i,j} = tổng X_{i+u, j+v} K_{u,v}; không có b. */}
+
+Bảng dưới đặt năm mạng cạnh nhau. Cột "Tham số" là số đếm thật bằng torchvision ở ô PyTorch thứ hai (bản ImageNet, 1 000 lớp). AlexNet trong torchvision theo bản "One weird trick" (Krizhevsky, 2014), hơi khác bản 2012. MobileNet bản đầu không có trong torchvision nên bảng ghi số của bài báo.
+
+| Mạng | Năm | Ý chính | Tham số |
+|---|---:|---|---:|
+| AlexNet | 2012 | Mạng sâu trên GPU, ReLU, dropout, tăng cường dữ liệu | 61.1M |
+| VGG-16 | 2014 | Chỉ kernel $3 \times 3$ xếp chồng, 16 lớp có trọng số | 138.4M |
+| ResNet-18 / ResNet-50 | 2015 | Khối dư $F(\mathbf{x}) + \mathbf{x}$, huấn luyện được mạng hàng trăm lớp | 11.7M / 25.6M |
+| MobileNet | 2017 | Tích chập tách theo chiều sâu, ít hơn 8 tới 9 lần phép tính | 4.2M (bài báo) |
+| MobileNetV2 / V3-Small | 2018 / 2019 | Thêm kết nối tắt, tìm kiến trúc tự động | 3.5M / 2.5M |
+| EfficientNet-B0 | 2019 | Co giãn kết hợp độ sâu, độ rộng, độ phân giải | 5.3M |
+
+Cột năm là năm bài báo đầu tiên lên arXiv (ResNet: tháng 12/2015, đăng ở CVPR 2016). Hãy nhìn cột cuối: sau VGG, mạng chính xác hơn nhưng **nhỏ đi**, vì các ý tưởng về sau chủ yếu tiết kiệm tham số và phép tính.
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: hai ô NumPy với Python 3.14, NumPy 2.4, SciPy 1.18 và scikit-learn 1.8 (bản có trong Pyodide); hai ô PyTorch với Python 3.14, PyTorch 2.15 và torchvision 0.29 trên CPU. Hai ô NumPy chạy ngay trên trang, hai ô PyTorch chạy trên máy bạn. Các ô độc lập, không dùng biến của nhau. Ô đầu lần đầu chạy lâu hơn, vì trình duyệt phải tải thêm SciPy và scikit-learn.
+
+### Tích chập viết tay bằng NumPy
+
+Ô dưới lấy ảnh chữ số 1 đầu tiên trong `load_digits` của scikit-learn (ảnh $8 \times 8$, giá trị 0 tới 16, chia 16 để về đoạn $[0, 1]$), trượt kernel cạnh dọc bằng hai vòng lặp đúng như công thức, rồi so với `scipy.signal.correlate2d`. Cuối cùng in cỡ đầu ra theo công thức cho vài cặp $(p, s)$.
+
+<PythonRunner code={conv2dCode} title="Tích chập 2D trên một chữ số 8×8" />
+
+Đọc kết quả:
+
+- **Ảnh và `feature map: (6, 6)`:** nét dọc của chữ số 1 nằm ở cột 3 và 4 (đếm từ 0); bản đồ có cỡ $\lfloor (8 + 0 - 3)/1 \rfloor + 1 = 6$.
+- **Các cột của bản đồ:** cột 1 và 2 âm (khoảng $-1.8$ tới $-3$): cửa sổ có nền tối bên trái, nét sáng bên phải. Cột 3 và 4 dương (tới $3.00$): mép phải của nét. Kernel tìm ra hai cạnh của nét dọc, và dấu cho biết cạnh nào.
+- **`same as scipy correlate2d: True`:** vòng lặp tay trùng với tương quan chéo của SciPy.
+- **`same as convolve2d (flipped): False`:** `convolve2d` lật kernel trước khi trượt (tích chập đúng nghĩa toán), nên ra kết quả khác. Với kernel này, lật trái phải chỉ đổi dấu, nên bản đồ ra đổi dấu toàn bộ.
+- **Bốn dòng cuối:** khớp bảng kích thước đầu ra ở mục Lý thuyết.
+
+### Đếm tham số và phép tính
+
+Ô thứ hai chỉ dùng Python thuần. Nó làm lại ba phép đếm của mục Lý thuyết: lớp kết nối đầy đủ so với tích chập, tích chập thường so với tách theo chiều sâu (lớp $14 \times 14 \times 512$ của MobileNet), và ba lớp $3 \times 3$ so với một lớp $7 \times 7$ kèm trường tiếp nhận. Các phép đếm bỏ qua hệ số tự do cho gọn.
+
+<PythonRunner code={paramsCode} title="Đếm tham số: kết nối đầy đủ, tích chập, depthwise separable" />
+
+Đọc kết quả:
+
+- **50 331 648 so với 432:** cùng biến ảnh $32 \times 32 \times 3$ thành 16 kênh $32 \times 32$, tích chập ít hơn khoảng 116 nghìn lần.
+- **462.4M và 52.3M phép nhân-cộng:** trùng với bảng 3 trong bài báo MobileNet. Tỉ lệ 0.1131 khớp đúng $1/512 + 1/9$, tức ít hơn khoảng 8.8 lần.
+- **110 592 so với 200 704:** với $C = 64$, đúng $27C^2$ và $49C^2$ của VGG. Ba dòng cuối cho trường tiếp nhận $3, 5, 7$: ba lớp $3 \times 3$ thấy bằng một lớp $7 \times 7$.
+
+### CNN nhỏ học trên ảnh chữ số
+
+File dưới huấn luyện một CNN hai khối tích chập trên 1 797 ảnh chữ số của `load_digits`, chia 80% để học và 20% để kiểm tra. Mỗi khối là tích chập $3 \times 3$ (padding 1, giữ cỡ), ReLU và max pooling $2 \times 2$: $8 \times 8 \to 4 \times 4 \to 2 \times 2$. Cuối cùng là một lớp kết nối đầy đủ ra 10 logit. Không cần tải dữ liệu: bộ ảnh đi kèm scikit-learn.
+
+<LocalCode
+  code={tinyCnnCode}
+  title="CNN hai lớp tích chập trên load_digits"
+  packages={['torch', 'scikit-learn']}
+  hardware="CPU là đủ, không cần GPU. Dưới một phút trên máy phát triển; nạp PyTorch có thể mất thêm vài chục giây"
+>
+
+```text
+input: (1437, 1, 8, 8) params: 1898
+feature maps: (1, 16, 2, 2)
+epoch 10  train loss 0.104  test acc 0.961
+epoch 20  train loss 0.037  test acc 0.961
+epoch 30  train loss 0.014  test acc 0.975
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **`params: 1898`:** lớp tích chập đầu $3^2 \cdot 1 \cdot 8 + 8 = 80$, lớp thứ hai $3^2 \cdot 8 \cdot 16 + 16 = 1\,168$, lớp cuối $64 \cdot 10 + 10 = 650$. Tổng 1 898, đúng công thức đếm.
+- **`feature maps: (1, 16, 2, 2)`:** sau hai lần pooling, mỗi ảnh còn 16 bản đồ $2 \times 2$, tức 64 số vào lớp cuối. Mỗi ô của bản đồ này có trường tiếp nhận $10 \times 10$, bao trọn ảnh.
+- **`test acc 0.975`:** sau 30 epoch, mạng chưa tới 2 000 tham số đoán đúng 97.5% ảnh chưa thấy. Số này có thể lệch chút ít trên máy hoặc bản PyTorch khác.
+
+Ở ô NumPy bạn tự đặt kernel cạnh dọc; ở đây `loss.backward()` tính gradient của $\mathcal{L}$ theo từng ô của mọi kernel, và mạng tự học ra kernel của mình.
+
+### Đếm tham số các mạng trong torchvision
+
+File cuối dựng bảy mạng của bảng ở mục Minh họa với `weights=None`: chỉ dựng kiến trúc với trọng số ngẫu nhiên, không tải gì từ mạng Internet. Nếu muốn trọng số đã học trên ImageNet để làm transfer learning, bạn đổi `weights=None` thành `weights="DEFAULT"`, và torchvision sẽ tải tệp trọng số về.
+
+<LocalCode
+  code={countParamsCode}
+  title="Số tham số của bảy CNN trong torchvision"
+  packages={['torch', 'torchvision']}
+  hardware="CPU là đủ, cần khoảng 1 GB RAM trống cho VGG-16. Vài giây tới vài phút, phần lớn là dựng VGG-16"
+  sampleVaries={false}
+>
+
+```text
+alexnet                61.1M params
+vgg16                 138.4M params
+resnet18               11.7M params
+resnet50               25.6M params
+mobilenet_v2            3.5M params
+mobilenet_v3_small      2.5M params
+efficientnet_b0         5.3M params
+```
+
+</LocalCode>
+
+VGG-16 nặng gấp hơn 10 lần ResNet-18 dù nông hơn, vì ba lớp kết nối đầy đủ cuối của nó chiếm khoảng 124 triệu tham số. ResNet bỏ chúng, thay bằng phép lấy trung bình toàn cục (global average pooling) trên mỗi bản đồ đặc trưng rồi một lớp kết nối đầy đủ duy nhất. EfficientNet-B0 ra 5.3 triệu, khớp số trong bài báo.
+
+## Lỗi hay gặp
+
+:::caution[Quên padding và stride khi tính cỡ đầu ra]
+Lỗi "shape mismatch" ở lớp kết nối đầy đủ đầu tiên thường do tính nhầm cỡ bản đồ trước nó. Hãy tính từng lớp bằng $\lfloor (H + 2p - k)/s \rfloor + 1$, kể cả pooling, như ô CNN nhỏ in `feature maps` trước khi học. Cũng nhớ rằng PyTorch xếp trục theo thứ tự $(N, C, H, W)$: lô, kênh, cao, rộng. Ảnh $8 \times 8$ xám phải có trục kênh, thành `(1, 8, 8)`, đó là việc của `unsqueeze(1)` trong ô.
+:::
+
+:::caution[Nghĩ ResNet ra đời để chữa gradient tiêu biến, hay để chống overfitting]
+Bài báo ResNet nói rõ mạng thường sâu bị **lỗi huấn luyện** cao hơn, nên không phải overfitting. Mạng thường của họ đã có chuẩn hóa theo lô (batch normalization) và tác giả kiểm tra thấy gradient không tiêu biến. Ý chính là: với kết nối tắt, "không làm gì" trở nên dễ, nên thêm lớp không làm mạng tệ đi. Góc nhìn "gradient có đường đi thẳng" đến từ bài báo sau đó và là lời giải thích bổ sung, không phải lý do gốc.
+:::
+
+:::caution[Lẫn tích chập của học sâu với tích chập trong toán]
+`torch.nn.Conv2d` làm tương quan chéo, không lật kernel. `scipy.signal.convolve2d` lật kernel. Khi so kết quả với thư viện xử lý tín hiệu, dùng `correlate2d`, như ô NumPy đã làm. Với mạng đã học thì không sao, nhưng khi bạn tự đặt kernel (ví dụ kernel cạnh) mà dùng nhầm hàm, dấu của kết quả có thể ngược.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Tích chập trượt một kernel nhỏ trên ảnh: nhìn cục bộ và dùng chung trọng số, nên một lớp chỉ có $k^2 C_{\text{in}} C_{\text{out}} + C_{\text{out}}$ tham số, không phụ thuộc cỡ ảnh, và mẫu được nhận ra ở mọi vị trí.
+- Cỡ đầu ra mỗi chiều là $\lfloor (H + 2p - k)/s \rfloor + 1$. Xếp chồng lớp nhỏ thì trường tiếp nhận lớn dần, $r_L = 1 + L(k - 1)$ khi stride bằng 1.
+- AlexNet (2012) đưa CNN sâu lên GPU; VGG (2014) xếp chồng kernel $3 \times 3$; ResNet (2015–2016) cho khối học phần dư $\mathbf{y} = F(\mathbf{x}) + \mathbf{x}$ nên huấn luyện được mạng rất sâu.
+- MobileNet (2017) tách tích chập thành depthwise và pointwise, chi phí còn khoảng $1/C_{\text{out}} + 1/k^2$; EfficientNet (2019) co giãn độ sâu, độ rộng, độ phân giải cùng lúc theo một hệ số $\phi$.
+
+**Đọc thêm:**
+
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. [*Dive into Deep Learning*](https://d2l.ai/chapter_convolutional-modern/index.html), chương 8 "Modern Convolutional Neural Networks". Sách mở, có code cho AlexNet, VGG, ResNet và nhiều mạng khác theo đúng thứ tự lịch sử.
+- Stanford CS231n. [*Convolutional Neural Networks for Visual Recognition: Convolutional Networks*](https://cs231n.github.io/convolutional-networks/). Ghi chú bài giảng về công thức kích thước, chia sẻ trọng số và phân tích từng lớp của VGG. Ghi chú dùng $F$ cho cỡ kernel và $S$, $P$ cho stride, padding.
+- Krizhevsky, A., Sutskever, I., Hinton, G. E. (2012). [*ImageNet Classification with Deep Convolutional Neural Networks*](https://papers.nips.cc/paper_files/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html), NeurIPS 2012; và Simonyan, K., Zisserman, A. (2014). [*Very Deep Convolutional Networks for Large-Scale Image Recognition*](https://arxiv.org/abs/1409.1556), arXiv:1409.1556, mục 2.3. Hai bài báo mở đầu; mục 2.3 của VGG có lập luận ba lớp $3 \times 3$.
+- He, K., Zhang, X., Ren, S., Sun, J. (2016). [*Deep Residual Learning for Image Recognition*](https://arxiv.org/abs/1512.03385), arXiv:1512.03385, mục 1 và 3; và cùng nhóm tác giả (2016). [*Identity Mappings in Deep Residual Networks*](https://arxiv.org/abs/1603.05027), arXiv:1603.05027. Vấn đề suy giảm, khối dư, và vì sao đường tắt đồng nhất cho tín hiệu đi thẳng.
+- Howard, A. G. và cộng sự (2017). [*MobileNets: Efficient Convolutional Neural Networks for Mobile Vision Applications*](https://arxiv.org/abs/1704.04861), arXiv:1704.04861, mục 3.1; và Tan, M., Le, Q. V. (2019). [*EfficientNet: Rethinking Model Scaling for Convolutional Neural Networks*](https://arxiv.org/abs/1905.11946), arXiv:1905.11946, mục 3. Phép đếm của depthwise separable và công thức co giãn kết hợp. Danh sách mạng có sẵn: [tài liệu torchvision 0.29](https://docs.pytorch.org/vision/0.29/models.html).
+
+<LessonProgress />

@@ -1,0 +1,91 @@
+---
+// cv/vision-transformer, "Minh họa": the path of one image through a ViT (Dosovitskiy et al., 2021), read
+// top-down. Top left, the image as a 2 × 2 grid (lines with no head, cells numbered in reading order: the
+// lesson's 8 × 8 digit with P = 4, N = 4); "cut patches" leads right to the shared linear projection E. Below,
+// three rows of five cells share their columns: the tokens ([CLS] first, accent: learned, no image content),
+// the position embeddings 0–4 added to them (dashed, second group), then, after the encoder block (× J, its
+// inside written small), the outputs: [CLS] again in accent, the patch outputs faded (tone off) with no arrow
+// on. Only [CLS] goes down into the classification head, then the predicted class. The row names stand in a
+// column on the right. Narrow layout only. Words: src/data/figures/vit.ts; N, E, J with FigMath.
+import { VIT } from '@data/figures/vit';
+import type { Pt } from '@lib/figures/geometry';
+import { anchor, closed, mainAndSmall, type Box } from '@lib/figures/layout';
+import { getPageLocale } from '@lib/page-locale';
+import FigArrow from './kit/FigArrow.astro';
+import FigMath from './kit/FigMath.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = VIT[getPageLocale(Astro.locals.starlightRoute)];
+const l = t.labels;
+
+// The grid: 2 × 2 cells of 32, an outline and two inner lines, numbered 1–4 in reading order.
+const GRID = { x: 16, y: 28, cell: 32 } as const;
+const gridEnd = { x: GRID.x + 2 * GRID.cell, y: GRID.y + 2 * GRID.cell };
+const gridMid = { x: GRID.x + GRID.cell, y: GRID.y + GRID.cell };
+const outline = closed([
+  [GRID.x, GRID.y],
+  [gridEnd.x, GRID.y],
+  [gridEnd.x, gridEnd.y],
+  [GRID.x, gridEnd.y],
+]);
+const cellCentre = (i: number): Pt => [GRID.x + GRID.cell * ((i % 2) + 0.5), GRID.y + GRID.cell * (Math.floor(i / 2) + 0.5)];
+const projection: Box = { x: 144, y: 22, width: 208, height: 72 };
+
+// Columns of the three rows: [CLS] 64 wide, then four patch cells of 44, gap 4 (x 12–268). Row names at x 276.
+const COLS = [
+  { x: 12, width: 64 },
+  ...[0, 1, 2, 3].map((i) => ({ x: 80 + 48 * i, width: 44 })),
+];
+const ROW = { left: 12, right: 268, names: 276, height: 36 } as const;
+const rowMid = (ROW.left + ROW.right) / 2;
+const patchMid = (COLS[1]!.x + ROW.right) / 2;
+const cell = (i: number, y: number): Box => ({ ...COLS[i]!, y, height: ROW.height });
+const TOKENS = 152;
+const POSITIONS = 196;
+const encoder: Box = { x: ROW.left, y: 256, width: ROW.right - ROW.left, height: 72 };
+const OUTPUTS = 352;
+const head: Box = { x: ROW.left, y: 412, width: 158, height: 54 };
+const predicted: Box = { x: 186, y: 412, width: 166, height: 54 };
+const height = head.y + head.height + 8;
+const clsOut = cell(0, OUTPUTS);
+---
+
+<FigureFrame id="vit" text={t} narrowHeight={height}>
+  <Fragment slot="narrow">
+    <FigText x={gridMid.x} y={14} lines={l.image} />
+    <FigArrow {...outline} head={false} />
+    <FigArrow from={[gridMid.x, GRID.y]} to={[gridMid.x, gridEnd.y]} head={false} />
+    <FigArrow from={[GRID.x, gridMid.y]} to={[gridEnd.x, gridMid.y]} head={false} />
+    {[0, 1, 2, 3].map((i) => <FigText x={cellCentre(i)[0]} y={cellCentre(i)[1]} lines={String(i + 1)} size="small" />)}
+    <FigMath x={gridMid.x - 2} y={gridEnd.y + 16} symbol="N" after="= 4" size="small" anchor="end" />
+    <FigText x={gridMid.x + 4} y={gridEnd.y + 16} lines={l.patches} size="small" anchor="start" />
+
+    <FigArrow from={[gridEnd.x, gridMid.y]} to={anchor(projection, 'left', (gridMid.y - projection.y) / projection.height)} />
+    <FigText x={(gridEnd.x + projection.x) / 2} y={gridMid.y - 14} lines={l.cut} size="small" />
+    <FigNode {...projection} math={{ symbol: 'E', bold: true }} {...mainAndSmall(l.projection)} />
+    <FigArrow from={[patchMid, projection.y + projection.height]} to={[patchMid, TOKENS]} />
+
+    <FigText x={ROW.left} y={TOKENS - 14} lines={l.clsNote} size="small" anchor="start" />
+    <FigNode {...cell(0, TOKENS)} lines={l.cls} tone="accent" />
+    {[1, 2, 3, 4].map((i) => <FigNode {...cell(i, TOKENS)} lines={String(i)} />)}
+    <FigText x={ROW.names} y={TOKENS + ROW.height / 2} lines={l.tokens} size="small" anchor="start" />
+    {[0, 1, 2, 3, 4].map((i) => <FigNode {...cell(i, POSITIONS)} lines={String(i)} tone="alt" />)}
+    <FigText x={ROW.names} y={POSITIONS + ROW.height / 2} lines={l.position} size="small" anchor="start" />
+
+    <FigArrow from={[rowMid, POSITIONS + ROW.height]} to={anchor(encoder, 'top')} />
+    <FigNode {...encoder} {...mainAndSmall(l.encoder)} />
+    <FigMath x={ROW.names} y={encoder.y + encoder.height / 2} before="×" symbol="J" anchor="start" />
+    <FigArrow from={anchor(encoder, 'bottom')} to={[rowMid, OUTPUTS]} />
+
+    <FigNode {...clsOut} lines={l.cls} tone="accent" />
+    {[1, 2, 3, 4].map((i) => <FigNode {...cell(i, OUTPUTS)} lines={String(i)} tone="off" />)}
+    <FigText x={ROW.names} y={OUTPUTS + ROW.height / 2} lines={l.outputs} size="small" anchor="start" />
+
+    <FigArrow from={anchor(clsOut, 'bottom')} to={[clsOut.x + clsOut.width / 2, head.y]} />
+    <FigNode {...head} {...mainAndSmall(l.head)} />
+    <FigArrow from={anchor(head, 'right')} to={anchor(predicted, 'left')} />
+    <FigNode {...predicted} {...mainAndSmall(l.predicted)} />
+  </Fragment>
+</FigureFrame>

@@ -1,0 +1,363 @@
+---
+title: 'Instance và Universal Segmentation: Mask R-CNN, Mask2Former, SAM'
+description: Hai người đứng sát nhau, semantic segmentation chỉ thấy một vùng "người". Instance và panoptic segmentation, độ đo PQ, Mask R-CNN, Mask2Former và SAM.
+quiz:
+  - question: 'Ảnh đường phố có bầu trời, mặt đường và bốn chiếc xe. Hệ thống cần trả lời cùng lúc: có mấy xe, mỗi xe chiếm những pixel nào, và pixel nào là mặt đường. Bài toán nào khớp yêu cầu này?'
+    options:
+      - 'Semantic segmentation: mỗi pixel một lớp là đủ'
+      - 'Instance segmentation: mỗi xe một mask'
+      - 'Panoptic segmentation'
+      - 'Phát hiện vật thể: mỗi xe một hộp bao'
+    answer: 2
+    explanation: 'Semantic segmentation gộp bốn xe thành một vùng "xe", nên không đếm được. Instance segmentation tách từng xe nhưng bỏ qua stuff như mặt đường và bầu trời. Hộp bao không cho biết pixel nào thuộc xe. Panoptic gán cho mọi pixel một lớp, và thêm mã đối tượng cho các lớp thing như xe.'
+  - question: 'Ảnh có hai người đứng sát nhau, mask thật của hai người rộng bằng nhau và không chồng lên nhau. Mô hình trả về đúng một mask phủ khít cả hai người. PQ của lớp người là bao nhiêu?'
+    options:
+      - 'PQ = 0.5, vì mask phủ đúng mọi pixel người'
+      - 'PQ = 0: không cặp nào có IoU lớn hơn 0.5, nên có 1 FP và 2 FN'
+      - 'PQ = 1, vì không pixel nào bị gán sai lớp'
+      - 'PQ khoảng 0.67, vì ghép được một trong hai người'
+    answer: 1
+    explanation: 'Mask gộp có IoU với mỗi người đúng bằng $1/2$, không lớn hơn ngưỡng 0.5, nên không ghép được với ai. Tử số bằng 0, mẫu số là $0 + 0.5 \cdot 1 + 0.5 \cdot 2$, nên PQ bằng 0. Nếu chấm bằng IoU theo lớp như semantic segmentation thì lại được 1: đó chính là chỗ hai bài toán khác nhau.'
+  - question: 'Bạn thay RoIAlign bằng RoIPool trong Mask R-CNN, giữ nguyên mọi thứ khác. Điều gì nhiều khả năng xảy ra?'
+    options:
+      - 'Mask lệch khỏi vật vài pixel nên AP của mask giảm rõ, còn phân loại ít bị ảnh hưởng'
+      - 'Phân loại sai nhiều hơn hẳn, còn mask gần như không đổi'
+      - 'Không đổi gì, vì cả hai đều cho ra đặc trưng $7 \times 7$'
+      - 'Mô hình không chạy được, vì hộp có tọa độ số thực'
+    answer: 0
+    explanation: 'RoIPool làm tròn tọa độ hộp và ranh giới các ô về lưới của bản đồ đặc trưng, nên đặc trưng lấy ra lệch so với vật. Nhãn lớp chịu được lệch nhỏ, mask tới từng pixel thì không. Bài báo Mask R-CNN đo AP của mask: 26.9 với RoIPool, 30.3 với RoIAlign. RoIPool vẫn chạy được với hộp số thực, chỉ là làm tròn chúng.'
+  - question: 'Trong một cảnh đông người, hai người khác nhau đứng sát thường có hộp với IoU khoảng 0.6, còn các hộp trùng của cùng một người có IoU khoảng 0.85. Bạn đặt ngưỡng NMS là 0.5. Điều gì xảy ra?'
+    options:
+      - 'Giữ đủ mọi người và bỏ hết hộp trùng'
+      - 'Giữ cả hộp trùng, vì 0.85 lớn hơn 0.5'
+      - 'Kết quả không phụ thuộc ngưỡng, vì NMS chỉ dựa vào điểm tin cậy'
+      - 'Bỏ được hộp trùng, nhưng cũng xóa nhầm một số người thật đứng sát người khác'
+    answer: 3
+    explanation: 'NMS bỏ mọi hộp có IoU với hộp đã giữ lớn hơn ngưỡng. Với ngưỡng 0.5, cả hộp trùng (0.85) lẫn người đứng sát (0.6) đều vượt, nên người thứ hai bị xóa. Ngưỡng nằm giữa 0.6 và 0.85 thì vừa, nhưng cảnh thật không gọn như vậy. DETR và Mask2Former bỏ hẳn NMS: mỗi vật thật được ghép với đúng một truy vấn khi huấn luyện.'
+  - question: 'Một công cụ gán nhãn dùng SAM. Người dùng bấm lần lượt 20 điểm trên cùng một ảnh. Phần nào của SAM phải chạy 20 lần?'
+    options:
+      - 'Bộ mã hóa ảnh ViT, vì mỗi điểm cần đặc trưng mới'
+      - 'Cả mô hình, vì SAM đọc ảnh và điểm cùng lúc'
+      - 'Bộ mã hóa prompt và bộ giải mã mask; embedding ảnh tính một lần rồi dùng lại'
+      - 'Không phần nào, vì SAM tính sẵn mọi mask của ảnh từ đầu'
+    answer: 2
+    explanation: 'Embedding ảnh không phụ thuộc vào điểm gợi ý, nên bộ mã hóa ảnh nặng chỉ chạy một lần, như ô LocalCode của bài. Mỗi cú bấm chỉ chạy bộ mã hóa prompt và bộ giải mã nhẹ, theo bài báo khoảng 50 ms trên CPU trong trình duyệt. Nhờ vậy công cụ gán nhãn có cảm giác tức thì.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import labelCode from '@code/cv/instance-universal-segmentation/label.vi.py?raw';
+import nmsCode from '@code/cv/instance-universal-segmentation/nms.vi.py?raw';
+import samCode from '@code/cv/instance-universal-segmentation/sam.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Phân biệt được ba bài toán: semantic segmentation, **instance segmentation** (phân vùng từng đối tượng) và **panoptic segmentation** (phân vùng toàn cảnh). Tính được độ đo **PQ** (panoptic quality) và tách nó thành hai phần SQ, RQ.
+- Giải thích được Mask R-CNN: phát hiện hộp trước, rồi vẽ mask trong từng hộp; và vì sao **RoIAlign** thay RoIPool.
+- Hiểu hướng **phân loại mask** (mask classification) bằng truy vấn: DETR, MaskFormer, rồi Mask2Former với **masked attention**, một kiến trúc cho cả ba bài toán.
+- Dùng được SAM với **điểm gợi ý** (point prompt), và giải thích vì sao SAM trả về ba mask cho một điểm.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài [Semantic Segmentation](/vi/cv/semantic-segmentation/) gán cho mỗi pixel một lớp trong $K$ lớp, và đo bằng $\text{IoU} = |A \cap B| / |A \cup B|$ giữa vùng đoán và vùng thật. Bài đó cũng dùng FPN (kim tự tháp đặc trưng) và nội suy song tuyến tính, hai thứ sẽ gặp lại ở đây.
+:::
+
+## Trực giác
+
+### Hai người đứng sát nhau
+
+Bạn có một ảnh hai người đứng vai kề vai. Một mô hình semantic segmentation tốt tô đúng mọi pixel người bằng cùng một màu. IoU của lớp "người" gần bằng 1.
+
+Giờ hỏi: **trong ảnh có mấy người?** Mô hình không trả lời được. Nó chỉ biết "pixel này là người", không biết "pixel này thuộc người **nào**". Với xe tự lái đếm người qua đường, robot nhặt từng quả táo, hay phần mềm đếm tế bào, câu hỏi "người nào, quả nào" mới là thứ cần.
+
+Cách đơn giản nhất: lấy vùng "người", tách thành các mảng liền nhau, mỗi mảng là một người. Cách này đúng khi các vật nằm rời nhau. Nhưng hai người chạm vai thành **một** mảng liền, nên bị đếm là một. Ô NumPy đầu tiên của bài cho thấy đúng chỗ hỏng này.
+
+### Hai hướng giải
+
+Hướng thứ nhất: **tìm vật trước, rồi tô từng vật**. Một bộ **phát hiện vật thể** (object detector) vẽ một **hộp bao** (bounding box) quanh mỗi người, rồi trong mỗi hộp ta tô pixel nào là người đó. Hai người đứng sát vẫn có hai hộp, nên vẫn ra hai mask. Đây là Mask R-CNN.
+
+Hướng thứ hai: **cho mô hình một số "khe" cố định**, ví dụ 100 khe, và yêu cầu mỗi khe trả về một mask kèm một nhãn lớp (hoặc "không có gì"). Mỗi khe tự "nhận" một vật. Cách này không cần hộp, và cùng một mô hình làm được cả semantic lẫn instance. Đây là MaskFormer và Mask2Former.
+
+Hướng thứ ba khác hẳn: người dùng **chỉ vào** vật cần tách (bấm một điểm, vẽ một hộp), mô hình trả về mask của vật đó, kể cả loại vật chưa từng có trong dữ liệu huấn luyện. Đây là SAM.
+
+Bài toán của bài này là: **làm sao tách từng vật riêng lẻ, kể cả khi chúng chạm nhau, đo chất lượng việc tách đó thế nào, và ba hướng trên giải nó ra sao?**
+
+## Lý thuyết
+
+### Ba bài toán, ba kiểu đáp án
+
+Kirillov và cộng sự (2019) chia lớp trong ảnh thành hai loại:
+
+- **Thing** (vật đếm được): người, xe, quả táo. Mỗi cái có hình dạng riêng, đếm được.
+- **Stuff** (vùng không đếm được): bầu trời, mặt đường, cỏ. Không ai hỏi "có mấy bầu trời".
+
+Từ đó có ba bài toán trên cùng một ảnh $H \times W$:
+
+| Bài toán | Đầu ra | Thing | Stuff |
+|---|---|---|---|
+| Semantic segmentation | Mỗi pixel một lớp | Gộp mọi vật cùng lớp | Có |
+| Instance segmentation | Một tập $\{(\mathbf{M}_i, c_i, s_i)\}$: mask, lớp, điểm tin cậy | Mỗi vật một mask | Không |
+| Panoptic segmentation | Mỗi pixel một cặp (lớp, mã đối tượng) | Mỗi vật một mã riêng | Một vùng mỗi lớp |
+
+Ở đây $\mathbf{M}_i \in \{0, 1\}^{H \times W}$ là mask nhị phân của vật thứ $i$, $c_i$ là lớp, $s_i$ là điểm tin cậy. Mask của instance segmentation được phép chồng lên nhau (mô hình có thể trả về nhiều mask cho cùng một vùng, xếp theo điểm). Panoptic thì không: mỗi pixel thuộc đúng một đoạn (segment).
+
+### Đo bằng PQ
+
+Với semantic segmentation, bài trước dùng mIoU. Nhưng mIoU không thấy lỗi gộp hai người: tô đúng mọi pixel người thì IoU lớp người vẫn bằng 1. Panoptic cần độ đo nhìn vào **từng đoạn**. Kirillov và cộng sự (2019) đề xuất **PQ** (panoptic quality), tính cho từng lớp rồi lấy trung bình.
+
+**Bước 1: ghép đoạn.** Một đoạn dự đoán $p$ ghép với một đoạn thật $g$ khi $\text{IoU}(p, g) > 0.5$. Vì sao 0.5? Các đoạn thật không chồng nhau, các đoạn dự đoán cũng vậy. Nếu $p$ chiếm hơn nửa phần hợp với $g$, thì không còn chỗ cho một $g'$ khác cũng chiếm hơn nửa phần hợp với $p$. Bài báo chứng minh điều này: ngưỡng 0.5 cho **ghép duy nhất**, không cần thuật toán ghép đôi nào.
+
+**Bước 2: chia ba nhóm.** Cặp ghép được là TP (true positive). Đoạn dự đoán không ghép với ai là FP. Đoạn thật không ai ghép là FN.
+
+**Bước 3: công thức.**
+
+$$
+\text{PQ} = \frac{\sum_{(p, g) \in \text{TP}} \text{IoU}(p, g)}{|\text{TP}| + \frac{1}{2}|\text{FP}| + \frac{1}{2}|\text{FN}|}
+$$
+
+Tử số cộng IoU của các cặp ghép được: ghép càng khít, tử số càng lớn. Mẫu số đếm số cặp, cộng thêm nửa điểm phạt cho mỗi đoạn thừa và mỗi đoạn sót.
+
+**Bước 4: tách làm hai.** Nhân rồi chia cho $|\text{TP}|$, ta được hai thừa số dễ đọc:
+
+$$
+\text{PQ} =
+\underbrace{\frac{\sum_{\text{TP}} \text{IoU}(p, g)}{|\text{TP}|}}_{\text{SQ}}
+\times
+\underbrace{\frac{|\text{TP}|}{|\text{TP}| + \frac{1}{2}|\text{FP}| + \frac{1}{2}|\text{FN}|}}_{\text{RQ}}
+$$
+
+Thừa số đầu, **SQ** (segmentation quality), là IoU trung bình của các cặp đã ghép: mask khít tới đâu. Thừa số sau, **RQ** (recognition quality), chính là điểm F1 quen thuộc của bài toán phát hiện: tìm đúng bao nhiêu vật.
+
+Áp vào ví dụ của ô NumPy: ba đồng xu A, B, C, trong đó B và C chạm nhau. Cách "mảng liền nhau" cho hai đoạn: A khớp hoàn toàn (IoU 1), còn mảng B+C có IoU 0.58 với C và 0.42 với B. Vậy TP gồm (A, A) và (B+C, C), không có FP, còn B là FN:
+
+$$
+\text{PQ} = \frac{1 + 0.58}{2 + 0 + \frac{1}{2} \cdot 1} \approx 0.633,
+\qquad \text{SQ} \approx 0.79, \quad \text{RQ} = 0.8
+$$
+
+Trong khi đó, mask semantic của lớp "xu" vẫn đúng từng pixel.
+
+### Nhắc nhanh về phát hiện vật thể
+
+Bài về phát hiện vật thể chưa có, nên đây là ba ý bài này cần. Một bộ phát hiện trả về các hộp $[x_1, y_1, x_2, y_2]$, mỗi hộp có lớp và điểm tin cậy. Độ trùng giữa hai hộp đo bằng IoU, như với mask, chỉ là tính trên hình chữ nhật: phần giao rộng $\max(0, \min(x_2, x_2') - \max(x_1, x_1'))$ và cao tính tương tự.
+
+Bộ phát hiện thường trả về **nhiều hộp chồng nhau** cho cùng một vật. **NMS** (non-maximum suppression, triệt tiêu điểm không cực đại) dọn chúng: sắp hộp theo điểm giảm dần, giữ hộp cao nhất, bỏ mọi hộp còn lại có IoU với nó lớn hơn một ngưỡng, rồi lặp lại. Ngưỡng là con dao hai lưỡi: thấp quá thì xóa nhầm người thật đứng sát nhau, cao quá thì sót hộp trùng. Ô NumPy thứ hai cho thấy điều này.
+
+### Mask R-CNN: tìm hộp trước, tô mask sau
+
+Mask R-CNN (He và cộng sự, 2017) xây trên Faster R-CNN (Ren và cộng sự, 2015), một bộ phát hiện hai giai đoạn:
+
+1. **Backbone** (mạng xương sống, thường là ResNet kèm FPN) biến ảnh thành bản đồ đặc trưng.
+2. **RPN** (region proposal network, mạng đề xuất vùng) đề xuất vài trăm tới vài nghìn hộp có thể chứa vật.
+3. Với mỗi hộp đề xuất, gọi là **RoI** (region of interest, vùng quan tâm), lấy ra một bản đồ đặc trưng nhỏ cỡ cố định, ví dụ $7 \times 7$ hoặc $14 \times 14$.
+4. Các đầu ra trên đặc trưng đó: đầu phân loại (lớp nào), đầu hồi quy hộp (chỉnh hộp cho khít), và phần Mask R-CNN thêm vào: **đầu mask**.
+
+Đầu mask là một mạng tích chập nhỏ, cho ra $K$ mask cỡ $m \times m$ (bài báo dùng $28 \times 28$), mỗi lớp một mask. Mỗi pixel đi qua sigmoid và học bằng cross-entropy nhị phân. Chỉ mask của lớp đúng được tính vào mất mát; lúc suy luận, mask được chọn theo lớp mà đầu phân loại đoán. Tác giả thấy **tách** việc "là lớp gì" khỏi việc "pixel nào thuộc vật" quan trọng: dùng softmax cạnh tranh giữa các lớp ở từng pixel cho kết quả kém hơn rõ. Mất mát của mỗi RoI là tổng ba phần:
+
+$$
+\mathcal{L} = \mathcal{L}_{\text{cls}} + \mathcal{L}_{\text{box}} + \mathcal{L}_{\text{mask}}
+$$
+
+Mask $28 \times 28$ sau đó được phóng về đúng cỡ hộp trên ảnh. Vì mỗi hộp có mask riêng, hai người đứng sát vẫn ra hai mask. Đổi lại, chất lượng phụ thuộc vào hộp: hộp sót thì vật mất, hộp bị NMS xóa nhầm thì vật cũng mất.
+
+### RoIAlign: đừng làm tròn
+
+Bước 3 nghe đơn giản nhưng có bẫy. Backbone thu nhỏ ảnh, ví dụ **stride** 16: một ô đặc trưng ứng với $16 \times 16$ pixel. Hộp có tọa độ số thực trên ảnh, nên trên bản đồ đặc trưng tọa độ thành $x / 16$.
+
+**RoIPool** (cách cũ) làm tròn hai lần. Lần một: tọa độ hộp. Cạnh trái ở pixel 33 thành $33 / 16 \approx 2.06$, làm tròn thành ô 2, tức pixel 32 trên ảnh. Lần hai: khi chia hộp thành lưới $7 \times 7$ ô, ranh giới mỗi ô lại bị làm tròn. Mỗi lần làm tròn có thể lệch tới nửa ô, tức tới 8 pixel trên ảnh. Phân loại chịu được lệch nhỏ như vậy: con mèo dịch vài pixel vẫn là con mèo. Mask thì không: lệch 8 pixel là đường viền lệch hẳn.
+
+**RoIAlign** bỏ mọi phép làm tròn. Giữ nguyên 2.06, chia hộp thành $7 \times 7$ ô bằng số thực. Trong mỗi ô, lấy giá trị tại 4 điểm đặt đều, mỗi điểm tính bằng **nội suy song tuyến tính** (bilinear interpolation) từ 4 ô đặc trưng gần nhất, rồi gộp lại bằng max hoặc trung bình. Thay đổi nhỏ, hiệu quả lớn: trong bảng thí nghiệm của bài báo (ResNet-50-C4), AP của mask tăng từ 26.9 (RoIPool) lên 30.3 (RoIAlign).
+
+### Từ phân loại pixel sang phân loại mask
+
+**DETR** (Carion và cộng sự, 2020) làm phát hiện vật thể theo kiểu khác. Mô hình có $N$ **truy vấn vật thể** (object query), bài báo dùng $N = 100$: các vectơ học được, đi qua một decoder Transformer, nhìn sang đặc trưng ảnh bằng cross-attention. Mỗi truy vấn trả ra một hộp và một lớp, hoặc lớp đặc biệt $\varnothing$ ("không có vật"). Khi huấn luyện, mỗi vật thật được **ghép đôi** (bipartite matching) với đúng một truy vấn, theo cách ghép có tổng chi phí nhỏ nhất. Truy vấn thứ hai cũng đoán cùng vật đó sẽ không được ghép và bị phạt, nên mô hình tự học không đoán trùng. Kết quả: **không cần NMS**, không cần hộp neo.
+
+**MaskFormer** (Cheng và cộng sự, 2021) đổi hộp thành mask. Cùng $N$ truy vấn, mỗi truy vấn $i$ cho ra một phân phối trên $K + 1$ lớp (thêm $\varnothing$) và một **mask embedding** $\mathbf{e}_i \in \mathbb{R}^{D}$. Song song, một bộ giải mã pixel (pixel decoder) cho mỗi pixel $(h, w)$ một vectơ $\mathbf{p}_{h,w} \in \mathbb{R}^{D}$. Mask của truy vấn $i$ là:
+
+$$
+\mathbf{M}_i[h, w] = \sigma\big(\mathbf{e}_i^\top \mathbf{p}_{h,w}\big)
+$$
+
+Tích vô hướng lớn nghĩa là pixel giống "vật" mà truy vấn đang giữ; sigmoid $\sigma$ đưa nó về khoảng $(0, 1)$. Đây là ý tưởng cốt lõi: **bài toán nào cũng là "dự đoán một tập mask, mỗi mask một nhãn"**. Semantic segmentation: mỗi lớp một mask. Instance: mỗi vật một mask. Panoptic: cả hai. Chỉ cách ghép kết quả lúc suy luận là khác. Bài báo tên là "Per-Pixel Classification is Not All You Need", đúng ý: phân loại từng pixel không phải cách duy nhất, kể cả cho semantic segmentation.
+
+### Mask2Former: masked attention
+
+MaskFormer học chậm và yếu với vật nhỏ. Mask2Former (Cheng và cộng sự, 2022) sửa bằng một ý: ở mỗi lớp decoder, truy vấn chỉ được nhìn vào **vùng mask mà chính nó vừa đoán ở lớp trước**.
+
+Gọi $\mathbf{X}_l \in \mathbb{R}^{N \times D}$ là $N$ truy vấn sau lớp thứ $l$. Cross-attention thường cho truy vấn nhìn mọi pixel. Masked attention thêm một ma trận $\boldsymbol{\mathcal{M}}_{l-1}$ vào trước softmax (bài báo viết công thức không có hệ số $1/\sqrt{d}$, ở đây giữ đúng như vậy):
+
+$$
+\mathbf{X}_l = \mathrm{softmax}\big(\boldsymbol{\mathcal{M}}_{l-1} + \mathbf{Q}_l \mathbf{K}_l^\top\big)\,\mathbf{V}_l + \mathbf{X}_{l-1}
+$$
+
+$\mathbf{Q}_l$ lấy từ các truy vấn, $\mathbf{K}_l$ và $\mathbf{V}_l$ lấy từ đặc trưng ảnh. Phần tử của $\boldsymbol{\mathcal{M}}_{l-1}$ ở hàng $i$, vị trí $(x, y)$ bằng 0 nếu mask lớp trước của truy vấn $i$ (cắt ngưỡng 0.5) chứa pixel đó, và bằng $-\infty$ nếu không. Vì sao $-\infty$? Vì $e^{-\infty} = 0$: sau softmax, trọng số attention ở các pixel ngoài mask bằng đúng 0. Truy vấn đang giữ "con mèo" chỉ gom đặc trưng từ vùng con mèo, không bị phân tán khắp ảnh. $+\,\mathbf{X}_{l-1}$ là kết nối tắt quen thuộc.
+
+Thêm vài cải tiến (đặc trưng nhiều độ phân giải luân phiên giữa các lớp decoder, tính mất mát mask trên một số điểm lấy mẫu thay vì cả mask để tiết kiệm bộ nhớ), Mask2Former đạt 57.8 PQ trên COCO panoptic, 50.1 AP trên COCO instance và 57.7 mIoU trên ADE20K semantic (bài báo, 2022, backbone Swin-L), cùng một kiến trúc. Với backbone ResNet-50, nó đạt 51.9 PQ sau 50 epoch, trong khi MaskFormer cần 300 epoch để đạt 46.5.
+
+"Universal" ở đây là **một kiến trúc**, không phải **một bộ trọng số**: chính bài báo ghi rằng mô hình vẫn phải huấn luyện riêng cho từng bài toán, và bản chỉ học panoptic hơi kém bản học riêng instance hay semantic.
+
+### SAM: phân vùng theo gợi ý
+
+Mask R-CNN và Mask2Former chỉ biết các lớp có trong dữ liệu huấn luyện (COCO có 80 lớp thing). SAM (Kirillov và cộng sự, 2023) đặt bài toán khác: **phân vùng theo gợi ý** (promptable segmentation). Đầu vào là ảnh cộng một **prompt**: một hoặc vài điểm, một hộp, hay một mask thô. Đầu ra là mask hợp lệ cho thứ được chỉ vào, bất kể đó là gì. SAM không trả về nhãn lớp.
+
+SAM có ba phần, thiết kế xoay quanh tốc độ:
+
+- **Bộ mã hóa ảnh** (image encoder): một ViT lớn (bản lớn nhất là ViT-H), pre-train bằng MAE, nhận ảnh $1024 \times 1024$ và cho ra embedding $64 \times 64$ với 256 kênh. Phần này nặng, nhưng **chỉ chạy một lần cho mỗi ảnh**.
+- **Bộ mã hóa prompt** (prompt encoder): đổi điểm và hộp thành vectơ (mã hóa vị trí cộng embedding học được).
+- **Bộ giải mã mask** (mask decoder): vài khối Transformer nhẹ, attention hai chiều giữa token prompt và embedding ảnh. Theo bài báo, khi đã có embedding ảnh, bộ mã hóa prompt và bộ giải mã chạy khoảng 50 ms trên CPU trong trình duyệt.
+
+Một điểm gợi ý thường **mơ hồ**: bấm vào cái áo thì ý bạn là cái áo, hay cả người? Nếu chỉ có một đầu ra, mô hình sẽ đoán một mask lưng chừng, trung bình của các đáp án. SAM trả về **3 mask** cho một điểm (bài báo: các mask lồng nhau thường sâu tối đa ba tầng, nguyên vật, phần, phần nhỏ), kèm một **điểm IoU dự đoán** (`iou_scores`) cho mỗi mask, để xếp hạng. Khi huấn luyện, chỉ mask khớp nhất với đáp án được lan truyền ngược.
+
+Dữ liệu là phần lớn của câu chuyện. Mask theo pixel đắt, nên nhóm tác giả dựng một **động cơ dữ liệu** (data engine) ba giai đoạn: người gán nhãn dùng SAM để gán nhanh, rồi SAM tự đề xuất mask, cuối cùng SAM tự gán toàn bộ. Kết quả là SA-1B: 11 triệu ảnh, 1.1 tỉ mask.
+
+SAM 2 (Ravi và cộng sự, 2024) mở rộng sang video: thêm **bộ nhớ** (memory bank) lưu đặc trưng và dự đoán của các khung hình trước, và một khối memory attention cho khung hiện tại nhìn vào bộ nhớ đó. Bạn bấm vào vật ở một khung, mô hình theo vật đó qua cả video. Bài báo xây bộ SA-V (35.5 triệu mask trên 50.9 nghìn video) và báo cáo trên ảnh SAM 2 chính xác hơn và nhanh hơn 6 lần so với SAM.
+
+:::note[Ghi nhớ]
+Instance tách từng vật đếm được; panoptic thêm cả stuff, đo bằng $\text{PQ} = \text{SQ} \times \text{RQ}$ với ghép đoạn ở IoU lớn hơn 0.5. Mask R-CNN tìm hộp rồi tô mask trong hộp, nhờ RoIAlign không làm tròn tọa độ. Mask2Former cho $N$ truy vấn, mỗi truy vấn một mask và một lớp, masked attention giữ truy vấn trong vùng của nó. SAM tách theo gợi ý: bộ mã hóa ảnh chạy một lần, bộ giải mã nhẹ chạy cho mỗi gợi ý, trả 3 mask khi gợi ý mơ hồ.
+:::
+
+### Giới hạn
+
+- **Mask R-CNN phụ thuộc hộp và NMS.** Cảnh đông, vật chồng nhiều lên nhau dễ bị xóa nhầm (ô NMS của bài, câu hỏi thứ tư).
+- **Mask2Former là một kiến trúc, không phải một mô hình cho mọi thứ.** Vẫn huấn luyện riêng từng bài toán, và chỉ biết các lớp đã học.
+- **SAM không biết vật là gì.** Muốn có nhãn lớp, phải ghép với một mô hình khác, ví dụ một bộ phát hiện theo câu chữ như GLIP ở bài [CLIP, BLIP, GLIP](/vi/cv/clip-blip-glip/), hoặc một bộ phân loại.
+- **Bài không đi sâu vào phát hiện vật thể** (các họ R-CNN, YOLO, hộp neo); chỉ nhắc phần Mask R-CNN cần.
+
+## Minh họa
+
+Hình dưới đặt ba đáp án của cùng một cảnh cạnh nhau. Hãy nhìn hai người đứng sát: ở ô semantic họ cùng một màu, ở ô instance và panoptic họ hai màu khác nhau; còn bầu trời và mặt đường thì biến mất ở ô instance.
+
+{/* FIG: SegmentationTasksFigure
+    Ý: cùng một cảnh có ba đáp án: semantic (mỗi pixel một lớp), instance (mỗi vật đếm được một mask), panoptic (cả hai).
+    Khối và mũi tên: một cảnh đơn giản vẽ bằng hình khối (dải trời phía trên, dải đường phía dưới, hai người đứng sát nhau chạm vai, một chiếc xe), lặp lại ba lần thành ba ô xếp dọc (bố cục hẹp 360). Ô 1 "Semantic": trời, đường, người, xe mỗi lớp một màu; hai người CÙNG một màu (trọng tâm: viền nhấn quanh vùng người liền khối). Ô 2 "Instance": nền trắng (stuff bỏ trống), mỗi người một màu riêng, xe một màu, mỗi mask có nhãn nhỏ "người 1", "người 2", "xe 1". Ô 3 "Panoptic": trời, đường như ô 1, người và xe như ô 2. Không có mũi tên giữa các ô; một nhãn bên trái mỗi ô.
+    Nhãn: "Semantic: mỗi pixel một lớp"; "Instance: mỗi vật một mask"; "Panoptic: mỗi pixel một lớp và một mã vật"; nhãn vùng "trời", "đường", "người 1", "người 2", "xe 1".
+    Chú thích: Semantic gộp hai người thành một vùng; instance tách họ nhưng bỏ stuff (trời, đường); panoptic gán cho mọi pixel một cặp (lớp, mã đối tượng) và được đo bằng PQ. */}
+
+Bảng dưới so ba họ mô hình của bài theo cùng các câu hỏi. Số liệu lấy từ bài báo của từng mô hình.
+
+| Tiêu chí | Mask R-CNN (2017) | Mask2Former (2022) | SAM (2023) |
+|---|---|---|---|
+| Ý chính | Tìm hộp, rồi tô mask trong mỗi hộp | $N$ truy vấn, mỗi truy vấn một mask và một lớp | Tách thứ được gợi ý (điểm, hộp, mask) |
+| Bài toán | Instance (và phát hiện) | Semantic, instance, panoptic, cùng kiến trúc | Mask không nhãn, theo gợi ý |
+| Có nhãn lớp không | Có, các lớp đã học | Có, các lớp đã học | Không |
+| Bỏ trùng lặp bằng | NMS trên hộp | Ghép đôi khi huấn luyện, không NMS | Người dùng chọn vật; 3 mask kèm điểm IoU dự đoán |
+| Điểm mạnh | Đơn giản, đầu mask rẻ, mở rộng sang điểm khớp người | Một thiết kế cho cả ba bài toán, masked attention hội tụ nhanh | Làm được với vật chưa từng thấy; gán nhãn nhanh |
+| Cái giá | Phụ thuộc chất lượng hộp; mask chỉ $28 \times 28$ | Vẫn huấn luyện riêng từng bài toán; tốn bộ nhớ | Bộ mã hóa ảnh nặng; không biết vật là gì |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: hai ô NumPy với Python 3.14, NumPy 2.4 và SciPy 1.18 (bản có trong Pyodide), ô SAM với Python 3.14, PyTorch 2.15 và transformers 5.22 trên CPU. Hai ô NumPy chạy ngay trên trang, ô SAM chạy trên máy bạn. Các ô độc lập, không dùng biến của nhau. Ô đầu tiên lần đầu chạy lâu hơn, vì trình duyệt phải tải thêm SciPy.
+
+### Từ mask semantic tới từng vật, và PQ
+
+Ô dưới vẽ ba đồng xu cùng lớp trên lưới $20 \times 34$: xu A nằm riêng, xu B và xu C chạm nhau. Mask semantic là hợp của ba mask thật. Cách 1 tách bằng `scipy.ndimage.label` (mỗi mảng liền nhau theo 4 hướng là một vật). Cách 2 co mask một pixel (`binary_erosion`) để cắt chỗ chạm, đánh số các mảng còn lại làm "hạt giống", rồi trả mỗi pixel của mask về hạt giống gần nhất. Mỗi cách in ma trận IoU giữa đoạn dự đoán (hàng) và vật thật (cột), rồi tính PQ như mục Lý thuyết.
+
+<PythonRunner code={labelCode} title="Tách vật từ mask semantic, ghép theo IoU, tính PQ" />
+
+Đọc kết quả:
+
+- **Cách 1, `components: 2`:** ba đồng xu nhưng chỉ hai mảng. Hàng thứ hai của ma trận là mảng B+C: IoU 0.42 với B, 0.58 với C. Chỉ cặp với C vượt 0.5, nên `TP=2 FP=0 FN=1` và `PQ=0.633`, đúng số đã tính tay.
+- **Cách 2, `components after erosion: 3`:** co một pixel cắt đứt chỗ chạm, ba hạt giống mọc lại thành ba mask khớp hoàn toàn, `PQ=1.000`. Thứ tự hàng đổi (C trước B) vì `label` đánh số theo thứ tự quét từ trên xuống, và C to hơn nên chạm hàng trên sớm hơn.
+
+Mẹo co mask là phiên bản rất thô của thuật toán watershed. Nó chạy được ở đây vì chỗ chạm chỉ mỏng một pixel. Hai vật chồng lên nhau một mảng lớn, hay hai vật dính nhau suốt một cạnh dài, thì co bao nhiêu cũng không tách đúng. Vì thế các mô hình instance học trực tiếp "vật nào là vật nào", thay vì đoán lại từ mask semantic.
+
+### NMS trên vài hộp
+
+Ô dưới có 4 hộp: hộp 0 và 1 cùng khoanh người A, hộp 2 khoanh người B đứng sát A, hộp 3 khoanh người C ở xa. Code tính IoU giữa mọi cặp hộp, rồi chạy NMS với ba ngưỡng.
+
+<PythonRunner code={nmsCode} title="NMS bằng NumPy với ba ngưỡng" />
+
+Đọc kết quả:
+
+- **Ma trận IoU:** hai hộp của người A có IoU 0.78. Người B đứng sát nên hộp của B có IoU 0.54 với hộp 0 và 0.64 với hộp 1. Người C không chạm ai.
+- **`thr=0.5`:** giữ `[0, 3]`. Hộp 1 bị bỏ (đúng), nhưng hộp 2 cũng bị bỏ vì 0.54 vượt ngưỡng: **người B biến mất**.
+- **`thr=0.6`:** giữ `[0, 2, 3]`, đúng ba người. Lưu ý hộp 1 bị hộp 0 xóa trước, nên IoU 0.64 giữa hộp 1 và hộp 2 không còn ảnh hưởng.
+- **`thr=0.8`:** giữ cả 4 hộp, người A bị đếm hai lần.
+
+Không có ngưỡng nào đúng cho mọi cảnh. Mask R-CNN sống chung với điều này; DETR và Mask2Former tránh nó bằng cách ghép mỗi vật với đúng một truy vấn khi huấn luyện.
+
+### SAM với điểm gợi ý
+
+File dưới vẽ bằng PIL một ảnh $256 \times 256$: hai hình tròn đỏ chạm nhau (A, B) và một hình vuông xanh (C), cùng mask thật của từng hình. Bộ mã hóa ảnh chạy **một lần** để lấy embedding; sau đó mỗi hình nhận một điểm gợi ý ở giữa, và chỉ bộ giải mã chạy lại. Với mỗi điểm, code in diện tích ba mask SAM trả về, điểm `iou_scores` mô hình tự chấm, IoU thật so với mask đúng, và mask có `iou_scores` cao nhất. Lần đầu chạy, `transformers` tải checkpoint `facebook/sam-vit-base` (bản ViT-B, nhỏ nhất của SAM), khoảng 375 MB. Cách cài PyTorch bản CPU có ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+<LocalCode
+  code={samCode}
+  title="SAM: một embedding ảnh, ba điểm gợi ý"
+  packages={['torch', 'transformers', 'pillow']}
+  hardware="CPU là đủ. Khoảng 1–2 phút trên máy phát triển khi đã có checkpoint. Bước attention của bộ mã hóa ảnh cần cấp một khối bộ nhớ khoảng 0.8 GB, nên hãy để trống vài GB RAM"
+  sampleVaries={false}
+>
+
+```text
+image embedding: (1, 256, 64, 64)
+A area: [10250, 10214, 5127] truth: 5145
+  iou_scores: [0.731 0.933 1.016]
+  IoU vs truth: [0.501 0.5   0.997] best: 2
+B area: [11701, 10241, 5111] truth: 5145
+  iou_scores: [0.727 0.954 1.004]
+  IoU vs truth: [0.438 0.501 0.993] best: 2
+C area: [15843, 5751, 5747] truth: 5751
+  iou_scores: [0.89  1.015 0.999]
+  IoU vs truth: [0.363 1.    0.999] best: 1
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **`(1, 256, 64, 64)`:** ảnh được phóng lên $1024 \times 1024$ rồi thu 16 lần thành lưới $64 \times 64$, mỗi ô 256 kênh, đúng như bài báo mô tả. Ba điểm gợi ý dùng lại embedding này.
+- **Điểm trên hình tròn A:** mask thứ ba có diện tích 5127 pixel, gần bằng 5145 của mask thật, IoU 0.997. Hai mask đầu rộng khoảng gấp đôi (10250 và 10214 pixel) và có IoU với A khoảng 0.5: chúng phủ **cả hai hình tròn**. Đây đúng là sự mơ hồ SAM được thiết kế để xử lý: một điểm trên hình tròn đỏ có thể có nghĩa "hình tròn này" hoặc "khối đỏ gồm hai hình tròn chạm nhau". `iou_scores` xếp mask đúng lên đầu (`best: 2`).
+- **Hình tròn B:** giống A, mask tốt nhất có IoU 0.993.
+- **Hình vuông C:** mask thứ hai khớp hoàn toàn (IoU 1.0, diện tích 5751 bằng đúng mask thật), và cũng là mask có điểm cao nhất. Mask đầu tiên rộng gần gấp ba mask thật, IoU chỉ 0.363.
+- **`iou_scores` có thể lớn hơn 1** (1.016, 1.015): đây là đầu ra của một đầu hồi quy học bằng sai số bình phương, không bị chặn ở 1. Dùng nó để xếp hạng các mask, đừng coi là xác suất.
+
+Để ý hai hình tròn chạm nhau, giống B và C của ô NumPy đầu. Một điểm gợi ý đủ để SAM tách từng hình, việc mà `ndimage.label` không làm được.
+
+## Lỗi hay gặp
+
+:::caution[Coi mỗi mảng liền nhau trong mask semantic là một vật]
+Mask semantic không có thông tin "vật nào". Các vật cùng lớp chạm nhau (người trong đám đông, tế bào dính nhau, quả trong thùng) gộp thành một mảng, như B và C ở ô đầu. Mẹo co mask hay watershed chỉ cứu được khi chỗ chạm mỏng. Nếu cần đếm hay tách từng vật, hãy dùng mô hình instance hoặc panoptic, và đo bằng AP hay PQ thay vì mIoU: mIoU không thấy lỗi gộp vật.
+:::
+
+:::caution[Nghĩ SAM thay được mô hình phân vùng có nhãn]
+SAM trả về mask, không trả về "đây là người" hay "đây là xe". Nó cũng cần được chỉ vào: không có prompt thì phải rải một lưới điểm khắp ảnh rồi lọc trùng, và kết quả là mọi thứ "giống một vật", kể cả các phần nhỏ. Muốn mask có nhãn lớp, hãy ghép SAM với một bộ phát hiện hay bộ phân loại, hoặc dùng mô hình như Mask2Former đã học đúng các lớp bạn cần.
+:::
+
+:::caution[Lấy mask đầu tiên của SAM, hay đọc `iou_scores` như xác suất]
+Với một điểm, SAM trả 3 mask theo một thứ tự cố định, không theo chất lượng. Ở ô SAM của bài, mask đầu tiên không phải mask tốt nhất ở hình nào: IoU của nó chỉ 0.36 tới 0.50. Hãy chọn theo `iou_scores` (hoặc đặt `multimask_output=False` khi gợi ý đã rõ ràng, ví dụ một hộp hay nhiều điểm). Và `iou_scores` là ước lượng IoU, có thể vượt 1, không phải xác suất.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Semantic segmentation gán lớp cho pixel; instance segmentation tách từng vật đếm được (thing); panoptic làm cả hai, mỗi pixel một cặp (lớp, mã đối tượng). PQ ghép đoạn ở IoU lớn hơn 0.5 rồi tính $\text{PQ} = \text{SQ} \times \text{RQ}$: độ khít của mask nhân với F1 của việc tìm vật.
+- Mask R-CNN thêm đầu mask $28 \times 28$ vào Faster R-CNN: tìm hộp, rồi tô mask trong hộp. RoIAlign bỏ phép làm tròn tọa độ của RoIPool bằng nội suy song tuyến tính, đủ để AP của mask tăng rõ.
+- Hướng phân loại mask: $N$ truy vấn, mỗi truy vấn một mask $\sigma(\mathbf{e}_i^\top \mathbf{p}_{h,w})$ và một lớp, ghép đôi với vật thật khi huấn luyện nên không cần NMS. Mask2Former thêm masked attention (giá trị $-\infty$ ngoài vùng mask trước softmax) và dùng một kiến trúc cho cả ba bài toán.
+- SAM tách theo gợi ý: bộ mã hóa ảnh ViT chạy một lần, bộ giải mã nhẹ chạy cho mỗi điểm hay hộp, trả 3 mask kèm điểm IoU dự đoán khi gợi ý mơ hồ, học trên SA-1B (1.1 tỉ mask). SAM không cho nhãn lớp; SAM 2 mở rộng sang video bằng bộ nhớ.
+
+**Đọc thêm:**
+
+- Kirillov, A., He, K., Girshick, R., Rother, C., Dollár, P. (2019). [*Panoptic Segmentation*](https://arxiv.org/abs/1801.00868), arXiv:1801.00868, CVPR 2019, mục 3 và 4. Định nghĩa thing, stuff, bài toán panoptic, và chứng minh ngắn vì sao ngưỡng 0.5 cho ghép duy nhất.
+- He, K., Gkioxari, G., Dollár, P., Girshick, R. (2017). [*Mask R-CNN*](https://arxiv.org/abs/1703.06870), arXiv:1703.06870, mục 3 và bảng 2. Đầu mask, RoIAlign, và các thí nghiệm bỏ từng thành phần.
+- Carion, N. và cộng sự (2020). [*End-to-End Object Detection with Transformers*](https://arxiv.org/abs/2005.12872), arXiv:2005.12872, mục 3. Truy vấn vật thể và mất mát ghép đôi, nền của MaskFormer.
+- Cheng, B., Schwing, A. G., Kirillov, A. (2021). [*Per-Pixel Classification is Not All You Need for Semantic Segmentation*](https://arxiv.org/abs/2107.06278), arXiv:2107.06278, NeurIPS 2021; và Cheng, B., Misra, I., Schwing, A. G., Kirillov, A., Girdhar, R. (2022). [*Masked-attention Mask Transformer for Universal Image Segmentation*](https://arxiv.org/abs/2112.01527), arXiv:2112.01527, CVPR 2022, mục 3 và 4.6. MaskFormer, Mask2Former, và chính tác giả nói về giới hạn "vẫn huấn luyện riêng từng bài toán".
+- Kirillov, A. và cộng sự (2023). [*Segment Anything*](https://arxiv.org/abs/2304.02643), arXiv:2304.02643, mục 3 và 4; và Ravi, N. và cộng sự (2024). [*SAM 2: Segment Anything in Images and Videos*](https://arxiv.org/abs/2408.00714), arXiv:2408.00714. Kiến trúc ba phần, xử lý mơ hồ, động cơ dữ liệu; và phần mở rộng sang video.
+
+<LessonProgress />

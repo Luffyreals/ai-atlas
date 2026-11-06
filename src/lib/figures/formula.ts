@@ -3,24 +3,29 @@
 // beside a box. Each part keeps FigMath's rules (checkMathLabel), plus two additions for the DL figures:
 // `sup`, a superscript (the layer index [1] of the site's a^{[l]}), and `hat`, a hat on the symbol, drawn as the
 // precomposed letter (ŷ, U+0177): Barlow's subsets have it, but not the combining U+0302.
+// Also supports upright string pieces (e.g. "32", "×", ",") for CV figures (cv-lessons.md 4).
 // Pure functions, no DOM; relative imports only (Playwright e2e may import this file).
 import { FIG_FONT, checkMathLabel, round1, type MathLabel } from './geometry';
 
-/** One part of a formula: a FigMath label, with an optional superscript or hat. */
-export interface FormulaPart extends MathLabel {
-  /** Superscript, 13 units, raised with dy: 1–2 digits or Latin letters, bare or in square brackets ("[1]"). */
-  sup?: string;
-  /** A hat on the symbol: only letters with a precomposed form in Barlow (HATS). */
-  hat?: boolean;
-}
+/** One part of a formula: a FigMath label, with an optional superscript or hat, or an upright string piece. */
+export type FormulaPart =
+  | string
+  | (MathLabel & {
+      /** Superscript, 13 units, raised with dy: 1–2 digits or Latin letters, bare or in square brackets ("[1]"). */
+      sup?: string;
+      /** A hat on the symbol: only letters with a precomposed form in Barlow (HATS). */
+      hat?: boolean;
+    });
+
+export type Formula = readonly FormulaPart[];
 
 /** One tspan of a formula, in order. dx and dy are relative to the end of the previous tspan. */
 export interface FormulaSpan {
   text: string;
-  bold?: true;
-  italic?: true;
+  bold?: boolean;
+  italic?: boolean;
   /** 13 units (sub, sup) instead of the formula's size. */
-  small?: true;
+  small?: boolean;
   dx?: number;
   dy?: number;
 }
@@ -43,6 +48,10 @@ export const HATS: Readonly<Record<string, string>> = {
 };
 
 const MATH_SUP = /^(?:[A-Za-z0-9]{1,2}|\[[A-Za-z0-9]{1,2}\])$/;
+/** Upright characters of a formula: digits, spaces, and math symbols. */
+const FORMULA_UPRIGHT = /^[0-9 =+−\-.,<>≤≥()×·/]+$/u;
+/** Operators drawn with a gap of GAP on each side, as KaTeX spaces a binary or relation sign. */
+const FORMULA_SPACED = /^[=+−<>≤≥×·]$/u;
 /** Gap before an operator after the symbol, and after it before the next part ("x + f"). */
 const GAP = 3;
 /** Gap next to a bracket ("f(x)"): the italic f leans into it already. */
@@ -58,6 +67,13 @@ const opens = (text: string) => /[([]$/.test(text);
 export function checkFormula(parts: readonly FormulaPart[]): void {
   if (parts.length === 0) throw new Error('checkFormula: needs at least one part.');
   for (const part of parts) {
+    if (typeof part === 'string') {
+      const text = part.trim();
+      if (!text || !FORMULA_UPRIGHT.test(text)) {
+        throw new Error(`checkFormula: an upright run may hold only digits, spaces and = + − - . , < > ≤ ≥ ( ) × · /, got "${part}".`);
+      }
+      continue;
+    }
     checkMathLabel(part.symbol, part.sub, part.after, part.before);
     if (part.sup !== undefined && !MATH_SUP.test(part.sup)) {
       throw new Error(`checkFormula: sup must be 1–2 digits or Latin letters, bare or in [ ], got "${part.sup}".`);
@@ -93,6 +109,12 @@ export function formulaSpans(parts: readonly FormulaPart[], fontSize: number = F
   const gapBefore = (text: string) => (isBracket(text) || opens(previous) ? TIGHT : GAP);
 
   for (const part of parts) {
+    if (typeof part === 'string') {
+      const text = part.trim();
+      const spaced = FORMULA_SPACED.test(text);
+      push(text, { bold: false, italic: false }, spans.length === 0 ? 0 : spaced ? GAP : gapBefore(text));
+      continue;
+    }
     if (part.before !== undefined) push(part.before, {}, gapBefore(part.before));
     const symbol = part.hat ? (HATS[part.symbol] ?? part.symbol) : part.symbol;
     push(symbol, part.bold ? { bold: true } : { italic: true }, spans.length === 0 ? 0 : gapBefore(symbol));

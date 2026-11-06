@@ -3,8 +3,10 @@
 // fig-<id>, fig-<id>-desc. tests/unit/viz/figure-conventions.test.ts keeps components, files and keys in step.
 import { AGENT_LOOP } from './agent-loop';
 import { ATTENTION_MASK } from './attention-mask';
+import { CLIP_CONTRASTIVE } from './clip-contrastive';
 import { CONTAINER_IMAGE } from './container-image';
 import { ENCODER_DECODER } from './encoder-decoder';
+import { GENERATIVE_MODELS } from './generative-models';
 import { GRU_CELL } from './gru-cell';
 import { LORA } from './lora';
 import { LSTM_CELL } from './lstm-cell';
@@ -20,8 +22,11 @@ import { RESIDUAL_BLOCK } from './residual-block';
 import { RETRIEVER_READER } from './retriever-reader';
 import { RLHF_STAGES } from './rlhf-stages';
 import { RNN_UNROLLED } from './rnn-unrolled';
+import { SEGMENTATION_TASKS } from './segmentation-tasks';
 import { TRANSFORMER_BLOCK } from './transformer-block';
 import type { FigureText } from './types';
+import { UNET } from './unet';
+import { VIT } from './vit';
 import { WORD2VEC } from './word2-vec';
 
 export const FIGURES = {
@@ -46,5 +51,10 @@ export const FIGURES = {
   'word2-vec': WORD2VEC,
   'attention-mask': ATTENTION_MASK,
   'retriever-reader': RETRIEVER_READER,
+  vit: VIT,
+  unet: UNET,
+  'segmentation-tasks': SEGMENTATION_TASKS,
+  'clip-contrastive': CLIP_CONTRASTIVE,
+  'generative-models': GENERATIVE_MODELS,
 } as const satisfies Record<string, FigureText<string>>;
 export type FigureId = keyof typeof FIGURES;

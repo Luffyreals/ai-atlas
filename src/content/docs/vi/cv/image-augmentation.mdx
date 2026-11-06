@@ -1,0 +1,346 @@
+---
+title: Data augmentation trong CV
+description: Mô hình nhận ra chữ số ở giữa ảnh nhưng nhầm khi chữ lệch 1 pixel. Tăng cường dữ liệu bằng lật, cắt, xoay, đổi màu, cutout, mixup, CutMix và RandAugment.
+quiz:
+  - question: 'Bạn huấn luyện mô hình nhận biển báo giao thông, trong đó có hai lớp "cấm rẽ trái" và "cấm rẽ phải". Bạn nên làm gì với lật ngang (horizontal flip)?'
+    options:
+      - 'Lật ngang với xác suất 0.5 và giữ nguyên nhãn, vì lật ngang hầu như luôn an toàn'
+      - 'Chỉ lật ngang ảnh trong tập test, để kiểm mô hình có bền không'
+      - 'Không lật ngang hai lớp đó, hoặc lật rồi đổi nhãn trái thành phải và ngược lại'
+      - 'Thay bằng lật dọc, vì lật dọc không đổi hướng trái phải'
+    answer: 2
+    explanation: 'Lật ngang biến biển "cấm rẽ trái" thành đúng hình biển "cấm rẽ phải". Giữ nhãn cũ là dạy mô hình một nhãn sai. Phép biến đổi chỉ an toàn khi nhãn bất biến với nó; ở đây nhãn đổi theo cách biết trước, nên có thể lật rồi đổi nhãn. Lật dọc làm biển lộn ngược, thứ không bao giờ gặp trên đường, cũng không phải lựa chọn tốt.'
+  - question: 'Một ảnh mixup trộn ảnh mèo và ảnh chó với $\lambda = 0.25$ cho mèo, nên nhãn là $[0.25, 0.75]$ (mèo, chó). Mô hình dự đoán xác suất mèo $0.8$, chó $0.2$. Cross-entropy của mẫu này xấp xỉ bao nhiêu?'
+    options: ['$0.22$', '$1.26$', '$1.05$', '$1.61$']
+    answer: 1
+    explanation: 'Với nhãn mềm, cross-entropy là $-\sum_k \tilde{y}_k \ln p_k = -(0.25 \ln 0.8 + 0.75 \ln 0.2) \approx 0.056 + 1.207 = 1.26$, cũng bằng $\lambda$ nhân loss khi nhãn là mèo cộng $1 - \lambda$ nhân loss khi nhãn là chó. Số $0.22$ là loss khi chỉ coi ảnh là mèo. Số $1.05$ là $-\ln(0.25 \cdot 0.8 + 0.75 \cdot 0.2)$: trộn xác suất trước rồi mới lấy log, không phải công thức của mixup.'
+  - question: 'Bạn tự viết hàm xoay cho bài segmentation, và xoay mask (giá trị 0, 1, 2 là nền, đường, xe) bằng nội suy song tuyến (bilinear), giống ảnh. Ở biên giữa đường và xe xuất hiện các giá trị như $1.5$. Vấn đề là gì?'
+    options:
+      - 'Số lớp là tên gọi, không có thứ tự, nên trung bình của lớp 1 và lớp 2 là vô nghĩa; mask phải dùng nội suy gần nhất (nearest)'
+      - 'Không sao, làm tròn $1.5$ lên 2 là xong'
+      - 'Chỉ sai vì kiểu dữ liệu; đổi mask sang float là đúng'
+      - 'Ảnh cũng phải dùng nội suy gần nhất cho khớp với mask'
+    answer: 0
+    explanation: 'Nội suy song tuyến lấy trung bình các pixel lân cận. Với ảnh, trung bình hai độ sáng vẫn là một độ sáng. Với mask, "trung bình của đường và xe" không phải lớp nào; tệ hơn, trung bình của nền (0) và xe (2) ra 1 là "đường", một nhãn sai trông như hợp lệ. Vì vậy mask luôn dùng nội suy gần nhất, như `tv_tensors.Mask` của torchvision tự làm. Ảnh thì vẫn nên dùng song tuyến cho mượt.'
+  - question: 'Có 500 ảnh. Bạn tạo 10 bản dịch và xoay ngẫu nhiên cho mỗi ảnh, được 5 500 ảnh, rồi mới chia ngẫu nhiên 80% train, 20% test. Độ chính xác test rất cao. Điều nào đúng?'
+    options:
+      - 'Kết quả đáng tin, vì tập test lớn hơn trước nhiều'
+      - 'Kết quả đáng tin, vì ảnh test là ảnh đã biến đổi nên khó hơn'
+      - 'Augmentation vô ích ở đây, vì ảnh sau biến đổi chỉ là bản sao'
+      - 'Kết quả quá lạc quan, vì bản biến đổi của cùng một ảnh rơi vào cả train lẫn test'
+    answer: 3
+    explanation: 'Một bản dịch 1 pixel gần như trùng ảnh gốc. Chia sau khi augment thì gần như ảnh test nào cũng có "anh em" trong tập train, nên mô hình chỉ cần nhớ, và điểm test đo trí nhớ chứ không đo tổng quát hóa: đây là rò rỉ dữ liệu. Cách đúng: chia train, kiểm định, test trên ảnh gốc trước, rồi chỉ augment tập train, mỗi epoch bốc thăm phép biến đổi mới.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import galleryCode from '@code/cv/image-augmentation/gallery.vi.py?raw';
+import shiftExperimentCode from '@code/cv/image-augmentation/shift-experiment.vi.py?raw';
+import pipelineCode from '@code/cv/image-augmentation/torchvision-pipeline.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu **tăng cường dữ liệu** (data augmentation) là dạy mô hình điều gì *không* được làm đổi nhãn, và vì sao nó là một dạng regularization.
+- Chọn được phép biến đổi hình học (lật, cắt ngẫu nhiên, xoay, co giãn) và quang học (độ sáng, tương phản, màu, nhiễu, làm mờ) hợp với bài toán, và nhận ra khi nào một phép làm sai nhãn.
+- Tự viết được cutout, mixup và CutMix, kể cả công thức trộn nhãn của mixup, và biết RandAugment rút việc chọn chính sách augmentation về hai số $N$, $M$.
+- Cài đặt được một pipeline `torchvision.transforms.v2` biến đổi ảnh, mask và hộp bao cùng lúc, và chỉ augment tập train.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+**Tiền xử lý dữ liệu** (data preprocessing) là các bước đưa dữ liệu thô về dạng mô hình học được, ví dụ chia giá trị pixel 0–255 về 0–1. Dữ liệu được chia thành **tập huấn luyện** (training set), **tập kiểm định** (validation set) để chọn siêu tham số và **tập kiểm tra** (test set) để chấm một lần cuối. Mọi bước "học" từ dữ liệu, kể cả tạo mẫu mới, chỉ được nhìn tập train; để thông tin của tập test lọt vào là **rò rỉ dữ liệu** (data leakage), làm điểm test đẹp giả.
+:::
+
+## Trực giác
+
+### Một chữ số lệch 1 pixel
+
+Bạn huấn luyện một mạng nhỏ nhận chữ số viết tay trên 300 ảnh $8 \times 8$ của `load_digits`. Trên ảnh test, nó đúng khoảng 94%. Rồi bạn dịch mỗi ảnh test đi tối đa 1 pixel, ngang hoặc dọc. Với mắt người, chữ số không đổi gì. Với mô hình, độ chính xác rơi xuống khoảng 40% (ô scikit-learn ở mục Ví dụ code cho đúng các số này).
+
+Chuyện gì đã xảy ra? Mô hình chưa bao giờ thấy một chữ số 6 nằm lệch sang phải. Nó học "pixel ở cột 3 đậm thì là 6", không học "hình có vòng tròn ở dưới thì là 6". Với 300 ảnh, cả hai quy tắc đều giải thích dữ liệu train như nhau, và mô hình chọn quy tắc dễ hơn.
+
+### Dạy điều không được làm đổi nhãn
+
+Cách sửa đơn giản nhất: cho mô hình thấy chữ số ở nhiều vị trí. Bạn không cần thu thêm ảnh. Bạn tự dịch các ảnh train đã có, giữ nguyên nhãn, rồi đưa vào huấn luyện. Mỗi ảnh dịch là một câu nói với mô hình: "dịch 1 pixel không đổi chữ số này".
+
+Đó là toàn bộ ý tưởng của tăng cường dữ liệu. Bạn biết trước một số phép biến đổi **không làm đổi đáp án**: chó lật ngang vẫn là chó, ảnh tối hơn một chút vẫn là ảnh đó. Bạn biến kiến thức này thành dữ liệu, vì mô hình chỉ học được từ dữ liệu.
+
+Nhưng không phải phép nào cũng an toàn. Xoay số 6 đi 180 độ được số 9. Lật ngang chữ "b" được chữ "d". Lật ngang một phim X-quang ngực đưa tim sang bên phải, thành một ca bệnh hiếm. Phép biến đổi nào an toàn tùy vào **bài toán**, không tùy vào ảnh.
+
+**Câu hỏi của bài:** chọn phép biến đổi nào, áp vào đâu (ảnh, nhãn, mask, hộp bao), và vì sao việc "chế thêm dữ liệu" này lại làm mô hình tổng quát hóa tốt hơn chứ không chỉ học thuộc nhiều hơn?
+
+## Lý thuyết
+
+### Ký hiệu
+
+Ảnh $\mathbf{X} \in \mathbb{R}^{H \times W \times C}$ (cao $H$, rộng $W$, $C$ kênh màu), nhãn $y$, mô hình $f$. Mẫu thứ $i$ của tập train là $(\mathbf{X}^{(i)}, y^{(i)})$, có $m$ mẫu. Một **phép biến đổi** (transformation) $T$ nhận một ảnh và trả về một ảnh cùng cỡ hoặc khác cỡ, ví dụ "lật ngang" hay "dịch phải 1 pixel". Bài toán segmentation có thêm mask $\mathbf{M}$: mỗi pixel một số lớp.
+
+### Bất biến và đồng biến
+
+Với phân loại, ta muốn mô hình **bất biến** (invariant) với $T$: biến đổi ảnh không làm đổi dự đoán.
+
+$$
+f(T(\mathbf{X})) = f(\mathbf{X})
+$$
+
+Với segmentation thì khác. Lật ảnh thì đáp án đúng cũng phải lật theo: con mèo sang bên trái thì vùng "mèo" trong mask cũng sang bên trái. Ta muốn mô hình **đồng biến** (equivariant) với $T$: biến đổi đầu vào thì đầu ra đổi theo đúng phép đó.
+
+$$
+f(T(\mathbf{X})) = T(f(\mathbf{X}))
+$$
+
+Phát hiện vật thể (object detection) cũng vậy: hộp bao (bounding box) phải dời theo vật. Đây là lý do mục "Ví dụ code" đưa ảnh, mask và hộp qua **cùng một** phép biến đổi.
+
+CNN có sẵn một phần tính chất này: tích chập trượt cùng một kernel khắp ảnh nên đồng biến với phép dịch (xem bài [Phân loại ảnh với CNN](/vi/cv/cnn-image-classification/)). Nhưng nó không tự bất biến với phép xoay, co giãn hay đổi độ sáng. Mạng kết nối đầy đủ như MLP thì không có sẵn tính chất nào: với nó, pixel ở cột 3 và pixel ở cột 4 là hai đặc trưng chẳng liên quan gì nhau. Augmentation là cách đưa các tính chất còn thiếu vào bằng dữ liệu.
+
+### Augmentation trong hàm mất mát
+
+Huấn luyện bình thường làm nhỏ trung bình mất mát $\ell$ trên tập train:
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = \frac{1}{m}\sum_{i=1}^{m} \ell\big(f(\mathbf{X}^{(i)}), y^{(i)}\big)
+$$
+
+Có augmentation, mỗi lần mô hình gặp ảnh $i$, ta bốc thăm một phép $T$ từ một tập phép biến đổi (ví dụ "dịch ngẫu nhiên tối đa 1 pixel"). Huấn luyện qua nhiều epoch, mỗi epoch một lần bốc thăm, nên điều được làm nhỏ thực chất là mất mát **trung bình trên mọi phép $T$**:
+
+$$
+\mathcal{L}_{\text{aug}}(\boldsymbol{\theta}) = \frac{1}{m}\sum_{i=1}^{m} \mathbb{E}_{T}\Big[\ell\big(f(T(\mathbf{X}^{(i)})), y^{(i)}\big)\Big]
+$$
+
+Kỳ vọng $\mathbb{E}_T$ ở đây là trung bình theo cách bốc thăm $T$. Đọc công thức này theo hai cách:
+
+- **Thêm dữ liệu.** Mỗi ảnh gốc trở thành cả một "đám" ảnh, cùng nhãn. Tập train hiệu dụng lớn hơn nhiều lần.
+- **Một khoản phạt.** Mô hình nào cho dự đoán khác nhau trên $\mathbf{X}$ và $T(\mathbf{X})$ thì chắc chắn sai ở một trong hai, nên bị phạt. Hàm mất mát mới loại bớt những mô hình "học thuộc vị trí pixel", giống regularization ở bài [Ridge, Lasso, Elastic Net](/vi/ml/regularization/) loại bớt những mô hình có hệ số khổng lồ.
+
+Vì thế augmentation là một cách chống [overfitting](/vi/ml/overfitting-underfitting/): nó không cho mô hình bám vào chi tiết chỉ đúng với vài trăm ảnh train. Và cũng như hệ số phạt $\lambda$, có thể phạt quá tay: biến đổi mạnh tới mức ảnh mất nghĩa thì mô hình underfit.
+
+:::note[Ghi nhớ]
+Augmentation là nói với mô hình "các phép biến đổi này không đổi đáp án" (phân loại), hoặc "đáp án đổi theo đúng phép này" (segmentation, detection), bằng cách đưa ảnh đã biến đổi vào huấn luyện. Nó đúng khi kiến thức đó đúng với bài toán.
+:::
+
+### Phép hình học và phép quang học
+
+**Phép hình học** (geometric) dời chỗ các pixel, không đổi giá trị:
+
+- **Lật ngang** (horizontal flip): ảnh tự nhiên gần như luôn an toàn. **Lật dọc** chỉ hợp với ảnh không có "phía trên", như ảnh vệ tinh hay tiêu bản kính hiển vi.
+- **Cắt ngẫu nhiên** (random crop) và **cắt co giãn ngẫu nhiên** (random resized crop): lấy một vùng ngẫu nhiên rồi co về cỡ cố định. Mô hình thấy vật ở nhiều vị trí và nhiều cỡ. AlexNet (Krizhevsky và cộng sự, 2012) đã cắt vùng $224 \times 224$ ngẫu nhiên từ ảnh $256 \times 256$ cộng lật ngang; đây là một trong hai cách chống overfitting chính của paper, cách kia là dropout.
+- **Xoay** (rotation) vài độ, **co giãn** (scaling), **xô nghiêng** (shear). Khi xoay, các góc ảnh lộ ra chỗ trống phải điền (thường bằng 0), và pixel mới phải nội suy từ pixel cũ.
+
+**Phép quang học** (photometric) đổi giá trị pixel, giữ nguyên chỗ:
+
+- **Độ sáng, tương phản** (brightness, contrast): mô phỏng ảnh chụp lúc sáng, lúc tối, máy ảnh khác nhau.
+- **Màu** (color jitter: độ bão hòa, sắc độ): mô phỏng ánh sáng vàng, trắng.
+- **Nhiễu** (noise) và **làm mờ** (blur): mô phỏng cảm biến kém, ảnh rung.
+
+Phép quang học không dời pixel nào, nên mask và hộp bao **giữ nguyên**. Chỉ phép hình học phải áp lên cả mask và hộp.
+
+### Khi nào phép biến đổi làm sai nhãn
+
+Phép $T$ chỉ an toàn khi nhãn thật sự bất biến với nó. Vài ví dụ nhãn **không** bất biến:
+
+- **Chữ số và chữ viết:** xoay 180 độ đổi 6 thành 9; lật ngang biến chữ thành chữ ngược, thứ không có trong dữ liệu thật.
+- **Hướng có nghĩa:** biển "rẽ trái" lật ngang thành "rẽ phải". Ảnh y tế có trái phải giải phẫu: tim nằm bên trái lồng ngực, nên lật phim X-quang tạo ra một ca bệnh khác.
+- **Màu có nghĩa:** phân loại quả chín hay xanh, đèn giao thông đỏ hay xanh: đổi sắc độ là đổi nhãn.
+- **Cắt quá tay:** cắt ngẫu nhiên một vùng nhỏ có thể bỏ mất cả vật cần nhận.
+
+Kiểm tra đơn giản nhất: in ra vài chục ảnh đã augment và tự hỏi "mình có còn gán đúng nhãn cũ cho ảnh này không?".
+
+### Cutout, mixup, CutMix
+
+Ba kỹ thuật dưới đây không mô phỏng thứ gì có thật. Chúng tạo ảnh "lạ" có chủ đích để mô hình khỏi dựa vào một chi tiết duy nhất.
+
+**Cutout** (DeVries và Taylor, 2017): xóa một ô vuông cỡ cố định ở vị trí ngẫu nhiên, điền 0. Mô hình phải nhận ra chó cả khi phần đầu bị che, nên không dựa hết vào một vùng.
+
+**Mixup** (Zhang và cộng sự, 2018): trộn hai ảnh **và** hai nhãn với cùng một hệ số. Nhãn viết dạng vectơ one-hot $\mathbf{y}$ (một số 1 ở vị trí lớp đúng, còn lại 0):
+
+$$
+\begin{aligned}
+\tilde{\mathbf{X}} &= \lambda\,\mathbf{X}^{(i)} + (1 - \lambda)\,\mathbf{X}^{(j)} \\
+\tilde{\mathbf{y}} &= \lambda\,\mathbf{y}^{(i)} + (1 - \lambda)\,\mathbf{y}^{(j)}
+\end{aligned}
+$$
+
+Hệ số $\lambda \in [0, 1]$ được bốc thăm từ phân phối Beta$(\alpha, \alpha)$; với $\alpha$ nhỏ, $\lambda$ thường gần 0 hoặc gần 1, tức đa số ảnh chỉ bị trộn nhẹ. Paper thấy $\alpha$ từ 0.1 tới 0.4 cải thiện kết quả trên ImageNet, còn $\alpha$ lớn làm mô hình underfit. Hai ảnh được trộn thường lấy trong cùng một mini-batch sau khi xáo thứ tự.
+
+Nhãn $\tilde{\mathbf{y}}$ là **nhãn mềm** (soft label): ví dụ $0.7$ cho lớp 6, $0.3$ cho lớp 1. Cross-entropy với nhãn mềm vẫn là $-\sum_k \tilde{y}_k \ln p_k$, với $p_k$ là xác suất mô hình gán cho lớp $k$. Thay $\tilde{y}_k$ vào:
+
+$$
+\begin{aligned}
+-\sum_k \tilde{y}_k \ln p_k &= -\sum_k \big(\lambda y^{(i)}_k + (1-\lambda) y^{(j)}_k\big) \ln p_k \\
+&= \lambda\Big(-\sum_k y^{(i)}_k \ln p_k\Big) + (1-\lambda)\Big(-\sum_k y^{(j)}_k \ln p_k\Big)
+\end{aligned}
+$$
+
+Dòng thứ hai chỉ tách tổng thành hai phần. Mỗi ngoặc là cross-entropy thường với một nhãn cứng. Vậy mất mát của mixup là **trung bình có trọng số của hai mất mát**: "ảnh này là lớp $i$" với trọng số $\lambda$, "là lớp $j$" với trọng số $1 - \lambda$. Nhiều code cài mixup đúng theo dòng thứ hai, không cần tạo vectơ nhãn mềm.
+
+Vì sao trộn hai ảnh vô nghĩa lại giúp? Mixup đòi mô hình đi "thẳng" giữa hai mẫu: ảnh lưng chừng giữa 6 và 1 thì dự đoán cũng lưng chừng, không nhảy đột ngột. Đó là một ràng buộc kiểu regularization, làm mô hình bớt tự tin thái quá.
+
+**CutMix** (Yun và cộng sự, 2019) gộp hai ý trên: thay vì xóa một ô (cutout) hay trộn mờ cả ảnh (mixup), nó **cắt một hình chữ nhật từ ảnh $j$ dán đè lên ảnh $i$**. Gọi $\mathbf{B}$ là ma trận cùng cỡ ảnh, bằng 1 ở chỗ giữ ảnh $i$ và 0 trong hình chữ nhật, $\odot$ là nhân từng phần tử:
+
+$$
+\tilde{\mathbf{X}} = \mathbf{B} \odot \mathbf{X}^{(i)} + (\mathbf{1} - \mathbf{B}) \odot \mathbf{X}^{(j)}
+$$
+
+Nhãn trộn như mixup, với $\lambda$ bằng **tỉ lệ diện tích** còn của ảnh $i$. Để hình chữ nhật chiếm đúng phần $1 - \lambda$ diện tích, hai cạnh của nó là $W\sqrt{1-\lambda}$ và $H\sqrt{1-\lambda}$: tích hai cạnh là $(1 - \lambda)WH$. Hình chữ nhật bị cắt bớt khi chạm mép ảnh, nên code tính lại $\lambda$ từ diện tích thật. So với cutout, không pixel nào bị phí; so với mixup, mỗi vùng ảnh vẫn là ảnh thật, mô hình học được "vật ở đâu".
+
+### Từ AutoAugment tới RandAugment
+
+Chọn phép biến đổi nào, mạnh cỡ nào, với xác suất bao nhiêu? Có hàng chục phép, mỗi phép một độ mạnh, nên số tổ hợp rất lớn.
+
+**AutoAugment** (Cubuk và cộng sự, 2019) để máy tìm. Một **chính sách** (policy) gồm nhiều chính sách con; mỗi chính sách con có hai phép, mỗi phép kèm xác suất áp dụng và độ mạnh. Mỗi ảnh trong mỗi mini-batch được áp một chính sách con chọn ngẫu nhiên. Thuật toán tìm (học tăng cường) thử rất nhiều chính sách, mỗi lần huấn luyện một mô hình nhỏ trên một phần dữ liệu và chấm trên tập kiểm định. Kết quả tốt, nhưng tìm rất tốn: theo paper RandAugment, riêng bản AutoAugment cho phát hiện vật thể tốn 15 nghìn giờ GPU.
+
+**RandAugment** (Cubuk và cộng sự, 2020) bỏ hẳn bước tìm. Có một danh sách cố định 14 phép (xoay, xô nghiêng, dịch, tương phản, độ sáng, độ nét…). Với mỗi ảnh:
+
+1. Chọn ngẫu nhiên $N$ phép trong danh sách, mỗi phép xác suất như nhau.
+2. Áp lần lượt từng phép với **cùng một độ mạnh** $M$, trên thang số nguyên 0 tới 10 (10 là mạnh nhất của từng phép).
+
+Chỉ còn hai số, và cả hai dễ hiểu: $N$, $M$ càng lớn thì regularization càng mạnh. Paper ước không gian tìm kiếm giảm từ khoảng $10^{32}$ (AutoAugment) xuống khoảng $10^{2}$, nhỏ tới mức thử lưới vài giá trị trên chính bài toán là đủ. Paper còn thấy độ mạnh tốt nhất **tăng** theo cỡ mô hình và cỡ tập train. Đây là lý do không nên tìm chính sách trên một bài toán nhỏ rồi đem sang bài toán lớn.
+
+### Chỉ augment tập train, và test-time augmentation
+
+Augmentation ngẫu nhiên chỉ dùng khi **huấn luyện**. Tập kiểm định và tập test chỉ đi qua các bước tất định: co về cỡ chuẩn, cắt giữa, chuẩn hóa pixel. Nếu tập test cũng bị biến đổi ngẫu nhiên, điểm test đổi theo mỗi lần chạy và không so được với ai.
+
+Ngoại lệ có chủ đích là **test-time augmentation** (TTA): lúc dự đoán, đưa vài bản biến đổi cố định của cùng một ảnh test (ví dụ ảnh gốc và ảnh lật ngang) qua mô hình rồi lấy trung bình xác suất. AlexNet làm vậy với 10 vùng cắt (bốn góc, giữa, cùng bản lật của chúng). TTA thường tăng độ chính xác một chút, đổi lại chậm hơn nhiều lần khi suy luận.
+
+### Giới hạn
+
+- **Không tạo ra thông tin mới.** Augmentation chỉ nhân các biến thể mà bạn đã biết trước. Mô hình chưa từng thấy ảnh ban đêm thì tăng độ tối không thay được dữ liệu ban đêm thật.
+- **Có thể phạt quá tay.** Biến đổi mạnh làm mô hình underfit, và độ chính xác trên ảnh sạch có thể giảm nhẹ. Mục Ví dụ code cho thấy chuyện này khi thay MLP bằng mô hình tuyến tính.
+- **Học tự giám sát dùng augmentation làm tín hiệu chính:** hai bản biến đổi của cùng ảnh phải cho biểu diễn giống nhau. Bài [Self-supervised learning với ảnh](/vi/cv/self-supervised-learning/) đi tiếp ý này.
+
+## Minh họa
+
+Ô dưới đây là phần minh họa chính của bài: cùng một chữ số 6 (chữ số 6 thứ nhất của `load_digits`, giá trị pixel chia 16 để về đoạn 0 tới 1) qua chín phép biến đổi viết bằng NumPy và `scipy.ndimage`. Mixup dùng $\lambda = 0.7$ cố định cho dễ đọc, thay vì bốc thăm từ Beta$(\alpha, \alpha)$. Để biết mỗi ảnh "trông giống" chữ số nào, ô dùng một bộ phân loại rất thô: tính ảnh trung bình của từng chữ số trên cả 1 797 ảnh, rồi chọn chữ số có ảnh trung bình gần nhất. Bấm Chạy, rồi nhìn vào số trong ngoặc ở tiêu đề mỗi ô. Lần đầu chạy lâu hơn, vì trình duyệt phải tải thêm SciPy, scikit-learn và matplotlib.
+
+<PythonRunner
+  code={galleryCode}
+  title="Lật, dịch, xoay, nhiễu, cutout, mixup"
+  figureAlt={['Lưới 3 x 3 ảnh xám 8 x 8 của cùng một chữ số 6, mỗi ô ghi tên phép biến đổi và chữ số đoán được trong ngoặc: original (6), flip (1), shift 1px (1), rotate 15 (6), rotate 180 (9), contrast (6), noise (6), cutout (6), mixup (1). Ảnh xoay 180 độ trông như số 9; ảnh mixup là một hình lưng chừng giữa 6 và 1.']}
+/>
+
+Dòng `mixup label` in vectơ 10 số: $0.3$ ở vị trí 1 và $0.7$ ở vị trí 6, đúng công thức $\tilde{\mathbf{y}} = \lambda\mathbf{y}^{(i)} + (1-\lambda)\mathbf{y}^{(j)}$. Dịch dùng `order=0` (nội suy gần nhất) và `cval=0` (ô trống điền nền trắng của ảnh, giá trị 0); xoay dùng `order=1` (song tuyến), nên ảnh xoay hơi nhòe.
+
+Ba điều đáng để ý:
+
+- **Xoay 180 độ** cho một hình mà chính bạn cũng đọc là 9: phép này làm sai nhãn, không được dùng cho chữ số.
+- **Dịch 1 pixel** làm bộ phân loại thô đoán sai, dù với mắt người ảnh gần như không đổi. Đó chính là kiểu mô hình mà augmentation dịch chuyển giúp được.
+- **Mixup** cho một hình không phải chữ số nào. Nó không cần trông thật; nhãn của nó là $0.7$ cho 6, $0.3$ cho 1.
+
+Bảng dưới tóm tắt khi nào dùng và khi nào tránh từng phép.
+
+| Phép biến đổi | Hợp với | Tránh khi | Mask, hộp bao |
+|---|---|---|---|
+| Lật ngang | Ảnh tự nhiên: động vật, đồ vật, cảnh | Chữ viết, biển chỉ hướng, ảnh y tế có trái phải | Lật theo |
+| Lật dọc, xoay 90 độ | Ảnh vệ tinh, kính hiển vi (không có "phía trên") | Ảnh có trọng lực: người, cảnh đường phố | Lật, xoay theo |
+| Cắt co giãn ngẫu nhiên | Phân loại ảnh nói chung | Vật nhỏ, dễ bị cắt mất; đếm vật | Cắt theo, bỏ hộp ra ngoài khung |
+| Xoay nhỏ, xô nghiêng | Chữ số, ảnh chụp cầm tay | Góc có nghĩa (đồng hồ, kim la bàn) | Xoay theo, nội suy gần nhất cho mask |
+| Độ sáng, tương phản | Ảnh chụp ngoài trời, nhiều máy ảnh | Độ sáng có nghĩa (ảnh y tế đo mật độ) | Giữ nguyên |
+| Đổi màu, sắc độ | Màu không quyết định lớp | Màu là nhãn: quả chín, đèn giao thông | Giữ nguyên |
+| Nhiễu, làm mờ | Ảnh cảm biến rẻ, ảnh rung | Chi tiết nhỏ là nhãn: vết nứt, chữ nhỏ | Giữ nguyên |
+| Cutout | Mô hình dựa vào một vùng duy nhất | Vật nhỏ có thể bị che hết | Phải xử lý riêng (vật bị che hết) |
+| Mixup, CutMix | Phân loại, nhất là dữ liệu ít, nhiều lớp | Bài toán cần nhãn cứng; segmentation (cần cách trộn mask riêng) | Trộn theo diện tích (CutMix) |
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: các ô chạy trên trang với Python 3.14, NumPy 2.4, SciPy 1.18 và scikit-learn 1.8 (bản có trong Pyodide), ô PyTorch với Python 3.14, PyTorch 2.15 và torchvision 0.29 trên CPU. Ô scikit-learn dưới đây (và ô ở mục Minh họa) chạy ngay trên trang, ô PyTorch chạy trên máy bạn. Các ô độc lập, không dùng biến của nhau.
+
+### Có và không có augmentation dịch chuyển
+
+Ô này làm lại thí nghiệm ở mục Trực giác. Nó chia 300 ảnh train (đủ cả 10 chữ số theo đúng tỉ lệ, nhờ `stratify`) và 1 497 ảnh test. Tập test có hai bản: ảnh gốc, và cùng các ảnh đó bị dịch ngẫu nhiên tối đa 1 pixel theo mỗi chiều. Mô hình là `MLPClassifier`, một mạng một lớp ẩn 64 nơ-ron, huấn luyện hai lần cùng seed: một lần trên 300 ảnh gốc, một lần trên 300 ảnh gốc cộng 4 bản dịch ngẫu nhiên của mỗi ảnh (1 500 ảnh). Augmentation chỉ chạm vào tập train. Ô cần khoảng chục giây trở lên, vì phải huấn luyện mạng hai lần.
+
+<PythonRunner code={shiftExperimentCode} title="Huấn luyện có và không có dịch ngẫu nhiên" />
+
+Đọc kết quả:
+
+- **Không augmentation:** đúng $0.938$ trên ảnh test gốc, chỉ $0.401$ trên ảnh test bị dịch. Mô hình đã học vị trí pixel, như ở mục Trực giác.
+- **Có augmentation:** $0.937$ trên ảnh gốc, gần như không đổi, và $0.882$ trên ảnh bị dịch. Mô hình đã học được "dịch 1 pixel không đổi chữ số", dù không thấy thêm ảnh thật nào.
+- Mạng không có tính chất dịch chuyển sẵn như CNN, nên mọi bất biến nó có đều đến từ dữ liệu.
+
+Thử đổi mô hình thành `LogisticRegression(max_iter=2000)` (nhớ sửa dòng import). Kết quả: không augmentation $0.935$ và $0.372$; có augmentation $0.883$ và $0.595$. Mô hình tuyến tính quá đơn giản để vừa nhận đúng ảnh gốc vừa chịu được phép dịch, nên augmentation kéo độ chính xác trên ảnh gốc xuống: đây là chuyện "phạt quá tay" ở mục Giới hạn. Phép biến đổi phải đi cùng một mô hình đủ sức học tính bất biến.
+
+### Pipeline torchvision v2: ảnh, mask và hộp bao cùng lúc
+
+Trong dự án thật, bạn không tự viết từng phép mà dùng `torchvision.transforms.v2`. Từ torchvision 0.15 (3/2023), các phép v2 nhận được cả ảnh, mask và hộp bao trong một lần gọi, nếu chúng được gói trong `tv_tensors`. File dưới đây tự vẽ một ảnh $128 \times 128$ bằng PIL (hình vuông đỏ là lớp 1, hình tròn xanh là lớp 2), tạo mask và hộp bao của hình vuông, rồi đưa qua pipeline: cắt co giãn ngẫu nhiên về $96 \times 96$, lật ngang, xoay tối đa 15 độ, đổi độ sáng, tương phản, độ bão hòa, đổi kiểu sang số thực. Để kiểm ảnh và mask còn khớp nhau, file đoán lớp của từng pixel từ màu (đỏ trội là 1, xanh trội là 2) rồi so với mask.
+
+<LocalCode
+  code={pipelineCode}
+  title="Biến đổi đồng bộ ảnh, mask và hộp bao"
+  packages={['torch', 'torchvision', 'pillow']}
+  hardware="CPU là đủ. Phần tính chỉ mất chưa tới một giây; phần lớn thời gian là nạp PyTorch"
+  sampleVaries={false}
+>
+
+```text
+image: (3, 96, 96) torch.float32
+mask: (96, 96) torch.uint8 values [0, 1, 2]
+box before: [[16, 20, 61, 65]] after: [[48, 0, 87, 41]]
+agreement, one call: 0.993
+agreement, two calls: 0.400
+eval image: (3, 96, 96)
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **`image`:** cắt co giãn đưa ảnh về $96 \times 96$, `ToDtype(..., scale=True)` đổi 0–255 thành 0–1.
+- **`mask ... values [0, 1, 2]`:** mask vẫn chỉ có ba số lớp, không có giá trị lưng chừng. torchvision biết `tv_tensors.Mask` là nhãn nên dùng nội suy gần nhất, và các phép đổi màu bỏ qua mask.
+- **`box`:** hộp của hình vuông dời và co theo ảnh. Sau khi xoay, hộp mới là hộp nhỏ nhất bao được hình đã xoay, nên có thể rộng hơn vật một chút.
+- **`agreement, one call: 0.993`:** màu của ảnh và mask khớp ở 99.3% pixel; phần lệch chỉ là các pixel ở viền hình, nơi màu của ảnh đã bị nội suy song tuyến thành màu lưng chừng còn mask thì không.
+- **`agreement, two calls: 0.400`:** gọi pipeline hai lần riêng cho ảnh và mask thì mỗi lần bốc thăm một phép cắt, lật, xoay khác nhau. Chỉ 40% pixel còn khớp: mô hình sẽ học từ một mask lệch với ảnh.
+- **`eval image`:** pipeline cho tập kiểm định và tập test là một `Compose` khác, chỉ có các bước tất định, nên cùng một ảnh luôn cho cùng một kết quả:
+
+```python
+eval_tf = v2.Compose([v2.Resize(110), v2.CenterCrop(96),
+                      v2.ToDtype(torch.float32, scale=True)])
+```
+
+Muốn thêm RandAugment vào pipeline train, dùng `v2.RandAugment(num_ops=2, magnitude=9)`: $N = 2$, $M = 9$, cũng là giá trị mặc định của torchvision. Lưu ý thang độ mạnh của torchvision mặc định có 31 mức (`num_magnitude_bins=31`), khác thang 0 tới 10 của paper. Nếu mô hình cần, thêm `v2.Normalize(mean, std)` ở cuối cả hai pipeline.
+
+## Lỗi hay gặp
+
+:::caution[Augment trước rồi mới chia train, test]
+Tạo sẵn các bản biến đổi cho cả bộ dữ liệu rồi mới chia ngẫu nhiên thì bản dịch 1 pixel của một ảnh nằm trong train, ảnh gốc nằm trong test. Mô hình chỉ cần nhớ, điểm test cao giả: rò rỉ dữ liệu. Chia trước trên ảnh gốc, và nếu nhiều ảnh chụp cùng một vật hay một bệnh nhân thì chia theo nhóm. Sau đó chỉ augment tập train, tốt nhất là bốc thăm phép biến đổi mới mỗi epoch thay vì tạo sẵn một lần.
+:::
+
+:::caution[Biến đổi ảnh mà quên mask hoặc hộp bao]
+Với segmentation và detection, mọi phép hình học phải áp lên ảnh, mask và hộp bằng **cùng một** lần bốc thăm. Gọi pipeline hai lần riêng làm mask lệch, như ô code cuối (chỉ 40% pixel khớp). Dùng `tv_tensors.Mask`, `tv_tensors.BoundingBoxes` và một lần gọi duy nhất. Tự viết thì nội suy mask bằng gần nhất (nearest), không bao giờ song tuyến. Sau khi cắt, hộp có thể nằm ngoài khung hoặc chỉ còn một vệt mỏng: `v2.SanitizeBoundingBoxes` bỏ các hộp đó.
+:::
+
+:::caution[Dùng phép biến đổi mặc định mà không nghĩ tới nhãn]
+Code mẫu trên mạng hay có `RandomHorizontalFlip` và `ColorJitter`, vì chúng hợp với ImageNet. Chép sang bài toán chữ viết, biển chỉ hướng, ảnh y tế hay phân loại theo màu có thể dạy mô hình nhãn sai. Trước khi huấn luyện, in ra vài chục ảnh đã augment kèm nhãn và kiểm bằng mắt.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Augmentation đưa vào dữ liệu kiến thức "phép biến đổi này không đổi đáp án" (bất biến, cho phân loại) hoặc "đáp án đổi theo đúng phép này" (đồng biến, cho segmentation, detection). Nó làm nhỏ mất mát trung bình trên các phép biến đổi, nên vừa là thêm dữ liệu vừa là một dạng regularization.
+- Phép hình học (lật, cắt, xoay) dời pixel và phải áp cả lên mask, hộp bao; phép quang học (sáng, tương phản, màu, nhiễu, mờ) chỉ đổi giá trị pixel. Phép nào an toàn tùy bài toán: xoay 180 độ biến 6 thành 9.
+- Cutout xóa một ô, mixup trộn hai ảnh và hai nhãn $\tilde{\mathbf{y}} = \lambda\mathbf{y}^{(i)} + (1-\lambda)\mathbf{y}^{(j)}$, CutMix dán một vùng ảnh này lên ảnh kia và trộn nhãn theo diện tích. RandAugment thay việc tìm chính sách tốn kém của AutoAugment bằng hai số $N$, $M$.
+- Chỉ augment tập train, sau khi đã chia dữ liệu. Tập kiểm định, test chỉ qua các bước tất định; test-time augmentation là ngoại lệ có chủ đích.
+
+**Đọc thêm:**
+
+- Shorten, C., Khoshgoftaar, T. M. (2019). [*A survey on Image Data Augmentation for Deep Learning*](https://doi.org/10.1186/s40537-019-0197-0). Journal of Big Data 6, 60. Tổng quan các nhóm phép biến đổi, đọc mục về phép hình học, quang học và tính "an toàn" của phép biến đổi.
+- Zhang, H., Cissé, M., Dauphin, Y. N., Lopez-Paz, D. (2018). [*mixup: Beyond Empirical Risk Minimization*](https://arxiv.org/abs/1710.09412). ICLR 2018. Mục 2 có công thức và đoạn code PyTorch vài dòng.
+- Yun, S., Han, D., Oh, S. J., Chun, S., Choe, J., Yoo, Y. (2019). [*CutMix: Regularization Strategy to Train Strong Classifiers with Localizable Features*](https://arxiv.org/abs/1905.04899). ICCV 2019. Mục 3 có cách lấy hình chữ nhật theo $\lambda$; paper so trực tiếp với cutout và mixup.
+- Cubuk, E. D., Zoph, B., Shlens, J., Le, Q. V. (2020). [*RandAugment: Practical automated data augmentation with a reduced search space*](https://arxiv.org/abs/1909.13719). Mục 3 là cả thuật toán (hai dòng Python); hình 3 cho thấy độ mạnh tốt nhất tăng theo cỡ mô hình và cỡ dữ liệu.
+- PyTorch. [*Transforming and augmenting images*](https://docs.pytorch.org/vision/stable/transforms.html), tài liệu torchvision. Danh sách phép v2 và cách dùng với mask, hộp bao (`tv_tensors`).
+
+<LessonProgress />

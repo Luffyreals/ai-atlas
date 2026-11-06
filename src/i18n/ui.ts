@@ -82,6 +82,11 @@ export const UI_KEYS = {
     'freqCol', 'splitText', 'mergesLabel', 'mergeItem', 'noMerges', 'startNote', 'mergedNote', 'tieNote',
     'doneNote', 'announceStep', 'announceEnd', 'resetDone',
   ],
+  vizDiffusion: [
+    'caption', 'x0Title', 'noiseTitle', 'xtTitle', 'x0Label', 'noiseLabel', 'xtLabel', 'shadeKey', 'signalName',
+    'noiseName', 'chartLabel', 'chartDesc', 'tAxis', 'coefAxis', 'controls', 'tLabel', 'tValueText', 'startNote',
+    'midNote', 'endNote', 'announce',
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 export type UiNamespace = keyof typeof UI_KEYS;
