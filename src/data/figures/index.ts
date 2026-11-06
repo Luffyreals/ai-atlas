@@ -39,5 +39,6 @@ export const FIGURES = {
   unet: UNET,
   'segmentation-tasks': SEGMENTATION_TASKS,
   'clip-contrastive': CLIP_CONTRASTIVE,
+  'generative-models': GENERATIVE_MODELS,
 } as const satisfies Record<string, FigureText<string>>;
 export type FigureId = keyof typeof FIGURES;
