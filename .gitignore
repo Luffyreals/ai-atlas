@@ -39,8 +39,10 @@ build.log
 Thumbs.db
 ehthumbs.db
 
-# Claude Code & local agent tooling
+# AI & agent tooling
 .claude/
+.agents/
+skills-lock.json
 .taste-skill/
 
 # Python environments & cache
