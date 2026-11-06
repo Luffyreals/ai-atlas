@@ -86,6 +86,19 @@
  * so it would scroll a little and Chrome would make every formula a Tab stop. Hence overflow-y: hidden,
  * plus padding-block so nothing is cut (KaTeX's 1em margin shrinks by the same amount).
  */
+
+/*
+ * Starlight aside titles wrap when containing multiple words or code tags on mobile.
+ */
+.starlight-aside__title {
+  flex-wrap: wrap;
+}
+/*
+ * A table wider than the column scrolls inside its own box, so the page never scrolls sideways.
+ */
+.sl-markdown-content table:not(:where(.not-content *)) {
+  max-width: 100%;
+}
 .sl-markdown-content .katex-display {
   overflow-x: auto;
   overflow-y: hidden;
