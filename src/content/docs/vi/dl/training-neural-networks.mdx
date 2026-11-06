@@ -359,16 +359,21 @@ Gradient của trọng số, $\boldsymbol{\delta}^{[l]}\mathbf{a}^{[l-1]\top}$, 
   code={bnDropoutCode}
   title="MLP có và không có BatchNorm, Dropout"
   packages={['torch', 'scikit-learn']}
-  hardware="HARDWARE_TODO"
+  hardware="CPU là đủ. Khoảng 5 tới 15 giây tùy máy"
 >
 
 ```text
-OUTPUT_TODO
+Base MLP (eval): test acc = 0.913
+BN + Dropout (eval): test acc = 0.917
+BN + Dropout (quen eval): test acc = ['0.830', '0.815', '0.816']
 ```
 
 </LocalCode>
 
-EXPLAIN_TODO
+Đọc kết quả:
+
+- **Khi có `model.eval()`:** Mạng có BatchNorm và Dropout đạt độ chính xác kiểm tra 0.917, nhỉnh hơn Base MLP (0.913) trên tập dữ liệu chữ số 8×8. Lúc này Dropout tắt hoàn toàn và BatchNorm dùng kỳ vọng, phương sai động tích lũy trong quá trình huấn luyện thay vì thống kê của batch kiểm tra.
+- **Khi quên `model.eval()`:** Độ chính xác sụt giảm mạnh xuống khoảng 0.815–0.830 và thay đổi ngẫu nhiên qua từng lần chạy. Lý do: Dropout vẫn tiếp tục tắt ngẫu nhiên 50% nơ-ron khiến tín hiệu đầu ra bị khuyết tật, đồng thời BatchNorm chuẩn hóa theo trung bình của tập kiểm tra thay vì phân phối đã học.
 
 ## Lỗi hay gặp
 
