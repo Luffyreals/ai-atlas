@@ -44,6 +44,8 @@ ehthumbs.db
 .agents/
 skills-lock.json
 .taste-skill/
+GEMINI.md
+AGENTS.md
 
 # Python environments & cache
 __pycache__/
