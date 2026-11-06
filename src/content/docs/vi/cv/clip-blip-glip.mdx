@@ -58,7 +58,7 @@ Sau bài này, bạn sẽ:
 
 - Hiểu **học đối chiếu** (contrastive learning) giữa ảnh và chữ: hai bộ mã hóa, ma trận độ tương đồng $N \times N$, đường chéo là các cặp đúng.
 - Tự dẫn được hàm mất mát **InfoNCE** đối xứng của CLIP, và giải thích được vai trò của **nhiệt độ** (temperature) $\tau$.
-- Dùng được CLIP để **phân loại zero-shot** (không cần ảnh có nhãn) bằng prompt "a photo of a {label}", và biết vì sao gộp nhiều prompt giúp ích.
+- Dùng được CLIP để **phân loại zero-shot** (không cần ảnh có nhãn) bằng prompt `"a photo of a {label}"`, và biết vì sao gộp nhiều prompt giúp ích.
 - Phân biệt được CLIP, BLIP và GLIP: mỗi mô hình học gì, cho ra gì, dùng cho việc gì; nhận ra các giới hạn đã biết của CLIP (đếm, quan hệ vị trí, chữ trong ảnh).
 
 ## Cần biết trước
@@ -194,9 +194,9 @@ $$
 
 Đây đúng là một hàng của ma trận $\mathbf{S}$, với các câu nhãn đứng ở vị trí chú thích. Bài báo CLIP nhìn nó như một **hồi quy logistic nhiều lớp** không có hệ số tự do: các $\mathbf{v}_k$ chính là trọng số của lớp phân loại, và bộ mã hóa chữ là thứ **sinh ra trọng số** từ tên nhãn.
 
-**Vì sao cần prompt.** Chú thích trong dữ liệu hiếm khi là một từ đơn, nên chỉ đưa tên nhãn "crane" vừa lệch phân phối, vừa mơ hồ (cần cẩu hay con sếu?). Bài báo dùng mẫu "A photo of a {label}." làm mặc định, giúp tăng 1.3% trên ImageNet; với từng bộ dữ liệu còn thêm ngữ cảnh, ví dụ "A photo of a {label}, a type of pet.".
+**Vì sao cần prompt.** Chú thích trong dữ liệu hiếm khi là một từ đơn, nên chỉ đưa tên nhãn "crane" vừa lệch phân phối, vừa mơ hồ (cần cẩu hay con sếu?). Bài báo dùng mẫu `"A photo of a {label}."` làm mặc định, giúp tăng 1.3% trên ImageNet; với từng bộ dữ liệu còn thêm ngữ cảnh, ví dụ `"A photo of a {label}, a type of pet."`.
 
-**Gộp nhiều prompt** (prompt ensembling). Viết mỗi nhãn bằng $M$ mẫu khác nhau ("a photo of a big {label}", "a blurry photo of a {label}"…), lấy trung bình các embedding chữ rồi chuẩn hóa lại:
+**Gộp nhiều prompt** (prompt ensembling). Viết mỗi nhãn bằng $M$ mẫu khác nhau (`"a photo of a big {label}"`, `"a blurry photo of a {label}"`…), lấy trung bình các embedding chữ rồi chuẩn hóa lại:
 
 $$
 \bar{\mathbf{v}}_k = \frac{\sum_{m=1}^{M} \mathbf{v}_k^{(m)}}{\left\lVert \sum_{m=1}^{M} \mathbf{v}_k^{(m)} \right\rVert}
@@ -353,7 +353,7 @@ CLIP cho một vectơ cho cả ảnh, nên trả lời "ảnh có mèo không", 
 
 - CLIP học bằng trò ghép đôi: trong lô $N$ cặp, ma trận $S_{ij} = \mathbf{u}_i^\top \mathbf{v}_j$ có đáp án trên đường chéo; mất mát là cross-entropy theo hàng và theo cột trên $\mathbf{S}/\tau$ (InfoNCE đối xứng). Gradient kéo đường chéo lên, đẩy mạnh nhất các mẫu âm khó.
 - $\tau$ quyết định softmax sắc hay phẳng: lớn quá thì không học được, nhỏ quá thì mất ổn định. CLIP học $\tau$, khởi tạo 0.07, chặn $1/\tau \le 100$.
-- Zero-shot: viết nhãn thành câu ("a photo of a {label}"), lấy argmax cosine. Gộp nhiều prompt thêm vài phần trăm. Giới hạn: đếm, quan hệ, chữ trong ảnh, khái niệm hiếm.
+- Zero-shot: viết nhãn thành câu (`"a photo of a {label}"`), lấy argmax cosine. Gộp nhiều prompt thêm vài phần trăm. Giới hạn: đếm, quan hệ, chữ trong ảnh, khái niệm hiếm.
 - BLIP thêm ITM và LM để vừa hiểu vừa viết, và lọc chú thích web bằng CapFilt; BLIP-2 nối bộ mã hóa ảnh và LLM đóng băng qua Q-Former. GLIP coi phát hiện vật thể là grounding: $\mathbf{S}_{\text{ground}} = \mathbf{O}\mathbf{P}^\top$ giữa vùng và từ.
 
 **Đọc thêm:**
