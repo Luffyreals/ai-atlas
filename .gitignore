@@ -65,3 +65,5 @@ test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
+# Working files of the design-taste-frontend skill (notes, direction sheet, screenshots)
+.taste-skill/

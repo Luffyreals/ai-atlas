@@ -74,8 +74,8 @@ export function arrowHead(from: Pt, to: Pt, size: number = ARROW_HEAD): string {
 
 /** One Latin or Greek letter (ς, U+03C2, is a final form, not a symbol). */
 const MATH_SYMBOL = /^[A-Za-z\u0391-\u03A1\u03A3-\u03A9\u03B1-\u03C1\u03C3-\u03C9]$/u;
-/** 1–2 digits or Latin letters. */
-const MATH_SUB = /^[A-Za-z0-9]{1,2}$/;
+/** 1–2 digits or Latin letters; or a letter, + or − (U+2212) and a digit: the time steps t−1, t+1 (dl-lessons.md 4.2). */
+const MATH_SUB = /^(?:[A-Za-z0-9]{1,2}|[A-Za-z][+−][0-9])$/u;
 /** Digits, spaces and a few math signs (\u00d7 for "\u00d7 N", llm-lessons.md 2.9.2): no words can hide here (viz/static-plots.md 11.3). */
 const MATH_AFTER = /^[0-9 =+\u2212\-.,<>\u2264\u2265()\u00d7]+$/u;
 
@@ -94,7 +94,7 @@ export interface MathLabel {
 
 /**
  * Throws unless a FigMath label is math, not words: `symbol` one Latin or Greek letter, `sub` 1–2 digits or
- * Latin letters, `after` and `before` only digits, spaces and = + − - . , < > ≤ ≥ ( ) ×. Words belong in
+ * Latin letters (or a letter ± a digit, t−1), `after` and `before` only digits, spaces and = + − - . , < > ≤ ≥ ( ) ×. Words belong in
  * src/data/figures/.
  */
 export function checkMathLabel(symbol: string, sub?: string, after?: string, before?: string): void {
@@ -102,7 +102,7 @@ export function checkMathLabel(symbol: string, sub?: string, after?: string, bef
     throw new Error(`checkMathLabel: symbol must be one Latin or Greek letter, got "${symbol}".`);
   }
   if (sub !== undefined && !MATH_SUB.test(sub)) {
-    throw new Error(`checkMathLabel: sub must be 1–2 digits or Latin letters, got "${sub}".`);
+    throw new Error(`checkMathLabel: sub must be 1–2 digits or Latin letters, or a letter ± a digit (t−1), got "${sub}".`);
   }
   if (after !== undefined && (!after.trim() || !MATH_AFTER.test(after))) {
     throw new Error(`checkMathLabel: after may hold only digits, spaces and = + − - . , < > ≤ ≥ ( ) ×, got "${after}".`);

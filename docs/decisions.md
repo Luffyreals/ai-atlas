@@ -200,3 +200,17 @@
     - `CLAUDE.md` → `.claude/CLAUDE.md` (Claude Code đọc được ở vị trí này).
     - Giữ ở gốc: `README.md`, `LICENSE`, file cấu hình (`package.json`, `astro.config.ts`, `tsconfig.json`, `playwright.config.ts`, `vitest.config.ts`) để công cụ và IDE tự nhận; `skills-lock.json` và `.agents/` do CLI của skill quản lý.
     - CI e2e chia **3 shard** (trước là 2) và `timeout-minutes: 30` (trước là 20): shard chậm hơn của 2 shard đã chạm giới hạn 20 phút và bị hủy hai lần trên PR #4, không có test nào lỗi.
+
+## Phần Deep Learning (115–129)
+
+Phiên viết phần DL tự chốt ngày 05/11/2026 theo phương án đề xuất (người dùng dặn không hỏi lại). Đều dễ đổi lại. Chi tiết ở [architecture/dl-lessons.md](architecture/dl-lessons.md).
+
+115. **Quy trình và kiểm chứng phần DL.** Chỉ bản vi (như 43, 53). Bỏ bước `summarizer` riêng: `lesson-writer` tự viết `docs/research/<bài>.md` gồm nguồn tham khảo có thật và bảng `## Kiểm chứng code` (khuôn của phần LLM). Lý do: 8 bài viết song song, tóm tắt tài liệu và viết bài do cùng một agent làm thì ít lệch hơn.
+116. **Ranh giới nội dung giữa các bài DL**, vì NLP, CV, LLM dùng chúng làm bài nền:
+    - Lan truyền ngược nằm ở `dl/training-neural-networks` (bài này cần nó để giải thích vanishing gradient); `dl/neural-networks` dừng ở lan truyền xuôi và luật học perceptron.
+    - YOLO ở `dl/modern-cnn-architectures` dạy ý tưởng phát hiện vật thể một lượt (lưới, hộp, IoU, NMS), vì phần CV không có bài phát hiện vật thể. Thực hành phân loại ảnh, MobileNet, EfficientNet, transfer learning để cho `cv/cnn-image-classification`.
+    - `dl/transformers` dạy self-attention, attention nhiều đầu, mã hóa vị trí, khối Transformer, mặt nạ, ba họ mô hình. Cross-attention, teacher forcing, beam search để cho `llm/seq2seq` (đã có).
+117. **Ký hiệu phần DL:** lớp $l$ viết $\mathbf{W}^{[l]}$, $\mathbf{a}^{[l]}$; bước thời gian viết chỉ số dưới $\mathbf{h}_t$; độ dài chuỗi $L$ như phần LLM (không dùng $T$, vì $T$ là nhiệt độ); tích từng phần tử $\odot$.
+118. **Code phần DL:** cơ chế cốt lõi bằng NumPy chạy trên trang (`PythonRunner`), kiểm bằng venv khớp Pyodide; huấn luyện bằng PyTorch qua `LocalCode`, chạy thật bằng venv `.venv-dl/` (torch CPU, không commit). Dữ liệu: `sklearn.datasets.load_digits` (ảnh 8×8 có sẵn, không tải mạng) cho MLP và CNN; chuỗi tự sinh cho RNN, GRU, LSTM, Transformer.
+119. **VIZ và hình:** 2 VIZ (`GradientFlowViz` ở bài huấn luyện mạng, `ConvolutionViz` ở bài CNN), 6 hình tĩnh (`MlpFigure`, `ResidualBlockFigure`, `RnnUnrolledFigure`, `GruCellFigure`, `LstmCellFigure`, `TransformerBlockFigure`). Bài Transformer dùng hình tĩnh, không VIZ attention: ô NumPy in ma trận trọng số attention là đủ.
+120. **Link giữa các bài DL:** 8 bài xuất bản trong cùng một PR nên được link lẫn nhau. Bài nền ML, Python, Toán chưa có thì hiện "Sắp có" qua `Prerequisites`, kèm khối "Nhắc nhanh".

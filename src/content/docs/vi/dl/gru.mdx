@@ -1,0 +1,312 @@
+---
+title: GRU
+description: 'RNN thường quên nhanh vì mỗi bước ghi đè trạng thái. GRU thêm cổng reset và cổng update, nội suy giữa trạng thái cũ và mới, nên gradient đi được xa.'
+quiz:
+  - question: 'Một cuốn sách viết GRU theo dạng $\mathbf{h}_t = (1 - \mathbf{z}_t) \odot \mathbf{h}_{t-1} + \mathbf{z}_t \odot \tilde{\mathbf{h}}_t$. Theo cách viết này, muốn một đơn vị giữ nguyên thông tin qua nhiều bước thì cổng update của nó phải thế nào?'
+    options:
+      - 'Gần 1'
+      - 'Gần 0'
+      - 'Gần 0.5, để cân bằng cũ và mới'
+      - 'Không liên quan tới $\mathbf{z}_t$, chỉ cần cổng reset gần 0'
+    answer: 1
+    explanation: 'Trong cách viết này, $\mathbf{z}_t$ nhân với trạng thái mới, còn $1 - \mathbf{z}_t$ nhân với trạng thái cũ. Giữ cái cũ nghĩa là $1 - \mathbf{z}_t \approx 1$, tức $\mathbf{z}_t \approx 0$. "Gần 1" đúng với quy ước của PyTorch mà bài dùng, nên dễ chọn nhầm: luôn xem $\mathbf{z}_t$ nhân với số hạng nào trước khi đọc tiếp. Cổng reset gần 0 thì ngược lại, làm ứng viên bỏ qua trạng thái cũ.'
+  - question: 'Một lớp có $d_x = 10$, $d_h = 20$, mỗi nhánh một vectơ hệ số tự do. RNN thường có 620 tham số. GRU cùng kích thước có bao nhiêu?'
+    options: ['620', '1240', '1860', '2480']
+    answer: 2
+    explanation: 'GRU có ba nhánh cùng hình dạng với RNN: cổng reset, cổng update và trạng thái ứng viên. Mỗi nhánh có $d_h(d_x + d_h) + d_h = 20 \cdot 30 + 20 = 620$ tham số, nên tổng là $3 \cdot 620 = 1860$. 2480 là của LSTM, có bốn nhánh. `nn.GRU` của PyTorch sẽ báo 1920, vì nó dùng hai vectơ hệ số tự do cho mỗi nhánh.'
+  - question: 'Ở một bước, cả cổng reset lẫn cổng update của mọi đơn vị đều gần 0. Trạng thái mới $\mathbf{h}_t$ gần bằng gì?'
+    options:
+      - '$\mathbf{h}_{t-1}$: không có gì thay đổi'
+      - 'Vectơ $\mathbf{0}$: mạng xóa sạch trạng thái'
+      - '$\tanh(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{b}_h)$: chỉ phụ thuộc đầu vào hiện tại'
+      - '$\tanh(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{W}_{hh}\mathbf{h}_{t-1} + \mathbf{b}_h)$: đúng một bước RNN thường'
+    answer: 2
+    explanation: '$\mathbf{z}_t \approx \mathbf{0}$ nên $\mathbf{h}_t \approx \tilde{\mathbf{h}}_t$. $\mathbf{r}_t \approx \mathbf{0}$ nên trong ứng viên, $\mathbf{r}_t \odot \mathbf{h}_{t-1} \approx \mathbf{0}$ và số hạng $\mathbf{W}_{hh}(\dots)$ biến mất. Mạng bắt đầu lại như thể $\mathbf{x}_t$ là phần tử đầu tiên. Dạng RNN thường ứng với $\mathbf{r}_t \approx \mathbf{1}$, không phải $\mathbf{0}$. "Xóa về $\mathbf{0}$" sai vì ứng viên vẫn nhận $\mathbf{x}_t$.'
+  - question: 'Một đơn vị của GRU có cổng update $z \approx 0.99$ suốt 50 bước liền. Theo đường đi thẳng qua các trạng thái, gradient từ bước cuối về bước đầu bị nhân với khoảng bao nhiêu?'
+    options:
+      - 'Khoảng $0.6$, vì mỗi bước Jacobian gần bằng $z$ và không đi qua $\mathbf{W}_{hh}$'
+      - 'Gần 0, vì sigmoid bão hòa ở $z \approx 0.99$ nên gradient tiêu biến'
+      - 'Đúng bằng 1, vì GRU loại bỏ hoàn toàn gradient tiêu biến'
+      - 'Khoảng $\sigma_{\max}(\mathbf{W}_{hh})^{50}$, như RNN thường'
+    answer: 0
+    explanation: 'Khi $z \approx 1$, Jacobian một bước gần bằng $\mathrm{diag}(\mathbf{z}_t)$, nên qua 50 bước còn khoảng $0.99^{50} \approx 0.6$. Sigmoid bão hòa làm nhỏ gradient đi vào tham số của cổng, nhưng không chặn đường đi qua $\mathbf{z}_t \odot \mathbf{h}_{t-1}$; chính sự bão hòa còn làm hai số hạng phụ của Jacobian biến mất. Nó cũng không bằng đúng 1: chỉ $z = 1$ tuyệt đối mới cho 1. $\mathbf{W}_{hh}$ chỉ xuất hiện trong nhánh ứng viên, nhánh này bị nhân với $1 - z \approx 0.01$.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import gruStepCode from '@code/dl/gru/gru-step.vi.py?raw';
+import rememberFirstCode from '@code/dl/gru/remember-first.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu vì sao RNN thường khó nhớ xa, và ý tưởng **cổng** (gate) như một cái van cho từng ô nhớ.
+- Viết được các phương trình của **GRU** (gated recurrent unit): **cổng reset** (reset gate) $\mathbf{r}_t$, **cổng update** (update gate) $\mathbf{z}_t$, **trạng thái ứng viên** (candidate state) $\tilde{\mathbf{h}}_t$, và phép nội suy ra $\mathbf{h}_t$.
+- Giải thích được vì sao khi $\mathbf{z}_t \approx \mathbf{1}$, gradient đi qua nhiều bước mà gần như không bị co lại.
+- Cài đặt được một bước GRU bằng NumPy, đếm được số tham số (gấp 3 RNN), và dùng `nn.GRU` của PyTorch trên một bài toán cần nhớ xa.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+RNN thường (bài [Mạng hồi tiếp](/vi/dl/rnn/)) cập nhật **trạng thái ẩn** (hidden state) bằng $\mathbf{h}_t = \tanh(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{W}_{hh}\mathbf{h}_{t-1} + \mathbf{b}_h)$, với $\mathbf{x}_t \in \mathbb{R}^{d_x}$, $\mathbf{h}_t \in \mathbb{R}^{d_h}$. **Sigmoid** $\sigma(a) = 1/(1 + e^{-a})$ đưa mọi số về khoảng $(0, 1)$. Phép $\odot$ là nhân từng phần tử của hai vectơ cùng kích thước.
+:::
+
+## Trực giác
+
+### Bản photo của bản photo
+
+Hãy nghĩ tới một tờ giấy được photo, rồi lấy bản photo đó photo tiếp, cứ thế 50 lần. Mỗi lần chỉ mờ đi một chút, nhưng tới bản cuối thì chữ trên bản gốc gần như không đọc được nữa.
+
+RNN thường làm đúng như vậy với trí nhớ của nó. Ở **mỗi** bước, nó tính trạng thái mới hoàn toàn từ đầu: lấy trạng thái cũ nhân với $\mathbf{W}_{hh}$, cộng đầu vào mới, cho qua $\tanh$. Thông tin của bước 1 muốn tới bước 50 phải đi qua 49 lần biến đổi như thế. Bài [Mạng hồi tiếp](/vi/dl/rnn/) đã cho thấy hệ quả ở chiều ngược lại: gradient từ bước cuối về bước đầu là tích của 49 Jacobian $\mathbf{D}_k\mathbf{W}_{hh}$, và thường co về 0 theo cấp số nhân.
+
+Thử một nhiệm vụ cụ thể: mạng đọc một chuỗi 100 số, mỗi số là $+1$ hoặc $-1$, rồi phải nói **số đầu tiên** là gì. 99 số sau chỉ là nhiễu. Người làm việc này rất dễ: ghi số đầu ra giấy, rồi không đụng vào tờ giấy nữa. RNN thường không có cách nào "không đụng vào": bước nào nó cũng viết lại toàn bộ trạng thái.
+
+### Một cái van cho mỗi ô nhớ
+
+Ý tưởng của GRU: gắn cho mỗi thành phần của trạng thái một cái **van**. Van mở hết về phía "giữ" thì thành phần đó được chép nguyên sang bước sau. Van mở về phía "ghi mới" thì nó được thay bằng giá trị mới tính từ đầu vào. Van không phải công tắc bật tắt, mà vặn được tới mọi mức ở giữa.
+
+Quan trọng nhất: độ mở của van **không cố định**. Nó được tính ở mỗi bước từ đầu vào và trạng thái hiện tại, bằng các trọng số học được. Mạng tự học khi nào nên giữ, khi nào nên ghi đè.
+
+Bài toán của bài này là: **thiết kế một bước cập nhật trạng thái có thể học cách giữ nguyên trạng thái cũ qua nhiều bước, để cả thông tin lẫn gradient đi được xa.**
+
+## Lý thuyết
+
+### Cổng là gì
+
+Một **cổng** là một vectơ có cùng kích thước với trạng thái, mỗi số nằm trong $(0, 1)$, dùng để nhân từng phần tử với một vectơ khác. Số gần 0 thì chặn, số gần 1 thì cho qua. Để có các số trong $(0, 1)$, ta lấy sigmoid của một hàm tuyến tính, giống hệt một lớp của mạng nơ-ron:
+
+$$
+\mathbf{g}_t = \sigma\left(\mathbf{W}_{xg}\mathbf{x}_t + \mathbf{W}_{hg}\mathbf{h}_{t-1} + \mathbf{b}_g\right)
+$$
+
+Tên ma trận theo đúng quy ước của bài [Mạng hồi tiếp](/vi/dl/rnn/): chữ đầu là thứ được nhân vào ($\mathbf{x}$ hay $\mathbf{h}$), chữ sau là thứ được tính ra (ở đây là cổng $g$). GRU có hai cổng như vậy.
+
+### Bốn phương trình của GRU
+
+GRU do Cho và cộng sự đề xuất năm 2014, trong cùng bài báo giới thiệu khung encoder–decoder mà bạn gặp ở bài [Mô hình chuỗi sang chuỗi](/vi/llm/seq2seq/). Ở bước $t$, GRU nhận $\mathbf{x}_t$ và $\mathbf{h}_{t-1}$, rồi tính bốn thứ theo thứ tự.
+
+**Bước 1: cổng reset.** Quyết định khi tính giá trị mới thì nhìn trạng thái cũ bao nhiêu:
+
+$$
+\mathbf{r}_t = \sigma\left(\mathbf{W}_{xr}\mathbf{x}_t + \mathbf{W}_{hr}\mathbf{h}_{t-1} + \mathbf{b}_r\right)
+$$
+
+**Bước 2: cổng update.** Quyết định giữ lại bao nhiêu phần trạng thái cũ:
+
+$$
+\mathbf{z}_t = \sigma\left(\mathbf{W}_{xz}\mathbf{x}_t + \mathbf{W}_{hz}\mathbf{h}_{t-1} + \mathbf{b}_z\right)
+$$
+
+**Bước 3: trạng thái ứng viên.** Đây là đúng một bước RNN thường, chỉ khác là trạng thái cũ đi qua cổng reset trước khi nhân với $\mathbf{W}_{hh}$:
+
+$$
+\tilde{\mathbf{h}}_t = \tanh\left(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{W}_{hh}(\mathbf{r}_t \odot \mathbf{h}_{t-1}) + \mathbf{b}_h\right)
+$$
+
+Nếu $\mathbf{r}_t \approx \mathbf{1}$ thì $\mathbf{r}_t \odot \mathbf{h}_{t-1} \approx \mathbf{h}_{t-1}$, và $\tilde{\mathbf{h}}_t$ chính là trạng thái mới của RNN thường. Nếu $\mathbf{r}_t \approx \mathbf{0}$ thì số hạng $\mathbf{W}_{hh}(\dots)$ biến mất, và ứng viên chỉ được tính từ $\mathbf{x}_t$, như thể chuỗi mới bắt đầu ở đây.
+
+**Bước 4: nội suy.** Trạng thái mới là trung bình có trọng số của trạng thái cũ và ứng viên, theo từng thành phần:
+
+$$
+\mathbf{h}_t = \mathbf{z}_t \odot \mathbf{h}_{t-1} + (\mathbf{1} - \mathbf{z}_t) \odot \tilde{\mathbf{h}}_t
+$$
+
+Với mỗi thành phần $j$, hai trọng số $z_{t,j}$ và $1 - z_{t,j}$ đều dương và cộng lại bằng 1, nên $h_{t,j}$ luôn nằm giữa $h_{t-1,j}$ và $\tilde{h}_{t,j}$. Đây là cái van ở phần Trực giác: $z_{t,j} \approx 1$ thì giữ cái cũ, $z_{t,j} \approx 0$ thì lấy cái mới. Mỗi thành phần có van riêng, nên có thành phần giữ lâu, có thành phần thay đổi liên tục.
+
+:::caution[Hai quy ước cho cổng update]
+Bài này theo quy ước của bài báo gốc (Cho và cộng sự, 2014) và của PyTorch: $\mathbf{z}_t$ nhân với **trạng thái cũ**, nên $\mathbf{z}_t \approx \mathbf{1}$ là giữ. Sách *Dive into Deep Learning* cũng dùng quy ước này. Một số tài liệu khác, như Chung và cộng sự (2014) hay trang Wikipedia về GRU, viết $\mathbf{h}_t = (\mathbf{1} - \mathbf{z}_t) \odot \mathbf{h}_{t-1} + \mathbf{z}_t \odot \tilde{\mathbf{h}}_t$: vai trò của $\mathbf{z}_t$ đảo ngược, $\mathbf{z}_t \approx \mathbf{1}$ là ghi mới. Hai cách tương đương về khả năng, chỉ đổi tên $\mathbf{z}_t$ thành $\mathbf{1} - \mathbf{z}_t$. Khi đọc tài liệu khác, luôn xem $\mathbf{z}_t$ nhân với số hạng nào.
+:::
+
+### Bốn trường hợp đầu mút
+
+Đặt các cổng ở giá trị cực trị giúp hiểu GRU làm được những gì:
+
+| Cổng update $\mathbf{z}_t$ | Cổng reset $\mathbf{r}_t$ | $\mathbf{h}_t$ gần bằng | Ý nghĩa |
+|---|---|---|---|
+| $\approx \mathbf{1}$ | bất kỳ | $\mathbf{h}_{t-1}$ | Giữ nguyên, bỏ qua $\mathbf{x}_t$ |
+| $\approx \mathbf{0}$ | $\approx \mathbf{1}$ | $\tanh(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{W}_{hh}\mathbf{h}_{t-1} + \mathbf{b}_h)$ | Đúng một bước RNN thường |
+| $\approx \mathbf{0}$ | $\approx \mathbf{0}$ | $\tanh(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{b}_h)$ | Quên hết, bắt đầu lại từ $\mathbf{x}_t$ |
+
+Vậy RNN thường là một trường hợp riêng của GRU. GRU thêm được hai hành vi mà RNN thường không có: **giữ nguyên** và **quên hẳn**. Cho và cộng sự nhận xét rằng đơn vị nào học phụ thuộc ngắn sẽ hay dùng cổng reset, đơn vị nào học phụ thuộc dài sẽ để cổng update gần mức "giữ" phần lớn thời gian.
+
+### Vì sao cổng giúp gradient đi xa
+
+Ở RNN thường, Jacobian một bước là $\mathbf{D}_t\mathbf{W}_{hh}$, và gradient đi từ bước $L$ về bước $t$ phải nhân $L - t$ ma trận như vậy. Giờ ta tính Jacobian một bước của GRU, $\partial \mathbf{h}_t / \partial \mathbf{h}_{t-1}$.
+
+Trong công thức $\mathbf{h}_t = \mathbf{z}_t \odot \mathbf{h}_{t-1} + (\mathbf{1} - \mathbf{z}_t) \odot \tilde{\mathbf{h}}_t$, $\mathbf{h}_{t-1}$ xuất hiện ở ba chỗ: trực tiếp trong số hạng đầu, bên trong $\mathbf{z}_t$, và bên trong $\tilde{\mathbf{h}}_t$. Đạo hàm của tích theo quy tắc nhân, cộng phần đóng góp của cả ba chỗ:
+
+$$
+\frac{\partial \mathbf{h}_t}{\partial \mathbf{h}_{t-1}}
+= \underbrace{\mathrm{diag}(\mathbf{z}_t)}_{\text{đường thẳng}}
++ \underbrace{\mathrm{diag}(\mathbf{h}_{t-1} - \tilde{\mathbf{h}}_t)\,\frac{\partial \mathbf{z}_t}{\partial \mathbf{h}_{t-1}}}_{\text{qua cổng update}}
++ \underbrace{\mathrm{diag}(\mathbf{1} - \mathbf{z}_t)\,\frac{\partial \tilde{\mathbf{h}}_t}{\partial \mathbf{h}_{t-1}}}_{\text{qua ứng viên}}
+$$
+
+Số hạng giữa có hệ số $\mathbf{h}_{t-1} - \tilde{\mathbf{h}}_t$ vì $\mathbf{z}_t$ nhân với $\mathbf{h}_{t-1}$ và $-\mathbf{z}_t$ nhân với $\tilde{\mathbf{h}}_t$. Đạo hàm của sigmoid là $\sigma'(a) = \sigma(a)(1 - \sigma(a))$, nên:
+
+$$
+\frac{\partial \mathbf{z}_t}{\partial \mathbf{h}_{t-1}} = \mathrm{diag}\big(\mathbf{z}_t \odot (\mathbf{1} - \mathbf{z}_t)\big)\,\mathbf{W}_{hz}
+$$
+
+Giờ xét một thành phần có $z \approx 1$:
+
+- **Số hạng đầu** có số $z \approx 1$ trên đường chéo.
+- **Số hạng giữa** chứa $z(1 - z) \approx 0$, nên gần 0.
+- **Số hạng cuối** bị nhân với $1 - z \approx 0$, nên cũng gần 0. Đây là nhánh duy nhất đi qua $\mathbf{W}_{hh}$.
+
+Khi mọi thành phần có $z \approx 1$, Jacobian một bước gần bằng $\mathrm{diag}(\mathbf{z}_t) \approx \mathbf{I}$, ma trận đơn vị. Qua nhiều bước, tích các Jacobian gần bằng tích các $\mathrm{diag}(\mathbf{z}_k)$: thành phần $j$ chỉ bị nhân với $\prod_k z_{k,j}$. Ví dụ $z = 0.99$ suốt 50 bước cho $0.99^{50} \approx 0.6$. So với RNN thường ở bài trước, nơi $\sigma_{\max}(\mathbf{W}_{hh}) = 0.9$ đã cho chặn trên $0.9^{50} \approx 0.005$, đây là một đường đi gần như thẳng.
+
+Điểm mấu chốt nằm ở **phép cộng**: số 1 trên đường chéo đến từ việc chép $\mathbf{h}_{t-1}$ sang $\mathbf{h}_t$, không phải từ một ma trận trọng số. Chung và cộng sự (2014) gọi đây là thành phần cộng (additive) mà RNN thường không có: RNN thường luôn thay nội dung, còn GRU giữ nội dung cũ và thêm nội dung mới lên trên.
+
+:::note[Ghi nhớ]
+GRU tính hai cổng $\mathbf{r}_t, \mathbf{z}_t \in (0, 1)^{d_h}$ bằng sigmoid, một ứng viên $\tilde{\mathbf{h}}_t$ bằng một bước RNN có cổng reset, rồi nội suy $\mathbf{h}_t = \mathbf{z}_t \odot \mathbf{h}_{t-1} + (\mathbf{1} - \mathbf{z}_t) \odot \tilde{\mathbf{h}}_t$. Khi $\mathbf{z}_t \approx \mathbf{1}$, trạng thái được chép nguyên và Jacobian một bước gần bằng $\mathbf{I}$, nên cả thông tin lẫn gradient đi được xa.
+:::
+
+### Số tham số
+
+RNN thường có một nhánh: $\mathbf{W}_{xh} \in \mathbb{R}^{d_h \times d_x}$, $\mathbf{W}_{hh} \in \mathbb{R}^{d_h \times d_h}$, $\mathbf{b}_h \in \mathbb{R}^{d_h}$, tổng $d_h(d_x + d_h) + d_h$ tham số. GRU có ba nhánh cùng hình dạng (cổng reset, cổng update, ứng viên), nên:
+
+$$
+\text{số tham số GRU} = 3\left(d_h(d_x + d_h) + d_h\right)
+$$
+
+Ví dụ $d_x = 3$, $d_h = 4$ như ô NumPy bên dưới: RNN có $4 \cdot 7 + 4 = 32$ tham số, GRU có 96. Nhiều hơn RNN, nhưng ít hơn LSTM (4 nhánh, bài [LSTM và BiLSTM](/vi/dl/lstm-bilstm/)).
+
+`nn.GRU` của PyTorch dùng **hai** vectơ hệ số tự do cho mỗi nhánh (`bias_ih` và `bias_hh`), nên nó báo $3\left(d_h(d_x + d_h) + 2d_h\right)$. Ba nhánh được xếp chồng trong một tensor theo thứ tự reset, update, ứng viên: `weight_ih_l0` có kích thước $(3d_h, d_x)$, `weight_hh_l0` có kích thước $(3d_h, d_h)$.
+
+### Cách PyTorch tính ứng viên
+
+PyTorch đặt cổng reset **sau** phép nhân ma trận, không phải trước:
+
+$$
+\tilde{\mathbf{h}}_t = \tanh\left(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{b}_{xh} + \mathbf{r}_t \odot (\mathbf{W}_{hh}\mathbf{h}_{t-1} + \mathbf{b}_{hh})\right)
+$$
+
+Tài liệu PyTorch gọi đại lượng này là $n_t$ (new gate). Chung và cộng sự (2014) đã thử cả hai cách đặt cổng reset và thấy kết quả ngang nhau. Các phương trình khác, kể cả phép nội suy, giống hệt mục trên. Bài dùng dạng $\mathbf{W}_{hh}(\mathbf{r}_t \odot \mathbf{h}_{t-1})$ vì nó dễ đọc hơn: cổng reset quyết định "nhìn bao nhiêu trạng thái cũ".
+
+### Giới hạn
+
+- **Cổng không xóa hẳn gradient tiêu biến.** Mạng phải *học* được $\mathbf{z}_t \approx \mathbf{1}$, mà lúc mới khởi tạo, $\mathbf{z}_t \approx 0.5$. Ô PyTorch và hộp "Lỗi hay gặp" cho thấy chuyện này.
+- **Gradient vẫn có thể bùng nổ** qua nhánh ứng viên, nên huấn luyện GRU vẫn hay dùng cắt chuẩn gradient (gradient clipping) như ở bài [Mạng hồi tiếp](/vi/dl/rnn/).
+- **Vẫn tuần tự.** Bước $t$ phải đợi bước $t - 1$, nên không song song theo thời gian được. Đây là lý do của bài [Transformers](/vi/dl/transformers/).
+- **Một vectơ cho cả giữ lẫn đọc.** GRU đưa toàn bộ trạng thái ra ngoài ở mỗi bước, và tỉ lệ giữ cũ với lấy mới luôn cộng lại bằng 1. LSTM tách hai việc này bằng trạng thái ô và ba cổng (bài [LSTM và BiLSTM](/vi/dl/lstm-bilstm/)).
+
+## Minh họa
+
+Hình dưới vẽ một ô GRU. Hãy nhìn theo đường ngang phía trên, nơi $\mathbf{h}_{t-1}$ đi thẳng tới $\mathbf{h}_t$ chỉ qua một phép nhân với $\mathbf{z}_t$: đó là "đường thẳng" của mục Lý thuyết. Mọi phép nhân ma trận và hàm $\tanh$ nằm ở nhánh phía dưới, nhánh tạo ứng viên.
+
+{/* FIG: GruCellFigure
+    Ý: trạng thái cũ có một đường đi thẳng tới trạng thái mới, chỉ qua phép nhân với cổng update; nhánh ứng viên đi vòng bên dưới.
+    Khối và mũi tên: hai đầu vào bên trái là h_{t-1} (phía trên) và x_t (phía dưới). Từ chúng tách ra ba khối song song: cổng reset (sigmoid), cổng update (sigmoid), và khối ứng viên (tanh). Đầu ra cổng reset nhân từng phần tử (⊙) với h_{t-1} rồi mới vào khối tanh. Đường ngang trên cùng là trọng tâm: h_{t-1} → ⊙ với z_t → ⊕ → h_t. Ứng viên đi qua ⊙ với (1 − z_t) rồi vào cùng ⊕. Khối "1 −" lấy z_t làm đầu vào. Nhóm thứ hai: ba khối cổng và ứng viên, màu nhạt hơn đường ngang.
+    Nhãn: "trạng thái cũ", "đầu vào", "cổng reset (sigmoid)", "cổng update (sigmoid)", "ứng viên (tanh)", "1 −", "trạng thái mới".
+    Chú thích: $\mathbf{h}_t = \mathbf{z}_t \odot \mathbf{h}_{t-1} + (\mathbf{1} - \mathbf{z}_t) \odot \tilde{\mathbf{h}}_t$; khi $\mathbf{z}_t \approx \mathbf{1}$, trạng thái cũ đi thẳng sang trạng thái mới. */}
+
+Bảng dưới lấy số từ ô NumPy thứ nhất: cùng một đầu vào và cùng $\mathbf{h}_0 = [0.9, -0.8, 0.5, -0.3]$, chỉ đổi hệ số tự do của cổng update để đẩy $\mathbf{z}$ về các đầu mút.
+
+| Cộng thêm vào cổng update | $\mathbf{z}$ trung bình | $\mathbf{h}_1$ | Gần với |
+|---|---:|---|---|
+| $0$ | 0.510 | $[0.245, -0.375, -0.092, 0.244]$ | trộn cũ và mới |
+| $+5$ | 0.992 | $[0.885, -0.796, 0.493, -0.293]$ | $\mathbf{h}_0$ |
+| $-5$ | 0.008 | $[-0.022, 0.353, -0.911, 0.847]$ | ứng viên $\tilde{\mathbf{h}}_1$ |
+
+## Ví dụ code
+
+Các ô dưới đây chạy độc lập. Ô thứ nhất chỉ cần NumPy và chạy ngay trên trang. Ô thứ hai cần PyTorch nên chạy trên máy bạn; nó chạy thử lần cuối tháng 11/2026 với Python 3.14 và PyTorch 2.15 trên CPU.
+
+### Một bước GRU bằng NumPy
+
+Ô dưới viết hàm `gru_step` đúng theo bốn phương trình ở mục Lý thuyết, với $d_x = 3$, $d_h = 4$ và trọng số ngẫu nhiên. Tham số `bias_z` cộng thêm một số vào cổng update để đẩy $\mathbf{z}$ về gần 0 hoặc gần 1. Phần đầu chạy một bước với ba giá trị của `bias_z`. Phần sau cho mạng đọc cùng một chuỗi 50 đầu vào, xuất phát từ hai trạng thái đầu khác nhau, $\mathbf{h}_0$ và $-\mathbf{h}_0$. Nếu sau 50 bước hai trạng thái cuối vẫn khác nhau, mạng còn "nhớ" nó xuất phát từ đâu.
+
+<PythonRunner code={gruStepCode} title="Một bước GRU, và trí nhớ sau 50 bước" />
+
+Đọc kết quả:
+
+- **`bias_z=+0`:** $\mathbf{z}$ trung bình 0.510, nên $\mathbf{h}_1$ là một hỗn hợp gần nửa cũ nửa mới, khác hẳn $\mathbf{h}_0$.
+- **`bias_z=+5`:** $\mathbf{z}$ trung bình 0.992, và $\mathbf{h}_1 = [0.885, -0.796, 0.493, -0.293]$ gần như trùng $\mathbf{h}_0 = [0.9, -0.8, 0.5, -0.3]$. Đầu vào $\mathbf{x}_1$ gần như bị bỏ qua.
+- **`bias_z=-5`:** $\mathbf{z}$ trung bình 0.008, nên $\mathbf{h}_1$ gần bằng ứng viên, không còn dấu vết của $\mathbf{h}_0$.
+- **Sau 50 bước:** lúc đầu hai trạng thái cách nhau tối đa 1.8 ở một thành phần. Với `bias_z=+0`, khoảng cách còn 0.0000: hai trạng thái đã trùng nhau, mạng quên hẳn điểm xuất phát. Với `bias_z=+5`, khoảng cách vẫn là 1.3047. Con số này khớp cỡ với phép tính ở mục Lý thuyết: $0.992^{50} \approx 0.67$, và $1.8 \cdot 0.67 \approx 1.2$.
+
+Điều mà ô này cho thấy với giá trị trạng thái cũng đúng với gradient: khoảng cách giữa hai trạng thái cuối co lại theo đúng tích các $z$, như Jacobian ở mục Lý thuyết.
+
+### RNN thường và GRU trên bài toán nhớ xa
+
+File dưới làm đúng nhiệm vụ ở phần Trực giác: chuỗi dài $L$, mỗi phần tử là $+1$ hoặc $-1$ ngẫu nhiên, nhãn là phần tử **đầu tiên**. Mô hình chỉ được dùng trạng thái cuối $\mathbf{h}_L$ để đoán.
+
+- **Mô hình:** `nn.RNN` hoặc `nn.GRU` với $d_x = 1$, $d_h = 16$, rồi một lớp tuyến tính ra 2 lớp. Đoán bừa thì độ chính xác khoảng 0.5.
+- **Huấn luyện:** 200 bước Adam, mỗi bước 64 chuỗi mới, với $L = 10$ và $L = 100$. Đánh giá trên 2000 chuỗi mới.
+- **Khởi tạo cổng update:** dòng `BIAS_Z = 3.0` đặt phần hệ số tự do của cổng update trong `bias_hh_l0` (khối thứ hai trong ba khối r, z, n) bằng 3, nên lúc đầu $\mathbf{z}_t \approx \sigma(3) \approx 0.95$: mạng bắt đầu ở chế độ "giữ là chính". Đây là cùng ý với mẹo đặt hệ số tự do của cổng quên bằng 1 ở bài [LSTM và BiLSTM](/vi/dl/lstm-bilstm/).
+
+Cách cài PyTorch bản chỉ chạy CPU có ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+<LocalCode
+  code={rememberFirstCode}
+  title="RNN thường và GRU nhớ phần tử đầu tiên"
+  packages={['torch']}
+  hardware="CPU là đủ, không cần GPU. Khoảng 1 tới 2 phút trên máy phát triển khi đang chạy song song nhiều việc, có thể nhanh hơn trên máy rảnh"
+  sampleVaries={false}
+>
+
+```text
+RNN: 304 recurrent parameters
+GRU: 912 recurrent parameters
+L= 10  RNN: loss 0.000  test accuracy 1.000
+L= 10  GRU: loss 0.000  test accuracy 1.000
+L=100  RNN: loss 0.691  test accuracy 0.496
+L=100  GRU: loss 0.001  test accuracy 1.000
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Số tham số:** 304 và 912, đúng gấp 3. Theo công thức hai bias của PyTorch: $16 \cdot 17 + 2 \cdot 16 = 304$ cho mỗi nhánh.
+- **$L = 10$:** cả hai đều đúng hoàn toàn. Với chuỗi ngắn, RNN thường vẫn nhớ được.
+- **$L = 100$:** RNN thường có loss 0.691, gần $\ln 2 \approx 0.693$, mức của đoán bừa, và độ chính xác 0.496. Gradient từ bước 100 về bước 1 quá nhỏ để nó học được gì. GRU có loss 0.001 và độ chính xác 1.000: các cổng update giữ thông tin của phần tử đầu qua 99 bước nhiễu.
+
+Seed cố định nên mỗi lần chạy trên cùng máy cho cùng kết quả; trên máy khác hoặc bản PyTorch khác, số có thể lệch đôi chút.
+
+## Lỗi hay gặp
+
+:::caution[Nghĩ rằng có cổng là tự nhớ xa được]
+Đổi `BIAS_Z = 0.0` trong ô PyTorch rồi chạy lại. Ở lần chạy thử của bài, GRU ở $L = 100$ chỉ còn loss 0.690 và độ chính xác 0.491, không khác RNN thường. Lúc mới khởi tạo, $\mathbf{z}_t \approx \sigma(0) = 0.5$: mỗi bước mất một nửa, và qua 99 bước gradient co còn cỡ $0.5^{99}$. Cổng chỉ tạo ra **khả năng** giữ; mạng phải tìm được tới đó bằng gradient. Với chuỗi rất dài, hãy khởi tạo cổng update nghiêng về phía giữ (nhớ đúng quy ước: ở PyTorch là hệ số tự do **dương**), hoặc cho mạng học trên chuỗi ngắn trước rồi tăng dần độ dài.
+:::
+
+:::caution[Đọc nhầm quy ước của cổng update]
+Bài này, bài báo gốc và PyTorch dùng $\mathbf{z}_t \odot \mathbf{h}_{t-1}$: $\mathbf{z}_t \approx \mathbf{1}$ là giữ. Một số tài liệu dùng $(\mathbf{1} - \mathbf{z}_t) \odot \mathbf{h}_{t-1}$: $\mathbf{z}_t \approx \mathbf{1}$ là ghi mới. Ghép công thức của hai nguồn khác nhau, hay khởi tạo bias theo một nguồn rồi chạy trên thư viện theo quy ước kia, sẽ cho ra đúng điều ngược với ý bạn. Luôn xem $\mathbf{z}_t$ nhân với số hạng nào.
+:::
+
+:::caution[Quên `batch_first=True` khi dùng `nn.GRU`]
+Mặc định, `nn.GRU` hiểu tensor đầu vào có dạng (độ dài chuỗi, lô, $d_x$). Dữ liệu của bạn có dạng (lô, độ dài chuỗi, $d_x$) mà không truyền `batch_first=True` thì PyTorch vẫn chạy không báo lỗi, nhưng coi mỗi chuỗi là một bước thời gian và mỗi bước thời gian là một chuỗi. Ngoài ra, `out, h_n = gru(x)` trả về hai thứ: `out` chứa $\mathbf{h}_t$ ở **mọi** bước của tầng cuối, `h_n` chỉ chứa trạng thái ở bước cuối của mọi tầng. Bài toán nhiều→một cần `out[:, -1]` (khi `batch_first=True`) hoặc `h_n[-1]`.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- RNN thường ghi đè trạng thái ở mọi bước, nên thông tin và gradient bị nhân lặp với $\mathbf{D}_t\mathbf{W}_{hh}$ và mờ dần theo cấp số nhân.
+- GRU thêm cổng reset $\mathbf{r}_t$ (nhìn trạng thái cũ bao nhiêu khi tính ứng viên) và cổng update $\mathbf{z}_t$ (giữ trạng thái cũ bao nhiêu), rồi nội suy $\mathbf{h}_t = \mathbf{z}_t \odot \mathbf{h}_{t-1} + (\mathbf{1} - \mathbf{z}_t) \odot \tilde{\mathbf{h}}_t$. Một số tài liệu đổi vai trò $\mathbf{z}_t$ và $\mathbf{1} - \mathbf{z}_t$.
+- Khi $\mathbf{z}_t \approx \mathbf{1}$, Jacobian một bước gần bằng $\mathbf{I}$, nên gradient đi qua nhiều bước gần như không co. Nhưng mạng phải học được tới đó: khởi tạo cổng nghiêng về phía giữ giúp ích với chuỗi rất dài.
+- GRU có 3 lần số tham số của RNN cùng kích thước, ít hơn LSTM (4 lần), và cho kết quả tương đương LSTM trong nhiều thí nghiệm.
+
+**Đọc thêm:**
+
+- Aston Zhang, Zachary C. Lipton, Mu Li, Alexander J. Smola (2023). [*Dive into Deep Learning*](https://d2l.ai/chapter_recurrent-modern/gru.html), mục 10.2 "Gated Recurrent Units (GRU)". Giải thích từng cổng kèm code; cùng quy ước $\mathbf{z}_t$ với bài, nhưng viết theo dạng hàng ($\mathbf{X}_t\mathbf{W}_{xr}$) thay cho dạng cột.
+- Kyunghyun Cho và cộng sự (2014). [*Learning Phrase Representations using RNN Encoder–Decoder for Statistical Machine Translation*](https://arxiv.org/abs/1406.1078), EMNLP 2014, mục 2.3. Bài báo giới thiệu GRU (khi đó chưa có tên này), với giải thích vai trò của từng cổng.
+- Junyoung Chung, Caglar Gulcehre, KyungHyun Cho, Yoshua Bengio (2014). [*Empirical Evaluation of Gated Recurrent Neural Networks on Sequence Modeling*](https://arxiv.org/abs/1412.3555), NIPS 2014 Deep Learning Workshop, mục 3. So GRU, LSTM và RNN thường trên nhạc và tiếng nói; nói rõ thành phần cộng. Bài báo dùng quy ước $\mathbf{z}_t$ ngược với bài này.
+- PyTorch. [*torch.nn.GRU*](https://docs.pytorch.org/docs/stable/generated/torch.nn.GRU.html). Phương trình chính xác mà PyTorch tính, cách xếp ba nhánh trong `weight_ih_l0`, `weight_hh_l0`, và ý nghĩa của `batch_first`.
+
+<LessonProgress />

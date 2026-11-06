@@ -1,0 +1,415 @@
+---
+title: 'Huấn luyện mạng nơ-ron: vanishing/exploding gradient, BatchNorm, Dropout'
+description: 'Vì sao mạng sâu khó huấn luyện: lan truyền ngược, kiểm tra gradient, gradient tiêu biến và bùng nổ, khởi tạo Xavier/He, BatchNorm, Dropout, weight decay.'
+quiz:
+  - question: 'Một mạng 7 lớp dùng sigmoid ở mọi lớp ẩn. Giả sử mọi trọng số trên đường đi đều bằng 1. So với $\delta$ ở lớp 7, $\delta$ ở lớp 1 lớn nhất là bao nhiêu lần?'
+    options: ['$1$ lần, vì trọng số bằng 1', '$0.25^{6} \approx 2.4 \times 10^{-4}$ lần', '$0.25^{7} \approx 6.1 \times 10^{-5}$ lần', '$0.5^{6} \approx 1.6 \times 10^{-2}$ lần']
+    answer: 1
+    explanation: 'Đi từ lớp 7 về lớp 1 là qua 6 bước, mỗi bước nhân với trọng số (bằng 1) và với $\sigma''(z) \le 0.25$. Tích lớn nhất là $0.25^{6}$. Trọng số bằng 1 không cứu được, vì đạo hàm của sigmoid tự nó đã co tín hiệu ít nhất 4 lần. Số mũ 7 là đếm nhầm số lớp thành số bước.'
+  - question: 'Lớp ẩn có 512 nơ-ron vào, dùng ReLU. Theo khởi tạo He, độ lệch chuẩn của trọng số là bao nhiêu?'
+    options: ['$\sqrt{1/512} \approx 0.044$', '$1$', '$\sqrt{2/512} = 0.0625$', '$2/512 \approx 0.0039$']
+    answer: 2
+    explanation: 'He chọn phương sai $2/n_{\text{in}}$, nên độ lệch chuẩn là $\sqrt{2/512} = \sqrt{1/256} = 1/16 = 0.0625$. Hệ số 2 bù cho việc ReLU đặt về 0 khoảng một nửa số giá trị. $\sqrt{1/512}$ là phương sai kiểu Xavier khi $n_{\text{in}} = n_{\text{out}}$, hợp với tanh hơn. $2/512$ là phương sai, chưa lấy căn.'
+  - question: 'Lớp Dropout với $p = 0.2$ (xác suất bỏ). Khi huấn luyện, một nơ-ron có giá trị $a = 3$ và được giữ lại. Theo inverted dropout, giá trị đi tiếp là bao nhiêu? Còn khi dự đoán?'
+    options:
+      - 'Huấn luyện $3.75$, dự đoán $3$'
+      - 'Huấn luyện $3$, dự đoán $2.4$'
+      - 'Huấn luyện $2.4$, dự đoán $3$'
+      - 'Huấn luyện $3.75$, dự đoán $3.75$'
+    answer: 0
+    explanation: 'Inverted dropout chia giá trị được giữ cho xác suất giữ $1 - p = 0.8$: $3 / 0.8 = 3.75$. Nhờ vậy kỳ vọng vẫn là $0.8 \times 3.75 = 3$, và lúc dự đoán lớp Dropout không làm gì, $a$ giữ nguyên $3$. Cách "huấn luyện giữ nguyên, dự đoán nhân 0.8" là dropout kiểu bài báo gốc, cũng đúng nhưng không phải inverted dropout.'
+  - question: 'Kiểm tra gradient cho MLP 2 lớp: sai số tương đối của $\mathbf{W}^{[2]}$ và $\mathbf{b}^{[2]}$ cỡ $10^{-11}$, của $\mathbf{W}^{[1]}$ và $\mathbf{b}^{[1]}$ cỡ $0.7$. Lỗi nhiều khả năng nằm ở đâu?'
+    options:
+      - 'Bước sai phân $h$ quá nhỏ'
+      - 'Công thức $\boldsymbol{\delta}^{[2]} = a^{[2]} - y$ sai'
+      - 'Cách tính $\boldsymbol{\delta}^{[1]}$, ví dụ quên nhân $g''(\mathbf{z}^{[1]})$'
+      - 'Hàm mất mát cài sai'
+    answer: 2
+    explanation: 'Gradient lớp 2 đúng nên $\boldsymbol{\delta}^{[2]}$ và hàm mất mát đều đúng: cả hai đều đi vào gradient lớp 2. Gradient lớp 1 chỉ khác ở bước truyền $\boldsymbol{\delta}^{[2]}$ về $\boldsymbol{\delta}^{[1]}$. Ô code đầu tiên của bài cho đúng kết quả này khi xóa thừa số $g''$. Nếu $h$ quá nhỏ, mọi tham số đều bị ảnh hưởng chứ không chỉ một lớp.'
+  - question: 'Bạn huấn luyện mạng có BatchNorm, rồi dự đoán từng ảnh một (batch cỡ 1) mà quên gọi `model.eval()`. Điều gì xảy ra ở lớp BatchNorm?'
+    options:
+      - 'Không sao, vì BatchNorm luôn dùng trung bình động'
+      - 'Trung bình của batch chính là giá trị của ảnh đó, nên $\hat{z} = 0$ (PyTorch báo lỗi khi mỗi kênh chỉ có một giá trị)'
+      - 'BatchNorm tự chuyển sang dùng $\gamma = 1$, $\beta = 0$'
+      - 'Kết quả đúng nhưng chậm hơn'
+    answer: 1
+    explanation: 'Ở chế độ huấn luyện, BatchNorm chuẩn hóa bằng trung bình và phương sai của chính batch. Batch có một mẫu thì $z - \mu_B = 0$, mọi thông tin bị xóa. `BatchNorm1d` của PyTorch từ chối trường hợp này và báo lỗi. Trung bình động chỉ được dùng ở chế độ `eval()`, nên phương án thứ nhất là hiểu nhầm hay gặp nhất.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import backpropCode from '@code/dl/training-neural-networks/backprop-check.vi.py?raw';
+import gradDepthCode from '@code/dl/training-neural-networks/grad-depth.vi.py?raw';
+import bnDropoutCode from '@code/dl/training-neural-networks/bn-dropout.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Tự dẫn được **lan truyền ngược** (backpropagation) cho MLP 2 lớp ở dạng ma trận, với đại lượng $\boldsymbol{\delta}^{[l]}$, và kiểm tra nó bằng **kiểm tra gradient** (gradient checking).
+- Giải thích được vì sao gradient **tiêu biến** (vanishing gradient) hoặc **bùng nổ** (exploding gradient) khi mạng sâu, và vì sao khởi tạo **Xavier** và **He** chữa được phần lớn chuyện này.
+- Hiểu **BatchNorm** và **Dropout** làm gì khi huấn luyện và khi dự đoán, và vì sao phải gọi `model.eval()`.
+- Biết khi nào dùng weight decay, dừng sớm (early stopping) và cắt chuẩn gradient (gradient clipping).
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài [Mạng nơ-ron nhân tạo](/vi/dl/neural-networks/) dùng ký hiệu $\mathbf{z}^{[l]} = \mathbf{W}^{[l]}\mathbf{a}^{[l-1]} + \mathbf{b}^{[l]}$, $\mathbf{a}^{[l]} = g(\mathbf{z}^{[l]})$, $\mathbf{a}^{[0]} = \mathbf{x}$; bài này giữ nguyên, và gọi $n^{[l]}$ là số nơ-ron của lớp $l$. Bộ tối ưu thì bài này chỉ cần **gradient descent** theo mini-batch ([bài Gradient Descent](/vi/ml/gradient-descent/)). **SGD có momentum** (SGD with momentum) cộng dồn các gradient cũ thành một "vận tốc" để đi đều hơn qua những chỗ gồ ghề, còn **Adam** chia mỗi bước cho độ lớn trung bình gần đây của gradient từng tham số, nên mỗi tham số có tốc độ học riêng. Chi tiết ở bài Các thuật toán tối ưu nâng cao.
+:::
+
+## Trực giác
+
+Bạn đã biết lan truyền xuôi: đưa $\mathbf{x}$ vào, qua từng lớp, ra $\hat{y}$. Để học, gradient descent cần đạo hàm của hàm mất mát $\mathcal{L}$ theo **mọi** tham số. Một mạng nhỏ cho ảnh chữ số 8×8, ba lớp ẩn 256 nơ-ron, đã có khoảng 150 nghìn tham số.
+
+### Cách ngây thơ: nhích từng tham số
+
+Ở bài Gradient Descent, bạn đã ước lượng độ dốc bằng cách nhích một tham số một chút rồi tính lại mất mát. Với 150 nghìn tham số, mỗi bước cập nhật cần ít nhất 150 nghìn lượt lan truyền xuôi. Quá chậm. Ta cần một cách tính **cả** 150 nghìn đạo hàm với chi phí chỉ cỡ vài lượt lan truyền xuôi. Đó là lan truyền ngược.
+
+### Trò chơi truyền tin
+
+Lan truyền ngược chuyền "lời trách" từ lớp ra về lớp vào: lớp ra biết mình sai bao nhiêu, nó báo cho lớp trước, lớp trước báo tiếp. Mỗi lần chuyền, tin bị **nhân** với một hệ số của lớp đó.
+
+Giống trò chơi truyền tin qua 10 người. Nếu ai cũng chỉ nói to bằng một phần tư người trước, người cuối nghe được $0.25^{10} \approx 10^{-6}$ âm lượng ban đầu: gần như im lặng. Nếu ai cũng nói to gấp đôi, người cuối bị hét vào tai to gấp $2^{10} = 1024$ lần. Chỉ khi mỗi người giữ đúng âm lượng, tin mới đi xa được.
+
+Với mạng sâu cũng vậy. Các lớp đầu nhận gradient rất nhỏ thì gần như đứng yên (tiêu biến), nhận gradient rất lớn thì nhảy lung tung tới mức tràn số (bùng nổ). Thêm nữa, mạng lớn đủ sức học thuộc tập train, nên còn phải chống overfitting.
+
+Bài toán của bài này là: **tính gradient của mọi tham số một cách hiệu quả, giữ cho tín hiệu gradient không tắt cũng không bùng lên khi đi qua nhiều lớp, và giữ cho mạng lớn không học thuộc dữ liệu.**
+
+## Lý thuyết
+
+### Quy tắc hàm hợp trên một chuỗi phép tính
+
+Bắt đầu với mạng chỉ có một nơ-ron mỗi lớp, mọi thứ là số vô hướng:
+
+$$
+x \;\to\; z_1 = w_1 x \;\to\; a_1 = g(z_1) \;\to\; z_2 = w_2 a_1 \;\to\; \mathcal{L}(z_2)
+$$
+
+Muốn biết $\mathcal{L}$ đổi bao nhiêu khi $w_1$ nhích một chút, ta lần theo chuỗi: $w_1$ đổi làm $z_1$ đổi, $z_1$ làm $a_1$ đổi, $a_1$ làm $z_2$ đổi, $z_2$ làm $\mathcal{L}$ đổi. **Quy tắc hàm hợp** (chain rule, còn gọi quy tắc dây chuyền) nói tỉ lệ đổi của cả chuỗi là tích các tỉ lệ đổi của từng mắt xích:
+
+$$
+\frac{\partial\mathcal{L}}{\partial w_1}
+= \frac{\partial\mathcal{L}}{\partial z_2}\cdot\frac{\partial z_2}{\partial a_1}\cdot\frac{\partial a_1}{\partial z_1}\cdot\frac{\partial z_1}{\partial w_1}
+= \frac{\partial\mathcal{L}}{\partial z_2}\cdot w_2 \cdot g'(z_1)\cdot x
+$$
+
+Mỗi thừa số đọc ra từ đúng một mắt xích: $z_2 = w_2 a_1$ nên $\partial z_2/\partial a_1 = w_2$; $a_1 = g(z_1)$ nên $\partial a_1/\partial z_1 = g'(z_1)$; $z_1 = w_1 x$ nên $\partial z_1/\partial w_1 = x$.
+
+Để ý: tính $\partial\mathcal{L}/\partial w_2 = \frac{\partial\mathcal{L}}{\partial z_2}\cdot a_1$ cũng cần $\frac{\partial\mathcal{L}}{\partial z_2}$. Phần đầu của chuỗi được **dùng chung**. Vì vậy ta tính từ cuối về đầu, lưu lại kết quả ở mỗi lớp, và lớp trước dùng lại kết quả của lớp sau. Đó là toàn bộ bí quyết của lan truyền ngược.
+
+### Lan truyền ngược cho MLP 2 lớp
+
+Giờ đến một MLP thật, với một mẫu $(\mathbf{x}, y)$, $y \in \{0, 1\}$:
+
+$$
+\begin{aligned}
+\mathbf{z}^{[1]} &= \mathbf{W}^{[1]}\mathbf{x} + \mathbf{b}^{[1]}, & \mathbf{a}^{[1]} &= g(\mathbf{z}^{[1]}) \\
+z^{[2]} &= \mathbf{W}^{[2]}\mathbf{a}^{[1]} + b^{[2]}, & a^{[2]} &= \sigma(z^{[2]}) = \hat{y}
+\end{aligned}
+$$
+
+$\mathbf{x}$ có $n$ phần tử, lớp ẩn có $n^{[1]}$ nơ-ron, nên $\mathbf{W}^{[1]}$ có kích thước $n^{[1]} \times n$. Lớp ra có một nơ-ron sigmoid, nên $\mathbf{W}^{[2]}$ có kích thước $1 \times n^{[1]}$. Hàm mất mát là cross-entropy nhị phân:
+
+$$
+\mathcal{L} = -\left[y\ln a^{[2]} + (1 - y)\ln\left(1 - a^{[2]}\right)\right]
+$$
+
+Đại lượng trung tâm là **$\boldsymbol{\delta}^{[l]} = \partial\mathcal{L}/\partial\mathbf{z}^{[l]}$**: mất mát nhạy thế nào với giá trị trước hàm kích hoạt của lớp $l$. Nó là "lời trách" được chuyền ngược. $\boldsymbol{\delta}^{[l]}$ cùng kích thước với $\mathbf{z}^{[l]}$.
+
+**Bước 1: $\delta$ ở lớp ra.** Đạo hàm của $\mathcal{L}$ theo $a^{[2]}$, rồi quy đồng:
+
+$$
+\frac{\partial\mathcal{L}}{\partial a^{[2]}} = -\frac{y}{a^{[2]}} + \frac{1 - y}{1 - a^{[2]}} = \frac{a^{[2]} - y}{a^{[2]}\left(1 - a^{[2]}\right)}
+$$
+
+Đạo hàm của sigmoid là $\sigma'(z) = \sigma(z)\left(1 - \sigma(z)\right)$, nên $\partial a^{[2]}/\partial z^{[2]} = a^{[2]}\left(1 - a^{[2]}\right)$. Nhân hai thừa số, mẫu số triệt tiêu:
+
+$$
+\delta^{[2]} = a^{[2]} - y
+$$
+
+Gọn đến bất ngờ: dự đoán trừ nhãn. Sigmoid đi với cross-entropy (và softmax đi với cross-entropy nhiều lớp) đều cho kết quả này, và đó là một lý do chúng hay đi cặp.
+
+**Bước 2: gradient của lớp ra.** Phần tử thứ $j$ của $\mathbf{W}^{[2]}$ chỉ đi vào $z^{[2]}$ qua số hạng $W^{[2]}_{j}a^{[1]}_j$, nên $\partial z^{[2]}/\partial W^{[2]}_j = a^{[1]}_j$. Nhân với $\delta^{[2]}$ theo quy tắc hàm hợp, rồi xếp lại thành hàng:
+
+$$
+\frac{\partial\mathcal{L}}{\partial\mathbf{W}^{[2]}} = \delta^{[2]}\,\mathbf{a}^{[1]\top}, \qquad \frac{\partial\mathcal{L}}{\partial b^{[2]}} = \delta^{[2]}
+$$
+
+**Bước 3: chuyền $\delta$ về lớp ẩn.** Nơ-ron ẩn $j$ ảnh hưởng tới $\mathcal{L}$ qua $a^{[1]}_j$, mà $a^{[1]}_j$ đi vào $z^{[2]}$ với hệ số $W^{[2]}_j$. Vậy $\partial\mathcal{L}/\partial a^{[1]}_j = W^{[2]}_j\,\delta^{[2]}$. Khi lớp sau có nhiều nơ-ron, $a^{[1]}_j$ đi vào tất cả, và ta cộng các đường lại: $\sum_i W^{[2]}_{ij}\delta^{[2]}_i$, chính là phần tử $j$ của $\mathbf{W}^{[2]\top}\boldsymbol{\delta}^{[2]}$. Cuối cùng qua hàm kích hoạt, nhân với $g'(z^{[1]}_j)$:
+
+$$
+\boldsymbol{\delta}^{[1]} = \left(\mathbf{W}^{[2]\top}\boldsymbol{\delta}^{[2]}\right) \odot g'\!\left(\mathbf{z}^{[1]}\right)
+$$
+
+Dấu $\odot$ là nhân từng phần tử, vì mỗi nơ-ron có hàm kích hoạt riêng của nó, không trộn với nơ-ron khác.
+
+**Bước 4: gradient của lớp ẩn.** Lặp lại Bước 2, với $\mathbf{x}$ đóng vai $\mathbf{a}^{[1]}$:
+
+$$
+\frac{\partial\mathcal{L}}{\partial\mathbf{W}^{[1]}} = \boldsymbol{\delta}^{[1]}\,\mathbf{x}^\top, \qquad \frac{\partial\mathcal{L}}{\partial\mathbf{b}^{[1]}} = \boldsymbol{\delta}^{[1]}
+$$
+
+$\boldsymbol{\delta}^{[1]}$ là cột $n^{[1]}$ phần tử, $\mathbf{x}^\top$ là hàng $n$ phần tử, nên tích là ma trận $n^{[1]} \times n$, đúng kích thước của $\mathbf{W}^{[1]}$. Kiểm kích thước như vậy là cách nhanh nhất để bắt lỗi chuyển vị.
+
+:::note[Ghi nhớ]
+Với mạng $N_L$ lớp, sau khi lan truyền xuôi và lưu lại mọi $\mathbf{z}^{[l]}$, $\mathbf{a}^{[l]}$:
+
+$$
+\begin{aligned}
+\boldsymbol{\delta}^{[l]} &= \left(\mathbf{W}^{[l+1]\top}\boldsymbol{\delta}^{[l+1]}\right) \odot g'\!\left(\mathbf{z}^{[l]}\right) \\
+\frac{\partial\mathcal{L}}{\partial\mathbf{W}^{[l]}} &= \boldsymbol{\delta}^{[l]}\,\mathbf{a}^{[l-1]\top}, \qquad \frac{\partial\mathcal{L}}{\partial\mathbf{b}^{[l]}} = \boldsymbol{\delta}^{[l]}
+\end{aligned}
+$$
+
+Bắt đầu từ $\boldsymbol{\delta}^{[N_L]}$ ở lớp ra, đi ngược tới $l = 1$. Với mini-batch $B$ mẫu, tính cho từng mẫu rồi lấy trung bình gradient.
+:::
+
+Chi phí của lan truyền ngược chỉ cỡ hai lần lan truyền xuôi, bất kể có bao nhiêu tham số. Đổi lại, phải giữ mọi $\mathbf{a}^{[l]}$ trong bộ nhớ cho tới lúc đi ngược; đó là lý do huấn luyện tốn bộ nhớ hơn dự đoán nhiều. PyTorch, TensorFlow, JAX làm việc này tự động (autograd), nhưng chúng làm đúng các bước trên.
+
+### Kiểm tra gradient bằng sai phân
+
+Lan truyền ngược tự viết rất dễ sai một chỗ chuyển vị hay một thừa số $g'$, mà mạng vẫn chạy, mất mát vẫn giảm chút ít. Cách bắt lỗi: tính lại từng đạo hàm bằng **sai phân trung tâm** (central difference), với một bước nhỏ $h$:
+
+$$
+\frac{\partial\mathcal{L}}{\partial\theta_k} \approx \frac{\mathcal{L}(\theta_k + h) - \mathcal{L}(\theta_k - h)}{2h}
+$$
+
+Ở tử số, chỉ $\theta_k$ được nhích, mọi tham số khác giữ nguyên. Sai phân trung tâm có sai số cỡ $h^2$, chính xác hơn nhiều so với sai phân một phía $\left(\mathcal{L}(\theta_k + h) - \mathcal{L}(\theta_k)\right)/h$ (sai số cỡ $h$). Với số thực 64 bit, $h \approx 10^{-5}$ là hợp lý: nhỏ hơn nữa thì sai số làm tròn ở phép trừ lại lớn lên.
+
+So gradient lan truyền ngược $\mathbf{g}$ với gradient sai phân $\mathbf{g}_{\text{num}}$ bằng **sai số tương đối**, để không phụ thuộc gradient lớn hay nhỏ:
+
+$$
+\text{sai số} = \frac{\lVert\mathbf{g} - \mathbf{g}_{\text{num}}\rVert}{\lVert\mathbf{g}\rVert + \lVert\mathbf{g}_{\text{num}}\rVert}
+$$
+
+Cỡ $10^{-7}$ hoặc nhỏ hơn là đúng; cỡ $10^{-2}$ trở lên gần như chắc chắn có lỗi. Mỗi tham số cần hai lượt lan truyền xuôi, nên chỉ kiểm trên mạng nhỏ, vài mẫu, rồi tắt đi khi huấn luyện thật.
+
+### Gradient tiêu biến và bùng nổ
+
+Viết công thức $\boldsymbol{\delta}^{[l]}$ lặp lại từ lớp ra về lớp 1. Mỗi lần lùi một lớp, $\boldsymbol{\delta}$ bị nhân với $\mathbf{W}^{[l+1]\top}$ rồi với $g'(\mathbf{z}^{[l]})$. Trở lại mạng một nơ-ron mỗi lớp cho dễ thấy:
+
+$$
+\delta^{[1]} = \delta^{[N_L]}\prod_{l=2}^{N_L} w_l\, g'\!\left(z^{[l-1]}\right)
+$$
+
+Một tích gồm $N_L - 1$ thừa số. Nếu mỗi thừa số cỡ $0.25$, mười lớp cho $0.25^{9} \approx 3.8 \times 10^{-6}$; nếu cỡ 2 thì $2^{9} = 512$. Tích của nhiều số hoặc co về 0, hoặc phình rất nhanh; chỉ khi các thừa số quanh 1 thì nó mới giữ được cỡ. Gradient của $\mathbf{W}^{[l]}$ là $\boldsymbol{\delta}^{[l]}\mathbf{a}^{[l-1]\top}$, nên các lớp đầu chịu ảnh hưởng nặng nhất.
+
+- **Tiêu biến:** các lớp đầu gần như không học. Mất mát giảm chậm hoặc dừng hẳn, dù các lớp cuối vẫn thay đổi.
+- **Bùng nổ:** một bước cập nhật quá lớn đẩy tham số ra xa, mất mát nhảy vọt, rồi thành `inf` hoặc `nan`.
+
+**Vì sao sigmoid dễ gây tiêu biến.** Đặt $a = \sigma(z) \in (0, 1)$, thì $\sigma'(z) = a(1 - a)$. Đây là parabol theo $a$, lớn nhất ở $a = 1/2$ (tức $z = 0$):
+
+$$
+\sigma'(z) = a(1 - a) \le \frac{1}{2}\cdot\frac{1}{2} = \frac{1}{4}
+$$
+
+Vậy mỗi lớp sigmoid co $\delta$ ít nhất 4 lần, trừ khi trọng số lớn bù lại. Khi $|z|$ lớn, sigmoid bão hòa (saturate): $a$ gần 0 hoặc 1, $\sigma'$ gần 0, còn tệ hơn. Tanh có $\tanh'(0) = 1$ nên đỡ hơn, nhưng cũng bão hòa. ReLU có đạo hàm đúng bằng 1 ở phần dương, nên tự nó không co tín hiệu; lúc này **trọng số** quyết định tất cả, tức là cách khởi tạo.
+
+### Khởi tạo Xavier và He
+
+**Không khởi tạo toàn số 0.** Nếu mọi trọng số của một lớp bằng nhau, mọi nơ-ron của lớp đó tính ra cùng một giá trị, nhận cùng một $\delta$, nên được cập nhật y hệt nhau. Chúng mãi là bản sao của nhau, và lớp 256 nơ-ron chỉ làm việc của một nơ-ron. Khởi tạo ngẫu nhiên để **phá vỡ đối xứng** (symmetry breaking). Câu hỏi còn lại là ngẫu nhiên với độ lệch chuẩn bao nhiêu.
+
+**Giữ phương sai qua mỗi lớp.** Xét $z_i = \sum_{j=1}^{n_{\text{in}}} W_{ij}a_j$, với $n_{\text{in}}$ là số nơ-ron vào. Giả sử các $W_{ij}$ độc lập, trung bình 0, phương sai $s^2$, và độc lập với các $a_j$. Mỗi số hạng có phương sai $s^2\,\mathbb{E}[a_j^2]$, và phương sai của tổng các số hạng độc lập là tổng các phương sai:
+
+$$
+\mathrm{Var}(z_i) = n_{\text{in}}\, s^2\, \mathbb{E}\!\left[a_j^2\right]
+$$
+
+Muốn tín hiệu không to lên cũng không nhỏ đi qua mỗi lớp, ta chọn $s^2$ để $\mathrm{Var}(z)$ ở lớp này bằng ở lớp trước.
+
+- **Hàm kích hoạt gần tuyến tính quanh 0** (tanh): $a \approx z$, nên $\mathbb{E}[a^2] \approx \mathrm{Var}(z_{\text{trước}})$, cần $n_{\text{in}}s^2 = 1$. Lượt lan truyền ngược nhân với $\mathbf{W}^\top$ nên đòi $n_{\text{out}}s^2 = 1$. **Khởi tạo Xavier** (Glorot và Bengio, 2010) lấy trung bình hai đòi hỏi:
+
+$$
+s^2 = \frac{2}{n_{\text{in}} + n_{\text{out}}}
+$$
+
+- **ReLU**: với $z$ đối xứng quanh 0, ReLU đặt nửa số giá trị về 0, nên $\mathbb{E}[a^2] = \frac{1}{2}\mathrm{Var}(z_{\text{trước}})$. Để bù nửa bị mất, **khởi tạo He** (He và cộng sự, 2015, còn gọi Kaiming) chọn:
+
+$$
+s^2 = \frac{2}{n_{\text{in}}}
+$$
+
+Lấy lớp vuông 64 → 64 làm ví dụ. Mỗi lần lùi một lớp ReLU, phương sai của $\delta$ bị nhân với $n\,s^2 \cdot \frac{1}{2}$. Với $s = 1$ là $64 \times 1 \times \frac{1}{2} = 32$, tức độ lệch chuẩn nhân $\sqrt{32} \approx 5.7$ mỗi lớp: bùng nổ. Với He, $64 \times \frac{2}{64} \times \frac{1}{2} = 1$: giữ nguyên. Ô code thứ hai sẽ đo đúng hai con số này.
+
+Xavier dẫn ra cho hàm gần tuyến tính quanh 0, mà sigmoid quanh 0 có độ dốc chỉ $\frac{1}{4}$, nên Xavier với sigmoid vẫn tiêu biến. Đây là một lý do mạng sâu ngày nay dùng ReLU (hoặc GELU) cùng He. `nn.Linear` của PyTorch mặc định lấy trọng số đều trong $\left[-1/\sqrt{n_{\text{in}}},\, 1/\sqrt{n_{\text{in}}}\right]$, tức phương sai $1/(3n_{\text{in}})$, nhỏ hơn He; muốn đúng He thì gọi `nn.init.kaiming_normal_`.
+
+### BatchNorm
+
+Khởi tạo tốt chỉ giữ cỡ tín hiệu **lúc đầu**. Trong lúc huấn luyện, trọng số thay đổi, và phân phối của $\mathbf{z}^{[l]}$ trôi đi. **Chuẩn hóa theo batch** (batch normalization, BatchNorm, BN; Ioffe và Szegedy, 2015) ép lại cỡ tín hiệu ở mỗi bước.
+
+Xét **một nơ-ron** trong một mini-batch $B$ mẫu, với các giá trị $z^{(1)}, \dots, z^{(B)}$. BatchNorm tính trung bình và phương sai của batch, rồi chuẩn hóa:
+
+$$
+\begin{aligned}
+\mu_B &= \frac{1}{B}\sum_{i=1}^{B} z^{(i)}, \qquad \sigma_B^2 = \frac{1}{B}\sum_{i=1}^{B}\left(z^{(i)} - \mu_B\right)^2 \\
+\hat{z}^{(i)} &= \frac{z^{(i)} - \mu_B}{\sqrt{\sigma_B^2 + \epsilon}}
+\end{aligned}
+$$
+
+$\epsilon$ là một số rất nhỏ (PyTorch mặc định $10^{-5}$) để không chia cho 0. Sau bước này, các $\hat{z}$ có trung bình 0, phương sai gần 1. Cuối cùng co giãn và dịch:
+
+$$
+\mathrm{BN}\!\left(z^{(i)}\right) = \gamma\,\hat{z}^{(i)} + \beta
+$$
+
+**Vì sao cần $\gamma$, $\beta$.** Ép mọi nơ-ron về trung bình 0, phương sai 1 có thể quá gò bó: một sigmoid sau đó sẽ chỉ làm việc ở vùng gần tuyến tính. $\gamma$ và $\beta$ là tham số học được, mỗi nơ-ron một cặp, cho mạng tự chọn cỡ và vị trí phù hợp. Nếu cần, mạng có thể học $\gamma = \sigma_B$, $\beta = \mu_B$ để trả lại đúng $z$ ban đầu. Vì BN trừ đi trung bình, hệ số tự do $\mathbf{b}^{[l]}$ của lớp tuyến tính đứng trước bị triệt tiêu, nên thường bỏ nó; $\beta$ làm thay việc đó.
+
+BN thường đặt sau lớp tuyến tính và trước hàm kích hoạt, như bài báo gốc. Mỗi nơ-ron có $\mu_B$, $\sigma_B$, $\gamma$, $\beta$ riêng.
+
+**Khi huấn luyện và khi dự đoán.** Lúc dự đoán, kết quả cho một ảnh không được phụ thuộc vào các ảnh khác tình cờ chung batch, và batch có thể chỉ có một ảnh. Vì vậy, trong lúc huấn luyện, BN giữ thêm **trung bình động** (running average) của $\mu_B$ và $\sigma_B^2$ qua các batch:
+
+$$
+\mu_{\text{run}} \leftarrow (1 - \alpha)\,\mu_{\text{run}} + \alpha\,\mu_B
+$$
+
+và tương tự cho phương sai. PyTorch gọi $\alpha$ là `momentum`, mặc định $0.1$ (khác momentum của bộ tối ưu). Lúc dự đoán, BN dùng $\mu_{\text{run}}$, $\sigma^2_{\text{run}}$ thay cho thống kê của batch. Chuyển giữa hai chế độ là việc của `model.train()` và `model.eval()`.
+
+**BN giúp gì.** Mạng có BN chịu được tốc độ học lớn hơn, ít nhạy với khởi tạo, và hội tụ nhanh hơn. Thống kê của batch có nhiễu, nên BN còn có tác dụng điều chuẩn nhẹ. Bài báo gốc giải thích bằng việc giảm "internal covariate shift" (phân phối đầu vào của mỗi lớp trôi đi), nhưng Santurkar và cộng sự (2018) cho thấy lý do chính có lẽ là BN làm mặt mất mát trơn hơn. Điểm yếu: batch nhỏ thì $\mu_B$, $\sigma_B$ nhiễu. Transformer vì vậy dùng chuẩn hóa lớp (layer normalization), chuẩn hóa trên các nơ-ron của **một** mẫu, xem bài [Transformer](/vi/dl/transformers/).
+
+### Dropout
+
+Mạng lớn có thể "học thuộc" tập train, như đường bậc 15 trong bài [Overfitting và underfitting](/vi/ml/overfitting-underfitting/). Một kiểu học thuộc đặc trưng của mạng nơ-ron: vài nơ-ron dựa vào nhau rất chặt, nơ-ron này chỉ có ích khi nơ-ron kia ở đúng chỗ (co-adaptation). **Dropout** (Srivastava và cộng sự, 2014) phá kiểu dựa dẫm này bằng một cách đơn giản đến lạ: ở mỗi bước huấn luyện, **tắt ngẫu nhiên** mỗi nơ-ron với xác suất $p$.
+
+Với một lớp có đầu ra $\mathbf{a}$, lấy một mặt nạ $\mathbf{r}$ mà mỗi phần tử độc lập, bằng 1 với xác suất $1 - p$ và bằng 0 với xác suất $p$. Bản dùng phổ biến, **inverted dropout**, chia thêm cho $1 - p$:
+
+$$
+\tilde{\mathbf{a}} = \frac{1}{1 - p}\,\mathbf{r} \odot \mathbf{a}
+$$
+
+**Vì sao chia cho $1 - p$.** Mỗi phần tử có kỳ vọng $\mathbb{E}[\tilde{a}_j] = (1 - p)\cdot\frac{a_j}{1 - p} + p \cdot 0 = a_j$. Lớp sau nhận tín hiệu cùng cỡ trung bình như khi không có dropout. Nhờ vậy, **lúc dự đoán, Dropout không làm gì cả**: giữ nguyên $\mathbf{a}$, không tắt nơ-ron nào, không nhân gì. Bài báo gốc làm ngược lại (giữ nguyên lúc huấn luyện, nhân trọng số với $1 - p$ lúc dự đoán); hai cách cho cùng kỳ vọng.
+
+Khi lan truyền ngược, nơ-ron bị tắt có $\delta$ bằng 0, nên trọng số nối vào nó không đổi ở bước đó. Mỗi bước huấn luyện vì vậy là huấn luyện một mạng con ngẫu nhiên, và mạng lúc dự đoán giống như trung bình của rất nhiều mạng con. Giá trị hay dùng: $p = 0.5$ cho lớp ẩn của MLP lớn (như bài báo gốc), $p$ khoảng $0.1$ trong Transformer.
+
+### Weight decay, dừng sớm, cắt chuẩn gradient
+
+Ba kỹ thuật ngắn nhưng gần như mạng nào cũng dùng.
+
+**Weight decay.** Thêm phạt L2 $\lambda\lVert\mathbf{w}\rVert_2^2$ như Ridge ở bài [Ridge, Lasso, Elastic Net](/vi/ml/regularization/). Gradient của khoản phạt là $2\lambda\mathbf{w}$, nên bước gradient descent thành:
+
+$$
+\mathbf{w} \leftarrow \mathbf{w} - \eta\left(\nabla\mathcal{L} + 2\lambda\mathbf{w}\right) = (1 - 2\eta\lambda)\,\mathbf{w} - \eta\nabla\mathcal{L}
+$$
+
+Vế phải cho thấy tên gọi: trước mỗi bước, trọng số bị **co** lại theo một tỉ lệ cố định, "phân rã" dần về 0 nếu dữ liệu không kéo nó ra. Tham số `weight_decay` của các bộ tối ưu trong PyTorch cộng thẳng $\text{wd}\cdot\mathbf{w}$ vào gradient, tức $\text{wd} = 2\lambda$. Với Adam, cộng vào gradient không còn tương đương với co trọng số, vì Adam chia lại gradient; AdamW (Loshchilov và Hutter, 2019) tách phần co trọng số ra riêng. Thường không phạt $\mathbf{b}$, $\gamma$, $\beta$.
+
+**Dừng sớm** (early stopping). Sau mỗi epoch, đo mất mát trên **tập kiểm định** (validation set). Mất mát kiểm định thường giảm rồi tăng lại khi mạng bắt đầu học thuộc. Lưu lại tham số ở epoch tốt nhất; nếu sau một số epoch (gọi là độ kiên nhẫn, patience) vẫn không tốt hơn thì dừng, và dùng bản đã lưu.
+
+**Cắt chuẩn gradient** (gradient clipping). Chặn bùng nổ trực tiếp: nếu chuẩn của cả vectơ gradient $\mathbf{g}$ vượt ngưỡng $c$, co nó lại:
+
+$$
+\mathbf{g} \leftarrow c\,\frac{\mathbf{g}}{\lVert\mathbf{g}\rVert} \quad \text{khi } \lVert\mathbf{g}\rVert > c
+$$
+
+Hướng giữ nguyên, chỉ độ dài bị giới hạn, nên một batch xấu không thể đẩy tham số đi quá xa. Trong PyTorch là `torch.nn.utils.clip_grad_norm_(model.parameters(), c)`, gọi sau `backward()` và trước `step()`. Kỹ thuật này đặc biệt quan trọng với mạng hồi tiếp (Pascanu và cộng sự, 2013), xem bài [Mạng nơ-ron hồi tiếp (RNN)](/vi/dl/rnn/).
+
+### Giới hạn
+
+- **Khởi tạo tốt và BN chưa đủ cho mạng rất sâu** (hàng trăm lớp). Kết nối tắt (residual connection) của ResNet cho gradient một đường đi thẳng, xem bài [Các kiến trúc CNN hiện đại](/vi/dl/modern-cnn-architectures/).
+- **Bài này không bàn chọn bộ tối ưu và lịch tốc độ học.** Momentum, Adam, warmup ở bài Các thuật toán tối ưu nâng cao.
+- **Phân tích phương sai dựa trên giả định độc lập.** Nó cho đúng cỡ lúc khởi tạo, nhưng không đảm bảo gì sau khi huấn luyện đã chạy.
+
+## Minh họa
+
+Minh họa dưới đây dựng một MLP sâu với dữ liệu ngẫu nhiên và vẽ, mỗi lớp một cột, độ lớn gradient của lớp đó, từ lớp đầu (trái) tới lớp cuối (phải). Trục đứng theo thang log: hai cột cách nhau một khoảng bằng nhau trên trục nghĩa là gấp nhau cùng một số lần, nên bạn đọc được "nhỏ đi bao nhiêu lần mỗi lớp". Bạn chọn hàm kích hoạt (sigmoid, tanh, ReLU), cách khởi tạo (độ lệch chuẩn 1, Xavier, He) và số lớp (2 tới 20). Hãy thử:
+
+1. **Sigmoid + Xavier**, 10 lớp: các cột thấp dần rõ rệt về phía trái. Mỗi lần lùi một lớp, gradient nhỏ đi vài lần, đúng như giới hạn $\sigma' \le \frac{1}{4}$. Kéo số lớp lên 20: các cột đầu gần như biến mất. Đó là gradient tiêu biến.
+2. **ReLU + độ lệch chuẩn 1**: ngược lại, các cột vọt lên rất cao, hơn cấu hình ổn định nhiều bậc độ lớn, và càng nhiều lớp càng cao. Đó là gradient bùng nổ, do mỗi lớp nhân phương sai lên khoảng $n/2$ lần.
+3. **ReLU + He**: các cột gần như bằng nhau, dù tăng lên 20 lớp. Tín hiệu đi qua mỗi lớp mà giữ được cỡ.
+4. Đổi sang **tanh**, giữ **Xavier**: các cột đều hơn hẳn so với sigmoid ở bước 1, vì $\tanh'(0) = 1$ chứ không phải $\frac{1}{4}$. Đây đúng là trường hợp Xavier được thiết kế cho.
+
+{/* VIZ: GradientFlowViz
+    Ý: độ lớn gradient ở từng lớp là tích các thừa số W và g'; sigmoid làm nó tiêu biến, ReLU với std 1 làm nó bùng nổ, ReLU với He giữ ổn định.
+    Tương tác: ba nhóm nút chọn hàm kích hoạt (sigmoid, tanh, ReLU) và cách khởi tạo (std 1, Xavier, He); thanh trượt số lớp 2–20. Mỗi lần đổi, tính lại và vẽ lại các cột ngay.
+    Dữ liệu: MLP tự sinh với seed cố định, độ rộng mỗi lớp cố định (ví dụ 64), một batch đầu vào chuẩn ngẫu nhiên, delta lớp cuối ngẫu nhiên cố định; giống ô code grad-depth của bài.
+    Ký hiệu: trục ngang là lớp l = 1..N_L; trục đứng (log) là ||δ^[l]|| hoặc ||∂L/∂W^[l]||; nhãn hàm kích hoạt σ, tanh, ReLU; khởi tạo Xavier s² = 2/(n_in + n_out), He s² = 2/n_in. */}
+
+## Ví dụ code
+
+Hai ô đầu chạy ngay trên trang, chỉ dùng NumPy; ô nào cũng tự tạo dữ liệu. Ô thứ ba dùng PyTorch, nên chạy trên máy bạn.
+
+Ô đầu tiên cài đặt đúng bốn bước lan truyền ngược của mục Lý thuyết cho MLP 2 lớp (3 đầu vào, 4 nơ-ron ẩn sigmoid, 1 nơ-ron ra sigmoid), trên 5 mẫu ngẫu nhiên, rồi so với gradient sai phân trung tâm, $h = 10^{-5}$.
+
+<PythonRunner code={backpropCode} title="Lan truyền ngược và kiểm tra gradient" />
+
+Sai số tương đối của cả bốn nhóm tham số đều cực nhỏ, từ $3.1 \times 10^{-12}$ ($\mathbf{b}^{[2]}$) tới $1.7 \times 10^{-10}$ ($\mathbf{W}^{[1]}$), dưới xa ngưỡng $10^{-7}$: lan truyền ngược đúng. Giờ hãy cố ý làm sai: xóa `* a1 * (1 - a1)` ở dòng tính `d1` (quên thừa số $g'$) rồi chạy lại. $\mathbf{W}^{[2]}$, $\mathbf{b}^{[2]}$ vẫn đúng, còn sai số của $\mathbf{W}^{[1]}$ và $\mathbf{b}^{[1]}$ nhảy lên $7.6 \times 10^{-1}$ và $7.2 \times 10^{-1}$. Kiểm tra gradient không chỉ báo có lỗi, nó còn chỉ ra lỗi nằm ở lớp nào.
+
+Ô thứ hai dựng một MLP 10 lớp, mỗi lớp 64 nơ-ron, cho 32 mẫu ngẫu nhiên đi qua, rồi lan truyền ngược và in $\lVert\boldsymbol{\delta}^{[l]}\rVert$ ở từng lớp với ba cấu hình. Để ba cấu hình so được với nhau, $\boldsymbol{\delta}$ ở lớp cuối được đặt giống hệt nhau (một vectơ ngẫu nhiên cố định), nên hàng 10 của bảng là cùng một số.
+
+<PythonRunner code={gradDepthCode} title="Độ lớn gradient qua 10 lớp" />
+
+Đọc từ dưới lên, tức theo chiều lan truyền ngược:
+
+- **Sigmoid + Xavier:** từ 1.4 ở lớp 10 xuống $2.9 \times 10^{-6}$ ở lớp 1, nhỏ đi khoảng 4 lần mỗi lớp. Lớp đầu nhận gradient nhỏ hơn lớp cuối gần nửa triệu lần.
+- **ReLU + std 1:** từ 1.4 lên $8.0 \times 10^{6}$, lớn lên khoảng 5.7 lần mỗi lớp, đúng con số $\sqrt{32}$ đã tính ở mục Khởi tạo.
+- **ReLU + He:** giữ quanh 1.3 tới 1.5 ở mọi lớp.
+
+Gradient của trọng số, $\boldsymbol{\delta}^{[l]}\mathbf{a}^{[l-1]\top}$, còn nhân thêm với kích hoạt của lớp trước. Với std 1, kích hoạt cũng bùng nổ theo chiều xuôi, nên mọi lớp đều có gradient trọng số khổng lồ, không chỉ các lớp đầu.
+
+Ô thứ ba huấn luyện hai MLP 3 lớp ẩn trên bộ chữ số viết tay `load_digits` của scikit-learn (1797 ảnh 8×8, nửa để train, nửa để test): một mạng thường, một mạng có BatchNorm và Dropout $p = 0.5$ sau mỗi lớp ẩn. Cuối cùng, ô cố ý quên `model.eval()` để xem chuyện gì xảy ra. Để cài PyTorch bản chỉ chạy CPU, xem bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+<LocalCode
+  code={bnDropoutCode}
+  title="MLP có và không có BatchNorm, Dropout"
+  packages={['torch', 'scikit-learn']}
+  hardware="CPU là đủ. Khoảng 5 tới 15 giây tùy máy"
+>
+
+```text
+Base MLP (eval): test acc = 0.913
+BN + Dropout (eval): test acc = 0.917
+BN + Dropout (quen eval): test acc = ['0.830', '0.815', '0.816']
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Khi có `model.eval()`:** Mạng có BatchNorm và Dropout đạt độ chính xác kiểm tra 0.917, nhỉnh hơn Base MLP (0.913) trên tập dữ liệu chữ số 8×8. Lúc này Dropout tắt hoàn toàn và BatchNorm dùng kỳ vọng, phương sai động tích lũy trong quá trình huấn luyện thay vì thống kê của batch kiểm tra.
+- **Khi quên `model.eval()`:** Độ chính xác sụt giảm mạnh xuống khoảng 0.815–0.830 và thay đổi ngẫu nhiên qua từng lần chạy. Lý do: Dropout vẫn tiếp tục tắt ngẫu nhiên 50% nơ-ron khiến tín hiệu đầu ra bị khuyết tật, đồng thời BatchNorm chuẩn hóa theo trung bình của tập kiểm tra thay vì phân phối đã học.
+
+## Lỗi hay gặp
+
+:::caution[Quên chuyển giữa `model.train()` và `model.eval()`]
+BatchNorm và Dropout là hai lớp duy nhất (trong bài này) cư xử khác nhau khi huấn luyện và khi dự đoán. Quên `model.eval()` trước khi đánh giá thì Dropout vẫn tắt ngẫu nhiên nơ-ron và BN dùng thống kê của batch đang đưa vào: kết quả lệch và mỗi lần chạy một khác, như cuối ô code thứ ba. Ngược lại, quên `model.train()` khi quay lại huấn luyện thì Dropout bị tắt và trung bình động của BN không được cập nhật. Đặt `model.train()` ở đầu mỗi epoch và `model.eval()` (cùng `torch.no_grad()`) trước mỗi lần đánh giá.
+:::
+
+:::caution[Khởi tạo mọi trọng số bằng 0 hoặc bằng nhau]
+Mạng vẫn chạy, mất mát vẫn có thể giảm chút ít, nhưng mọi nơ-ron trong một lớp giống hệt nhau mãi mãi, nên mạng chỉ mạnh như mạng một nơ-ron mỗi lớp. Hệ số tự do $\mathbf{b}$ thì khởi tạo bằng 0 được, vì trọng số ngẫu nhiên đã phá vỡ đối xứng. Với ReLU, dùng He; với tanh, dùng Xavier.
+:::
+
+:::caution[Kiểm tra gradient khi Dropout đang bật, hoặc bằng số thực 32 bit]
+Dropout lấy mặt nạ mới ở mỗi lượt lan truyền xuôi, nên $\mathcal{L}(\theta_k + h)$ và $\mathcal{L}(\theta_k - h)$ dùng hai mạng khác nhau, và sai phân vô nghĩa. Tắt Dropout (hoặc cố định mặt nạ) khi kiểm tra. Với số thực 32 bit, phép trừ ở tử số mất quá nhiều chữ số khi $h$ nhỏ; kiểm tra bằng 64 bit, như ô code đầu tiên. ReLU có chỗ gãy ở 0: nếu $z$ nằm cách 0 chưa tới $h$, sai phân có thể lệch, và đó không phải lỗi của bạn.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Lan truyền ngược là quy tắc hàm hợp tính từ lớp ra về lớp vào, dùng lại kết quả trung gian: $\boldsymbol{\delta}^{[l]} = \left(\mathbf{W}^{[l+1]\top}\boldsymbol{\delta}^{[l+1]}\right) \odot g'(\mathbf{z}^{[l]})$, $\partial\mathcal{L}/\partial\mathbf{W}^{[l]} = \boldsymbol{\delta}^{[l]}\mathbf{a}^{[l-1]\top}$. Kiểm tra bằng sai phân trung tâm; sai số tương đối cỡ $10^{-7}$ trở xuống là đúng.
+- Gradient ở lớp đầu là tích nhiều thừa số $\mathbf{W}^\top$ và $g'$, nên dễ tiêu biến (sigmoid: $\sigma' \le \frac{1}{4}$) hoặc bùng nổ (trọng số quá lớn).
+- Khởi tạo giữ phương sai qua mỗi lớp: Xavier $s^2 = 2/(n_{\text{in}} + n_{\text{out}})$ cho tanh, He $s^2 = 2/n_{\text{in}}$ cho ReLU.
+- BatchNorm chuẩn hóa mỗi nơ-ron theo batch rồi co giãn bằng $\gamma$, $\beta$, và dùng trung bình động khi dự đoán; inverted dropout tắt nơ-ron với xác suất $p$ và chia cho $1 - p$ khi huấn luyện, không làm gì khi dự đoán. Weight decay co trọng số, dừng sớm giữ mô hình tốt nhất trên tập kiểm định, cắt chuẩn gradient chặn bùng nổ.
+
+**Đọc thêm:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Bài 14: Multi-layer Perceptron và Backpropagation](https://machinelearningcoban.com/2017/02/24/mlp/). Tiếng Việt, dẫn lan truyền ngược dạng ma trận. Ký hiệu khác: dữ liệu xếp theo cột, $N$ là số mẫu.
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. *Dive into Deep Learning*, bản tiếng Việt [*Đắm mình vào Học Sâu*](https://d2l.aivivn.com/) (dịch từ bản 0.14.4): mục 4.7 [Lan truyền xuôi, lan truyền ngược và đồ thị tính toán](https://d2l.aivivn.com/chapter_multilayer-perceptrons/backprop_vn.html), mục 4.8 [Ổn định số học và khởi tạo](https://d2l.aivivn.com/chapter_multilayer-perceptrons/numerical-stability-and-init_vn.html), mục 4.6 [Dropout](https://d2l.aivivn.com/chapter_multilayer-perceptrons/dropout_vn.html), mục 7.5 [Chuẩn hóa theo batch](https://d2l.aivivn.com/chapter_convolutional-modern/batch-norm_vn.html). Có code chạy được.
+- Goodfellow, I., Bengio, Y., Courville, A. (2016). [*Deep Learning*](https://www.deeplearningbook.org/), MIT Press, mục 6.5 (lan truyền ngược), chương 7 (điều chuẩn, có dropout và dừng sớm), mục 8.4 và 8.7.1 (khởi tạo, BatchNorm).
+- Khóa CS231n, Đại học Stanford. Ghi chú bài giảng [*Neural Networks Part 3*](https://cs231n.github.io/neural-networks-3/) (trang không ghi tác giả và năm), mục Gradient checks. Mẹo thực tế khi kiểm tra gradient: sai số tương đối, chỗ gãy, số thực 64 bit.
+- Các bài gốc. Rumelhart, D. E., Hinton, G. E., Williams, R. J. (1986). [*Learning representations by back-propagating errors*](https://doi.org/10.1038/323533a0). *Nature* 323, 533–536. Glorot, X., Bengio, Y. (2010). [*Understanding the difficulty of training deep feedforward neural networks*](https://proceedings.mlr.press/v9/glorot10a.html). AISTATS. He, K. và cộng sự (2015). [*Delving Deep into Rectifiers*](https://arxiv.org/abs/1502.01852). arXiv:1502.01852. Ioffe, S., Szegedy, C. (2015). [*Batch Normalization*](https://arxiv.org/abs/1502.03167). arXiv:1502.03167. Srivastava, N. và cộng sự (2014). [*Dropout: A Simple Way to Prevent Neural Networks from Overfitting*](https://jmlr.org/papers/v15/srivastava14a.html). *JMLR* 15, 1929–1958.
+
+<LessonProgress />

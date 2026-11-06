@@ -1,0 +1,39 @@
+---
+// GradientFlowViz for dl/training-neural-networks (docs/architecture/viz/gradient-flow.md). The only file a lesson
+// imports: <GradientFlowViz />, no props, no client:* in MDX. Here, at build time: UI strings and KaTeX for the
+// caption and the three weight standard deviations. The island draws the network and runs the forward and backward
+// passes itself (gradient-flow.ts), with the same code and bits at build time and in the browser.
+// The island hydrates 200px before it scrolls into view. Styles: viz.css, through Starlight's customCss.
+import GradientFlowVizIsland from './gradient-flow-viz/GradientFlowVizIsland';
+import { getStrings } from '@i18n/ui';
+import { formatString } from '@i18n/format';
+import { inlineMarkupLabel, renderInlineMarkup } from '@lib/inline-markup';
+import { getPageLocale } from '@lib/page-locale';
+import { GRADIENT_FLOW } from '@lib/viz/gradient-flow';
+
+const route = Astro.locals.starlightRoute;
+const locale = getPageLocale(route);
+const strings = getStrings(Astro.locals.t, 'vizGradientFlow');
+const tCommon = getStrings(Astro.locals.t, 'common');
+
+const captionHtml = renderInlineMarkup(
+  formatString(strings.caption, { width: GRADIENT_FLOW.width, batch: GRADIENT_FLOW.batch }),
+);
+// The standard deviation of each initialisation, as the lesson writes it (n = fan-in).
+const stdHtml = {
+  std1: renderInlineMarkup('$1$'),
+  xavier: renderInlineMarkup(String.raw`$\sqrt{1/n}$`),
+  he: renderInlineMarkup(String.raw`$\sqrt{2/n}$`),
+};
+---
+
+<div class="atlas-viz not-content" lang={locale} data-pagefind-ignore>
+  <GradientFlowVizIsland
+    client:visible={{ rootMargin: '200px' }}
+    captionHtml={captionHtml}
+    stdHtml={stdHtml}
+    labels={{ depthHtml: renderInlineMarkup(strings.depthLabel), depthText: inlineMarkupLabel(strings.depthLabel) }}
+    strings={strings}
+  />
+  <noscript><p class="atlas-viz-noscript">{tCommon.needsScript}</p></noscript>
+</div>

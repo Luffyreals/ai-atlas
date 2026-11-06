@@ -1,0 +1,89 @@
+---
+// dl/lstm-bilstm, "Minh họa": the cell state runs straight across the top like a conveyor belt, only multiplied
+// by the forget gate and added to; the heavy work sits below. The focus (accent) is that line: c_{t−1} → × (f_t)
+// → + → c_t, no weight on it. Below, h_{t−1} (left) and x_t (from below) join into one bus that feeds the four
+// branches with weights (second group, dashed, as in GruCellFigure): σ forget, σ input, tanh candidate, σ output.
+// f_t goes up to the ×; i_t meets c̃_t at a × that goes up to the +; c_t branches down through an element-wise
+// tanh (plain: no weights) to meet o_t at a ×, which leaves on the right as h_t. No line crosses another.
+// Narrow layout only. Words: src/data/figures/lstm-cell.ts; symbols with FigMath (c̃ with its tilde).
+import { LSTM_CELL } from '@data/figures/lstm-cell';
+import { getPageLocale } from '@lib/page-locale';
+import { anchor, type Box } from '@lib/figures/layout';
+import FigArrow from './kit/FigArrow.astro';
+import FigMath from './kit/FigMath.astro';
+import FigNode from './kit/FigNode.astro';
+import FigText from './kit/FigText.astro';
+import FigureFrame from './kit/FigureFrame.astro';
+
+const t = LSTM_CELL[getPageLocale(Astro.locals.starlightRoute)];
+
+/** A box from its centre. */
+const at = (cx: number, cy: number, width: number, height: number): Box => ({ x: cx - width / 2, y: cy - height / 2, width, height });
+const OP = { width: 30, height: 36 } as const;
+const op = (cx: number, cy: number, width: number = OP.width) => at(cx, cy, width, OP.height);
+const LAYER_HEIGHT = 56;
+
+const TOP = 44; // the cell-state line
+const F = 50; // forget gate column, and the × on the top line
+const I = 128; // input gate column
+const G = 214; // candidate column, its × and the +
+const O = 300; // output gate column, the element-wise tanh and its ×
+const OPS = 160; // row of the two lower ×
+const GATES = 238; // row of the four branches
+const BUS = 300; // [h_{t−1}, x_t] into the branches
+const XIN = 28; // x_t joins the bus here
+
+const forgetMul = op(F, TOP);
+const sum = op(G, TOP);
+const squash = op(O, 100, 52); // tanh(c_t), element-wise
+const inMul = op(G, OPS);
+const outMul = op(O, OPS);
+const forget = at(F, GATES, 62, LAYER_HEIGHT);
+const input = at(I, GATES, 62, LAYER_HEIGHT);
+const candidate = at(G, GATES, 76, LAYER_HEIGHT);
+const output = at(O, GATES, 62, LAYER_HEIGHT);
+const gateTop = GATES - LAYER_HEIGHT / 2;
+const sigma = { symbol: 'σ' } as const;
+---
+
+<FigureFrame id="lstm-cell" text={t} narrowHeight={364}>
+  <Fragment slot="narrow">
+    <FigMath x={6} y={20} symbol="c" sub="t−1" bold anchor="start" />
+    <FigMath x={356} y={20} symbol="c" sub="t" bold anchor="end" />
+    <FigText x={(F + G) / 2} y={22} lines={t.labels.state} size="small" />
+    <FigArrow from={[4, TOP]} to={anchor(forgetMul, 'left')} tone="accent" />
+    <FigNode {...forgetMul} lines={t.labels.times} tone="accent" />
+    <FigArrow from={anchor(forgetMul, 'right')} to={anchor(sum, 'left')} tone="accent" />
+    <FigNode {...sum} lines={t.labels.plus} tone="accent" />
+    <FigArrow from={anchor(sum, 'right')} to={[356, TOP]} tone="accent" />
+
+    <FigArrow from={[O, TOP]} to={anchor(squash, 'top')} />
+    <FigNode {...squash} lines={t.labels.tanh} />
+    <FigArrow from={anchor(squash, 'bottom')} to={anchor(outMul, 'top')} />
+    <FigNode {...outMul} lines={t.labels.times} />
+    <FigArrow from={anchor(outMul, 'right')} to={[356, OPS]} />
+    <FigMath x={356} y={OPS - 16} symbol="h" sub="t" bold anchor="end" />
+
+    <FigArrow from={[F, gateTop]} to={anchor(forgetMul, 'bottom')} />
+    <FigMath x={F + 8} y={136} symbol="f" sub="t" bold anchor="start" />
+    <FigArrow from={[I, gateTop]} via={[[I, OPS]]} to={anchor(inMul, 'left')} />
+    <FigMath x={I + 8} y={186} symbol="i" sub="t" bold anchor="start" />
+    <FigNode {...inMul} lines={t.labels.times} />
+    <FigArrow from={anchor(inMul, 'top')} to={anchor(sum, 'bottom')} />
+    <FigArrow from={[G, gateTop]} to={anchor(inMul, 'bottom')} />
+    <FigMath x={G + 8} y={194} symbol="c" sub="t" bold tilde anchor="start" />
+    <FigArrow from={[O, gateTop]} to={anchor(outMul, 'bottom')} />
+    <FigMath x={O + 8} y={194} symbol="o" sub="t" bold anchor="start" />
+
+    <FigNode {...forget} math={sigma} lines={t.labels.forget} tone="alt" />
+    <FigNode {...input} math={sigma} lines={t.labels.input} tone="alt" />
+    <FigNode {...candidate} lines={t.labels.tanh} small={t.labels.candidate} tone="alt" />
+    <FigNode {...output} math={sigma} lines={t.labels.output} tone="alt" />
+
+    <FigMath x={6} y={284} symbol="h" sub="t−1" bold anchor="start" />
+    <FigArrow from={[4, BUS]} to={[O, BUS]} head={false} />
+    {[F, I, G, O].map((cx) => <FigArrow from={[cx, BUS]} to={[cx, GATES + LAYER_HEIGHT / 2]} />)}
+    <FigArrow from={[XIN, 336]} to={[XIN, BUS]} />
+    <FigMath x={XIN} y={348} symbol="x" sub="t" bold />
+  </Fragment>
+</FigureFrame>

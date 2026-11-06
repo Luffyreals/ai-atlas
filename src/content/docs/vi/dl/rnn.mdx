@@ -1,0 +1,385 @@
+---
+title: Mạng nơ-ron hồi tiếp (RNN)
+description: Đọc một câu từng từ và nhớ những gì đã đọc. Trạng thái ẩn, chia sẻ trọng số, lan truyền ngược theo thời gian, và vì sao RNN khó nhớ xa.
+quiz:
+  - question: 'Một lớp RNN có $d_x = 10$ (số chiều đầu vào) và $d_h = 20$ (số chiều trạng thái ẩn). Lớp này có bao nhiêu tham số khi đọc chuỗi dài $L = 100$, và khi đọc chuỗi dài $L = 1000$?'
+    options:
+      - '620 trong cả hai trường hợp'
+      - '62 000 và 620 000'
+      - '620 và 6 200'
+      - '600 trong cả hai trường hợp, vì $\mathbf{b}_h$ không tính'
+    answer: 0
+    explanation: '$\mathbf{W}_{hh}$ có $20 \times 20 = 400$ số, $\mathbf{W}_{xh}$ có $20 \times 10 = 200$ số, $\mathbf{b}_h$ có 20 số: tổng 620. Mọi bước thời gian dùng lại đúng bộ tham số này, nên số tham số không phụ thuộc $L$. Nhân với $L$ là cách nghĩ của một MLP có trọng số riêng cho từng vị trí. Hệ số tự do cũng là tham số học được, nên phải tính.'
+  - question: 'Xét RNN một chiều $h_t = \tanh(w\,h_{t-1} + u\,x_t)$ với $w = 0.8$, và giả sử $h$ luôn gần 0 nên đạo hàm của $\tanh$ gần bằng 1. Độ lớn của $\partial h_{60} / \partial h_{10}$ vào khoảng bao nhiêu?'
+    options:
+      - 'Khoảng $0.8 \times 50 = 40$'
+      - 'Khoảng $0.8$, vì mỗi bước dùng cùng $w$'
+      - 'Khoảng $0.8^{50} \approx 1.4 \times 10^{-5}$'
+      - 'Khoảng $0.8^{60} \approx 1.5 \times 10^{-6}$'
+    answer: 2
+    explanation: 'Đạo hàm qua một bước là $w \cdot \tanh''(\cdot) \approx 0.8$. Đi từ bước 10 tới bước 60 phải qua 50 bước, và quy tắc dây chuyền nhân 50 thừa số đó lại: $0.8^{50} \approx 1.4 \times 10^{-5}$. Đây là phép nhân, không phải phép cộng, nên kết quả co theo cấp số nhân. Số mũ là khoảng cách $60 - 10$, không phải 60.'
+  - question: 'Bạn huấn luyện RNN trên chuỗi rất dài bằng truncated BPTT với đoạn dài $K = 50$, và vẫn chuyển $\mathbf{h}$ (đã cắt gradient) từ đoạn này sang đoạn sau. Nhãn ở một bước phụ thuộc vào một đầu vào cách đó 200 bước. Điều gì đúng?'
+    options:
+      - 'Mô hình không thể dùng thông tin cách 200 bước, vì $\mathbf{h}$ bị đặt lại về 0 ở mỗi đoạn'
+      - '$\mathbf{h}$ vẫn mang thông tin qua ranh giới các đoạn, nhưng gradient không đi xa quá 50 bước, nên mô hình không được dạy trực tiếp để giữ thông tin đó'
+      - 'Truncated BPTT cho gradient giống hệt BPTT đầy đủ, chỉ tốn ít bộ nhớ hơn'
+      - 'Mô hình học được phụ thuộc này dễ hơn BPTT đầy đủ, vì gradient không bị tiêu biến'
+    answer: 1
+    explanation: 'Lan truyền xuôi không bị cắt: $\mathbf{h}$ cuối đoạn trước là $\mathbf{h}$ đầu đoạn sau, nên thông tin vẫn có thể đi qua. Chỉ đường gradient bị cắt ở ranh giới, nên không có tín hiệu nào bảo các trọng số "hãy giữ lại đầu vào này 200 bước". Gradient cũng vì vậy mà khác BPTT đầy đủ: nó bỏ hẳn các số hạng xa hơn $K$ bước.'
+  - question: 'RNN của bạn đọc các bài đánh giá dài khoảng 300 từ, và chỉ dựa vào vài chục từ cuối để phân loại. Loss giảm đều, không có bước nào nhảy vọt hay ra NaN. Bạn bật gradient clipping với ngưỡng 1. Điều gì sẽ xảy ra?'
+    options:
+      - 'Mô hình bắt đầu dùng các từ ở đầu bài, vì clipping giữ gradient ổn định'
+      - 'Gần như không đổi: clipping chỉ co các gradient quá lớn, không phóng to các gradient đã tiêu biến'
+      - 'Loss sẽ ra NaN, vì clipping làm gradient bị méo'
+      - 'Mô hình quên luôn các từ cuối bài'
+    answer: 1
+    explanation: 'Triệu chứng ở đây là gradient tiêu biến: tín hiệu từ đầu bài tới loss quá nhỏ. Clipping chỉ tác động khi chuẩn gradient vượt ngưỡng, và khi đó nó thu nhỏ vectơ lại. Nó không làm số nhỏ to lên. Muốn nhớ xa hơn cần đổi kiến trúc, như GRU hay LSTM có cổng.'
+  - question: 'Bài toán nào là dạng một → nhiều?'
+    options:
+      - 'Đọc một câu bình luận, cho biết khen hay chê'
+      - 'Gán từ loại cho từng từ trong câu'
+      - 'Dịch một câu tiếng Anh sang tiếng Việt'
+      - 'Nhìn một bức ảnh, sinh câu mô tả từng từ một'
+    answer: 3
+    explanation: 'Một ảnh (một đầu vào) cho ra một chuỗi từ: đó là một → nhiều. Phân loại bình luận là nhiều → một. Gán từ loại là nhiều → nhiều cùng độ dài, mỗi từ một nhãn. Dịch máy cũng là nhiều → nhiều, nhưng hai độ dài khác nhau, nên cần encoder–decoder.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import forwardCode from '@code/dl/rnn/forward.vi.py?raw';
+import jacobianCode from '@code/dl/rnn/jacobian.vi.py?raw';
+import sineRnnCode from '@code/dl/rnn/sine-rnn.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu vì sao dữ liệu chuỗi cần một kiến trúc riêng, và cách mạng nơ-ron hồi tiếp (recurrent neural network, RNN) dùng **trạng thái ẩn** (hidden state) để mang thông tin qua từng bước.
+- Mở rộng một RNN theo thời gian, thấy được vì sao mọi bước dùng chung một bộ trọng số, và nhận ra các dạng bài toán một → nhiều, nhiều → một, nhiều → nhiều.
+- Tự dẫn được lan truyền ngược theo thời gian (backpropagation through time, BPTT), và giải thích được vì sao gradient tiêu biến hay bùng nổ theo cấp số nhân của khoảng cách.
+- Cài đặt được lan truyền xuôi của RNN bằng NumPy, và huấn luyện một RNN bằng PyTorch với truncated BPTT và gradient clipping.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+## Trực giác
+
+### Dữ liệu có thứ tự
+
+Hãy đọc hai câu: "chó cắn người" và "người cắn chó". Cùng ba từ, nhưng nghĩa ngược hẳn. Hay nhìn nhiệt độ đo mỗi giờ: 24, 25, 27, 29... Muốn đoán giờ tới, bạn cần biết các số đi theo thứ tự nào, không chỉ biết có những số nào.
+
+Văn bản, chuỗi thời gian (time series), âm thanh, chuỗi ADN đều là **dữ liệu chuỗi** (sequential data): một dãy $\mathbf{x}_1, \mathbf{x}_2, \dots, \mathbf{x}_L$, trong đó thứ tự mang thông tin, và độ dài $L$ thay đổi từ mẫu này sang mẫu khác. Một câu bình luận có thể dài 5 từ hoặc 500 từ.
+
+### Vì sao MLP không hợp
+
+MLP ở bài [Mạng nơ-ron nhân tạo](/vi/dl/neural-networks/) nhận một vectơ có số chiều cố định. Có hai cách ép một chuỗi vào đó, và cả hai đều vướng:
+
+- **Ghép các bước thành một vectơ dài.** Phải chọn trước độ dài tối đa, chuỗi ngắn hơn thì đệm thêm số 0, chuỗi dài hơn thì cắt. Tệ hơn, mỗi vị trí có trọng số riêng. Mạng học "chữ *hay* ở vị trí 2 là lời khen" không giúp gì cho chữ *hay* ở vị trí 7: nó phải học lại từ đầu cho từng vị trí.
+- **Cộng hay lấy trung bình mọi bước.** Số chiều thì cố định, nhưng mất hẳn thứ tự. "Chó cắn người" và "người cắn chó" cho ra cùng một vectơ.
+
+### Đọc từng từ, giữ một bản ghi nhớ
+
+Bạn đọc câu này không phải bằng cách nhìn cả câu một lúc. Bạn đọc từng từ, và trong đầu luôn có một "bản tóm tắt" những gì đã đọc. Gặp từ mới, bạn cập nhật bản tóm tắt. Cách cập nhật thì giống nhau ở mọi từ: bạn không có một kỹ năng đọc riêng cho từ thứ 3 và một kỹ năng khác cho từ thứ 30.
+
+RNN làm đúng như vậy. Nó giữ một vectơ gọi là trạng thái ẩn. Mỗi bước, nó lấy trạng thái cũ và đầu vào mới, qua **cùng một công thức với cùng một bộ trọng số**, để ra trạng thái mới. Nhờ thế, chuỗi dài bao nhiêu cũng đọc được, và điều học được ở vị trí này dùng được ở mọi vị trí khác.
+
+Bài toán của bài này là: **xây một mạng đọc chuỗi có độ dài bất kỳ theo đúng thứ tự, nhớ lại những gì đã đọc trong một vectơ trạng thái, và tìm cách huấn luyện nó; rồi hiểu vì sao nó vẫn khó nhớ những gì đã đọc từ rất lâu.**
+
+## Lý thuyết
+
+### Trạng thái ẩn và công thức một bước
+
+Ở bước $t$ (từ $1$ tới $L$), RNN nhận đầu vào $\mathbf{x}_t \in \mathbb{R}^{d_x}$ và trạng thái của bước trước $\mathbf{h}_{t-1} \in \mathbb{R}^{d_h}$, rồi tính trạng thái mới:
+
+$$
+\mathbf{h}_t = \tanh\left(\mathbf{W}_{xh} \mathbf{x}_t + \mathbf{W}_{hh} \mathbf{h}_{t-1} + \mathbf{b}_h\right)
+$$
+
+- $d_x$ là số chiều của đầu vào, $d_h$ là số chiều của trạng thái ẩn (một siêu tham số, ví dụ 32 hay 256).
+- $\mathbf{W}_{xh} \in \mathbb{R}^{d_h \times d_x}$ đưa đầu vào mới vào không gian trạng thái.
+- $\mathbf{W}_{hh} \in \mathbb{R}^{d_h \times d_h}$ là **trọng số hồi tiếp** (recurrent weight): nó quyết định trạng thái cũ ảnh hưởng tới trạng thái mới ra sao. Đây là chỗ "hồi tiếp" trong tên gọi.
+- $\mathbf{b}_h \in \mathbb{R}^{d_h}$ là hệ số tự do.
+- $\tanh$ đưa mỗi thành phần về khoảng $(-1, 1)$, nên trạng thái không tự phình to dù đi qua rất nhiều bước.
+- Trạng thái đầu $\mathbf{h}_0$ thường đặt bằng vectơ 0.
+
+Cách đặt tên ma trận đọc như một mũi tên: chữ đầu là thứ được nhân vào, chữ sau là thứ được tính ra. $\mathbf{W}_{xh}$ đi từ $\mathbf{x}$ sang $\mathbf{h}$, $\mathbf{W}_{hh}$ đi từ $\mathbf{h}$ cũ sang $\mathbf{h}$ mới. Các bài [GRU](/vi/dl/gru/) và [LSTM và BiLSTM](/vi/dl/lstm-bilstm/) giữ quy ước này, chỉ thay chữ sau bằng tên cổng, ví dụ $\mathbf{W}_{xf}$, $\mathbf{W}_{hf}$ cho cổng quên.
+
+Nếu cần một dự đoán ở bước $t$, ta đưa $\mathbf{h}_t$ qua một lớp tuyến tính:
+
+$$
+\hat{\mathbf{y}}_t = \mathbf{W}_{hy} \mathbf{h}_t + \mathbf{b}_y
+$$
+
+Với bài toán phân loại, $\hat{\mathbf{y}}_t$ là các logit, và ta áp softmax như ở lớp ra của MLP. Với bài toán hồi quy, như đoán giá trị tiếp theo của một chuỗi số, $\hat{\mathbf{y}}_t$ chính là dự đoán.
+
+Hãy để ý: $\mathbf{h}_t$ phụ thuộc vào $\mathbf{h}_{t-1}$, mà $\mathbf{h}_{t-1}$ lại phụ thuộc vào $\mathbf{h}_{t-2}$, cứ thế về tới $\mathbf{x}_1$. Vì vậy $\mathbf{h}_t$ là một bản tóm tắt của **toàn bộ** $\mathbf{x}_1, \dots, \mathbf{x}_t$, nén vào $d_h$ con số. Nó chỉ phụ thuộc vào các bước đã qua, không nhìn thấy các bước sau.
+
+### Mở rộng theo thời gian và chia sẻ trọng số
+
+Công thức trên có một vòng lặp: đầu ra $\mathbf{h}_t$ quay lại làm đầu vào của bước sau. Để tính toán và lấy đạo hàm, ta **mở rộng theo thời gian** (unrolling): viết ra một bản sao của ô RNN cho mỗi bước, nối $\mathbf{h}_1 \to \mathbf{h}_2 \to \dots \to \mathbf{h}_L$.
+
+$$
+\mathbf{h}_0 \xrightarrow{\ \mathbf{x}_1\ } \mathbf{h}_1 \xrightarrow{\ \mathbf{x}_2\ } \mathbf{h}_2 \to \cdots \xrightarrow{\ \mathbf{x}_L\ } \mathbf{h}_L
+$$
+
+Sau khi mở rộng, RNN trông như một mạng truyền thẳng có $L$ lớp. Khác biệt quan trọng: **mọi "lớp" dùng chung $\mathbf{W}_{hh}$, $\mathbf{W}_{xh}$, $\mathbf{b}_h$** (chia sẻ trọng số, weight sharing). Ba hệ quả:
+
+1. **Số tham số không phụ thuộc $L$.** Lớp RNN có $d_h^2 + d_h d_x + d_h$ tham số, dù chuỗi dài 10 hay 10 000 bước.
+2. **Học một lần, dùng ở mọi vị trí.** Quy tắc "gặp chữ *hay* thì đẩy trạng thái về phía khen" nằm trong $\mathbf{W}_{xh}$, áp ở bước nào cũng được.
+3. **Đọc được chuỗi dài hơn mọi chuỗi đã thấy.** Chỉ cần chạy công thức thêm vài bước.
+
+Bạn sẽ thấy hình của ô RNN và bản mở rộng của nó ở mục Minh họa.
+
+### Các dạng bài toán
+
+Cùng một RNN, tùy chỗ ta đưa đầu vào và lấy đầu ra, có các dạng sau:
+
+| Dạng | Đầu vào | Đầu ra | Ví dụ |
+|---|---|---|---|
+| Một → nhiều | Một vectơ (thường làm $\mathbf{h}_0$ hoặc $\mathbf{x}_1$) | $\hat{\mathbf{y}}_1, \dots, \hat{\mathbf{y}}_L$ | Nhìn ảnh, sinh câu mô tả |
+| Nhiều → một | $\mathbf{x}_1, \dots, \mathbf{x}_L$ | Chỉ $\hat{\mathbf{y}}_L$, tính từ $\mathbf{h}_L$ | Phân loại cảm xúc của bình luận |
+| Nhiều → nhiều, cùng độ dài | $\mathbf{x}_1, \dots, \mathbf{x}_L$ | $\hat{\mathbf{y}}_t$ ở mọi bước | Gán từ loại cho từng từ; đoán giá trị kế tiếp ở mỗi bước |
+| Nhiều → nhiều, khác độ dài | Chuỗi nguồn | Chuỗi đích dài khác | Dịch máy |
+
+Dạng cuối cần hai RNN: một mạng đọc hết câu nguồn (encoder), một mạng sinh câu đích (decoder). Đó là chủ đề của bài [Mô hình chuỗi sang chuỗi (Seq2Seq)](/vi/llm/seq2seq/).
+
+Với dạng nhiều → nhiều, hàm mất mát là tổng các hàm mất mát ở từng bước, $\mathcal{L} = \sum_{t=1}^{L} \mathcal{L}_t$, trong đó $\mathcal{L}_t$ so $\hat{\mathbf{y}}_t$ với nhãn ở bước $t$. Với dạng nhiều → một, chỉ có $\mathcal{L}_L$. Trong code người ta thường lấy trung bình thay cho tổng; điều đó chỉ nhân gradient với một hằng số.
+
+### Lan truyền ngược theo thời gian (BPTT)
+
+Muốn huấn luyện, ta cần gradient của $\mathcal{L}$ theo $\mathbf{W}_{hh}$, $\mathbf{W}_{xh}$, $\mathbf{b}_h$. Sau khi mở rộng, RNN là một mạng truyền thẳng sâu $L$ lớp, nên ta dùng đúng lan truyền ngược ở bài [Huấn luyện mạng nơ-ron](/vi/dl/training-neural-networks/), đi từ bước $L$ lùi về bước $1$. Cách làm này có tên riêng: **lan truyền ngược theo thời gian** (backpropagation through time, BPTT). Có hai điều mới so với MLP: $\mathbf{h}_t$ ảnh hưởng tới loss theo hai đường, và trọng số được dùng lại ở mọi bước.
+
+Để gọn, viết $\boldsymbol{\delta}_t = \partial \mathcal{L} / \partial \mathbf{h}_t$, vectơ gradient của loss theo trạng thái ở bước $t$, cùng kích thước với $\mathbf{h}_t$.
+
+**Bước 1: gradient theo trạng thái.** $\mathbf{h}_t$ tác động lên loss theo hai đường: trực tiếp qua $\mathcal{L}_t$ (qua $\hat{\mathbf{y}}_t$), và gián tiếp qua $\mathbf{h}_{t+1}$, rồi từ đó tới mọi bước sau. Quy tắc dây chuyền cộng hai phần đó lại:
+
+$$
+\boldsymbol{\delta}_t = \frac{\partial \mathcal{L}_t}{\partial \mathbf{h}_t} + \left(\frac{\partial \mathbf{h}_{t+1}}{\partial \mathbf{h}_t}\right)^{\!\top} \boldsymbol{\delta}_{t+1}
+$$
+
+Ở bước cuối không có $\mathbf{h}_{L+1}$, nên $\boldsymbol{\delta}_L = \partial \mathcal{L}_L / \partial \mathbf{h}_L$. Từ đó ta tính lùi được $\boldsymbol{\delta}_{L-1}, \boldsymbol{\delta}_{L-2}, \dots, \boldsymbol{\delta}_1$.
+
+**Bước 2: Jacobian một bước.** Thừa số $\partial \mathbf{h}_{t+1} / \partial \mathbf{h}_t$ là một ma trận $d_h \times d_h$, gọi là **ma trận Jacobian**: phần tử hàng $i$, cột $j$ là đạo hàm của thành phần $i$ của $\mathbf{h}_{t+1}$ theo thành phần $j$ của $\mathbf{h}_t$. Ta có $\mathbf{h}_{t+1} = \tanh(\mathbf{W}_{hh} \mathbf{h}_t + \dots)$, và đạo hàm của $\tanh$ là $\tanh'(u) = 1 - \tanh^2(u)$. Mỗi thành phần đi qua $\tanh$ riêng, nên quy tắc dây chuyền cho:
+
+$$
+\frac{\partial \mathbf{h}_{t+1}}{\partial \mathbf{h}_t} = \mathbf{D}_{t+1} \mathbf{W}_{hh}, \qquad
+\mathbf{D}_{t+1} = \mathrm{diag}\left(\mathbf{1} - \mathbf{h}_{t+1} \odot \mathbf{h}_{t+1}\right)
+$$
+
+$\mathbf{D}_{t+1}$ là ma trận đường chéo chứa đạo hàm $\tanh$ của từng thành phần, tính lại được từ chính $\mathbf{h}_{t+1}$ đã lưu khi lan truyền xuôi. Mọi số trên đường chéo nằm trong $(0, 1]$.
+
+**Bước 3: gradient theo trọng số.** Ở bước $t$, $\mathbf{W}_{hh}$ nhân với $\mathbf{h}_{t-1}$, giống một lớp tuyến tính nhận đầu vào $\mathbf{h}_{t-1}$. Gradient theo đầu vào của $\tanh$ ở bước đó (nhân $\boldsymbol{\delta}_t$ với đạo hàm $\tanh$, như Bước 2) là $\mathbf{D}_t \boldsymbol{\delta}_t$, nên phần đóng góp của bước $t$ là tích ngoài $(\mathbf{D}_t \boldsymbol{\delta}_t)\, \mathbf{h}_{t-1}^\top$, như gradient của lớp tuyến tính trong MLP. Nhưng $\mathbf{W}_{hh}$ được dùng ở **mọi** bước, nên gradient của nó là tổng các phần đóng góp:
+
+$$
+\begin{aligned}
+\frac{\partial \mathcal{L}}{\partial \mathbf{W}_{hh}} &= \sum_{t=1}^{L} (\mathbf{D}_t \boldsymbol{\delta}_t)\, \mathbf{h}_{t-1}^\top \\
+\frac{\partial \mathcal{L}}{\partial \mathbf{W}_{xh}} &= \sum_{t=1}^{L} (\mathbf{D}_t \boldsymbol{\delta}_t)\, \mathbf{x}_t^\top \\
+\frac{\partial \mathcal{L}}{\partial \mathbf{b}_h} &= \sum_{t=1}^{L} \mathbf{D}_t \boldsymbol{\delta}_t
+\end{aligned}
+$$
+
+Cộng dồn qua các bước là điều duy nhất mà chia sẻ trọng số thêm vào. Gradient của $\mathbf{W}_{hy}$, $\mathbf{b}_y$ thì như lớp ra của MLP, cũng cộng qua các bước có loss.
+
+:::note[Ghi nhớ]
+BPTT là lan truyền ngược trên mạng đã mở rộng. Gradient theo trạng thái đi lùi qua công thức $\boldsymbol{\delta}_t = \partial \mathcal{L}_t / \partial \mathbf{h}_t + (\mathbf{D}_{t+1} \mathbf{W}_{hh})^\top \boldsymbol{\delta}_{t+1}$. Gradient theo trọng số là tổng phần đóng góp của mọi bước, vì mọi bước dùng chung trọng số. BPTT phải lưu mọi $\mathbf{h}_t$ của lượt xuôi, nên bộ nhớ tăng theo $L$.
+:::
+
+### Vì sao RNN khó nhớ xa
+
+Giả sử nhãn ở bước $L$ phụ thuộc vào đầu vào ở một bước $t$ rất sớm. Để học được điều đó, gradient của $\mathcal{L}_L$ phải đi ngược về tận $\mathbf{h}_t$. Trải công thức ở Bước 1 ra, phần đi theo đường từ $\mathbf{h}_L$ về $\mathbf{h}_t$ là:
+
+$$
+\frac{\partial \mathcal{L}_L}{\partial \mathbf{h}_t} = \left(\frac{\partial \mathbf{h}_L}{\partial \mathbf{h}_t}\right)^{\!\top} \frac{\partial \mathcal{L}_L}{\partial \mathbf{h}_L}, \qquad
+\frac{\partial \mathbf{h}_L}{\partial \mathbf{h}_t} = \mathbf{D}_L \mathbf{W}_{hh}\, \mathbf{D}_{L-1} \mathbf{W}_{hh} \cdots \mathbf{D}_{t+1} \mathbf{W}_{hh}
+$$
+
+Vế phải là tích của $L - t$ Jacobian một bước, mỗi bước một thừa số $\mathbf{D}_k \mathbf{W}_{hh}$. Đây là chỗ khác hẳn MLP: ở MLP mỗi lớp có ma trận riêng, còn ở đây **cùng một ma trận $\mathbf{W}_{hh}$ bị nhân lặp lại** $L - t$ lần.
+
+**Trường hợp một chiều.** Hãy xem $d_h = 1$ và trạng thái luôn gần 0, nên $\tanh' \approx 1$. Mỗi Jacobian chỉ là một số $w$, và $\partial h_L / \partial h_t \approx w^{L-t}$. Với $L - t = 50$: nếu $w = 0.9$ thì $0.9^{50} \approx 0.005$; nếu $w = 1.1$ thì $1.1^{50} \approx 117$. Chỉ lệch 0.1 quanh số 1 mà kết quả chênh nhau hơn hai vạn lần.
+
+**Trường hợp tổng quát.** Dùng tính chất của chuẩn ma trận $\lVert \mathbf{A}\mathbf{B} \rVert \le \lVert \mathbf{A} \rVert \lVert \mathbf{B} \rVert$, với $\lVert \cdot \rVert$ là chuẩn phổ (spectral norm), tức **giá trị kỳ dị** (singular value) lớn nhất $\sigma_{\max}$ của ma trận: hệ số lớn nhất mà ma trận có thể kéo dài một vectơ. Ma trận đường chéo $\mathbf{D}_k$ có các số trong $(0, 1]$, nên $\lVert \mathbf{D}_k \rVert \le 1$. Từ đó:
+
+$$
+\left\lVert \frac{\partial \mathbf{h}_L}{\partial \mathbf{h}_t} \right\rVert
+\le \prod_{k=t+1}^{L} \lVert \mathbf{D}_k \rVert \, \lVert \mathbf{W}_{hh} \rVert
+\le \sigma_{\max}(\mathbf{W}_{hh})^{\,L-t}
+$$
+
+- **Gradient tiêu biến** (vanishing gradient). Nếu $\sigma_{\max}(\mathbf{W}_{hh}) < 1$, chặn trên co về 0 theo cấp số nhân của khoảng cách $L - t$. Đây là điều kiện **đủ**: chắc chắn tiêu biến. $\tanh$ bão hòa (trạng thái gần $\pm 1$, đạo hàm gần 0) còn làm co nhanh hơn.
+- **Gradient bùng nổ** (exploding gradient). Muốn tích này lớn dần thì $\sigma_{\max}(\mathbf{W}_{hh}) > 1$ là điều kiện **cần**, nhưng chưa đủ, vì các $\mathbf{D}_k$ có thể kéo nó xuống. Khi nó xảy ra, một vài bước cập nhật có gradient cực lớn đẩy trọng số đi rất xa, loss nhảy vọt hoặc ra NaN.
+
+Pascanu, Mikolov và Bengio (2013) chứng minh hai điều kiện này (cho trường hợp $\tanh$; với sigmoid, ngưỡng là 4 thay cho 1, vì đạo hàm sigmoid không quá $1/4$). Trước đó, Bengio, Simard và Frasconi (1994) đã chỉ ra rằng phụ thuộc càng xa thì gradient descent càng khó học nó. Hệ quả thực tế dễ thấy từ công thức BPTT: gradient theo $\mathbf{W}_{hh}$ là tổng các số hạng ứng với mọi khoảng cách, và số hạng của khoảng cách xa nhỏ hơn số hạng gần theo cấp số nhân. Tín hiệu của các phụ thuộc gần lấn át hẳn, nên mô hình chủ yếu học được quan hệ giữa các bước gần nhau.
+
+Bài [Huấn luyện mạng nơ-ron](/vi/dl/training-neural-networks/) đã gặp vanishing gradient ở MLP sâu. Ở RNN, "độ sâu" là độ dài chuỗi, và một câu văn hay một chuỗi đo đạc dễ dài hàng trăm bước.
+
+### Truncated BPTT
+
+BPTT đầy đủ trên một chuỗi rất dài (cả một cuốn sách, hay một năm số liệu theo giờ) vừa tốn bộ nhớ, vì phải lưu mọi $\mathbf{h}_t$, vừa chỉ cập nhật trọng số một lần sau khi đọc hết. **Truncated BPTT** chia chuỗi thành các đoạn liên tiếp dài $K$ bước:
+
+1. Chạy xuôi trên đoạn đầu, bắt đầu từ $\mathbf{h}_0$, tính loss, lan truyền ngược **chỉ trong đoạn đó**, rồi cập nhật trọng số.
+2. Lấy trạng thái cuối đoạn làm trạng thái đầu của đoạn sau, nhưng **cắt đường gradient** đi qua nó: coi nó là một hằng số.
+3. Lặp lại cho tới hết chuỗi.
+
+Lượt xuôi vẫn liền mạch, nên $\mathbf{h}$ vẫn mang thông tin từ các đoạn trước. Đổi lại, gradient không bao giờ đi xa quá $K$ bước, nên mô hình không được dạy trực tiếp để giữ thông tin lâu hơn $K$ bước. Bộ nhớ chỉ tăng theo $K$, không theo $L$. Trong PyTorch, bước 2 là `h = h.detach()`, như trong ô code thứ ba.
+
+### Gradient clipping
+
+Với gradient bùng nổ, cách chữa đơn giản nhất là **cắt chuẩn gradient** (gradient clipping). Gọi $\mathbf{g}$ là vectơ ghép mọi gradient của mô hình, $\tau$ là một ngưỡng chọn trước. Trước mỗi bước cập nhật:
+
+$$
+\text{nếu } \lVert \mathbf{g} \rVert > \tau \text{ thì } \mathbf{g} \leftarrow \frac{\tau}{\lVert \mathbf{g} \rVert}\, \mathbf{g}
+$$
+
+Vectơ mới có chuẩn đúng bằng $\tau$ và giữ nguyên hướng. Gradient vẫn chỉ hướng giảm loss, chỉ có bước nhảy bị giới hạn, nên một lô dữ liệu xấu không hất trọng số đi quá xa. Pascanu và cộng sự gợi ý chọn $\tau$ bằng cách xem chuẩn gradient trung bình qua nhiều bước cập nhật; theo họ, ngưỡng từ một nửa tới mười lần mức trung bình đó vẫn hội tụ. Trong PyTorch, đó là `torch.nn.utils.clip_grad_norm_`.
+
+Clipping chỉ thu nhỏ gradient quá lớn. Nó **không** làm gradient đã tiêu biến lớn lên, nên không giúp RNN nhớ xa hơn.
+
+### Giới hạn
+
+- **Khó nhớ xa.** Gradient tiêu biến làm RNN thường chỉ dùng được ngữ cảnh gần. Truncated BPTT và clipping giúp huấn luyện ổn định hơn, nhưng không chữa được điều này. Ô code thứ hai cho bạn thấy tốc độ co của gradient.
+- **Phải chạy tuần tự.** $\mathbf{h}_t$ cần $\mathbf{h}_{t-1}$, nên không tính song song theo các bước được. Bài [Transformers](/vi/dl/transformers/) bỏ hẳn vòng lặp này.
+- **Mọi thứ nén vào một vectơ.** Toàn bộ quá khứ phải đi qua $\mathbf{h}_t$ có $d_h$ chiều. Bài [Mô hình chuỗi sang chuỗi (Seq2Seq)](/vi/llm/seq2seq/) cho thấy vì sao điều này thành nút thắt khi dịch câu dài.
+
+## Minh họa
+
+Hình dưới đặt ô RNN và bản mở rộng của nó cạnh nhau. Hãy nhìn vào các nhãn trọng số ở bản mở rộng: ba bước $t-1$, $t$, $t+1$ dùng đúng một bộ $\mathbf{W}_{xh}$, $\mathbf{W}_{hh}$, không phải ba bộ khác nhau. Mũi tên ngang nối $\mathbf{h}_{t-1} \to \mathbf{h}_t \to \mathbf{h}_{t+1}$ chính là đường mà gradient phải đi ngược lại khi lan truyền ngược theo thời gian.
+
+{/* FIG: RnnUnrolledFigure
+    Ý: một ô RNN có vòng lặp chính là một chuỗi các bản sao dùng chung trọng số, nối nhau qua trạng thái ẩn.
+    Khối và mũi tên: bên trái (nhóm thứ hai) là một ô RNN, mũi tên vào từ dưới (đầu vào), mũi tên ra phía trên (trạng thái ẩn, có thể kèm đầu ra), và một mũi tên vòng từ đầu ra quay lại chính ô. Dấu "=" hoặc mũi tên "mở rộng" ở giữa. Bên phải (trọng tâm) là ba ô giống hệt nhau cho các bước t-1, t, t+1, xếp ngang; mỗi ô nhận đầu vào từ dưới, đưa trạng thái ẩn lên trên, và một mũi tên ngang đưa trạng thái ẩn sang ô bên phải. Mũi tên ngang đi vào ô đầu (từ bước trước) và đi ra từ ô cuối (sang bước sau). Mũi tên vào từ dưới mang nhãn trọng số đầu vào, mũi tên ngang mang nhãn trọng số hồi tiếp, giống nhau ở cả ba ô. Bố cục hẹp 360 đơn vị: có thể xếp ô có vòng lặp ở trên, bản mở rộng ở dưới.
+    Nhãn: "Ô RNN"; "mở rộng theo thời gian"; "bước t-1", "bước t", "bước t+1"; "đầu vào"; "trạng thái ẩn"; "cùng trọng số ở mọi bước".
+    Chú thích: Mỗi bước tính $\mathbf{h}_t = \tanh(\mathbf{W}_{xh} \mathbf{x}_t + \mathbf{W}_{hh} \mathbf{h}_{t-1} + \mathbf{b}_h)$ với cùng $\mathbf{W}_{hh}$, $\mathbf{W}_{xh}$, $\mathbf{b}_h$; trên hình ghi $\mathbf{x}_{t-1}, \mathbf{x}_t, \mathbf{x}_{t+1}$ ở đầu vào và $\mathbf{h}_{t-1}, \mathbf{h}_t, \mathbf{h}_{t+1}$ ở trạng thái ẩn. */}
+
+Bảng dưới cho thấy tốc độ co giãn của tích các Jacobian trong trường hợp một chiều, $\partial h_L / \partial h_t \approx w^{L-t}$. Mỗi cột là một khoảng cách $L - t$.
+
+| $w$ | $L - t = 1$ | $L - t = 10$ | $L - t = 20$ | $L - t = 50$ |
+|---|---:|---:|---:|---:|
+| 0.5 | 0.5 | 0.00098 | 9.5e-07 | 8.9e-16 |
+| 0.9 | 0.9 | 0.35 | 0.12 | 0.0052 |
+| 1.0 | 1 | 1 | 1 | 1 |
+| 1.1 | 1.1 | 2.6 | 6.7 | 120 |
+
+Chỉ hàng $w = 1$ giữ được gradient qua 50 bước, và đó là một điểm cân bằng rất mỏng: lệch một chút là tiêu biến hoặc bùng nổ. Ô code thứ hai đo đúng đại lượng này trên một RNN thật có $\tanh$.
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: hai ô NumPy với Python 3.14 và NumPy 2.4 (bản có trong Pyodide), ô PyTorch với Python 3.14 và PyTorch 2.15 trên CPU. Hai ô NumPy chạy ngay trên trang và chạy độc lập: ô nào cũng tự import và tự tạo dữ liệu. Ô PyTorch chạy trên máy bạn.
+
+### Lan truyền xuôi bằng NumPy
+
+Ô dưới cài công thức một bước, rồi chạy nó trên một chuỗi 4 bước với $d_x = 2$, $d_h = 3$. Trọng số lấy ngẫu nhiên, chưa huấn luyện: ở đây ta chỉ xem trạng thái ẩn đi qua các bước ra sao. Cuối ô, cùng bộ tham số được chạy trên hai chuỗi khác: 2 bước đầu của chuỗi cũ, và chuỗi cũ đảo ngược thứ tự.
+
+<PythonRunner code={forwardCode} title="RNN lan truyền xuôi trên một chuỗi ngắn" />
+
+Đọc kết quả:
+
+- **Bốn trạng thái $\mathbf{h}_1, \dots, \mathbf{h}_4$** đều nằm trong $(-1, 1)$ nhờ $\tanh$. Trạng thái cuối $\mathbf{h}_4 = [0.365, 0.01, -0.084]$ là bản tóm tắt của cả chuỗi. Từ nó, lớp ra cho một dự đoán `y_hat = -0.123`, đúng dạng nhiều → một.
+- **Chuỗi dài 2** cho trạng thái cuối $[0.21, -0.089, 0.233]$, đúng bằng $\mathbf{h}_2$ của chuỗi dài 4. Cùng một hàm đọc được chuỗi dài bao nhiêu cũng được, và $\mathbf{h}_t$ chỉ phụ thuộc các bước đã qua.
+- **Chuỗi đảo ngược** cho $[0.146, 0.236, -0.409]$, khác hẳn $\mathbf{h}_4$, dù có đúng bốn đầu vào như cũ. RNN phân biệt được thứ tự, điều mà phép lấy trung bình ở mục Trực giác không làm được.
+- **22 tham số**: $\mathbf{W}_{xh}$ có 6, $\mathbf{W}_{hh}$ có 9, $\mathbf{b}_h$ có 3, $\mathbf{W}_{hy}$ có 3, $\mathbf{b}_y$ có 1. Con số này không đổi khi chuỗi dài hơn.
+
+### Đo gradient qua nhiều bước
+
+Ô dưới đo đúng đại lượng ở mục "Vì sao RNN khó nhớ xa": chuẩn phổ $\lVert \partial \mathbf{h}_L / \partial \mathbf{h}_t \rVert$ theo khoảng cách $L - t$, với $d_h = 16$ và $L = 50$. Để điều khiển được độ lớn của $\mathbf{W}_{hh}$, ô lấy $\mathbf{W}_{hh} = c\,\mathbf{Q}$, với $\mathbf{Q}$ là một **ma trận trực giao** (orthogonal matrix): nhân với nó chỉ xoay vectơ, không đổi độ dài. Vì vậy mọi giá trị kỳ dị của $\mathbf{W}_{hh}$ đều bằng đúng $c$. Đầu vào là một chuỗi số nhỏ, và để gọn, ô bỏ hệ số tự do $\mathbf{b}_h$.
+
+Code đi lùi từ bước $L$, mỗi bước nhân thêm một Jacobian $\mathbf{D}_k \mathbf{W}_{hh}$ như ở Bước 2, rồi in chuẩn phổ của tích ở một số khoảng cách.
+
+<PythonRunner code={jacobianCode} title="Chuẩn của tích các Jacobian theo khoảng cách" />
+
+Đọc kết quả:
+
+- **$c = 0.5$: tiêu biến.** Ở khoảng cách 10 còn $9.5 \times 10^{-4}$, rất sát chặn trên $0.5^{10} \approx 9.8 \times 10^{-4}$, vì trạng thái nhỏ nên $\mathbf{D}_k$ gần ma trận đơn vị. Ở khoảng cách 40 chỉ còn $7.1 \times 10^{-13}$: đầu vào cách 40 bước gần như không gửi được tín hiệu nào về trọng số.
+- **$c = 1.0$: co chậm.** Chặn trên là 1, nhưng $\tanh' < 1$ vẫn kéo xuống từ từ: 0.73 ở khoảng cách 10, 0.14 ở khoảng cách 40. Đây là vùng mà RNN học dễ nhất, và cũng là vùng hẹp nhất.
+- **$c = 2.0$: bùng nổ.** Từ 1.9 ở khoảng cách 1 lên $3.2 \times 10^{1}$ ở khoảng cách 10 và $6.7 \times 10^{3}$ ở khoảng cách 40. Con số này còn xa chặn trên $2^{40} \approx 10^{12}$, vì trạng thái đã lớn và $\tanh$ bão hòa kéo bớt xuống. Điều kiện $\sigma_{\max} > 1$ chỉ là cần, không đủ, như mục Lý thuyết đã nói.
+
+Bạn có thể đổi `c` thành 0.9 hoặc 1.1, hay tăng hệ số `0.1` của `xs` lên 1.0, rồi chạy lại để thấy $\tanh$ bão hòa làm gradient co nhanh hơn ra sao.
+
+### RNN bằng PyTorch đoán giá trị tiếp theo của sóng sin
+
+File dưới huấn luyện `nn.RNN` cho một bài nhiều → nhiều cùng độ dài: ở mỗi bước, đọc giá trị hiện tại của một sóng sin có nhiễu nhỏ, đoán giá trị kế tiếp.
+
+- **Dữ liệu tự sinh:** $\sin(0.1\,t)$ cộng nhiễu chuẩn độ lệch 0.05, dài 2000 bước. Đầu vào là $x_t$, nhãn là $x_{t+1}$.
+- **Mô hình:** `nn.RNN(1, 32)` ($d_x = 1$, $d_h = 32$, hàm $\tanh$) và một lớp `nn.Linear(32, 1)` cho $\hat{y}_t = \mathbf{W}_{hy} \mathbf{h}_t + b_y$. PyTorch tính $\mathbf{h}_t$ với hai vectơ hệ số tự do, `bias_ih` và `bias_hh`; tổng của chúng đóng vai $\mathbf{b}_h$ trong công thức của bài.
+- **Truncated BPTT:** chuỗi chia thành 40 đoạn, mỗi đoạn $K = 50$ bước. Trạng thái cuối đoạn được chuyển sang đoạn sau bằng `h.detach()`.
+- **Gradient clipping** với ngưỡng $\tau = 1$. Hàm `clip_grad_norm_` trả về chuẩn **trước** khi cắt; code in chuẩn lớn nhất trong mỗi epoch.
+- **Huấn luyện** 15 epoch bằng Adam, tức 600 bước cập nhật. Đánh giá trên 500 bước của một đoạn sóng mới, so với cách đoán đơn giản nhất: "giá trị kế tiếp bằng giá trị hiện tại".
+
+Cách cài PyTorch bản chỉ chạy CPU có ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+<LocalCode
+  code={sineRnnCode}
+  title="nn.RNN đoán giá trị tiếp theo của sóng sin"
+  packages={['torch']}
+  hardware="CPU là đủ, không cần GPU. Khoảng 40 giây tới 1 phút trên máy phát triển, nhanh hơn khi máy rảnh"
+  sampleVaries={false}
+>
+
+```text
+epoch  1  train MSE 0.0779  max grad norm 1.66
+epoch  5  train MSE 0.0045  max grad norm 0.15
+epoch 10  train MSE 0.0042  max grad norm 0.26
+epoch 15  train MSE 0.0042  max grad norm 0.16
+test MSE (RNN)          0.0038
+test MSE (copy x_t)     0.0091
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **MSE huấn luyện giảm từ 0.0779 ở epoch 1 xuống 0.0042.** Nhiễu trong nhãn có phương sai $0.05^2 = 0.0025$, phần này không đoán được, nên loss không thể xuống dưới mức đó.
+- **Clipping chỉ làm việc lúc đầu.** Ở epoch 1, chuẩn gradient lớn nhất là 1.66, vượt ngưỡng 1, nên đã bị cắt. Từ epoch 5, chuẩn lớn nhất chỉ 0.15 tới 0.26, clipping không còn tác động. Đây là cách clipping thường làm việc: một tấm lưới an toàn cho vài bước xấu, không phải một phần của mọi bước.
+- **Trên đoạn mới, MSE của RNN là 0.0038**, so với 0.0091 của cách chép giá trị hiện tại, tức nhỏ hơn khoảng 2.4 lần. RNN đã học được hướng đi của sóng từ các bước trước: biết sóng đang lên hay xuống thì đoán giá trị kế tiếp tốt hơn chép lại.
+
+Seed cố định nên mỗi lần chạy trên cùng máy cho cùng kết quả; trên máy khác hoặc bản PyTorch khác, số có thể lệch đôi chút.
+
+## Lỗi hay gặp
+
+:::caution[Nghĩ rằng mỗi bước có trọng số riêng]
+Bản mở rộng trông như $L$ lớp, nên dễ nghĩ RNN có $L$ bộ trọng số và số tham số tăng theo độ dài chuỗi. Không phải vậy: mọi bước dùng chung $\mathbf{W}_{hh}$, $\mathbf{W}_{xh}$, $\mathbf{b}_h$, như ô NumPy đầu tiên có đúng 22 tham số dù đọc chuỗi dài 2 hay 4. Hệ quả khi lấy gradient: phần đóng góp của các bước được **cộng** vào cùng một ma trận, không phải mỗi bước cập nhật một ma trận riêng.
+:::
+
+:::caution[Quên cắt gradient khi chuyển trạng thái giữa các đoạn]
+Với truncated BPTT, nếu bỏ dòng `h = h.detach()` trong ô PyTorch, `h` của đoạn trước vẫn nối với đồ thị tính toán cũ. Lần `backward()` thứ hai sẽ cố đi ngược qua đồ thị của đoạn trước, mà đồ thị đó đã bị giải phóng, nên PyTorch báo lỗi `RuntimeError` có câu "Trying to backward through the graph a second time". Thêm `backward(retain_graph=True)` như lời gợi ý trong thông báo là sai hướng: nó bắt gradient đi ngược về tận đầu chuỗi, đúng điều truncated BPTT muốn tránh. Ở ô này, nó còn đổi sang một lỗi khác ("modified by an inplace operation"), vì đồ thị cũ cần các trọng số trước khi `opt.step()` sửa chúng. Ngược lại, đặt `h = None` ở mỗi đoạn thì hết lỗi, nhưng mô hình mất luôn ngữ cảnh từ đoạn trước.
+:::
+
+:::caution[Tin rằng gradient clipping chữa được gradient tiêu biến]
+Clipping chỉ co các vectơ có chuẩn lớn hơn ngưỡng. Gradient từ một bước cách 40 bước đã nhỏ cỡ $10^{-13}$ (ô code thứ hai, $c = 0.5$) thì clipping để nguyên. Clipping chống bùng nổ; muốn nhớ xa cần đổi kiến trúc, như GRU và LSTM.
+:::
+
+:::caution[Nhầm thứ tự trục của tensor trong PyTorch]
+Mặc định, `nn.RNN` nhận tensor có dạng (độ dài chuỗi, số mẫu trong lô, $d_x$), không phải (số mẫu, độ dài, $d_x$). Nếu dữ liệu của bạn để số mẫu ở trục đầu mà quên `batch_first=True`, PyTorch không báo lỗi, vì trục cuối vẫn đúng là $d_x$: nó coi mỗi mẫu là một bước thời gian và đọc "ngang" qua các mẫu trong lô. Code vẫn chạy và vẫn in ra loss, nên lỗi rất khó thấy. Hãy kiểm tra `x.shape` ngay trước khi gọi mô hình.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- RNN đọc chuỗi từng bước và cập nhật trạng thái ẩn $\mathbf{h}_t = \tanh(\mathbf{W}_{xh} \mathbf{x}_t + \mathbf{W}_{hh} \mathbf{h}_{t-1} + \mathbf{b}_h)$, một bản tóm tắt của mọi bước đã qua; dự đoán ở bước $t$ là $\hat{\mathbf{y}}_t = \mathbf{W}_{hy} \mathbf{h}_t + \mathbf{b}_y$.
+- Mở rộng theo thời gian, RNN là một mạng sâu $L$ lớp dùng chung trọng số: số tham số không phụ thuộc $L$, đọc được chuỗi dài bất kỳ, phân biệt được thứ tự. Tùy chỗ lấy đầu ra, ta có các dạng một → nhiều, nhiều → một, nhiều → nhiều.
+- BPTT là lan truyền ngược trên mạng đã mở rộng; gradient theo trọng số là tổng phần đóng góp của mọi bước. Gradient từ bước $L$ về bước $t$ đi qua tích $L - t$ Jacobian $\mathbf{D}_k \mathbf{W}_{hh}$, nên co hoặc giãn theo cấp số nhân của khoảng cách: $\sigma_{\max}(\mathbf{W}_{hh}) < 1$ chắc chắn tiêu biến, $\sigma_{\max}(\mathbf{W}_{hh}) > 1$ mới có thể bùng nổ.
+- Truncated BPTT giới hạn lan truyền ngược trong đoạn $K$ bước để tiết kiệm bộ nhớ; gradient clipping co gradient quá lớn về đúng ngưỡng $\tau$. Cả hai giúp huấn luyện ổn định nhưng không giúp nhớ xa.
+
+Câu hỏi còn lại là: làm sao để gradient đi được qua hàng trăm bước mà không tiêu biến? Bài [GRU](/vi/dl/gru/) trả lời bằng **cổng**: thay vì luôn ghi đè trạng thái bằng $\tanh(\dots)$, mạng học cách quyết định giữ lại bao nhiêu phần trạng thái cũ ở mỗi bước, tạo ra một đường đi gần như thẳng cho cả thông tin lẫn gradient.
+
+**Đọc thêm:**
+
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. (bản dịch tiếng Việt của nhóm Đắm mình vào Học Sâu). [*Đắm mình vào Học Sâu*](https://d2l.aivivn.com/chapter_recurrent-neural-networks/index_vn.html), chương 8, mục 8.4 tới 8.7. Bản tiếng Việt của *Dive into Deep Learning*: RNN từ đầu bằng code, có mục gọt gradient (gradient clipping) và BPTT chi tiết.
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. (2023). [*Dive into Deep Learning*, mục 9.7 Backpropagation Through Time](https://d2l.ai/chapter_recurrent-neural-networks/bptt.html). Bản tiếng Anh mới hơn; mục 9.7 so BPTT đầy đủ, truncated BPTT thông thường và truncated BPTT ngẫu nhiên.
+- Goodfellow, I., Bengio, Y., Courville, A. (2016). [*Deep Learning*, chương 10 Sequence Modeling: Recurrent and Recursive Nets](https://www.deeplearningbook.org/contents/rnn.html), mục 10.1, 10.2, 10.7 và 10.11. Mở rộng đồ thị tính toán, BPTT, thử thách của phụ thuộc xa và cắt gradient. Sách dùng $\tau$ cho độ dài chuỗi, chỗ bài này viết $L$; trong bài này $\tau$ là ngưỡng cắt gradient.
+- Pascanu, R., Mikolov, T., Bengio, Y. (2013). [*On the difficulty of training recurrent neural networks*](https://proceedings.mlr.press/v28/pascanu13.html), ICML 2013, mục 2 và 3. Điều kiện đủ cho tiêu biến, điều kiện cần cho bùng nổ, và thuật toán cắt chuẩn gradient kèm cách chọn ngưỡng.
+- Bengio, Y., Simard, P., Frasconi, P. (1994). [*Learning long-term dependencies with gradient descent is difficult*](https://doi.org/10.1109/72.279181), *IEEE Transactions on Neural Networks* 5(2), 157–166. Bài kinh điển chỉ ra vì sao gradient descent khó học phụ thuộc xa trong mạng hồi tiếp.
+
+<LessonProgress />

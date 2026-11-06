@@ -283,8 +283,9 @@
   background: var(--atlas-viz-grid);
 }
 
-/* A row cut away: muted words ("removed" is written out, not only shown by colour), a hollow dashed bar. */
-.atlas-viz [data-removed] {
+/* A row cut away: muted words ("removed" is written out, not only shown by colour), a hollow dashed bar.
+   Also a cell whose number is 0 (a product of ConvolutionViz), so the ones that count stand out. */
+.atlas-viz :is([data-removed], [data-zero]) {
   color: var(--atlas-viz-muted);
 }
 
@@ -525,6 +526,89 @@
   font-weight: 600;
 }
 
+/* Grids of numbered cells (ConvolutionViz, convolution.md): HTML, so every number is real text. Panels stack;
+   from 36rem two columns, filled densely so the full-width calc row goes under the two grids.
+   Lines: each cell draws its right and bottom edge, the grid its top and left, so cell k starts at k/n. */
+.atlas-viz-panels {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+}
+
+.atlas-viz-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.atlas-viz-calc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.atlas-viz-cells {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--atlas-viz-n), minmax(0, 1fr));
+  max-width: 22rem;
+  border: solid var(--atlas-viz-grid);
+  border-width: 1px 0 0 1px;
+  background: var(--atlas-viz-plot-bg);
+  color: var(--atlas-viz-ink);
+  font-size: var(--sl-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.atlas-viz-cell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  border: solid var(--atlas-viz-grid);
+  border-width: 0 1px 1px 0;
+  line-height: 1.3;
+  text-align: center;
+}
+
+/* A signed fill under the number: accent above 0, blue below, opacity |value| / scale up to 0.45 (the text
+   keeps 4.5:1 on it, convolution.md). A bright pixel: ink, its number in the background colour. */
+.atlas-viz-cell[data-fill]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--atlas-viz-primary);
+  opacity: var(--atlas-viz-o);
+}
+
+.atlas-viz-cell[data-fill='neg']::before {
+  background: var(--atlas-viz-alt);
+}
+
+.atlas-viz-cell > span {
+  position: relative;
+}
+
+.atlas-viz-cell[data-bright] {
+  background: var(--atlas-viz-ink);
+  color: var(--atlas-viz-plot-bg);
+}
+
+.atlas-viz [role='gridcell'] {
+  cursor: pointer;
+}
+
+.atlas-viz-cell:focus-visible {
+  z-index: 1;
+}
+
+/* The window on the image, the chosen cell on the map: an accent frame with a halo of the background. */
+.atlas-viz-frame {
+  position: absolute;
+  border: 3px solid var(--atlas-viz-primary);
+  box-shadow: 0 0 0 2px var(--atlas-viz-plot-bg), inset 0 0 0 2px var(--atlas-viz-plot-bg);
+  pointer-events: none;
+}
+
 .atlas-viz-noscript {
   margin: 12px 0 0;
   padding-inline-start: 12px;
@@ -543,6 +627,17 @@
 
   .atlas-viz-bar {
     stroke-width: 16px;
+  }
+}
+
+@container (min-width: 36rem) {
+  .atlas-viz-panels {
+    grid-template-columns: 1fr 1fr;
+    grid-auto-flow: dense;
+  }
+
+  .atlas-viz-calc {
+    grid-column: 1 / -1;
   }
 }
 

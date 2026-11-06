@@ -1,0 +1,419 @@
+---
+title: 'Các kiến trúc CNN hiện đại: LeNet, AlexNet, VGG, GoogLeNet, ResNet, Xception, SENet, YOLO'
+description: 'Từ LeNet đọc chữ số tới ResNet 152 lớp và YOLO: mỗi kiến trúc thêm một ý tưởng (3×3 xếp chồng, tích chập 1×1, kết nối tắt, tách theo chiều sâu, trọng số kênh, phát hiện một lượt).'
+quiz:
+  - question: 'Thay một lớp tích chập $7 \times 7$ bằng ba lớp $3 \times 3$ nối tiếp (stride 1, cùng $C$ kênh vào và ra, bỏ qua hệ số tự do). Trường tiếp nhận và số tham số thay đổi thế nào?'
+    options:
+      - 'Trường tiếp nhận còn $3 \times 3$, số tham số giảm từ $49C^2$ xuống $9C^2$'
+      - 'Trường tiếp nhận thành $9 \times 9$, số tham số tăng từ $49C^2$ lên $81C^2$'
+      - 'Trường tiếp nhận vẫn là $7 \times 7$, số tham số giảm từ $49C^2$ xuống $27C^2$'
+      - 'Trường tiếp nhận vẫn là $7 \times 7$, số tham số không đổi'
+    answer: 2
+    explanation: 'Mỗi lớp $3 \times 3$ nới trường tiếp nhận thêm 2 ô mỗi chiều: $1 + 3 \cdot 2 = 7$. Mỗi lớp có $9C^2$ trọng số, ba lớp là $27C^2$, ít hơn $49C^2$ của một lớp $7 \times 7$. Phương án $3 \times 3$ quên rằng lớp sau nhìn đầu ra của lớp trước, mà mỗi ô đầu ra đó đã tóm một vùng $3 \times 3$ của ảnh. Ba lớp còn có ba ReLU thay vì một.'
+  - question: 'Đầu vào có 256 kênh. Bạn muốn một lớp $5 \times 5$ ra 64 kênh, và chèn trước nó một lớp $1 \times 1$ giảm xuống 32 kênh. Bỏ qua hệ số tự do, số tham số khoảng bao nhiêu, so với khi không chèn?'
+    options:
+      - 'Khoảng 59 nghìn, so với khoảng 410 nghìn'
+      - 'Khoảng 410 nghìn ở cả hai cách, vì $1 \times 1$ không có trọng số đáng kể'
+      - 'Khoảng 470 nghìn, so với khoảng 410 nghìn, vì thêm một lớp thì thêm tham số'
+      - 'Khoảng 8 nghìn, so với khoảng 410 nghìn'
+    answer: 0
+    explanation: 'Không chèn: $25 \cdot 256 \cdot 64 = 409\,600$. Có chèn: lớp $1 \times 1$ tốn $256 \cdot 32 = 8\,192$, lớp $5 \times 5$ giờ chỉ nhận 32 kênh nên tốn $25 \cdot 32 \cdot 64 = 51\,200$, cộng lại $59\,392$, ít hơn khoảng 7 lần. Thêm một lớp không có nghĩa là thêm tham số: lớp mới làm lớp đắt nhất rẻ đi nhiều. 8 nghìn chỉ là phần của lớp $1 \times 1$.'
+  - question: 'Một mạng thường (không có kết nối tắt) 56 lớp có lỗi trên tập huấn luyện cao hơn một mạng 20 lớp cùng kiểu. Giải thích nào khớp với hiện tượng này?'
+    options:
+      - 'Mạng 56 lớp bị overfitting vì có nhiều tham số hơn'
+      - 'Mạng 56 lớp cần nhiều dữ liệu hơn, nên lỗi huấn luyện cao là bình thường'
+      - 'Mạng 56 lớp không thể biểu diễn được hàm mà mạng 20 lớp biểu diễn'
+      - 'Bộ tối ưu khó tìm ra tham số tốt cho mạng sâu, dù tồn tại một lời giải ít nhất tốt bằng mạng 20 lớp'
+    answer: 3
+    explanation: 'Overfitting làm lỗi huấn luyện thấp còn lỗi kiểm tra cao. Ở đây chính lỗi huấn luyện cao hơn, nên vấn đề nằm ở việc tối ưu. Mạng 56 lớp biểu diễn được mọi thứ mạng 20 lớp làm được: chép 20 lớp đó, 36 lớp còn lại làm phép đồng nhất. Kết nối tắt làm phép đồng nhất trở nên dễ học, chỉ cần đẩy phần dư $F$ về 0.'
+  - question: 'Một lớp $3 \times 3$ có 128 kênh vào và 128 kênh ra (bỏ qua hệ số tự do). Thay nó bằng tích chập tách theo chiều sâu (depthwise $3 \times 3$ rồi pointwise $1 \times 1$). Số tham số giảm khoảng bao nhiêu lần?'
+    options:
+      - 'Khoảng 128 lần, vì mỗi kênh chỉ có một bộ lọc'
+      - 'Khoảng 8.4 lần'
+      - 'Khoảng 9 lần chính xác, vì kernel có 9 ô'
+      - 'Không giảm, vì vẫn còn đủ $3 \times 3$ và $1 \times 1$'
+    answer: 1
+    explanation: 'Tích chập thường: $9 \cdot 128 \cdot 128 = 147\,456$. Depthwise: $9 \cdot 128 = 1\,152$. Pointwise: $128 \cdot 128 = 16\,384$. Tổng $17\,536$, tỉ số khoảng $8.4$. Tỉ số tổng quát là $1/(1/C_{\text{out}} + 1/k^2)$: phần $1/k^2$ chiếm ưu thế nên gần 9 nhưng luôn dưới 9, vì phần pointwise trộn kênh vẫn tốn $C_{\text{in}} C_{\text{out}}$. Chỉ phần depthwise mới rẻ 128 lần.'
+  - question: 'Hai người đứng sát nhau trong ảnh. Mô hình cho hai hộp đúng, mỗi hộp một người, IoU giữa hai hộp là 0.4. Bạn chạy NMS với ngưỡng 0.3. Điều gì xảy ra?'
+    options:
+      - 'Giữ cả hai hộp, vì mỗi hộp ứng với một người khác nhau'
+      - 'Bỏ cả hai hộp, vì chúng chồng lên nhau'
+      - 'Giữ hộp điểm cao hơn, bỏ hộp còn lại, nên mất một người'
+      - 'Gộp hai hộp thành một hộp lớn bao cả hai người'
+    answer: 2
+    explanation: 'NMS không biết hộp nào ứng với vật nào. Nó chỉ giữ hộp điểm cao nhất rồi bỏ mọi hộp có IoU với hộp đó từ ngưỡng trở lên; $0.4 \ge 0.3$ nên hộp thứ hai bị bỏ. Với ngưỡng 0.5 cả hai sẽ được giữ. Ngưỡng quá thấp làm mất vật nằm sát nhau, quá cao thì để lại hộp trùng. NMS cũng không gộp hộp: nó chỉ giữ hoặc bỏ.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import paramCountCode from '@code/dl/modern-cnn-architectures/param-count.vi.py?raw';
+import iouNmsCode from '@code/dl/modern-cnn-architectures/iou-nms.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Kể được dòng thời gian từ LeNet-5 (1998) tới SENet (2018), và nói được mỗi kiến trúc thêm **một ý tưởng** nào để giải quyết vấn đề gì.
+- Tự tính được vì sao hai lớp $3 \times 3$ rẻ hơn một lớp $5 \times 5$, vì sao **tích chập 1×1** (1×1 convolution) và **tích chập tách theo chiều sâu** (depthwise separable convolution) cắt được nhiều tham số.
+- Giải thích được **kết nối tắt** (residual connection) của ResNet, và vì sao nó giúp huấn luyện mạng hàng trăm lớp.
+- Hiểu ý tưởng phát hiện vật thể một lượt của YOLO: lưới, hộp, độ tin cậy, **IoU** và **NMS**, và cài đặt được IoU, NMS bằng NumPy.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Từ bài [Mạng nơ-ron tích chập](/vi/dl/cnn/): một lớp tích chập với kernel $k \times k$, $C_{\text{in}}$ kênh vào và $C_{\text{out}}$ kênh ra có $(k^2 C_{\text{in}} + 1)\,C_{\text{out}}$ tham số (mỗi bộ lọc $k^2 C_{\text{in}}$ trọng số cộng một hệ số tự do), không phụ thuộc kích thước ảnh. **Trường tiếp nhận** (receptive field) của một ô đầu ra là vùng ảnh vào mà ô đó "nhìn thấy". Từ bài [Huấn luyện mạng nơ-ron](/vi/dl/training-neural-networks/): **BatchNorm** chuẩn hóa đầu ra của một lớp theo từng batch, **Dropout** tắt ngẫu nhiên một phần nơ-ron khi huấn luyện, và gradient có thể **tiêu biến** (vanishing) khi đi ngược qua nhiều lớp.
+:::
+
+## Trực giác
+
+### Một cuộc thi, mỗi năm một ý tưởng
+
+Từ năm 2010, cuộc thi ImageNet (ILSVRC) cho các đội khoảng 1.2 triệu ảnh, 1000 lớp, và chấm **lỗi top-5**: tỉ lệ ảnh mà nhãn đúng không nằm trong 5 dự đoán đầu của mô hình. Hãy nhìn lỗi của đội thắng (hoặc đứng đầu) qua vài năm:
+
+| Năm | Mô hình | Lỗi top-5 |
+|---|---|---:|
+| 2012 | AlexNet | 15.3% (đội thứ hai: 26.2%) |
+| 2014 | VGG (hạng hai) | 7.3% |
+| 2014 | GoogLeNet (hạng nhất) | 6.67% |
+| 2015 | ResNet | 3.57% |
+| 2017 | SENet | 2.251% |
+
+Lỗi giảm khoảng 7 lần trong 5 năm. Điều đáng chú ý: phép tích chập không đổi. Mọi mô hình trong bảng vẫn trượt bộ lọc trên ảnh như bài [Mạng nơ-ron tích chập](/vi/dl/cnn/). Cái đổi là **cách xếp** các lớp tích chập. Mỗi kiến trúc gặp một bức tường, rồi tìm ra một ý tưởng để vượt qua:
+
+- Mạng lớn huấn luyện quá chậm, lại học thuộc lòng dữ liệu. (AlexNet)
+- Nên dùng bộ lọc cỡ nào: $3 \times 3$, $5 \times 5$, $11 \times 11$? (VGG)
+- Muốn dùng mọi cỡ cùng lúc mà không đắt. (GoogLeNet)
+- Thêm lớp thì lỗi **huấn luyện** lại tăng. (ResNet)
+- Một bộ lọc vừa nhìn không gian vừa trộn kênh, có lãng phí không? (Xception)
+- Kênh nào quan trọng với ảnh **này**? (SENet)
+
+### Từ "ảnh này là gì" tới "vật nào ở đâu"
+
+Phân loại trả lời một câu: ảnh có con mèo. Một chiếc xe tự lái cần nhiều hơn: có ba người đi bộ và một xe máy, **ở những vị trí này**, và phải trả lời trong vài chục mili giây. Đó là bài toán **phát hiện vật thể** (object detection). YOLO dùng chính một CNN để làm việc đó chỉ trong một lần chạy qua mạng.
+
+Bài toán của bài này là: **mỗi kiến trúc nổi tiếng đã thêm ý tưởng nào vào khung "tích chập, pooling, lớp cuối" của CNN, ý tưởng đó giải quyết vấn đề gì, và tốn (hoặc tiết kiệm) bao nhiêu tham số.**
+
+## Lý thuyết
+
+### Khung chung của một CNN phân loại ảnh
+
+Mọi mạng trong bài (trừ YOLO ở phần đầu ra) có cùng một dáng:
+
+1. **Thân** (backbone): nhiều lớp tích chập. Càng vào sâu, ảnh càng nhỏ lại (nhờ pooling hoặc stride 2) còn số kênh càng nhiều. Lớp đầu bắt cạnh, lớp sau ghép cạnh thành hoa văn, rồi thành bộ phận của vật.
+2. **Đầu** (head): biến bản đồ đặc trưng cuối thành 1000 logit, rồi softmax.
+
+Phần còn lại của mục này đi theo dòng thời gian. Mỗi mục nói vấn đề trước, ý tưởng sau.
+
+### LeNet-5 (1998): khuôn mẫu đầu tiên
+
+LeCun và cộng sự (1998) dùng LeNet-5 để đọc chữ số viết tay, và hệ thống của họ đã được dùng để đọc séc ngân hàng. Ảnh vào $32 \times 32$, đi qua:
+
+- tích chập $5 \times 5$ ra 6 kênh, rồi lấy mẫu xuống (subsampling, giống pooling trung bình);
+- tích chập $5 \times 5$ ra 16 kênh, rồi lấy mẫu xuống;
+- một lớp tích chập ra 120 kênh (ảnh lúc này còn $1 \times 1$), một lớp kết nối đầy đủ 84 nơ-ron, rồi 10 đầu ra.
+
+Cộng số tham số từng lớp mà bài báo ghi, phần huấn luyện được có khoảng **60 nghìn**. Ý tưởng của LeNet là chính cái khung **tích chập → pooling, lặp lại, rồi lớp kết nối đầy đủ**, huấn luyện đầu cuối bằng lan truyền ngược. Mọi mạng sau đều giữ khung này.
+
+### AlexNet (2012): lớn hơn, cùng dữ liệu lớn và GPU
+
+Gần 15 năm sau, ý tưởng vẫn vậy, nhưng ba thứ đã khác: có ImageNet với 1.2 triệu ảnh gán nhãn, có GPU, và có vài mẹo huấn luyện. Krizhevsky, Sutskever và Hinton (2012) xây một mạng **5 lớp tích chập và 3 lớp kết nối đầy đủ**, khoảng **60 triệu tham số**, gấp khoảng 1000 lần LeNet. Bốn điểm làm nó chạy được:
+
+- **ReLU** thay cho tanh. ReLU không bão hòa ở phía dương, nên gradient không bị bóp nhỏ. Trong bài báo, một mạng 4 lớp dùng ReLU đạt lỗi huấn luyện 25% trên CIFAR-10 nhanh hơn khoảng 6 lần bản dùng tanh.
+- **Dropout** (tỉ lệ 0.5) ở hai lớp kết nối đầy đủ đầu, nơi tập trung phần lớn tham số và dễ overfitting nhất.
+- **Tăng cường dữ liệu** (data augmentation): cắt ngẫu nhiên các mảnh ảnh, lật ngang, đổi cường độ màu, để 1.2 triệu ảnh "nhiều" hơn.
+- **Hai GPU** GTX 580 (mỗi cái 3 GB) chạy song song, huấn luyện mất 5 tới 6 ngày.
+
+Kết quả: lỗi top-5 15.3%, trong khi đội thứ hai (không dùng mạng nơ-ron sâu) là 26.2%. Đây là thời điểm học sâu chiếm lấy thị giác máy tính.
+
+### VGG (2014): chỉ dùng bộ lọc 3×3, xếp chồng
+
+AlexNet dùng bộ lọc $11 \times 11$ ở lớp đầu, $5 \times 5$ ở lớp sau. Simonyan và Zisserman (2014) hỏi: nếu chỉ dùng $3 \times 3$ và xếp nhiều lớp thì sao?
+
+**Bước 1: hai lớp 3×3 nhìn được bao xa.** Một ô ở lớp thứ nhất nhìn một vùng $3 \times 3$ của ảnh. Một ô ở lớp thứ hai nhìn $3 \times 3$ ô của lớp thứ nhất. Hai ô lớp một nằm ở hai mép của cửa sổ đó cách nhau 2 bước, và mỗi ô lại nhìn thêm 1 điểm ảnh về mỗi phía, nên vùng ảnh tổng cộng rộng $2 + 3 = 5$. Tổng quát, với stride 1, mỗi lớp $k \times k$ nới trường tiếp nhận thêm $k - 1$:
+
+$$
+r_L = 1 + L(k - 1)
+$$
+
+Với $k = 3$: hai lớp cho $r_2 = 5$, ba lớp cho $r_3 = 7$. Vậy hai lớp $3 \times 3$ "nhìn" được đúng vùng của một lớp $5 \times 5$.
+
+**Bước 2: so số tham số.** Giả sử số kênh vào và ra đều là $C$, bỏ qua hệ số tự do. Một lớp $k \times k$ có $k^2 C^2$ trọng số. Do đó:
+
+$$
+\underbrace{2 \cdot 9C^2}_{\text{hai lớp } 3 \times 3} = 18C^2
+\;<\;
+\underbrace{25C^2}_{\text{một lớp } 5 \times 5}
+$$
+
+Hai lớp nhỏ tốn 72% số tham số của một lớp lớn. Với ba lớp so với một lớp $7 \times 7$, khoảng cách còn lớn hơn: $27C^2$ so với $49C^2$.
+
+**Bước 3: thêm phi tuyến.** Hai lớp có hai ReLU, một lớp chỉ có một. Cùng vùng nhìn, mạng có thêm một chỗ "uốn", nên biểu diễn được hàm phức tạp hơn.
+
+VGG-16 và VGG-19 (16 và 19 lớp có trọng số) chỉ là các khối "vài lớp $3 \times 3$ rồi max pooling" lặp lại, cuối cùng là ba lớp kết nối đầy đủ. Thiết kế đơn giản đến mức người ta vẫn dùng VGG làm ví dụ đầu tiên. Nhưng nó nặng: VGG-16 có khoảng **138 triệu** tham số, và khoảng 124 triệu trong số đó nằm ở ba lớp kết nối đầy đủ cuối (đếm bằng `torchvision`).
+
+### GoogLeNet và khối Inception (2014): nhánh song song, tích chập 1×1
+
+Cùng năm, nhóm của Szegedy (2014) đặt một câu hỏi khác: tại sao phải **chọn** cỡ bộ lọc? Một vật nhỏ cần $3 \times 3$, một vật to cần $5 \times 5$. Khối **Inception** chạy cùng lúc bốn nhánh trên cùng một đầu vào: tích chập $1 \times 1$, $3 \times 3$, $5 \times 5$, và max pooling $3 \times 3$. Đầu ra của bốn nhánh có cùng chiều cao và chiều rộng (nhờ padding), nên được **ghép theo chiều kênh**.
+
+Cách làm ngây thơ này rất đắt. Nhánh $5 \times 5$ trên đầu vào 192 kênh, ra 32 kênh, tốn $(25 \cdot 192 + 1) \cdot 32 = 153\,632$ tham số, và phép nhân thì nhân thêm với số vị trí trên ảnh.
+
+**Tích chập 1×1 là gì.** Kernel $1 \times 1$ không nhìn hàng xóm nào. Tại mỗi vị trí $(i, j)$, nó lấy vectơ $C_{\text{in}}$ giá trị kênh ở đúng vị trí đó và nhân với một ma trận $C_{\text{out}} \times C_{\text{in}}$. Nói cách khác, nó là **một lớp kết nối đầy đủ áp lên từng điểm ảnh**, dùng chung trọng số cho mọi điểm. Khi $C_{\text{out}} < C_{\text{in}}$, nó nén thông tin của nhiều kênh vào ít kênh hơn.
+
+GoogLeNet đặt một lớp $1 \times 1$ giảm kênh **trước** các lớp $3 \times 3$ và $5 \times 5$. Ở nhánh $5 \times 5$ trên: giảm 192 kênh xuống 16 trước, rồi mới $5 \times 5$ ra 32 kênh. Số tham số:
+
+$$
+\underbrace{(192 + 1) \cdot 16}_{1 \times 1:\ 3\,088}
++
+\underbrace{(25 \cdot 16 + 1) \cdot 32}_{5 \times 5:\ 12\,832}
+= 15\,920
+$$
+
+ít hơn khoảng 10 lần. Ô code thứ nhất tính lại các số này.
+
+GoogLeNet có 22 lớp có tham số, và bỏ các lớp kết nối đầy đủ to ở cuối, thay bằng **pooling trung bình toàn cục** (global average pooling): lấy trung bình mỗi kênh trên cả ảnh, được một vectơ, rồi một lớp tuyến tính ra 1000 lớp. Kết quả: lỗi top-5 6.67%, với số tham số ít hơn AlexNet khoảng 12 lần (theo bài báo). Tên GoogLeNet là lời chào tới LeNet.
+
+### ResNet (2015): kết nối tắt
+
+VGG cho thấy sâu hơn thì tốt hơn. Vậy cứ thêm lớp? He và cộng sự (2015) thử, và thấy một chuyện lạ.
+
+**Vấn đề: thêm lớp, lỗi huấn luyện lại tăng.** Trên CIFAR-10, một mạng "thường" (plain, không có kết nối tắt) 56 lớp có lỗi **trên tập huấn luyện** cao hơn mạng 20 lớp. Đây không phải overfitting: overfitting làm lỗi huấn luyện thấp còn lỗi kiểm tra cao. Ở đây mạng sâu học tệ hơn ngay trên dữ liệu nó được thấy. Các tác giả gọi đó là **hiện tượng thoái hóa** (degradation).
+
+Chuyện này lạ vì có một lời giải dễ: lấy mạng 20 lớp đã học, thêm 36 lớp chỉ làm phép **đồng nhất** (identity), tức trả lại đúng đầu vào. Mạng 56 lớp đó tốt bằng mạng 20 lớp. Vậy lời giải tồn tại, chỉ là gradient descent không tìm ra. Một chồng tích chập và ReLU khó học được phép "không làm gì".
+
+**Ý tưởng: học phần dư.** Gọi $\mathbf{x}$ là đầu vào của một khối vài lớp, và $H(\mathbf{x})$ là hàm ta muốn khối đó biểu diễn. Thay vì bắt các lớp học thẳng $H$, ResNet cho chúng học **phần dư** (residual):
+
+$$
+F(\mathbf{x}) = H(\mathbf{x}) - \mathbf{x}
+$$
+
+rồi cộng $\mathbf{x}$ trở lại qua một **đường tắt** (shortcut). Đầu ra của khối là:
+
+$$
+\mathbf{y} = g\big(F(\mathbf{x}) + \mathbf{x}\big)
+$$
+
+ở đây $F$ là hai lớp tích chập $3 \times 3$, mỗi lớp có BatchNorm, ReLU ở giữa, và $g$ là ReLU sau phép cộng. Hình ở mục Minh họa vẽ đúng khối này. Nếu phép đồng nhất là tốt nhất, các lớp chỉ cần đẩy $F$ về 0, tức đẩy trọng số về gần 0. Việc đó dễ hơn nhiều so với học ra phép đồng nhất từ đầu.
+
+**Vì sao gradient đi xa được.** Xét trường hợp một chiều, bỏ ReLU cuối cho gọn: $y = x + f(x)$. Đạo hàm là:
+
+$$
+\frac{dy}{dx} = 1 + f'(x)
+$$
+
+Số hạng 1 đến từ đường tắt. Mạng thường có $y = f(x)$ nên đạo hàm chỉ là $f'(x)$. Qua 50 khối, quy tắc dây chuyền nhân 50 đạo hàm với nhau. Nếu mỗi $f'$ cỡ 0.5, mạng thường còn $0.5^{50} \approx 10^{-15}$: gradient tiêu biến. Với kết nối tắt, mỗi thừa số là $1 + f'(x)$, quanh 1 khi $f'$ nhỏ, nên tích không sụp về 0. Gradient có một "đường cao tốc" đi thẳng từ lớp cuối về lớp đầu. (Lập luận này đúng nhất khi đường tắt là phép đồng nhất thuần túy; He và cộng sự (2016) phân tích kỹ hơn trong bài về ánh xạ đồng nhất.)
+
+**Khi kích thước không khớp.** Phép cộng $F(\mathbf{x}) + \mathbf{x}$ cần hai tensor cùng kích thước. Khi một khối giảm ảnh đi một nửa (stride 2) và tăng gấp đôi số kênh, đường tắt dùng một tích chập $1 \times 1$ stride 2 để đổi $\mathbf{x}$ cho khớp. Đường tắt đồng nhất thì **không thêm tham số nào**.
+
+**Khối nút cổ chai.** ResNet-50, 101, 152 dùng khối $1 \times 1 \to 3 \times 3 \to 1 \times 1$: lớp $1 \times 1$ đầu giảm kênh, lớp $3 \times 3$ làm việc trên ít kênh, lớp $1 \times 1$ sau tăng kênh lại. Đây là đúng ý tưởng giảm kênh của Inception.
+
+Kết quả trên ImageNet: mạng thường 34 lớp có lỗi top-1 28.54%, **tệ hơn** mạng thường 18 lớp (27.94%). Thêm kết nối tắt, ResNet-34 còn 25.03%, tốt hơn ResNet-18. ResNet-152 có 152 lớp mà vẫn tốn ít phép tính hơn VGG-16 (11.3 so với 15.3 tỉ FLOPs), và tổ hợp các ResNet đạt lỗi top-5 3.57%. Kết nối tắt từ đó có mặt khắp nơi, kể cả trong mọi khối Transformer (bài [Transformer](/vi/dl/transformers/)).
+
+### Xception (2017): tích chập tách theo chiều sâu
+
+Một lớp tích chập $3 \times 3$ thường làm **hai việc cùng lúc**: nhìn hàng xóm trong không gian (vùng $3 \times 3$), và trộn thông tin giữa các kênh (mỗi bộ lọc nhìn mọi kênh vào). Chollet (2017) đặt giả thuyết rằng hai việc này tách riêng được, và tách thì hiệu quả hơn.
+
+**Tích chập tách theo chiều sâu** làm hai bước:
+
+1. **Depthwise**: mỗi kênh vào có **một** bộ lọc $k \times k$ riêng, chỉ nhìn kênh đó. Không trộn kênh.
+2. **Pointwise**: một tích chập $1 \times 1$ trộn các kênh, như ở Inception.
+
+Đếm tham số (bỏ qua hệ số tự do). Tích chập thường có $k^2 C_{\text{in}} C_{\text{out}}$. Bản tách có $k^2 C_{\text{in}}$ (depthwise) cộng $C_{\text{in}} C_{\text{out}}$ (pointwise). Chia hai số cho nhau:
+
+$$
+\frac{k^2 C_{\text{in}} + C_{\text{in}} C_{\text{out}}}{k^2 C_{\text{in}} C_{\text{out}}}
+= \frac{1}{C_{\text{out}}} + \frac{1}{k^2}
+$$
+
+Dòng này có được bằng cách chia từng số hạng ở tử cho mẫu: số hạng đầu còn $1/C_{\text{out}}$, số hạng sau còn $1/k^2$. Với $k = 3$ và $C_{\text{out}} = 256$, tỉ số là $1/256 + 1/9 \approx 0.115$: bản tách tốn khoảng **8.7 lần ít hơn**. Khi số kênh lớn, $1/C_{\text{out}}$ gần 0, nên mức tiết kiệm tiến gần $k^2 = 9$ lần.
+
+Chollet nhìn Inception theo cách này: một khối Inception chia kênh thành vài nhóm, mỗi nhóm có tích chập không gian riêng. Đẩy tới cực điểm, mỗi kênh một nhóm, ta được tích chập tách theo chiều sâu. Tên **Xception** nghĩa là "Extreme Inception". Mạng có 36 lớp tích chập, chia thành 14 module, có kết nối tắt kiểu ResNet. Với khoảng 22.9 triệu tham số (Inception V3 có 23.6 triệu), Xception hơn Inception V3 một chút trên ImageNet (top-1 79.0% so với 78.2%) và hơn rõ trên một bộ dữ liệu nội bộ 350 triệu ảnh. Vì số tham số gần bằng nhau, cái lợi đến từ cách **dùng** tham số, không phải từ việc có nhiều hơn. Cùng ý tưởng này là nền của MobileNet, mạng cho điện thoại (bài Phân loại ảnh với CNN).
+
+### SENet (2018): mỗi kênh một trọng số
+
+Đến đây, mọi kênh ra của một lớp được đối xử như nhau. Nhưng với ảnh một con mèo, kênh bắt "lông" quan trọng hơn kênh bắt "bánh xe". Hu và cộng sự (2018) thêm một khối nhỏ học cách **tăng hoặc giảm từng kênh tùy theo ảnh**: khối **squeeze-and-excitation** (SE). Gọi $\mathbf{U}$ là đầu ra của một lớp, có $C$ kênh, mỗi kênh $\mathbf{U}_c$ là một ma trận $H \times W$.
+
+**Bước 1, squeeze (ép):** tóm mỗi kênh thành một số bằng trung bình toàn cục:
+
+$$
+z_c = \frac{1}{HW}\sum_{i=1}^{H}\sum_{j=1}^{W} U_c(i, j)
+$$
+
+Ta được vectơ $\mathbf{z}$ có $C$ thành phần, một "bản tóm tắt" ảnh này theo từng kênh.
+
+**Bước 2, excitation (kích):** cho $\mathbf{z}$ qua một MLP nhỏ có nút cổ chai, rồi sigmoid:
+
+$$
+\mathbf{s} = \sigma\big(\mathbf{W}_2\, \mathrm{ReLU}(\mathbf{W}_1 \mathbf{z})\big)
+$$
+
+$\mathbf{W}_1$ có kích thước $\tfrac{C}{r} \times C$ (nén $C$ số xuống $C/r$), $\mathbf{W}_2$ có kích thước $C \times \tfrac{C}{r}$ (mở lại $C$ số). Bài báo chọn $r = 16$. Sigmoid đưa mỗi $s_c$ về khoảng $(0, 1)$: đó là "trọng số" của kênh $c$.
+
+**Bước 3, scale (co giãn):** nhân cả kênh với trọng số của nó, $\tilde{\mathbf{U}}_c = s_c \mathbf{U}_c$.
+
+Trọng số $\mathbf{s}$ thay đổi theo từng ảnh, vì $\mathbf{z}$ tính từ chính ảnh đó. Đây là một dạng **chú ý theo kênh** (channel attention), họ hàng xa của attention trong Transformer. Khối SE rất rẻ: chỉ có $\mathbf{W}_1$ và $\mathbf{W}_2$, khoảng $2C^2/r$ tham số. Gắn vào mỗi khối của ResNet-50, số tham số tăng từ 25.6 lên 28.1 triệu (khoảng 10%), số phép tính gần như không đổi (3.87 so với 3.86 tỉ FLOPs), còn lỗi top-1 giảm từ 24.80% xuống 23.29%. Đội dùng SENet thắng ILSVRC 2017 với lỗi top-5 2.251%.
+
+### YOLO (2016): phát hiện vật thể trong một lượt
+
+Các mạng trên trả lời "ảnh này là gì". **Phát hiện vật thể** cần thêm "ở đâu": đầu ra là một danh sách **hộp bao** (bounding box), mỗi hộp có vị trí, kích thước, và nhãn lớp. Cách làm phổ biến trước đó (họ R-CNN) đề xuất khoảng hai nghìn vùng có thể chứa vật, rồi chạy bộ phân loại trên từng vùng. Chính xác, nhưng chậm.
+
+Redmon và cộng sự (2016) đặt câu hỏi ngược lại: một CNN có thể **nhìn ảnh một lần** (You Only Look Once) rồi trả ra mọi hộp cùng lúc không? Ý tưởng:
+
+**Lưới.** Chia ảnh thành lưới $S \times S$ ô (bài báo dùng $S = 7$). Ô nào chứa **tâm** của một vật thì ô đó chịu trách nhiệm phát hiện vật ấy.
+
+**Mỗi ô dự đoán gì.** Mỗi ô dự đoán $B$ hộp ($B = 2$). Mỗi hộp gồm 5 số: tâm $(x, y)$ tính theo ô, chiều rộng và chiều cao $(w, h)$ tính theo cả ảnh, và một **độ tin cậy** (confidence). Ngoài ra mỗi ô dự đoán $C$ xác suất lớp (với bộ dữ liệu PASCAL VOC, $C = 20$), dùng chung cho các hộp của ô. Vậy đầu ra của mạng là một tensor:
+
+$$
+S \times S \times (5B + C) = 7 \times 7 \times (5 \cdot 2 + 20) = 7 \times 7 \times 30
+$$
+
+Mạng có 24 lớp tích chập (nhiều lớp $1 \times 1$ giảm kênh, học từ GoogLeNet) rồi 2 lớp kết nối đầy đủ, và lớp cuối ra thẳng tensor này. Phát hiện vật thể thành một bài **hồi quy**: một lần lan truyền xuôi là xong.
+
+**IoU: hai hộp trùng nhau bao nhiêu.** Để biết một hộp dự đoán tốt cỡ nào, ta so nó với hộp thật bằng **IoU** (Intersection over Union, tỉ lệ giao trên hợp):
+
+$$
+\mathrm{IoU}(A, B) = \frac{\text{diện tích}(A \cap B)}{\text{diện tích}(A \cup B)}
+$$
+
+IoU bằng 1 khi hai hộp trùng khít, bằng 0 khi không chạm nhau. Ví dụ: hộp $A$ từ $(10, 10)$ tới $(50, 50)$ và hộp $B$ từ $(12, 14)$ tới $(52, 54)$, mỗi hộp $40 \times 40 = 1600$. Phần giao chạy từ $x = 12$ tới $50$ (rộng 38) và $y = 14$ tới $50$ (cao 36), diện tích $1368$. Phần hợp là tổng hai diện tích trừ phần giao (để không đếm phần giao hai lần): $1600 + 1600 - 1368 = 1832$. Vậy $\mathrm{IoU} = 1368 / 1832 \approx 0.75$.
+
+Độ tin cậy của một hộp được huấn luyện để bằng $\Pr(\text{có vật}) \times \mathrm{IoU}$ giữa hộp dự đoán và hộp thật: gần 0 nếu ô không chứa vật, gần IoU nếu có. Lúc dùng, điểm của hộp cho một lớp là xác suất lớp đó nhân với độ tin cậy.
+
+**NMS: bỏ hộp trùng.** Một con mèo to có thể được vài ô và vài hộp cùng "nhận". Ta được nhiều hộp chồng lên nhau quanh cùng một vật. **NMS** (Non-Maximum Suppression, khử phi cực đại) dọn chúng, làm riêng cho từng lớp:
+
+1. Sắp các hộp theo điểm giảm dần.
+2. Giữ hộp điểm cao nhất.
+3. Bỏ mọi hộp còn lại có IoU với hộp vừa giữ từ một ngưỡng trở lên (thường 0.5): chúng nhiều khả năng là cùng một vật.
+4. Lặp lại với các hộp còn sót, tới khi hết.
+
+Với YOLO, NMS thêm 2 tới 3 điểm mAP (mean average precision, thước đo chuẩn của phát hiện vật thể, cao hơn là tốt hơn). Kết quả: YOLO chạy 45 khung hình mỗi giây với 63.4 mAP trên PASCAL VOC 2007, đủ nhanh cho video thời gian thực. Điểm yếu, theo chính bài báo: mỗi ô chỉ có 2 hộp và một lớp, nên YOLO khó với nhiều vật nhỏ đứng sát nhau, như một đàn chim, và định vị kém chính xác hơn các phương pháp hai bước. Các phiên bản sau (YOLOv2, YOLOv3 của chính Redmon, rồi nhiều bản của các nhóm khác) thêm hộp neo (anchor box) và dự đoán ở nhiều tỉ lệ ảnh để bù những điểm yếu này.
+
+### Bảng so sánh
+
+| Năm | Kiến trúc | Số lớp | Số tham số (xấp xỉ) | Ý tưởng chính |
+|---|---|---|---:|---|
+| 1998 | LeNet-5 | 7 (không tính lớp vào) | 60 nghìn ¹ | Khung tích chập → pooling → kết nối đầy đủ |
+| 2012 | AlexNet | 8 (5 tích chập + 3 kết nối đầy đủ) | 61 triệu ² | ReLU, dropout, tăng cường dữ liệu, GPU |
+| 2014 | VGG-16 / VGG-19 | 16 / 19 | 138 / 144 triệu ² | Chỉ dùng $3 \times 3$, xếp chồng |
+| 2014 | GoogLeNet | 22 | 6.6 triệu ² | Nhánh song song, $1 \times 1$ giảm kênh, pooling trung bình toàn cục |
+| 2015 | ResNet-18 / 50 / 152 | 18 / 50 / 152 | 11.7 / 25.6 / 60.2 triệu ² | Kết nối tắt, học phần dư |
+| 2017 | Xception | 36 lớp tích chập | 22.9 triệu ³ | Tích chập tách theo chiều sâu |
+| 2018 | SE-ResNet-50 | 50 | 28.1 triệu ³ | Khối SE: trọng số cho từng kênh |
+| 2016 | YOLO | 24 tích chập + 2 kết nối đầy đủ | không nêu ⁴ | Phát hiện vật thể một lượt: lưới, hộp, độ tin cậy |
+
+Nguồn của cột số tham số: ¹ cộng số tham số huấn luyện được của từng lớp trong bài báo LeNet-5; ² tự đếm bằng `torchvision` 0.29 (`weights=None`, GoogLeNet không tính hai bộ phân loại phụ dùng khi huấn luyện), khớp con số trong bài báo AlexNet (60 triệu) và VGG (138, 144 triệu); ³ bảng trong bài báo Xception và SENet; ⁴ bài báo YOLO không ghi tổng số tham số.
+
+Hai điều nhìn ra từ bảng: số tham số **không** tăng theo độ sâu (ResNet-152 sâu gấp gần 10 lần VGG-16 mà ít tham số hơn), và hầu hết các ý tưởng sau VGG là để **tiêu tham số khôn hơn**, không phải để có nhiều hơn.
+
+### Giới hạn
+
+- **Bài chỉ kể ý tưởng.** Huấn luyện một mạng phân loại ảnh thật, dùng lại trọng số đã học sẵn (transfer learning), và các mạng nhẹ như MobileNet, EfficientNet nằm ở bài Phân loại ảnh với CNN.
+- **Số tham số chưa phải tất cả.** Tốc độ thật còn phụ thuộc số phép tính (FLOPs), bộ nhớ cho kích hoạt và phần cứng. Tích chập tách theo chiều sâu ít phép nhân hơn nhiều, nhưng trên GPU không phải lúc nào cũng nhanh hơn tương ứng.
+- **YOLO ở đây chỉ ở mức ý tưởng.** Hàm mất mát nhiều thành phần, hộp neo và cách đo mAP chi tiết không có trong bài này.
+
+## Minh họa
+
+Hình dưới vẽ một khối của ResNet-18. Hãy nhìn hai đường đi từ $\mathbf{x}$: đường chính đi qua hai lớp tích chập, đường tắt đi vòng qua và gặp lại đường chính ở dấu cộng, **trước** ReLU cuối. Đường tắt không có lớp nào, nên không có tham số nào.
+
+{/* FIG: ResidualBlockFigure
+    Ý: một khối residual là hai lớp tích chập cộng với chính đầu vào; đường tắt mang x vòng qua, không có tham số.
+    Khối và mũi tên: đọc từ trên xuống. Đường chính (trọng tâm): x → tích chập 3×3 → BN → ReLU → tích chập 3×3 → BN → ⊕ → ReLU → đầu ra. Đường tắt (nhóm thứ hai, nét khác màu): từ x vòng sang bên phải, đi thẳng xuống ⊕. Một dấu ngoặc bao các khối từ tích chập đầu tới BN thứ hai, ghi "phần dư".
+    Nhãn: "Đầu vào x"; "Tích chập 3×3"; "BN"; "ReLU"; "Tích chập 3×3"; "BN"; "+"; "ReLU"; "Đầu ra"; "Đường tắt (đồng nhất)"; "Phần dư F(x)" (nhãn dùng chữ, không dùng công thức).
+    Chú thích: Đầu ra của khối là $\mathbf{y} = g(F(\mathbf{x}) + \mathbf{x})$, với $F$ là hai lớp tích chập $3 \times 3$ có BatchNorm và $g$ là ReLU; với 64 kênh, khối có 73 984 tham số, đều nằm ở đường chính (ô PyTorch của bài). */}
+
+Bảng dưới là khối Inception đầu tiên của GoogLeNet (khối "3a" trong bài báo), đặt trên đầu vào $28 \times 28 \times 192$. Hãy nhìn cột thứ hai: mọi nhánh lớn đều có một lớp $1 \times 1$ giảm kênh đứng trước.
+
+| Nhánh | Lớp giảm kênh $1 \times 1$ | Lớp chính | Kênh ra |
+|---|---:|---|---:|
+| $1 \times 1$ | không có | $1 \times 1$ | 64 |
+| $3 \times 3$ | 192 → 96 | $3 \times 3$ | 128 |
+| $5 \times 5$ | 192 → 16 | $5 \times 5$ | 32 |
+| Pooling | không có | max pooling $3 \times 3$, rồi $1 \times 1$ | 32 |
+| **Ghép theo kênh** | | | **256** |
+
+Đầu ra là $28 \times 28 \times 256$: cùng chiều cao, chiều rộng với đầu vào, chỉ khác số kênh. Cả khối có khoảng 159 nghìn tham số (theo bảng 1 của bài báo).
+
+## Ví dụ code
+
+Ba ô dưới đây chạy độc lập. Hai ô đầu chỉ dùng NumPy và SciPy, chạy ngay trên trang; ô thứ nhất lần đầu chạy lâu hơn một chút vì trình duyệt phải tải SciPy. Ô thứ ba cần PyTorch nên chạy trên máy bạn. Code chạy thử lần cuối tháng 11/2026, với Python 3.14, NumPy 2.4 (bản có trong Pyodide), PyTorch 2.15 và `torchvision` 0.29 trên CPU.
+
+### Đếm tham số của ba ý tưởng
+
+Ô dưới đếm tham số cho bốn ý tưởng của mục Lý thuyết, có tính cả hệ số tự do: hai lớp $3 \times 3$ so với một lớp $5 \times 5$ (256 kênh), nhánh $5 \times 5$ của Inception có và không có $1 \times 1$, tích chập tách theo chiều sâu so với tích chập thường, và chi phí của một khối SE. Ô cũng kiểm tra trường tiếp nhận bằng cách đặt một điểm sáng giữa ảnh, chập hai lần với kernel $3 \times 3$, rồi đo vùng khác 0.
+
+<PythonRunner code={paramCountCode} title="Đếm tham số: VGG, Inception, Xception, SENet" />
+
+Đọc kết quả:
+
+- **Hai lớp 3×3: 1,180,160 tham số, một lớp 5×5: 1,638,656.** Tỉ số khoảng 0.72, đúng $18/25$ (hệ số tự do gần như không đáng kể). Vùng khác 0 sau hai lần chập là **5×5**: một điểm sáng ảnh hưởng tới vùng $5 \times 5$ của đầu ra, tức mỗi ô đầu ra nhìn vùng $5 \times 5$ của ảnh vào.
+- **Nhánh 5×5 của Inception: 153,632 tham số khi làm thẳng, 15,920 khi có 1×1 giảm xuống 16 kênh**, ít hơn khoảng 10 lần, khớp phép tính ở mục Lý thuyết.
+- **Tích chập 3×3 thường: 590,080; bản tách theo chiều sâu: 68,352**, ít hơn 8.6 lần. Công thức không tính hệ số tự do cho $1/(1/256 + 1/9) \approx 8.7$; hệ số tự do làm tỉ số lệch đi một chút.
+- **Khối SE với $r = 16$ chỉ tốn 8,464 tham số**, bằng 1.4% của một lớp $3 \times 3$ cùng số kênh. Đó là lý do SENet thêm được khối này vào mọi khối của ResNet mà mạng chỉ nặng thêm khoảng 10%.
+
+### IoU và NMS bằng NumPy
+
+Ô dưới cài đặt IoU và NMS đúng như các bước ở mục YOLO, trên 5 hộp tự đặt cho một lớp: ba hộp quanh một con mèo, hai hộp quanh một con chó. Hộp có dạng $(x_1, y_1, x_2, y_2)$: góc trên trái và góc dưới phải. Hàm `iou` tính IoU của một hộp với nhiều hộp cùng lúc; hàm `nms` trả về chỉ số các hộp được giữ, theo thứ tự giữ.
+
+<PythonRunner code={iouNmsCode} title="IoU và NMS trên 5 hộp" />
+
+Đọc kết quả:
+
+- **IoU của hộp 0 với các hộp khác là 0.75, 0.59, 0, 0.** Số 0.75 khớp phép tính tay ở mục Lý thuyết. Hộp 2 lệch nhiều hơn nên IoU thấp hơn. Hai hộp của con chó không chạm hộp 0, nên IoU bằng 0. IoU của hai hộp chó với nhau là 0.65.
+- **Với ngưỡng 0.5, NMS giữ `[0, 3]`**: hộp mèo điểm cao nhất (0.90), rồi hộp chó điểm cao nhất (0.85). Ba hộp còn lại đều trùng từ 0.5 trở lên với một hộp đã giữ. Mỗi vật đúng một hộp.
+- **Với ngưỡng 0.7, NMS giữ `[0, 3, 4, 2]`**: chỉ hộp 1 (IoU 0.75) bị bỏ. Hộp 4 (IoU 0.65 với hộp 3) và hộp 2 (IoU 0.59 với hộp 0) sống sót, nên mỗi con vật bị đếm hai lần. Ngưỡng là một siêu tham số, và quá cao thì không dọn hết hộp trùng.
+
+### Khối residual bằng PyTorch
+
+File dưới định nghĩa khối `BasicBlock` của ResNet (hai lớp $3 \times 3$ có BatchNorm, đường tắt đồng nhất, hoặc $1 \times 1$ stride 2 khi đổi kích thước), so số tham số của nó với khối tương ứng trong `resnet18` của `torchvision`, rồi làm một thí nghiệm nhỏ về hiện tượng thoái hóa: huấn luyện một mạng sâu **có** và **không có** đường tắt trên bộ ảnh chữ số $8 \times 8$ `load_digits` của scikit-learn (có sẵn khi cài, không tải mạng).
+
+{/* LOCALCODE_PENDING */}
+
+## Lỗi hay gặp
+
+:::caution[Nghĩ rằng mạng sâu hơn học tệ hơn là do overfitting]
+Overfitting thì lỗi huấn luyện thấp, lỗi kiểm tra cao. Hiện tượng mà ResNet giải quyết là **lỗi huấn luyện** của mạng sâu cao hơn mạng nông: vấn đề tối ưu, không phải vấn đề tổng quát hóa. Thêm dropout hay thu thập thêm dữ liệu không chữa được nó. Cách nhận ra: luôn vẽ cả đường lỗi huấn luyện, không chỉ lỗi kiểm định. Nếu lỗi huấn luyện của mạng sâu hơn còn cao hơn, hãy nghĩ tới kết nối tắt, khởi tạo, BatchNorm, trước khi nghĩ tới regularization.
+:::
+
+:::caution[Coi tích chập 1×1 là phép không làm gì]
+Kernel $1 \times 1$ không nhìn hàng xóm, nhưng nó **trộn kênh**: tại mỗi điểm ảnh, nó nhân vectơ kênh với một ma trận, như một lớp kết nối đầy đủ. Đó là việc chính của nó trong Inception, trong nút cổ chai của ResNet và trong bước pointwise của Xception. Nếu bỏ ReLU sau nó và đặt hai lớp $1 \times 1$ liền nhau thì đúng là phí, vì tích hai ma trận vẫn là một ma trận.
+:::
+
+:::caution[Cộng đường tắt khi hai tensor khác kích thước]
+$F(\mathbf{x}) + \mathbf{x}$ chỉ hợp lệ khi hai tensor có cùng số kênh, chiều cao và chiều rộng. Ở khối đầu của mỗi giai đoạn, lớp tích chập đầu dùng stride 2 và tăng số kênh, nên $\mathbf{x}$ phải đi qua một tích chập $1 \times 1$ stride 2 (kèm BatchNorm) trên đường tắt, như nhánh `shortcut` trong ô PyTorch. PyTorch sẽ báo lỗi kích thước nếu bạn quên; nguy hiểm hơn là khi kích thước tình cờ khớp nhờ broadcasting (ví dụ một bên có 1 kênh) và mạng chạy mà không báo gì.
+:::
+
+:::caution[Đặt ngưỡng NMS mà không nghĩ tới vật đứng sát nhau]
+NMS chỉ nhìn IoU, không biết hai hộp là cùng một vật hay hai vật. Ngưỡng thấp (0.3) dọn sạch hộp trùng nhưng có thể xóa người thứ hai trong một đám đông; ngưỡng cao (0.7) để sót hộp trùng, như ô IoU và NMS ở trên. Chọn ngưỡng trên tập kiểm định, và chạy NMS **riêng cho từng lớp**: hộp "người" không được xóa hộp "xe đạp" chỉ vì chúng chồng lên nhau.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Mọi kiến trúc trong bài giữ khung của LeNet-5 (tích chập, pooling, rồi lớp phân loại) và thêm một ý tưởng. AlexNet (2012): lớn hơn, với ReLU, dropout, GPU và ImageNet. VGG (2014): chỉ $3 \times 3$; $L$ lớp nhìn vùng $1 + 2L$ với ít tham số hơn một lớp lớn ($18C^2$ so với $25C^2$).
+- Tích chập $1 \times 1$ là lớp kết nối đầy đủ trên từng điểm ảnh, dùng để giảm kênh trước lớp đắt (GoogLeNet, nút cổ chai của ResNet). Tích chập tách theo chiều sâu (Xception) tách việc nhìn không gian khỏi việc trộn kênh, tiết kiệm gần $k^2$ lần.
+- ResNet học phần dư: $\mathbf{y} = g(F(\mathbf{x}) + \mathbf{x})$. Phép đồng nhất trở nên dễ học, gradient có đường đi thẳng qua đường tắt, nên mạng 152 lớp vẫn huấn luyện được. SENet cho mỗi kênh một trọng số $s_c \in (0, 1)$ tính từ chính ảnh, với rất ít tham số.
+- YOLO biến phát hiện vật thể thành một lần hồi quy: lưới $S \times S$, mỗi ô $B$ hộp có độ tin cậy và $C$ xác suất lớp. IoU đo hai hộp trùng nhau bao nhiêu; NMS giữ hộp điểm cao nhất và bỏ các hộp trùng với nó quá ngưỡng.
+
+**Đọc thêm:**
+
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. *Đắm mình vào Học Sâu*, bản dịch tiếng Việt của nhóm Đắm mình vào Học Sâu. [*Chương 7: Mạng Nơ-ron Tích chập Hiện đại*](https://d2l.aivivn.com/chapter_convolutional-modern/index_vn.html). AlexNet, VGG, GoogLeNet, ResNet có code từng mạng; bản tiếng Anh mới hơn là [*Dive into Deep Learning*, chương 8](https://www.d2l.ai/chapter_convolutional-modern/index.html) (2023).
+- He, K., Zhang, X., Ren, S., Sun, J. (2015). [*Deep Residual Learning for Image Recognition*](https://arxiv.org/abs/1512.03385), arXiv:1512.03385 (CVPR 2016), mục 1, 3 và hình 1. Hiện tượng thoái hóa, phần dư, khối nút cổ chai; bài báo cũng viết $H(\mathbf{x})$, $F(\mathbf{x})$ như bài này.
+- Simonyan, K., Zisserman, A. (2014). [*Very Deep Convolutional Networks for Large-Scale Image Recognition*](https://arxiv.org/abs/1409.1556), arXiv:1409.1556 (ICLR 2015), mục 2.3. Lập luận "ba lớp $3 \times 3$ thay một lớp $7 \times 7$" và bảng số tham số.
+- Szegedy, C. và cộng sự (2014). [*Going Deeper with Convolutions*](https://arxiv.org/abs/1409.4842), arXiv:1409.4842 (CVPR 2015), mục 4 và bảng 1. Khối Inception và vai trò giảm kênh của tích chập $1 \times 1$.
+- Redmon, J., Divvala, S., Girshick, R., Farhadi, A. (2016). [*You Only Look Once: Unified, Real-Time Object Detection*](https://www.cv-foundation.org/openaccess/content_cvpr_2016/html/Redmon_You_Only_Look_CVPR_2016_paper.html), CVPR 2016, mục 2. Lưới, hộp, độ tin cậy, và các giới hạn của YOLO.
+- Các bài gốc còn lại: LeCun, Y. và cộng sự (1998), [*Gradient-Based Learning Applied to Document Recognition*](http://yann.lecun.com/exdb/publis/pdf/lecun-01a.pdf) (PDF), mục II; Krizhevsky, A., Sutskever, I., Hinton, G. E. (2012), [*ImageNet Classification with Deep Convolutional Neural Networks*](https://papers.nips.cc/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html), NIPS 2012; Chollet, F. (2017), [*Xception: Deep Learning with Depthwise Separable Convolutions*](https://arxiv.org/abs/1610.02357), CVPR 2017; Hu, J. và cộng sự (2018), [*Squeeze-and-Excitation Networks*](https://arxiv.org/abs/1709.01507), CVPR 2018.
+
+<LessonProgress />

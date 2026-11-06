@@ -1,0 +1,437 @@
+---
+title: Transformers
+description: 'Đọc cả câu một lượt thay vì từng từ. Attention có chia tỉ lệ, nhiều đầu, mã hóa vị trí, khối Transformer, mặt nạ nhân quả và ba họ mô hình.'
+quiz:
+  - question: 'Bạn tăng chiều khóa từ $d_k = 64$ lên $d_k = 256$ nhưng quên chia điểm cho $\sqrt{d_k}$. Các thành phần của truy vấn và khóa vẫn có trung bình 0, phương sai 1. Điều gì nhiều khả năng xảy ra với softmax?'
+    options:
+      - 'Không đổi gì, vì softmax đã chuẩn hóa mỗi hàng về tổng bằng 1'
+      - 'Trọng số phẳng hơn, gần chia đều cho mọi vị trí'
+      - 'Điểm có phương sai lớn gấp 4, softmax dồn gần hết trọng số vào một vị trí, gradient gần bằng 0'
+      - 'Điểm có phương sai lớn gấp 16, nên mô hình học nhanh hơn'
+    answer: 2
+    explanation: 'Tích vô hướng là tổng của $d_k$ số hạng độc lập, mỗi số hạng phương sai 1, nên phương sai bằng $d_k$: từ 64 lên 256 là gấp 4 (không phải 16, vì phương sai tăng tuyến tính theo $d_k$). Điểm trải rộng thì softmax nhọn về một ô, và vùng đó có gradient rất nhỏ. Softmax có tổng bằng 1 ở mọi trường hợp, nhưng tổng bằng 1 không ngăn nó dồn hết vào một ô.'
+  - question: 'Một encoder Transformer không có mã hóa vị trí đọc hai câu "chó cắn mèo" và "mèo cắn chó" (mỗi từ một token). So đầu ra ở token "cắn" của hai câu.'
+    options:
+      - 'Giống hệt nhau'
+      - 'Khác nhau, vì "chó" và "mèo" đổi chỗ'
+      - 'Khác nhau, vì attention nhiều đầu tự học được thứ tự'
+      - 'Không so được, vì hai câu có độ dài khác nhau'
+    answer: 0
+    explanation: 'Không có vị trí, self-attention chỉ thấy một tập vectơ: "cắn" chấm điểm với "chó" và "mèo" như nhau dù chúng đứng đâu, rồi lấy cùng một trung bình có trọng số. Thêm đầu hay thêm lớp không đổi điều này, vì mọi phép tính đều không phụ thuộc thứ tự. Ô mã hóa vị trí của bài đo đúng chuyện này: không có mã hóa vị trí thì đầu ra ở "cắn" lệch $0.000$.'
+  - question: 'Một mô hình tăng cửa sổ ngữ cảnh từ 4096 lên 8192 token. Với một đầu ở một lớp, số ô của ma trận điểm $\mathbf{Q}\mathbf{K}^\top$ thay đổi thế nào?'
+    options:
+      - 'Không đổi, vì số tham số của mô hình không đổi'
+      - 'Gấp 2'
+      - 'Gấp $\sqrt{2}$'
+      - 'Gấp 4'
+    answer: 3
+    explanation: 'Ma trận điểm có $L \times L$ ô, nên gấp đôi $L$ thì gấp 4 số ô (từ khoảng 16.8 triệu lên 67.1 triệu). Số tham số đúng là không đổi, vì $\mathbf{W}^Q$, $\mathbf{W}^K$, $\mathbf{W}^V$ không phụ thuộc $L$, nhưng bộ nhớ và phép tính của attention tăng theo $L^2$. Các phần khác như FFN mới tăng tuyến tính theo $L$.'
+  - question: 'Bạn tính self-attention trên 6 token, một lần không có mặt nạ, một lần có mặt nạ nhân quả. Hàng nào của ma trận trọng số giống hệt nhau ở hai lần?'
+    options:
+      - 'Hàng đầu tiên'
+      - 'Hàng cuối cùng'
+      - 'Không hàng nào, vì mặt nạ đổi mọi hàng'
+      - 'Mọi hàng, vì mặt nạ chỉ đổi đầu ra chứ không đổi trọng số'
+    answer: 1
+    explanation: 'Mặt nạ chỉ che các vị trí $j > i$. Hàng cuối ($i = 6$) không có vị trí nào phía sau, nên không ô nào bị che, và softmax ra đúng như khi không có mặt nạ. Hàng đầu thì ngược lại: chỉ còn chính nó, nên trọng số là $1$ ở ô đầu và $0$ ở mọi ô khác, khác hẳn bản không có mặt nạ.'
+  - question: 'Bạn cần phân loại cảm xúc của các bình luận đã viết xong, và từ ở cuối câu (như "...nhưng không đáng tiền") có thể đổi nghĩa của từ ở đầu. Họ Transformer nào hợp nhất làm điểm xuất phát?'
+    options:
+      - 'Decoder-only, vì có mặt nạ nhân quả nên học nhanh hơn'
+      - 'Encoder–decoder, vì phân loại cần cross-attention'
+      - 'Encoder-only, vì mỗi token nhìn được cả câu, trước lẫn sau'
+      - 'Họ nào cũng như nhau, vì đều là Transformer'
+    answer: 2
+    explanation: 'Câu đã có đủ, nên không cần che tương lai: encoder-only (kiểu BERT) cho mỗi token nhìn cả hai phía, đúng cái bài toán cần. Mặt nạ nhân quả chỉ cần khi sinh văn bản từng token, và nó làm token đầu câu không thấy phần cuối. Decoder-only vẫn làm được nếu đọc biểu diễn ở token cuối, nhưng không phải lựa chọn tự nhiên nhất cho bài này; encoder–decoder thì thừa một nửa khi đầu ra chỉ là một nhãn.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import attentionCode from '@code/dl/transformers/attention.vi.py?raw';
+import scalingCode from '@code/dl/transformers/scaling.vi.py?raw';
+import positionalCode from '@code/dl/transformers/positional.vi.py?raw';
+import sortEncoderCode from '@code/dl/transformers/sort-encoder.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Giải thích được ba chỗ nghẽn của RNN và LSTM (tính tuần tự, đường đi dài giữa hai token xa nhau, một vectơ trạng thái cho cả quá khứ), và vì sao attention gỡ được cả ba.
+- Tự dẫn được attention tích vô hướng có chia tỉ lệ (scaled dot-product attention) $\mathrm{softmax}(\mathbf{Q}\mathbf{K}^\top/\sqrt{d_k})\mathbf{V}$, kể cả lý do chia cho $\sqrt{d_k}$, và cài đặt nó bằng NumPy, có và không có mặt nạ nhân quả.
+- Hiểu attention nhiều đầu (multi-head attention), mã hóa vị trí (positional encoding) và các phần của một khối Transformer: kết nối tắt, chuẩn hóa lớp, mạng truyền thẳng.
+- Phân biệt ba họ Transformer (encoder-only, decoder-only, encoder–decoder) và nhận ra cái giá $O(L^2)$ của attention khi chuỗi dài.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+**Softmax** đổi một vectơ điểm $\mathbf{z}$ thành phân phối xác suất, $\mathrm{softmax}(\mathbf{z})_j = e^{z_j} / \sum_{k} e^{z_k}$: mọi số dương, cộng lại bằng 1, điểm cao hơn được phần lớn hơn (bài [Mạng nơ-ron nhân tạo](/vi/dl/neural-networks/)). Mỗi token được đổi thành một vectơ học được gọi là **embedding**, lấy từ một bảng có một hàng cho mỗi token trong từ vựng (bài Word2Vec trong phần NLP nói kỹ hơn). **LSTM** đọc chuỗi từng token một, cập nhật trạng thái ẩn $\mathbf{h}_t$ và trạng thái ô $\mathbf{c}_t$ (bài [LSTM và BiLSTM](/vi/dl/lstm-bilstm/)).
+:::
+
+## Trực giác
+
+### Ba chỗ nghẽn khi đọc từng từ
+
+Đọc câu sau, rồi trả lời: "nó" là ai?
+
+> Con mèo mà bà hàng xóm nuôi từ mùa đông năm ngoái đã trèo lên mái nhà vì **nó** sợ con chó.
+
+Bạn biết ngay "nó" là con mèo, dù hai từ cách nhau hơn mười từ. Mắt bạn nhảy thẳng từ "nó" về "con mèo". Một LSTM thì không nhảy được. Nó phải đi qua từng từ một, và gặp ba chỗ nghẽn:
+
+1. **Tuần tự.** Muốn có $\mathbf{h}_{10}$ phải có $\mathbf{h}_9$ trước. Một câu 1000 token cần 1000 bước nối tiếp nhau, dù GPU có hàng nghìn lõi đang chờ việc.
+2. **Đường đi dài.** Thông tin về "mèo" phải đi qua hơn mười lần cập nhật trạng thái mới tới "nó". Mỗi lần đi qua là một lần có thể phai đi, và gradient khi lan truyền ngược cũng phải đi đúng quãng đường ấy. Hai token cách nhau $L$ bước thì đường đi dài $O(L)$.
+3. **Một vectơ cho cả quá khứ.** Mọi thứ đã đọc phải nén vào $\mathbf{h}_t$ có số chiều cố định. Câu càng dài, vectơ càng chật.
+
+Cổng của GRU và LSTM làm chỗ nghẽn thứ hai bớt nặng, nhưng không gỡ được chỗ thứ nhất và thứ ba.
+
+### Tra cứu mềm
+
+Thử một cách khác: cho **mỗi từ được nhìn thẳng mọi từ khác** trong câu, một bước là tới. Từ "nó" tự hỏi: "trong câu, ai là con vật có thể sợ?". Mỗi từ khác giơ ra một tấm nhãn mô tả mình: "con mèo: con vật, làm chủ ngữ", "mái nhà: đồ vật, chỗ chốn". Nhãn nào khớp câu hỏi thì từ đó được nghe nhiều hơn.
+
+Đây là một kiểu **tra cứu mềm**. Từ điển Python `d["mèo"]` là tra cứu cứng: khóa phải khớp đúng, và bạn lấy đúng một giá trị. Tra cứu mềm cho mỗi khóa một **mức khớp** với câu hỏi, rồi trả về **trung bình có trọng số** của mọi giá trị, khóa càng khớp thì trọng số càng lớn. Nhờ vậy, mọi thứ đều là phép nhân ma trận và softmax, nên lấy đạo hàm được và học được bằng lan truyền ngược.
+
+Mỗi từ đóng cả ba vai cùng lúc: hỏi (truy vấn), giơ nhãn (khóa), và mang nội dung để người khác lấy (giá trị). Mọi từ hỏi cùng một lúc, nên cả câu được xử lý **song song**. Còn một chuyện: nếu chỉ so nhãn, mô hình không biết từ nào đứng trước từ nào. "Chó cắn mèo" và "mèo cắn chó" trông y như nhau. Ta sẽ phải tự thêm vị trí vào.
+
+Bài toán của bài này là: **xây một lớp mạng mà ở đó mọi token nhìn thẳng mọi token khác trong một bước, bằng tra cứu mềm có học được; xử lý cả chuỗi song song; vẫn biết thứ tự các token; và khi cần sinh văn bản, không nhìn trộm tương lai.**
+
+## Lý thuyết
+
+### Từ RNN tới attention
+
+Bahdanau, Cho và Bengio (2014) là những người đầu tiên đưa attention vào dịch máy: decoder RNN, ở mỗi bước, lấy trung bình có trọng số của mọi trạng thái encoder thay vì chỉ một vectơ cuối (bài [Mô hình chuỗi sang chuỗi](/vi/llm/seq2seq/) kể chi tiết). Lúc đó attention còn là phần gắn thêm vào RNN. Vaswani và cộng sự (2017) đi xa hơn: bỏ hẳn RNN, chỉ giữ attention. Tên bài báo nói đúng ý đó: *Attention Is All You Need*. Mô hình của họ là **Transformer**.
+
+### Attention tích vô hướng có chia tỉ lệ
+
+Bắt đầu với **một** truy vấn. Ta có:
+
+- một **truy vấn** (query) $\mathbf{q} \in \mathbb{R}^{d_k}$: điều đang hỏi;
+- $L$ **khóa** (key) $\mathbf{k}_1, \dots, \mathbf{k}_L \in \mathbb{R}^{d_k}$: nhãn của từng vị trí;
+- $L$ **giá trị** (value) $\mathbf{v}_1, \dots, \mathbf{v}_L$: nội dung của từng vị trí, mỗi vectơ $d_v$ chiều.
+
+Ở đây $L$ là độ dài chuỗi và $d_k$ là **chiều khóa**. Truy vấn và khóa phải cùng số chiều, vì ta sẽ lấy tích vô hướng của chúng. Attention làm ba bước.
+
+**Bước 1: chấm điểm.** Mức khớp giữa truy vấn và khóa $j$ là tích vô hướng, chia cho $\sqrt{d_k}$ (lý do ở mục sau):
+
+$$
+s_j = \frac{\mathbf{q}^\top \mathbf{k}_j}{\sqrt{d_k}}, \qquad j = 1, \dots, L
+$$
+
+Tích vô hướng lớn khi hai vectơ cùng hướng, nhỏ hay âm khi chúng lệch nhau. Đó là thước đo "khớp" đơn giản nhất.
+
+**Bước 2: đổi điểm thành trọng số.** Softmax trên $j$ cho các trọng số dương, cộng lại bằng 1:
+
+$$
+\alpha_j = \frac{\exp(s_j)}{\sum_{l=1}^{L} \exp(s_l)}
+$$
+
+**Bước 3: trộn giá trị.** Đầu ra là trung bình có trọng số của các giá trị:
+
+$$
+\mathbf{o} = \sum_{j=1}^{L} \alpha_j \mathbf{v}_j
+$$
+
+Bây giờ làm cho mọi truy vấn cùng lúc. Xếp $L$ truy vấn thành các hàng của ma trận $\mathbf{Q} \in \mathbb{R}^{L \times d_k}$, các khóa thành $\mathbf{K} \in \mathbb{R}^{L \times d_k}$, các giá trị thành $\mathbf{V} \in \mathbb{R}^{L \times d_v}$. Ô $(i, j)$ của $\mathbf{Q}\mathbf{K}^\top$ chính là $\mathbf{q}_i^\top \mathbf{k}_j$, nên cả ba bước gói vào một dòng:
+
+$$
+\mathrm{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \mathrm{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d_k}}\right)\mathbf{V}
+$$
+
+- $\mathbf{Q}\mathbf{K}^\top$ là ma trận điểm $L \times L$: hàng $i$ là điểm của truy vấn $i$ với mọi khóa.
+- Softmax làm **theo từng hàng**, nên mỗi hàng của ma trận trọng số $\mathbf{A}$ cộng lại bằng 1.
+- $\mathbf{A}\mathbf{V}$ có kích thước $L \times d_v$: hàng $i$ là $\mathbf{o}_i$, đầu ra của vị trí $i$.
+
+Cả phép tính chỉ là hai phép nhân ma trận và một softmax. Không có vòng lặp theo thời gian, nên mọi vị trí được tính song song.
+
+### Vì sao chia cho $\sqrt{d_k}$
+
+Giả sử các thành phần $q_r$ và $k_r$ của truy vấn và khóa là các biến ngẫu nhiên độc lập, trung bình 0, phương sai 1. Đây là giả thiết của chính bài báo gốc, để thấy độ lớn của điểm. Tích vô hướng là tổng của $d_k$ số hạng:
+
+$$
+\mathbf{q}^\top \mathbf{k} = \sum_{r=1}^{d_k} q_r k_r
+$$
+
+Xét một số hạng $q_r k_r$. Trung bình của nó là $\mathbb{E}[q_r]\,\mathbb{E}[k_r] = 0$, vì hai biến độc lập. Phương sai của nó là:
+
+$$
+\begin{aligned}
+\mathrm{Var}(q_r k_r) &= \mathbb{E}[q_r^2 k_r^2] - \left(\mathbb{E}[q_r k_r]\right)^2 \\
+&= \mathbb{E}[q_r^2]\,\mathbb{E}[k_r^2] - 0 \\
+&= 1 \cdot 1 = 1
+\end{aligned}
+$$
+
+Dòng đầu là định nghĩa phương sai. Dòng hai tách kỳ vọng của tích nhờ $q_r$ và $k_r$ độc lập, và trung bình đã bằng 0. Dòng ba dùng $\mathbb{E}[q_r^2] = \mathrm{Var}(q_r) + (\mathbb{E}[q_r])^2 = 1$, tương tự cho $k_r$.
+
+Các số hạng độc lập với nhau, nên phương sai của tổng bằng tổng các phương sai: $\mathrm{Var}(\mathbf{q}^\top\mathbf{k}) = d_k$. Độ lệch chuẩn là $\sqrt{d_k}$. Với $d_k = 64$, điểm thường lệch nhau cỡ $\pm 8$, và $e^{8}/e^{-8}$ đã gần chín triệu lần. Softmax gần như dồn hết trọng số vào ô lớn nhất, và ở vùng đó gradient của softmax rất nhỏ, nên mô hình học chậm. Chia cho $\sqrt{d_k}$ đưa phương sai về đúng 1, dù $d_k$ là bao nhiêu:
+
+$$
+\mathrm{Var}\!\left(\frac{\mathbf{q}^\top \mathbf{k}}{\sqrt{d_k}}\right) = \frac{d_k}{d_k} = 1
+$$
+
+Ô thứ hai ở mục Ví dụ code đo đúng điều này.
+
+### Self-attention: Q, K, V từ cùng một chuỗi
+
+Trong **self-attention**, cả truy vấn, khóa và giá trị đều đến từ cùng một chuỗi. Gọi $\mathbf{X} \in \mathbb{R}^{L \times d}$ là đầu vào, mỗi hàng là vectơ của một token, $d$ là **chiều mô hình** (model dimension). Ba ma trận chiếu học được $\mathbf{W}^Q, \mathbf{W}^K \in \mathbb{R}^{d \times d_k}$ và $\mathbf{W}^V \in \mathbb{R}^{d \times d_v}$ cho:
+
+$$
+\mathbf{Q} = \mathbf{X}\mathbf{W}^Q, \qquad \mathbf{K} = \mathbf{X}\mathbf{W}^K, \qquad \mathbf{V} = \mathbf{X}\mathbf{W}^V
+$$
+
+Vì sao không dùng thẳng $\mathbf{X}$ làm cả ba? Vì một token cần hỏi một điều, nhưng được nhận ra qua một điều khác. "Nó" cần hỏi "ai là con vật?", trong khi khóa của "con mèo" nói "tôi là con vật". Ba phép chiếu riêng cho mô hình học ba vai đó độc lập. Mọi vị trí dùng **chung** $\mathbf{W}^Q$, $\mathbf{W}^K$, $\mathbf{W}^V$, nên số tham số không phụ thuộc $L$.
+
+Với câu ví dụ, nhờ self-attention, "nó" tới "con mèo" trong **một** bước, dù hai từ cách xa bao nhiêu. Đường đi giữa hai vị trí bất kỳ dài $O(1)$ thay vì $O(L)$.
+
+### Attention nhiều đầu
+
+Một lần attention cho mỗi vị trí **một** trung bình có trọng số. Nhưng một từ thường cần nhìn nhiều thứ cùng lúc: "nó" cần biết ai là chủ ngữ, động từ đi kèm là gì, từ ngay trước là gì. Gộp hết vào một phân phối trọng số thì các mối quan hệ đó bị trộn lẫn.
+
+**Attention nhiều đầu** (multi-head attention) chạy $h$ phép attention song song, mỗi **đầu** (head) có ma trận chiếu riêng, rồi ghép kết quả:
+
+$$
+\begin{aligned}
+\mathrm{head}_i &= \mathrm{Attention}(\mathbf{X}\mathbf{W}_i^Q, \mathbf{X}\mathbf{W}_i^K, \mathbf{X}\mathbf{W}_i^V), \quad i = 1, \dots, h \\
+\mathrm{MultiHead}(\mathbf{X}) &= \mathrm{Concat}(\mathrm{head}_1, \dots, \mathrm{head}_h)\,\mathbf{W}^O
+\end{aligned}
+$$
+
+- Mỗi đầu chiếu xuống $d_k = d_v = d/h$ chiều. Ghép $h$ đầu lại được đúng $d$ chiều, và $\mathbf{W}^O \in \mathbb{R}^{d \times d}$ trộn chúng.
+- Mỗi đầu có không gian con riêng, nên có thể học một kiểu quan hệ riêng. Mô hình tự quyết định đầu nào học gì; không ai gán trước.
+- Vì mỗi đầu nhỏ đi $h$ lần, tổng phép tính gần bằng một đầu duy nhất $d$ chiều.
+
+Bản cơ sở của Transformer gốc có $d = 512$, $h = 8$, nên $d_k = 64$. Khi cài đặt, người ta không viết vòng lặp qua các đầu: chỉ tính một lần $\mathbf{X}\mathbf{W}^Q$ với ma trận $d \times d$, rồi đổi hình (reshape) kết quả $L \times d$ thành $h \times L \times d_k$.
+
+### Mã hóa vị trí
+
+Self-attention không biết thứ tự. Đổi chỗ hai token trong $\mathbf{X}$ thì hai hàng của $\mathbf{Q}$, $\mathbf{K}$, $\mathbf{V}$ đổi chỗ theo, ma trận điểm đổi hàng và cột tương ứng, và đầu ra đổi chỗ y như đầu vào. Không có gì khác thay đổi. Người ta gọi tính chất này là **đẳng biến với hoán vị** (permutation equivariance). Với một token đứng yên, như "cắn" trong "chó cắn mèo" và "mèo cắn chó", đầu ra giống hệt nhau. Ô thứ ba của mục Ví dụ code kiểm tra đúng điều đó.
+
+Cách sửa: cộng vào embedding của mỗi token một vectơ $\mathbf{p}_{\text{pos}} \in \mathbb{R}^d$ chỉ phụ thuộc vị trí $\text{pos}$ của nó. Transformer gốc dùng **mã hóa vị trí sin/cos** (sinusoidal positional encoding), không có tham số:
+
+$$
+p_{\text{pos},\,2i} = \sin\!\left(\frac{\text{pos}}{10000^{2i/d}}\right), \qquad
+p_{\text{pos},\,2i+1} = \cos\!\left(\frac{\text{pos}}{10000^{2i/d}}\right)
+$$
+
+Ở đây $i = 0, 1, \dots, d/2 - 1$ đánh số các cặp chiều. Đọc công thức:
+
+- **Mỗi cặp chiều là một chiếc kim quay** với tốc độ riêng. Cặp $i = 0$ quay nhanh nhất (một radian mỗi vị trí); cặp cuối quay chậm nhất. Bước sóng tăng theo cấp số nhân, từ $2\pi$ tới $10000 \cdot 2\pi$. Giống một đồng hồ có kim giây, kim phút, kim giờ: nhìn cả bộ kim là biết chính xác thời điểm.
+- **Mọi giá trị nằm trong $[-1, 1]$**, nên vị trí lớn không làm vectơ phình to.
+- **Độ lệch cố định là một phép quay cố định.** Với mỗi độ lệch $k$, $\mathbf{p}_{\text{pos}+k}$ là một hàm tuyến tính của $\mathbf{p}_{\text{pos}}$ (quay mỗi cặp chiều một góc chỉ phụ thuộc $k$). Vaswani và cộng sự hy vọng nhờ đó mô hình dễ học cách nhìn theo vị trí tương đối.
+
+Có hai lựa chọn khác, cần biết tên:
+
+- **Vị trí học được** (learned positional embedding): một bảng $L_{\max} \times d$ học như embedding. Bài báo gốc thử cách này và thấy kết quả gần như y hệt; họ chọn sin/cos vì hy vọng mô hình dùng được với chuỗi dài hơn lúc huấn luyện. GPT dùng vị trí học được.
+- **RoPE** (rotary position embedding) không cộng vào đầu vào mà xoay chính truy vấn và khóa trong mỗi lớp attention, nên điểm chỉ phụ thuộc độ lệch giữa hai vị trí. Đây là cách của họ Llama, xem bài [Họ LLaMA: RoPE, huấn luyện song song](/vi/llm/llama-family/).
+
+### Khối Transformer
+
+Attention trộn thông tin **giữa** các vị trí. Một mô hình còn cần biến đổi thông tin **tại** từng vị trí, và cần xếp chồng được nhiều lớp. Một **khối Transformer** (Transformer block) có hai khối con, mỗi khối con được bọc bởi kết nối tắt và chuẩn hóa lớp. Gọi $\mathbf{H} \in \mathbb{R}^{L \times d}$ là đầu vào của khối. Theo bài báo gốc:
+
+$$
+\begin{aligned}
+\mathbf{H}' &= \mathrm{LN}\big(\mathbf{H} + \mathrm{MultiHead}(\mathbf{H})\big) \\
+\mathbf{H}_{\text{ra}} &= \mathrm{LN}\big(\mathbf{H}' + \mathrm{FFN}(\mathbf{H}')\big)
+\end{aligned}
+$$
+
+- **Mạng truyền thẳng** (feed-forward network, FFN) áp **riêng cho từng vị trí**, cùng tham số cho mọi vị trí: $\mathrm{FFN}(\mathbf{x}) = \max(0, \mathbf{x}\mathbf{W}_1 + \mathbf{b}_1)\mathbf{W}_2 + \mathbf{b}_2$. Lớp giữa rộng hơn: bản gốc dùng $d_{\text{ff}} = 2048 = 4d$. Attention là chỗ các vị trí "nói chuyện" với nhau; FFN là chỗ mỗi vị trí tự "suy nghĩ" về những gì vừa nghe.
+- **Kết nối tắt** (residual connection), dấu cộng $\mathbf{H} + \dots$: mỗi khối con chỉ cần học một phần **hiệu chỉnh** thêm vào đầu vào. Gradient có một đường đi thẳng qua phép cộng, nên chồng hàng chục khối vẫn huấn luyện được. Đây là cùng ý với ResNet ở bài [Các kiến trúc CNN hiện đại](/vi/dl/modern-cnn-architectures/).
+- **Chuẩn hóa lớp** (layer normalization, $\mathrm{LN}$) đưa vectơ của mỗi vị trí về trung bình 0, độ lệch chuẩn 1, rồi co giãn và dịch bằng tham số học được. Khác BatchNorm, nó tính trên các chiều của **một** vectơ, nên không phụ thuộc kích thước lô hay độ dài chuỗi.
+
+Cách đặt $\mathrm{LN}$ **sau** phép cộng như trên gọi là **Post-LN**. Hầu hết mô hình từ GPT-2 trở đi đặt $\mathrm{LN}$ **trước** mỗi khối con, $\mathbf{H} + \mathrm{MultiHead}(\mathrm{LN}(\mathbf{H}))$, gọi là **Pre-LN**: Xiong và cộng sự (2020) cho thấy Pre-LN có gradient ổn định hơn lúc đầu huấn luyện, nên dễ huấn luyện hơn. Bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/) dùng Pre-LN.
+
+Cả mô hình là: embedding token cộng mã hóa vị trí, rồi $N$ khối như trên chồng lên nhau (bản gốc $N = 6$), rồi một lớp ra tùy bài toán. Mỗi khối nhận vào và trả ra một ma trận cùng kích thước $L \times d$.
+
+### Mặt nạ nhân quả
+
+Khi sinh văn bản, mô hình đoán token kế tiếp chỉ từ các token đã có. Nếu vị trí $i$ được nhìn vị trí $j > i$, nó nhìn trộm đúng cái phải đoán. **Mặt nạ nhân quả** (causal mask) cộng $-\infty$ vào các ô điểm có $j > i$ trước softmax:
+
+$$
+\mathrm{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d_k}} + \mathbf{M}\right)\mathbf{V},
+\qquad
+M_{ij} =
+\begin{cases}
+0, & j \le i \\
+-\infty, & j > i
+\end{cases}
+$$
+
+Vì $e^{-\infty} = 0$, các ô bị che có trọng số đúng 0, còn các ô $j \le i$ vẫn cộng lại bằng 1. Ma trận trọng số thành tam giác dưới. Hàng đầu chỉ nhìn chính nó; hàng cuối nhìn được cả chuỗi, nên giống hệt bản không có mặt nạ. Nhờ mặt nạ, một lần chạy cho $L$ dự đoán cùng lúc mà không vị trí nào thấy đáp án của mình; bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/) dùng đúng điều này để huấn luyện một GPT nhỏ.
+
+### Ba họ Transformer
+
+Từ cùng một khối, có ba cách lắp:
+
+| Họ | Gồm | Attention | Ví dụ | Hợp với |
+|---|---|---|---|---|
+| Encoder-only | Chồng khối encoder | Self-attention hai chiều, không mặt nạ | BERT (Devlin và cộng sự, 2018) | Hiểu một văn bản có sẵn: phân loại, gán nhãn từng token, tìm kiếm |
+| Decoder-only | Chồng khối decoder | Self-attention có mặt nạ nhân quả | GPT (Radford và cộng sự, 2018), Llama | Sinh văn bản từng token |
+| Encoder–decoder | Hai chồng khối | Encoder hai chiều; decoder có mặt nạ, cộng cross-attention sang encoder | Transformer gốc (2017), T5 | Đổi một chuỗi thành chuỗi khác: dịch, tóm tắt |
+
+Bài này chỉ dừng ở mức "biết có ba họ". Cross-attention, teacher forcing và beam search của họ encoder–decoder có ở bài [Mô hình chuỗi sang chuỗi](/vi/llm/seq2seq/). BERT và GPT được học kỹ ở các bài BERT và GPT và huấn luyện phân tán trong phần NLP; Transformer cho ảnh (ViT) ở phần CV.
+
+### Cái giá: $O(L^2)$
+
+So một lớp self-attention với một lớp RNN, theo bảng 1 của bài báo gốc:
+
+| Tiêu chí | Self-attention | RNN |
+|---|---|---|
+| Phép tính mỗi lớp | $O(L^2 d)$ | $O(L d^2)$ |
+| Số bước phải làm nối tiếp | $O(1)$ | $O(L)$ |
+| Đường đi dài nhất giữa hai vị trí | $O(1)$ | $O(L)$ |
+
+Hai hàng dưới là lý do Transformer thắng: song song hoàn toàn, và mọi cặp vị trí cách nhau một bước. Hàng đầu là cái giá. Ma trận điểm có $L \times L$ ô cho **mỗi đầu ở mỗi lớp**. Với $L = 8192$, đó là $8192^2 \approx 67$ triệu số. Gấp đôi độ dài chuỗi thì gấp bốn phép tính và bộ nhớ của attention. Khi $L$ nhỏ hơn $d$, như câu thông thường, attention còn rẻ hơn RNN; khi ngữ cảnh dài tới hàng trăm nghìn token, phần $L^2$ chiếm ưu thế.
+
+:::note[Ghi nhớ]
+Attention là tra cứu mềm: $\mathrm{softmax}(\mathbf{Q}\mathbf{K}^\top/\sqrt{d_k})\mathbf{V}$, mỗi hàng của ma trận trọng số cộng lại bằng 1. Chia $\sqrt{d_k}$ đưa phương sai của điểm về 1. Self-attention lấy $\mathbf{Q}$, $\mathbf{K}$, $\mathbf{V}$ từ cùng một chuỗi; nhiều đầu chạy $h$ phép attention $d/h$ chiều song song. Attention không biết thứ tự, nên phải cộng mã hóa vị trí. Một khối gồm attention nhiều đầu và FFN, mỗi phần có kết nối tắt và chuẩn hóa lớp. Mặt nạ nhân quả che tương lai khi sinh văn bản. Cái giá là $O(L^2)$ theo độ dài chuỗi.
+:::
+
+### Giới hạn
+
+- **Chuỗi dài rất đắt.** Phép tính và bộ nhớ $O(L^2)$ là lý do có các cách cài đặt attention tiết kiệm bộ nhớ và các biến thể attention thưa, ở bài Transformers nâng cao trong phần NLP.
+- **Ít giả định sẵn có về dữ liệu.** Transformer không mặc định "gần nhau thì liên quan" như CNN hay "theo thứ tự" như RNN. Điều này làm nó linh hoạt, nhưng thường cần nhiều dữ liệu hơn để học những điều đó; ViT ở phần CV là một ví dụ.
+- **Thứ tự chỉ đến từ mã hóa vị trí.** Quên nó thì mô hình vẫn chạy, chỉ không biết thứ tự; hộp đầu tiên ở mục Lỗi hay gặp cho thấy hậu quả.
+
+## Minh họa
+
+Hình dưới vẽ một khối Transformer theo kiểu bài báo gốc. Hãy đọc từ dưới lên, và để ý hai đường kết nối tắt vòng qua mỗi khối con trước khi gặp phép cộng.
+
+{/* FIG: TransformerBlockFigure
+    Ý: một khối Transformer gồm attention nhiều đầu và FFN, mỗi khối con có kết nối tắt và chuẩn hóa lớp, xếp chồng N lần.
+    Khối và mũi tên: đọc từ dưới lên. Token → embedding, cộng mã hóa vị trí (nút ⊕) → khung lớn "× N" chứa: attention nhiều đầu (trọng tâm) → cộng và chuẩn hóa → FFN (trọng tâm) → cộng và chuẩn hóa. Hai đường kết nối tắt: một đường mang đầu vào của khung vòng qua attention tới "cộng và chuẩn hóa" thứ nhất; một đường mang đầu ra của nó vòng qua FFN tới "cộng và chuẩn hóa" thứ hai. Phía trên khung: đầu ra. Embedding và mã hóa vị trí thuộc nhóm thứ hai (màu nhạt hơn).
+    Nhãn: "Token", "Embedding", "Mã hóa vị trí", "Attention nhiều đầu", "Cộng và chuẩn hóa", "Mạng truyền thẳng (FFN)", "× N", "Đầu ra".
+    Chú thích: Post-LN như bài báo gốc, mỗi khối con tính $\mathrm{LN}(\mathbf{x} + \mathrm{Sublayer}(\mathbf{x}))$; mọi mũi tên mang ma trận $L \times d$. */}
+
+Ma trận trọng số attention đọc được bằng mắt. Bảng dưới lấy từ ô NumPy đầu tiên ở mục Ví dụ code: 5 token với vectơ ngẫu nhiên (seed 0), $d = 8$, $d_k = 4$. Hàng $i$ là cách vị trí $i$ chia sự chú ý cho 5 vị trí. Bên trái là self-attention không mặt nạ, bên phải là có mặt nạ nhân quả.
+
+| Vị trí | Không mặt nạ: nhìn 1, 2, 3, 4, 5 | Có mặt nạ: nhìn 1, 2, 3, 4, 5 |
+|---|---|---|
+| 1 | 0.09, 0.29, 0.18, 0.37, 0.08 | 1.00, 0, 0, 0, 0 |
+| 2 | 0.38, 0.18, 0.11, 0.08, 0.25 | 0.67, 0.33, 0, 0, 0 |
+| 3 | 0.33, 0.27, 0.08, 0.14, 0.18 | 0.48, 0.40, 0.11, 0, 0 |
+| 4 | 0.13, 0.18, 0.33, 0.19, 0.16 | 0.16, 0.22, 0.40, 0.23, 0 |
+| 5 | 0.08, 0.31, 0.23, 0.32, 0.07 | 0.08, 0.31, 0.23, 0.32, 0.07 |
+
+Ba điều đáng nhìn:
+
+- **Mỗi hàng cộng lại bằng 1** ở cả hai bên (các số đã làm tròn hai chữ số, nên cộng tay có thể lệch 0.01).
+- **Bên phải là tam giác dưới.** Vị trí 1 chỉ còn chính nó, nên trọng số là 1.00.
+- **Hàng 5 giống hệt nhau ở hai bên**, vì vị trí cuối không có tương lai để che. Hàng 2 bên phải là hàng 2 bên trái, bỏ ba ô sau rồi chuẩn hóa lại: $0.38 : 0.18$ thành $0.67 : 0.33$.
+
+Vectơ ở đây là ngẫu nhiên, nên các con số không mang nghĩa ngôn ngữ nào. Ở mô hình đã huấn luyện, mỗi đầu cho một bảng như vậy, và nhiều bảng có cấu trúc dễ nhận ra, như nhìn từ ngay trước hay nhìn chủ ngữ.
+
+## Ví dụ code
+
+Code trong bài chạy thử lần cuối tháng 11/2026: ba ô NumPy với Python 3.14 và NumPy 2.4 (bản có trong Pyodide), ô cuối với Python 3.14 và PyTorch 2.15 trên CPU. Ba ô đầu chạy ngay trên trang, độc lập với nhau. Ô cuối cần PyTorch nên chạy trên máy bạn.
+
+### Self-attention và mặt nạ nhân quả bằng NumPy
+
+Ô dưới cài đặt đúng công thức của mục Lý thuyết. Năm token đồ chơi có vectơ ngẫu nhiên $d = 8$ chiều; ba ma trận chiếu đưa chúng xuống $d_k = 4$. Hàm `attention` nhận thêm một mặt nạ kiểu `bool`, `True` là **được** nhìn, và đặt $-\infty$ vào các ô bị che.
+
+<PythonRunner code={attentionCode} title="Self-attention có và không có mặt nạ nhân quả" />
+
+Đọc kết quả:
+
+- **Ma trận trọng số không mặt nạ** là bảng bên trái ở mục Minh họa. `row sums` in năm số `1.`: softmax theo hàng đúng là cho mỗi vị trí một phân phối.
+- **`output shape: (5, 4)`**: mỗi token nhận một vectơ mới $d_v = 4$ chiều, trộn từ giá trị của mọi token.
+- **Có mặt nạ**, ma trận thành tam giác dưới, hàng cuối không đổi. Dòng cuối in `True`: đầu ra của vị trí đầu tiên đúng bằng giá trị của chính nó, vì nó chỉ được nhìn chính nó với trọng số 1.
+
+### Vì sao chia cho $\sqrt{d_k}$
+
+Ô này kiểm lại phép tính phương sai. Với mỗi $d_k$, nó lấy 2000 truy vấn, mỗi truy vấn chấm điểm với 10 khóa, mọi thành phần lấy từ phân phối chuẩn trung bình 0, phương sai 1. Nó in phương sai của tích vô hướng, và trọng số lớn nhất trung bình mà softmax cho ra, khi không chia (`raw`) và khi chia cho $\sqrt{d_k}$ (`scaled`).
+
+<PythonRunner code={scalingCode} title="Phương sai của tích vô hướng theo chiều khóa" />
+
+Đọc kết quả:
+
+- **Phương sai bám sát $d_k$**: 4.0, 62.9 và 506.9 với $d_k = 4, 64, 512$, đúng như $\mathrm{Var}(\mathbf{q}^\top\mathbf{k}) = d_k$ (sai lệch nhỏ do lấy mẫu).
+- **Không chia, softmax nhọn dần**: trọng số lớn nhất trung bình từ 0.50 lên 0.87 rồi 0.95. Ở $d_k = 512$, gần như cả trọng số dồn vào một khóa, dù các khóa là ngẫu nhiên và không khóa nào thật sự khớp hơn.
+- **Có chia, trọng số lớn nhất giữ quanh 0.30 tới 0.32** ở mọi $d_k$. Mười khóa ngẫu nhiên thì không khóa nào nên chiếm hết; chia $\sqrt{d_k}$ giữ softmax ở vùng còn gradient để học.
+
+### Mã hóa vị trí sin/cos
+
+Ô này dựng mã hóa vị trí sin/cos, rồi làm thí nghiệm "chó cắn mèo". Ba token có vectơ ngẫu nhiên. Để gọn, self-attention ở đây không có ma trận chiếu ($\mathbf{Q} = \mathbf{K} = \mathbf{V}$ là đầu vào); kết luận không đổi khi có. Ô đổi chỗ token đầu và token cuối, rồi đo đầu ra ở token giữa, khi không và khi có mã hóa vị trí.
+
+<PythonRunner code={positionalCode} title="Mã hóa vị trí sin/cos và thứ tự token" />
+
+Đọc kết quả:
+
+- **Bảng mã hóa vị trí** in 4 chiều đầu của 3 vị trí. Vị trí 0 là $(0, 1, 0, 1)$ vì $\sin 0 = 0$, $\cos 0 = 1$. Cột đầu ($i = 0$) quay nhanh: $\sin 1 \approx 0.84$, $\sin 2 \approx 0.91$. Cột thứ ba ($i = 1$) quay chậm hơn hẳn: 0.1, 0.2. Mỗi vị trí có một "dấu vân tay" riêng.
+- **Không có mã hóa vị trí, đầu ra ở "cắn" lệch 0.000** giữa "chó cắn mèo" và "mèo cắn chó": mô hình không phân biệt được hai câu, đúng tính đẳng biến với hoán vị.
+- **Có mã hóa vị trí, đầu ra lệch 0.146**: giờ "chó" ở vị trí 0 khác "chó" ở vị trí 2, nên hai câu cho kết quả khác nhau.
+
+### Transformer chỉ có encoder học sắp xếp
+
+File dưới huấn luyện một Transformer encoder-only nhỏ để **sắp xếp dãy 8 chữ số**: vào `3 9 0 1 ...`, ra dãy đó xếp tăng dần. Bài toán này hợp để thấy hai ý của bài: mỗi vị trí đầu ra phải nhìn **cả** dãy vào (số nhỏ nhất có thể nằm ở bất kỳ đâu), và phải biết **mình đang ở vị trí nào** (vị trí 1 cần số nhỏ nhất, vị trí 8 cần số lớn nhất).
+
+- **Mô hình:** embedding token nhân $\sqrt{d}$ như bài báo gốc, cộng mã hóa vị trí sin/cos (hàm `sinusoidal`, cùng công thức với ô NumPy), rồi `nn.TransformerEncoder` gồm 2 khối, $d = 64$, $h = 4$ đầu, FFN 128 chiều, `norm_first=True` (Pre-LN), rồi một lớp tuyến tính ra 10 logit ở **mỗi** vị trí.
+- **Không mặt nạ:** dãy vào có đủ từ đầu, mọi vị trí nhìn cả dãy, nên đây là encoder chứ không phải decoder.
+- **Huấn luyện:** mỗi bước sinh 64 dãy ngẫu nhiên mới, cross-entropy trên cả 8 vị trí, 1001 bước AdamW.
+- **Đánh giá trên 1000 dãy mới:** tỉ lệ token đúng, và tỉ lệ dãy đúng hoàn toàn cả 8 số.
+
+Cách cài PyTorch bản chỉ chạy CPU có ở bài [Xây dựng LLM đầu tiên](/vi/llm/build-first-llm/).
+
+<LocalCode
+  code={sortEncoderCode}
+  title="Transformer encoder sắp xếp dãy số"
+  packages={['torch']}
+  hardware="CPU là đủ. Khoảng 15 tới 30 giây tùy máy"
+>
+
+```text
+step    0: loss = 8.8032
+step  500: loss = 0.4811
+step 1000: loss = 0.3019
+token acc = 0.976, sequence acc = 0.845
+```
+
+</LocalCode>
+
+Đọc kết quả:
+
+- **Học rất nhanh:** Sau 1000 bước (khoảng 15 giây trên CPU), hàm mất mát giảm từ 8.80 xuống 0.30. Trên 1000 dãy kiểm tra hoàn toàn mới, độ chính xác ở từng chữ số đạt **97.6%**, và **84.5%** toàn bộ dãy được sắp xếp hoàn toàn chuẩn xác cả 8 vị trí.
+- **Tại sao Transformer giải được:** Không có cấu trúc đệ quy tuần tự như RNN, nhưng cơ chế self-attention 4 đầu cho phép mỗi vị trí ở tầng sau thu thập thông tin từ bất kỳ phần tử nào trong dãy vào. Nhờ mã hóa vị trí, tầng ra biết vị trí thứ nhất cần chọn số nhỏ nhất và vị trí thứ 8 cần chọn số lớn nhất.
+
+## Lỗi hay gặp
+
+:::caution[Quên mã hóa vị trí]
+Code vẫn chạy, kích thước mọi ma trận vẫn đúng, chỉ có mô hình không biết thứ tự. Đổi `USE_POS = False` trong ô PyTorch rồi chạy lại: hàm mất mát kẹt ở 1.71, độ chính xác từng chữ số chỉ còn 30.0% và **tỉ lệ dãy đúng hoàn toàn rơi về đúng 0.0%**. Lý do đúng như ô "chó cắn mèo": không có vị trí, các vị trí chứa cùng một chữ số luôn cho cùng một đầu ra, nên mô hình không thể xếp số nhỏ nhất vào ô đầu và số lớn nhất vào ô cuối. Mô hình dùng mã hóa vị trí cố định (sin/cos) hay học được thì mã hóa đó phải được **cộng vào embedding** trước khối đầu tiên; mô hình dùng RoPE thì phép xoay nằm trong mỗi lớp attention.
+:::
+
+:::caution[Chia cho $\sqrt{d}$ thay vì $\sqrt{d_k}$, hoặc quên chia]
+Với nhiều đầu, mỗi đầu có $d_k = d/h$ chiều, và điểm của đầu đó phải chia cho $\sqrt{d_k}$, không phải $\sqrt{d}$. Chia nhầm $\sqrt{d}$ thì điểm nhỏ đi $\sqrt{h}$ lần, softmax quá phẳng lúc đầu; quên chia thì như ô thứ hai cho thấy, với $d_k = 512$ softmax đã dồn trung bình 0.95 trọng số vào một khóa ngẫu nhiên. Cả hai lỗi đều không báo gì, mô hình chỉ học kém hơn. `nn.MultiheadAttention` và `F.scaled_dot_product_attention` của PyTorch đã chia đúng; chỉ cần để ý khi tự viết.
+:::
+
+:::caution[Softmax sai chiều]
+Ma trận điểm có hàng là truy vấn, cột là khóa. Softmax phải làm theo **hàng** (`axis=-1` hay `axis=1` trong NumPy), để mỗi truy vấn chia 1 đơn vị chú ý cho các khóa. Viết `axis=0` thì mỗi **cột** cộng bằng 1: mỗi khóa chia mình cho các truy vấn, một phép tính không có nghĩa. Code vẫn chạy và kích thước không đổi. Cách kiểm: in `A.sum(axis=1)` như ô đầu tiên, phải ra toàn số 1.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- RNN và LSTM đọc tuần tự, đường đi giữa hai token xa dài $O(L)$, và nén quá khứ vào một vectơ. Attention cho mọi token nhìn thẳng mọi token khác trong một bước, tính song song.
+- Attention tích vô hướng có chia tỉ lệ $\mathrm{softmax}(\mathbf{Q}\mathbf{K}^\top/\sqrt{d_k})\mathbf{V}$ là tra cứu mềm: truy vấn so với khóa ra trọng số, trọng số trộn giá trị. Chia $\sqrt{d_k}$ vì tích vô hướng có phương sai $d_k$.
+- Self-attention lấy $\mathbf{Q}$, $\mathbf{K}$, $\mathbf{V}$ từ cùng một chuỗi qua ba ma trận chiếu; attention nhiều đầu chạy $h$ phép như vậy, mỗi phép $d/h$ chiều. Attention không biết thứ tự, nên cần mã hóa vị trí: sin/cos, học được, hoặc RoPE.
+- Khối Transformer là attention nhiều đầu rồi FFN, mỗi phần có kết nối tắt và chuẩn hóa lớp (Post-LN ở bản gốc, Pre-LN ở hầu hết mô hình sau này). Mặt nạ nhân quả che tương lai. Ba họ: encoder-only (BERT), decoder-only (GPT), encoder–decoder (bản gốc, T5). Cái giá là $O(L^2)$ theo độ dài chuỗi.
+
+**Đọc thêm:**
+
+- Vaswani, A. và cộng sự (2017). [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762), NIPS 2017, mục 3 và 4. Bài gốc: attention có chia tỉ lệ (kèm chú thích về phương sai $d_k$), nhiều đầu, mã hóa vị trí sin/cos, và bảng so sánh với RNN. Bài báo viết $d_{\text{model}}$ và $n$ cho chỗ bài này viết $d$ và $L$.
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. (2023). [*Dive into Deep Learning*](https://d2l.ai/chapter_attention-mechanisms-and-transformers/index.html), chương 11, mục 11.1 tới 11.7. Đi từ truy vấn, khóa, giá trị tới Transformer đầy đủ, có code chạy được.
+- Bahdanau, D., Cho, K., Bengio, Y. (2014). [*Neural Machine Translation by Jointly Learning to Align and Translate*](https://arxiv.org/abs/1409.0473), arXiv:1409.0473 (ICLR 2015), mục 3. Attention đầu tiên cho dịch máy, gắn vào một RNN encoder–decoder; điểm ở đây do một mạng nhỏ tính, chưa phải tích vô hướng.
+- Alammar, J. (2018). [*The Illustrated Transformer*](https://jalammar.github.io/illustrated-transformer/). Hình vẽ từng bước của self-attention và attention nhiều đầu, dễ đọc khi mới làm quen.
+- Xiong, R. và cộng sự (2020). [*On Layer Normalization in the Transformer Architecture*](https://arxiv.org/abs/2002.04745), ICML 2020. Vì sao Pre-LN dễ huấn luyện hơn Post-LN và không cần warmup.
+
+<LessonProgress />

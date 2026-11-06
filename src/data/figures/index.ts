@@ -4,15 +4,21 @@
 import { AGENT_LOOP } from './agent-loop';
 import { CONTAINER_IMAGE } from './container-image';
 import { ENCODER_DECODER } from './encoder-decoder';
+import { GRU_CELL } from './gru-cell';
 import { LORA } from './lora';
+import { LSTM_CELL } from './lstm-cell';
 import { ML_FAMILIES } from './ml-families';
 import { ML_WORKFLOW } from './ml-workflow';
+import { MLP } from './mlp';
 import { MOE } from './moe';
 import { MULTIMODAL } from './multimodal';
 import { PARALLELISM } from './parallelism';
 import { RAG_PIPELINE } from './rag-pipeline';
 import { REGULARIZATION_GEOMETRY } from './regularization-geometry';
+import { RESIDUAL_BLOCK } from './residual-block';
 import { RLHF_STAGES } from './rlhf-stages';
+import { RNN_UNROLLED } from './rnn-unrolled';
+import { TRANSFORMER_BLOCK } from './transformer-block';
 import type { FigureText } from './types';
 
 export const FIGURES = {
@@ -28,5 +34,11 @@ export const FIGURES = {
   multimodal: MULTIMODAL,
   parallelism: PARALLELISM,
   'container-image': CONTAINER_IMAGE,
+  mlp: MLP,
+  'residual-block': RESIDUAL_BLOCK,
+  'transformer-block': TRANSFORMER_BLOCK,
+  'rnn-unrolled': RNN_UNROLLED,
+  'gru-cell': GRU_CELL,
+  'lstm-cell': LSTM_CELL,
 } as const satisfies Record<string, FigureText<string>>;
 export type FigureId = keyof typeof FIGURES;

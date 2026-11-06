@@ -63,6 +63,17 @@ export const UI_KEYS = {
     'caption', 'plotLabel', 'rule', 'threshold', 'controls', 'thresholdLabel', 'thresholdValueText',
     'matrixLabel', 'trueLabel', 'predPositive', 'predNegative', 'actualPositive', 'actualNegative',
     'accuracy', 'precision', 'recall', 'f1', 'noPositive', 'undefinedValue', 'announce',
+  vizGradientFlow: [
+    'caption', 'chartLabel', 'chartDesc', 'layerAxis', 'gradAxis', 'bar', 'lastLayer', 'controls',
+    'activation', 'init', 'sigmoid', 'tanh', 'relu', 'std1', 'xavier', 'he', 'depthLabel', 'depthValueText',
+    'weightStd', 'ratio', 'sciSpoken', 'vanishing', 'stable', 'exploding', 'vanishingNote', 'stableNote',
+    'explodingNote', 'announce',
+  ],
+  vizConvolution: [
+    'caption', 'kernelsLabel', 'identity', 'blur', 'sharpen', 'sobelVertical', 'sobelHorizontal',
+    'imageTitle', 'imageLabel', 'imageDesc', 'kernelTitle', 'kernelLabel', 'productsTitle', 'product', 'sum',
+    'mapTitle', 'mapLabel', 'cellLabel', 'legend', 'prev', 'next', 'identityNote', 'blurNote', 'sharpenNote',
+    'sobelVerticalNote', 'sobelHorizontalNote', 'announce',
   ],
 } as const satisfies Record<string, readonly string[]>;
 

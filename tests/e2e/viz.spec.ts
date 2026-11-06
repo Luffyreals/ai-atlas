@@ -144,6 +144,12 @@ function measureContrast(root: Element): {
     }
   }
 
+  // A grid of numbered cells (ConvolutionViz, viz/convolution.md): the accent frame of the window or of the
+  // chosen cell, 3:1 against the grid's background (the frame's halo is that colour).
+  for (const [n, frame] of [...root.querySelectorAll('.atlas-viz-frame')].entries()) {
+    marks.push(pair(`frame ${n} border-color`, getComputedStyle(frame).borderTopColor, backgroundOf(frame)));
+  }
+
   // Swatches of the key and the readouts against the block (section 4.9, second table): 3:1 like any mark.
   // A filled point is measured by its fill; a ring, a zero ring, a triangle and every line by their stroke
   // (the inside of a ring is the plot background on purpose, sections 9.4.7 and 10.4.6).
@@ -168,6 +174,15 @@ function measureContrast(root: Element): {
     if (parent.closest('.sr-only, .katex-mathml, noscript')) continue;
     if (!parent.checkVisibility({ visibilityProperty: true, opacityProperty: true })) continue;
     text.push(pair(`"${words.slice(0, 40)}"`, getComputedStyle(parent).color, backgroundOf(parent)));
+  }
+  // A cell with a signed fill draws it in its ::before at some opacity, which backgroundOf does not see: its
+  // number is measured again on that fill, laid over the cell's own background.
+  const { rgba, over } = window.atlasContrast!;
+  for (const cell of root.querySelectorAll('.atlas-viz-cell[data-fill]')) {
+    const before = getComputedStyle(cell, '::before');
+    const [r, g, b, a] = rgba(before.backgroundColor);
+    const fill = over([r, g, b, a * parseFloat(before.opacity)], backgroundOf(cell));
+    text.push(pair(`cell "${(cell.textContent ?? '').trim()}" on its fill`, getComputedStyle(cell).color, fill));
   }
   return { marks, swatches, text, unmeasured };
 }
@@ -327,6 +342,13 @@ for (const { path } of PAGES) {
             el.setAttribute('data-atlas-broken', el.getAttribute('style') ?? '');
             el.style.setProperty(property, getComputedStyle(el.closest('.atlas-viz-meter') as Element).backgroundColor);
             out.push({ where: 'meter', what });
+          }
+          // A grid VIZ: the frame of the window, made the colour of its grid.
+          const frame = root.querySelector<HTMLElement>('.atlas-viz-frame');
+          if (frame) {
+            frame.setAttribute('data-atlas-broken', frame.getAttribute('style') ?? '');
+            frame.style.borderColor = getComputedStyle(frame.parentElement as Element).backgroundColor;
+            out.push({ where: 'plot', what: 'frame 0 border-color' });
           }
           (root.querySelector('figcaption') as HTMLElement).style.color = getComputedStyle(root).backgroundColor;
           return out;
