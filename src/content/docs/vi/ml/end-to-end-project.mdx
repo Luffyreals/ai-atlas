@@ -1,0 +1,307 @@
+---
+title: Dự án ML từ đầu đến cuối
+description: Đoán mức tiến triển bệnh tiểu đường sau một năm, đi đủ 8 bước, từ đặt bài toán, chia train/test, EDA, pipeline, kiểm định chéo, tinh chỉnh tới chấm test một lần và giám sát.
+quiz:
+  - question: 'Bạn chạy `StandardScaler().fit_transform(X)` trên cả 442 bệnh nhân, rồi mới gọi `train_test_split`. Chỗ nào sai?'
+    options:
+      - 'Không sai gì, vì chuẩn hóa không dùng tới nhãn $y$'
+      - 'Trung bình và độ lệch chuẩn đã tính cả trên 89 bệnh nhân test, nên thông tin của tập test lọt vào bước chuẩn bị dữ liệu'
+      - 'Sai vì `StandardScaler` phải chạy sau mô hình, không phải trước'
+      - 'Sai vì cột `sex` không được phép chuẩn hóa'
+    answer: 1
+    explanation: 'Rò rỉ dữ liệu không cần đi qua nhãn: chỉ cần tập test góp phần vào một con số mà bước huấn luyện dùng. Với `StandardScaler` trên 442 mẫu, ảnh hưởng thường nhỏ, nhưng các bước học nhiều hơn từ dữ liệu, như chọn đặc trưng theo tương quan với $y$, thì rò rỉ mạnh hơn hẳn. Thói quen đúng là chia trước, rồi đặt mọi bước tiền xử lý trong `Pipeline` để chúng chỉ học từ phần dữ liệu đang khớp.'
+  - question: 'Bạn thử 30 cấu hình mô hình. Với mỗi cấu hình, bạn khớp trên tập train rồi xem MAE trên tập test, cuối cùng báo cáo MAE test nhỏ nhất là 38. Trên bệnh nhân mới, MAE nhiều khả năng thế nào?'
+    options:
+      - 'Khoảng 38, vì tập test chưa bao giờ được dùng để khớp mô hình'
+      - 'Nhỏ hơn 38, vì cấu hình đó đã được chọn kỹ'
+      - 'Lớn hơn 38, vì 38 là số nhỏ nhất trong 30 con số có nhiễu, và tập test đã bị dùng để chọn mô hình'
+    answer: 2
+    explanation: 'Mỗi MAE test có một phần may rủi theo đúng 89 bệnh nhân đó. Lấy số nhỏ nhất trong 30 số là chọn luôn cả phần may rủi có lợi, nên 38 lạc quan. Tập test không dùng để khớp, nhưng đã dùng để chọn, tức nó đã thành tập kiểm định. Muốn chọn trong 30 cấu hình thì dùng kiểm định chéo trên tập train, rồi chấm tập test một lần.'
+  - question: 'Bạn xây mô hình phát hiện một bệnh hiếm, chỉ 2% bệnh nhân mắc. Kiểm định chéo cho độ chính xác (accuracy) 0.98. Bước nào của quy trình giúp bạn thấy con số này có thể chẳng nói lên gì?'
+    options:
+      - 'Bước 6: tinh chỉnh thêm siêu tham số để lên 0.99'
+      - 'Bước 3: xem hệ số tương quan của từng đặc trưng với nhãn'
+      - 'Bước 8: giám sát mô hình sau khi triển khai'
+      - 'Bước 1: so với mốc cơ sở luôn đoán "không bệnh", cũng được 0.98, rồi chọn thước đo khác như recall'
+    answer: 3
+    explanation: 'Mốc cơ sở `DummyClassifier(strategy="most_frequent")` đoán mọi người đều khỏe, đúng 98% mà không phát hiện được ai. Vậy 0.98 không hơn gì mốc cơ sở. Câu hỏi đúng là "trong số người bệnh, mô hình bắt được bao nhiêu", tức recall, cùng các thước đo ở bài Đánh giá mô hình. Tinh chỉnh tiếp theo accuracy chỉ đẩy mô hình về phía đoán "không bệnh".'
+  - question: 'Ở ô code thứ ba, MAE kiểm định chéo của mô hình đã chốt là 45.66, còn MAE test là 39.9. Bạn nên làm gì?'
+    options:
+      - 'Báo cáo 39.9, kèm ghi chú: tập test chỉ có 89 bệnh nhân, MAE từng fold dao động từ 40.5 tới 50.7, nên sai số trên bệnh nhân mới có thể cao hơn 39.9'
+      - 'Thử thêm vài mức `alpha`, giữ mức cho MAE test nhỏ hơn nữa'
+      - 'Kết luận mô hình bị underfitting, vì MAE test nhỏ hơn MAE kiểm định chéo'
+      - 'Chia lại train/test với `random_state` khác cho tới khi hai con số gần nhau'
+    answer: 0
+    explanation: 'Một tập test 89 người cho một ước lượng có nhiễu. Ở đây nó rơi vào phía may mắn: đổi cách chia, MAE test đi từ khoảng 38 tới 51. Thử `alpha` theo tập test, hay chia lại cho tới khi số "đẹp", đều là dùng tập test để chọn, và con số báo cáo hết trung thực. Underfitting nhìn ở chỗ sai số train cũng lớn, không ở chỗ test nhỏ hơn kiểm định chéo.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import exploreDataCode from '@code/ml/end-to-end-project/explore-data.vi.py?raw';
+import compareModelsCode from '@code/ml/end-to-end-project/compare-models.vi.py?raw';
+import tuneAndTestCode from '@code/ml/end-to-end-project/tune-and-test.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Đi được đủ 8 bước của một dự án học máy, từ đặt bài toán tới **triển khai** (deployment), và biết mỗi bước cho ra cái gì.
+- Chọn được thước đo hợp bài toán, đặt một **mốc cơ sở** (baseline) để so, và hiểu vì sao mốc cơ sở cho MAE là trung vị.
+- Cài đặt được cả quy trình bằng scikit-learn: chia có phân tầng, `Pipeline` với `ColumnTransformer`, so mô hình bằng kiểm định chéo, tinh chỉnh bằng `GridSearchCV`, rồi chấm tập test đúng một lần.
+- Nhận ra ba bẫy làm hỏng con số cuối cùng: **rò rỉ dữ liệu** (data leakage), nhìn tập test nhiều lần, và chọn sai thước đo.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài này ráp các mảnh của Phần 3 lại với nhau. **Ridge** là hồi quy tuyến tính có phạt L2, với hệ số phạt mà scikit-learn gọi là `alpha` ([Ridge, Lasso, Elastic Net](/vi/ml/regularization/)). **Random forest** lấy trung bình dự đoán của nhiều cây quyết định ([Decision Tree và Random Forest](/vi/ml/decision-tree-random-forest/)). **`Pipeline`** nối các bước tiền xử lý với mô hình thành một khối có `fit` và `predict`, còn **`ColumnTransformer`** xử lý mỗi nhóm cột một kiểu ([Xử lý dữ liệu, tăng cường dữ liệu, dữ liệu mất cân bằng](/vi/ml/data-preprocessing/)).
+:::
+
+## Trực giác
+
+Một phòng khám đưa bạn hồ sơ của 442 bệnh nhân tiểu đường. Mỗi người có 10 chỉ số đo lúc bắt đầu theo dõi: tuổi, giới tính, chỉ số khối cơ thể (BMI), huyết áp trung bình và sáu chỉ số trong máu. Một năm sau, bác sĩ ghi lại một con số cho biết bệnh đã tiến triển nặng thêm bao nhiêu. Phòng khám hỏi: **với bệnh nhân mới, có đoán trước được con số đó không, để biết ai cần theo dõi sát?**
+
+Đây là bộ dữ liệu `load_diabetes` có sẵn trong scikit-learn, do Efron và cộng sự công bố năm 2004. Năm bệnh nhân đầu tiên:
+
+| Bệnh nhân | age | sex | bmi | bp | s1 | s2 | s3 | s4 | s5 | s6 | Tiến triển |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 59 | 2 | 32.1 | 101 | 157 | 93.2 | 38 | 4 | 4.8598 | 87 | 151 |
+| 1 | 48 | 1 | 21.6 | 87 | 183 | 103.2 | 70 | 3 | 3.8918 | 69 | 75 |
+| 2 | 72 | 2 | 30.5 | 93 | 156 | 93.6 | 41 | 4 | 4.6728 | 85 | 141 |
+| 3 | 24 | 1 | 25.3 | 84 | 198 | 131.4 | 40 | 5 | 4.8903 | 89 | 206 |
+| 4 | 50 | 1 | 23.0 | 101 | 192 | 125.4 | 52 | 4 | 4.2905 | 80 | 135 |
+
+`bp` là huyết áp trung bình. `s1` tới `s6` là các chỉ số huyết thanh: cholesterol toàn phần, LDL, HDL, tỉ số cholesterol/HDL, một chỉ số triglyceride (có lẽ đã lấy log) và đường huyết. `sex` mã hóa bằng 1 và 2; tài liệu không nói số nào là nam.
+
+### Cách làm vội
+
+Bạn đã có đủ công cụ, nên rất dễ làm thế này: chuẩn hóa cả bảng, thử mười mô hình, mỗi mô hình chấm trên một tập test, giữ mô hình có điểm đẹp nhất rồi báo cáo điểm đó. Mỗi bước nghe hợp lý. Nhưng con số báo cáo sẽ **lạc quan**: tập test đã góp phần vào việc chuẩn hóa, và đã được dùng để chọn trong mười mô hình. Khi phòng khám dùng thật, sai số sẽ lớn hơn số bạn hứa.
+
+Vấn đề không nằm ở mô hình nào. Nó nằm ở **thứ tự** làm việc và **dữ liệu nào được nhìn vào lúc nào**.
+
+### Cách làm có kỷ luật
+
+Người làm ML lâu năm thường theo một danh sách kiểm tra. Bài này dùng 8 bước, gần với danh sách ở chương 2 sách của Aurélien Géron (xem Đọc thêm). Ý xuyên suốt rất đơn giản: **cất tập test đi ngay từ đầu, mọi quyết định khác chỉ dựa vào tập train, và chỉ mở tập test một lần ở cuối**.
+
+Bài toán của bài này là: **đoán mức tiến triển bệnh sau một năm từ 10 chỉ số ban đầu, và báo cáo một con số sai số mà phòng khám tin được trên bệnh nhân mới.**
+
+## Lý thuyết
+
+### Bước 1: Đặt bài toán và chọn thước đo
+
+Trước khi viết dòng code nào, trả lời ba câu hỏi.
+
+**Học có giám sát hay không? Hồi quy hay phân loại?** Ta có nhãn, nên là học có giám sát. Nhãn là một số liên tục từ 25 tới 346, nên là **hồi quy**. Nếu phòng khám chỉ cần biết "nặng hay không nặng", bài toán sẽ thành phân loại, với thước đo khác hẳn.
+
+**Đo bằng gì?** Bài này dùng **sai số tuyệt đối trung bình** (mean absolute error, MAE):
+
+$$
+\text{MAE} = \frac{1}{m}\sum_{i=1}^{m}\left\lvert y^{(i)} - \hat{y}^{(i)}\right\rvert
+$$
+
+Lý do: MAE có cùng đơn vị với nhãn. "Trung bình đoán lệch 46 điểm, trên thang 25 tới 346" là câu bác sĩ hiểu ngay. MSE, quen thuộc từ các bài trước, có đơn vị bình phương và phạt rất nặng vài lỗi lớn. Nếu một lỗi lớn đắt hơn hẳn nhiều lỗi nhỏ, MSE (hay căn của nó, RMSE) lại hợp hơn. Không có thước đo đúng cho mọi bài toán: thước đo phải phản ánh cái giá thật của lỗi.
+
+**Thế nào là "tốt"?** Một con số MAE đứng một mình không nói gì. Cần một **mốc cơ sở**: cách đoán đơn giản nhất không cần học gì. Với MAE, đó là luôn đoán **trung vị** (median) của nhãn trên tập train. Vì sao trung vị, không phải trung bình?
+
+Gọi $c$ là con số ta luôn đoán. Dời $c$ lên một đoạn nhỏ $\delta$, chưa vượt qua nhãn nào. Mỗi bệnh nhân có nhãn lớn hơn $c$ được bớt lỗi đi $\delta$, mỗi người có nhãn nhỏ hơn $c$ bị thêm lỗi $\delta$. Vậy MAE đổi một lượng:
+
+$$
+\frac{\delta}{m}\Big(\#\{y^{(i)} < c\} - \#\{y^{(i)} > c\}\Big)
+$$
+
+với $\#\{\cdot\}$ là số bệnh nhân thỏa điều kiện. Còn nhiều người nằm trên $c$ hơn nằm dưới thì dời lên làm MAE giảm. Ta dời cho tới khi hai bên bằng nhau, tức $c$ là trung vị. Với MSE, làm cách tương tự (đạo hàm theo $c$ cho bằng 0) sẽ ra trung bình. Trong scikit-learn, mốc cơ sở này là `DummyRegressor(strategy="median")`. Mô hình nào không thắng nó thì chưa học được gì đáng kể.
+
+### Bước 2: Lấy dữ liệu, chia ngay, cất tập test
+
+Ngay khi có dữ liệu, tách ra một **tập kiểm tra** (test set), ở đây 20%, tức 89 bệnh nhân, và không nhìn vào nó nữa. Vì sao vội vậy, khi chưa kịp xem dữ liệu? Vì **bộ não của bạn cũng là một mô hình**. Nếu bạn nhìn cả bảng rồi để ý "cột `s5` có vẻ quan trọng", quyết định đó đã dùng tới tập test. Tập test chỉ trung thực khi mọi quyết định đều không chạm vào nó.
+
+**Phân tầng** (stratified split). Chia ngẫu nhiên thuần túy có thể, do xui, đưa quá ít bệnh nhân nặng vào tập test. Với phân loại, bạn truyền nhãn vào `stratify` để giữ đúng tỉ lệ các lớp. Với hồi quy, không có lớp, nên ta tự tạo: cắt nhãn thành 5 nhóm có số người bằng nhau (`pd.qcut`), rồi phân tầng theo nhóm. Kết quả: tập test có 18, 18, 18, 17, 18 người ở năm nhóm từ nhẹ tới nặng.
+
+### Bước 3: Khám phá dữ liệu trên tập train
+
+**Phân tích dữ liệu khám phá** (exploratory data analysis, EDA) là xem dữ liệu trước khi mô hình hóa: mỗi cột trong khoảng nào, có giá trị thiếu hay vô lý không, cột nào là phân loại, cột nào liên quan tới nhãn. Mọi thứ làm trên **tập train**.
+
+Công cụ đơn giản nhất là `describe()` và **hệ số tương quan** (correlation coefficient) giữa từng đặc trưng với nhãn. Hệ số này nằm trong $[-1, 1]$, càng xa 0 thì quan hệ **tuyến tính** càng mạnh. Hai lưu ý:
+
+- Tương quan gần 0 không có nghĩa là không liên quan, chỉ là không liên quan **theo đường thẳng**. Quan hệ hình chữ U cho tương quan gần 0.
+- Tương quan không phải **quan hệ nhân quả** (causation). Dữ liệu này là quan sát, không phải thí nghiệm, nên dù BMI tương quan mạnh với tiến triển, mô hình không cho bạn biết giảm BMI sẽ làm bệnh chậm lại bao nhiêu.
+
+EDA cũng là lúc phát hiện cột cần xử lý riêng. Ở đây, `sex` chỉ có hai giá trị 1 và 2: đó là một biến phân loại mã hóa bằng số, không phải số đo.
+
+### Bước 4: Chuẩn bị dữ liệu bằng pipeline
+
+Ở bước này bạn quyết định biến đổi dữ liệu thế nào: điền giá trị thiếu, mã hóa cột phân loại, chuẩn hóa cột số, tạo đặc trưng mới. Bài [Xử lý dữ liệu, tăng cường dữ liệu, dữ liệu mất cân bằng](/vi/ml/data-preprocessing/) đi kỹ từng việc. Điều quan trọng ở đây là **mọi bước có học từ dữ liệu**, như tính trung bình để chuẩn hóa, phải được **khớp chỉ trên phần dữ liệu đang huấn luyện**.
+
+Cách chắc nhất là gói tiền xử lý và mô hình vào một `Pipeline`. Với dữ liệu tiểu đường:
+
+- `OneHotEncoder(drop="if_binary")` đổi `sex` thành một cột 0/1.
+- `StandardScaler()` chuẩn hóa 9 cột còn lại. Ridge cần bước này, vì khoản phạt đối xử mọi trọng số như nhau.
+
+Khi đưa cả pipeline vào kiểm định chéo, scikit-learn khớp lại `StandardScaler` trong **từng fold**, chỉ trên phần dùng để khớp. Fold bị giữ lại để chấm không góp gì vào trung bình và độ lệch chuẩn. Đây là lý do không chuẩn hóa sẵn cả bảng.
+
+### Bước 5: Thử vài mô hình bằng kiểm định chéo
+
+Bây giờ mới chọn mô hình. Đừng đầu tư vào một mô hình ngay. Hãy thử nhanh vài mô hình khác kiểu, với siêu tham số mặc định hoặc hợp lý, rồi so bằng **kiểm định chéo** (cross-validation) trên tập train:
+
+1. **Mốc cơ sở** `DummyRegressor`: để biết sàn ở đâu.
+2. **Mô hình tuyến tính có regularization**, ở đây Ridge: nhanh, ít siêu tham số, ít bị overfitting.
+3. **Mô hình phi tuyến**, ở đây random forest: bắt được tương tác và đường cong, nhưng cần nhiều dữ liệu hơn.
+
+Ghi lại cả trung bình **và độ lệch chuẩn** của điểm qua các fold. Hai mô hình chênh nhau ít hơn độ lệch chuẩn thì chưa nói được cái nào hơn. Kết quả của bước này là một danh sách ngắn, hai hoặc ba mô hình đáng tinh chỉnh tiếp.
+
+### Bước 6: Tinh chỉnh siêu tham số
+
+Mỗi mô hình có **siêu tham số** (hyperparameter) phải chọn trước khi khớp: `alpha` của Ridge, số cây và độ sâu của random forest. **Tinh chỉnh siêu tham số** (hyperparameter tuning) là chọn chúng bằng kiểm định chéo, theo một trong hai cách:
+
+- **Tìm kiếm lưới** (grid search), `GridSearchCV`: thử **mọi** tổ hợp trong một lưới bạn liệt kê. Lưới 6 mức `alpha` với 5 fold là 30 lần khớp. Hợp khi có một hai siêu tham số.
+- **Tìm kiếm ngẫu nhiên** (random search), `RandomizedSearchCV`: rút ngẫu nhiên một số tổ hợp cố định (`n_iter`) từ các khoảng bạn cho. Khi có nhiều siêu tham số mà chỉ vài cái thật sự quan trọng, cách này thường tìm được cấu hình tốt với ít lần khớp hơn lưới (Bergstra và Bengio, 2012).
+
+Trong pipeline, siêu tham số được gọi bằng `<tên bước>__<tên tham số>`, với hai dấu gạch dưới. `make_pipeline` đặt tên bước theo tên lớp viết thường, nên `alpha` của Ridge là `ridge__alpha`. Chọn xong, `GridSearchCV` tự **khớp lại** mô hình tốt nhất trên cả tập train (`refit=True`, mặc định).
+
+Một chi tiết tinh tế: điểm kiểm định chéo của cấu hình thắng cũng hơi lạc quan, vì nó là số tốt nhất trong nhiều số có nhiễu, giống chuyện chọn bằng tập test, chỉ nhẹ hơn. Đó là lý do vẫn cần tập test.
+
+### Bước 7: Phân tích lỗi, rồi chấm tập test một lần
+
+Trước khi mở tập test, hãy xem mô hình sai **ở đâu**. **Phân tích lỗi** (error analysis) dùng **dự đoán ngoài fold** (out-of-fold prediction): `cross_val_predict` đoán mỗi bệnh nhân train bằng một mô hình chưa thấy người đó. Rồi nhóm lỗi theo một tiêu chí, ví dụ theo mức độ bệnh. Có thể mô hình đoán tốt người bệnh nhẹ nhưng kém người bệnh nặng, đúng nhóm phòng khám quan tâm nhất. Phát hiện kiểu này có thể đưa bạn quay lại bước 1 (đổi thước đo), bước 4 (thêm đặc trưng) hay bước 5 (thử mô hình khác). Quay lại vẫn an toàn, vì tập test chưa bị chạm.
+
+Khi đã chốt mô hình, chấm tập test **đúng một lần**. Con số đó là ước lượng sai số trên bệnh nhân mới. Sau bước này, đừng sửa mô hình theo tập test nữa: sửa xong thì con số không còn trung thực. Nếu MAE test tệ hơn hẳn kiểm định chéo, đó là dấu hiệu của rò rỉ dữ liệu hoặc tập test khác tập train, cần điều tra. Muốn chấm lại sau khi sửa, bạn cần dữ liệu mới.
+
+### Bước 8: Triển khai và giám sát
+
+Mô hình chỉ có ích khi người khác dùng được. Phần này chỉ giới thiệu; cách đưa mô hình ra sau một địa chỉ HTTP nằm ở bài [Deploy mô hình riêng](/vi/llm/deploy-custom-model/), và cách đóng gói ở bài [Docker và Cloud](/vi/llm/docker-cloud/).
+
+**Lưu cả pipeline**, không chỉ mô hình. Tiền xử lý là một phần của mô hình: bệnh nhân mới phải được chuẩn hóa bằng đúng trung bình và độ lệch chuẩn của tập train. Cách hay dùng là `joblib`:
+
+```python
+import joblib
+
+joblib.dump(search.best_estimator_, "diabetes-ridge.joblib")  # lưu
+model = joblib.load("diabetes-ridge.joblib")  # nạp lại, ở nơi phục vụ
+```
+
+Dòng này cần một biến `search` đã khớp như ô code thứ ba, và chạy trên máy bạn, không chạy trên trang. Hai lưu ý từ tài liệu scikit-learn: file `joblib` có thể chạy code tùy ý khi nạp, nên chỉ nạp file bạn tin; và nên nạp bằng **đúng phiên bản** scikit-learn đã dùng khi lưu, kèm ghi chú dữ liệu, code và điểm kiểm định chéo.
+
+**Giám sát.** Thế giới không đứng yên. Phòng khám đổi máy xét nghiệm, đơn vị đo của một chỉ số đổi, bệnh nhân trẻ hơn trước: phân bố đầu vào đã khác dữ liệu huấn luyện. Hiện tượng này gọi là **dữ liệu trôi** (data drift). Cũng có khi chính quan hệ giữa đầu vào và nhãn thay đổi, ví dụ có thuốc mới làm bệnh tiến triển chậm hơn: **khái niệm trôi** (concept drift). Cách giám sát tối thiểu: so thống kê đầu vào mới với tập train, và khi có nhãn thật (một năm sau), tính lại MAE. MAE xấu đi thì huấn luyện lại trên dữ liệu mới, đi lại quy trình.
+
+### Giới hạn
+
+- **Quy trình là vòng lặp, không phải đường thẳng.** Bước 7 thường đưa bạn về bước 1, 4 hay 5. Điều duy nhất không quay lại là tập test.
+- **Dữ liệu nhỏ thì mọi con số đều dao động.** Với 89 bệnh nhân, MAE test đổi vài điểm theo cách chia (ô code thứ ba).
+- **Dự đoán tốt không có nghĩa là giải thích nhân quả** (Bước 3).
+- **Bài bỏ qua phần khó nhất ngoài đời**: thu thập và gán nhãn dữ liệu, quyền riêng tư của dữ liệu y tế, kiểm tra mô hình có công bằng với các nhóm bệnh nhân không, và cách trình bày kết quả cho người không chuyên.
+
+## Minh họa
+
+Bảng dưới gom 8 bước lại. Hãy đọc cột cuối: mỗi bước có một đầu ra cụ thể. Nếu bạn không viết ra được đầu ra của một bước, bước đó chưa xong.
+
+| Bước | Câu hỏi | Đầu ra | Trong bài này |
+|---|---|---|---|
+| 1. Đặt bài toán | Đoán cái gì, đo bằng gì, thế nào là đủ tốt? | Loại bài toán, thước đo, mốc cơ sở | Hồi quy, MAE, luôn đoán trung vị |
+| 2. Lấy và chia dữ liệu | Tập test có đại diện không? | Tập train và tập test đã cất | 353 và 89 bệnh nhân, phân tầng theo 5 nhóm nhãn |
+| 3. Khám phá (EDA) | Dữ liệu trông thế nào? | Ghi chú về cột, khoảng giá trị, tương quan | `bmi` và `s5` tương quan mạnh nhất; `sex` là cột phân loại |
+| 4. Chuẩn bị dữ liệu | Biến đổi cột nào, ra sao? | Một `ColumnTransformer` | `sex` thành 0/1, các cột khác chuẩn hóa |
+| 5. Thử mô hình | Kiểu mô hình nào hứa hẹn? | Danh sách ngắn, điểm kiểm định chéo | Mốc cơ sở, Ridge, random forest |
+| 6. Tinh chỉnh | Siêu tham số nào tốt nhất? | Mô hình đã chốt | `GridSearchCV` cho `alpha` của Ridge |
+| 7. Phân tích lỗi, chấm test | Sai ở đâu? Sai bao nhiêu trên dữ liệu mới? | Một con số test, báo cáo lỗi | MAE test, lỗi theo mức độ bệnh |
+| 8. Triển khai, giám sát | Dùng thế nào, khi nào phải huấn luyện lại? | File mô hình, kế hoạch giám sát | `joblib`, theo dõi dữ liệu trôi |
+
+Ở bài [Tổng quan về Học máy](/vi/ml/ml-overview/), quy trình chỉ có chia, khớp, chấm. Ở đây, giữa "chia" và "chấm" có thêm cả một vòng thử, tinh chỉnh và phân tích lỗi, nhưng vòng đó chỉ chạy trên tập train.
+
+## Ví dụ code
+
+Ba ô dưới đây chạy độc lập: ô nào cũng tự tải và chia dữ liệu theo cùng một cách (`random_state=0`), nên ba ô thấy cùng 353 bệnh nhân train và 89 bệnh nhân test. Ô chạy đầu tiên lâu hơn một chút, vì trình duyệt phải tải thêm pandas và scikit-learn. Dữ liệu được tải bằng `scaled=False` để giữ đơn vị gốc; mặc định scikit-learn trả về các cột đã được chuẩn hóa sẵn trên cả 442 người, và như vậy là đã bỏ qua bước 4.
+
+### Tải, chia, khám phá
+
+Ô thứ nhất làm bước 2 và 3: chia có phân tầng, rồi xem thống kê và tương quan **trên tập train**.
+
+<PythonRunner code={exploreDataCode} title="Tải, chia và khám phá dữ liệu" />
+
+- Tập train có 353 người, tập test 89 người. Từ dòng `# Từ đây, chỉ nhìn tập train.`, mọi thứ đều tính trên `X_train`, `y_train`.
+- Các cột có thang rất khác nhau: `s5` có độ lệch chuẩn 0.5, `s1` có 34.2. Đây là lý do cần chuẩn hóa trước Ridge.
+- `sex` có 189 người mã 1 và 164 người mã 2: đúng là cột phân loại.
+- Tương quan mạnh nhất với nhãn là `bmi` (0.57) và `s5` (0.55), rồi `bp` (0.44). `s3`, tức HDL, tương quan âm (-0.38): HDL cao đi kèm tiến triển nhẹ hơn. `sex` gần 0 (0.03), nhưng như đã nói, điều đó không đủ để bỏ cột.
+- Nhãn trên tập train từ 25 tới 346, trung bình 152.1. Một MAE khoảng 45 là lệch khá nhiều so với khoảng này: đừng hứa với phòng khám một mô hình chính xác tới từng điểm.
+
+### So sánh mô hình bằng kiểm định chéo
+
+Ô thứ hai làm bước 4 và 5. `prep` là `ColumnTransformer` của bước 4, ghép với từng mô hình bằng `make_pipeline`. `KFold(n_splits=5, shuffle=True, random_state=0)` chia 353 người train thành 5 fold.
+
+<PythonRunner code={compareModelsCode} title="Mốc cơ sở, Ridge và random forest" />
+
+- **Mốc cơ sở** (luôn đoán trung vị) có MAE kiểm định chéo 65.6.
+- **Ridge** đạt 45.8, giảm khoảng 30% so với mốc cơ sở. Mô hình đã học được điều có ích.
+- **Random forest** đạt 49.3, **kém** Ridge. Hai con số chênh 3.5, xấp xỉ độ lệch chuẩn qua các fold (3.4 và 3.6), nên chưa thể nói chắc Ridge hơn, nhưng chắc chắn random forest không hơn.
+- Dòng cuối giải thích phần nào: trên chính tập train, random forest có MAE 32.3, thấp hơn hẳn 49.3 của kiểm định chéo. Với 353 người và 10 đặc trưng, rừng học cả nhiễu; quan hệ trong dữ liệu này lại khá gần tuyến tính, nên mô hình đơn giản thắng.
+
+Bài học của ô này: **mô hình phức tạp hơn không tự động tốt hơn**, và chỉ kiểm định chéo mới cho bạn biết. Danh sách ngắn để tinh chỉnh là Ridge.
+
+### Tinh chỉnh, phân tích lỗi, chấm test
+
+Ô thứ ba làm bước 6 và 7, theo đúng thứ tự: tinh chỉnh `alpha` bằng `GridSearchCV`, xem lỗi trên dự đoán ngoài fold, rồi mới chấm tập test một lần.
+
+<PythonRunner code={tuneAndTestCode} title="GridSearchCV, phân tích lỗi, chấm test" />
+
+**Tinh chỉnh.** `alpha = 10` thắng với MAE kiểm định chéo 45.66. Nhưng hãy nhìn cả cột: từ `alpha = 0.1` tới `30`, MAE chỉ đi từ 45.95 xuống 45.66, chênh chưa tới 0.3. Chỉ `alpha = 100` mới tệ đi rõ (46.92). Tinh chỉnh ở đây gần như không đổi gì. Điều này hay gặp: chọn đúng kiểu mô hình và đặc trưng thường quan trọng hơn nhiều so với vặn siêu tham số.
+
+**Phân tích lỗi.** Bảng tiếp theo chia 353 người train thành 4 nhóm theo mức tiến triển thật, rồi tính sai số trung bình $\hat{y} - y$ trong mỗi nhóm:
+
+- Nhóm nhẹ nhất bị đoán **dư** trung bình 44.2, nhóm nặng nhất bị đoán **thiếu** 52.9.
+- Mô hình kéo mọi dự đoán về gần giữa. 10 chỉ số ban đầu không giải thích hết vì sao một người tiến triển nặng, nên với phần không giải thích được, mô hình đoán gần trung bình.
+
+Đây là thông tin quan trọng cho phòng khám: mô hình **kém nhất ở chính nhóm cần theo dõi sát nhất**. Nếu nhóm đó là mục tiêu, có lẽ nên quay lại bước 1, coi đây là bài toán phân loại "nặng hay không" với thước đo như recall, hoặc tìm thêm dữ liệu.
+
+**Chấm tập test.** MAE test là 39.9, **nhỏ hơn** 45.66 của kiểm định chéo. Mô hình không đột nhiên giỏi lên: 89 người này tình cờ dễ đoán hơn. MAE ở từng fold dao động từ 40.5 tới 50.7, và nếu giữ `alpha = 10` mà đổi `random_state` của bước chia từ 0 sang 1, 2, 3, 4, MAE test lần lượt là 48.8, 45.9, 50.9, 37.8. Một tập test nhỏ cho một ước lượng có nhiễu. Báo cáo trung thực là "MAE test 39.9 trên 89 bệnh nhân; kiểm định chéo cho khoảng 46", không phải chọn con số đẹp hơn.
+
+**Ba lỗi lớn nhất trên tập test**, chỉ để hiểu và báo cáo, không để sửa mô hình:
+
+- Bệnh nhân 92 có tiến triển 48, mô hình đoán 191. BMI 26.8, gần mức trung bình.
+- Bệnh nhân 304 có tiến triển 253, mô hình đoán 123. BMI 22.8, thấp.
+- Bệnh nhân 382 có tiến triển 132, mô hình đoán 253. BMI 32.0, cao.
+
+Hai người sau đi ngược xu hướng chung "BMI cao, tiến triển nặng": mô hình dựa nhiều vào BMI nên sai lớn ở họ. Đó cũng là kiểu lỗi phân tích ngoài fold đã báo trước.
+
+## Lỗi hay gặp
+
+:::caution[Tiền xử lý hay chọn đặc trưng trước khi chia]
+Chuẩn hóa, điền giá trị thiếu, hay chọn "10 đặc trưng tương quan mạnh nhất với $y$" trên **cả** bảng rồi mới chia: thông tin của tập test đã lọt vào mô hình, tức rò rỉ dữ liệu. Chọn đặc trưng theo $y$ là dạng nặng nhất, vì nó dùng thẳng nhãn của tập test. Rò rỉ cũng có thể đến từ chính dữ liệu: một cột chỉ được ghi **sau** khi biết kết quả, như "số lần tái khám trong năm", sẽ cho điểm rất đẹp lúc huấn luyện nhưng không có khi dự đoán cho bệnh nhân mới. Cách tránh: chia trước, đặt mọi bước học từ dữ liệu trong `Pipeline`, và với mỗi cột hãy hỏi "lúc cần dự đoán, cột này đã có chưa?".
+:::
+
+:::caution[Nhìn tập test nhiều lần]
+Mỗi lần bạn xem điểm test rồi sửa gì đó, dù chỉ là một siêu tham số, tập test đã thành tập kiểm định. Sau vài chục vòng, điểm test lạc quan y như điểm train. Mọi so sánh và tinh chỉnh làm bằng kiểm định chéo trên tập train (`cross_val_score`, `GridSearchCV`). Tập test chỉ mở một lần, cho mô hình đã chốt. Nếu buộc phải sửa sau đó, hãy ghi rõ trong báo cáo rằng điểm test không còn trung thực.
+:::
+
+:::caution[Chọn thước đo theo thói quen]
+Accuracy cho bệnh hiếm, MSE khi phòng khám chỉ quan tâm "lệch bao nhiêu điểm", MAE khi một lỗi lớn có thể nguy hiểm: thước đo sai thì cả quy trình tối ưu sai thứ. Chọn thước đo ở bước 1, theo cái giá thật của lỗi, và luôn so với mốc cơ sở `DummyRegressor` hay `DummyClassifier`. Với phân loại, xem bài [Đánh giá mô hình: Accuracy, Precision, Recall, F1](/vi/ml/classification-metrics/).
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Một dự án ML đi qua 8 bước: đặt bài toán và thước đo, chia dữ liệu, EDA, chuẩn bị dữ liệu, thử mô hình, tinh chỉnh, phân tích lỗi và chấm test, triển khai và giám sát. Mỗi bước có một đầu ra cụ thể, và các bước 3 tới 7 hay lặp lại.
+- Cất tập test ngay từ đầu (phân tầng nếu cần, với hồi quy thì phân tầng theo nhóm của nhãn). Mọi quyết định chỉ dựa vào tập train, tiền xử lý nằm trong `Pipeline`, so sánh và tinh chỉnh bằng kiểm định chéo. Tập test chấm một lần.
+- Thước đo phản ánh cái giá thật của lỗi, và luôn có mốc cơ sở. MAE $= \frac{1}{m}\sum_i\lvert y^{(i)} - \hat{y}^{(i)}\rvert$ có mốc cơ sở là trung vị. Trên dữ liệu tiểu đường, Ridge (MAE kiểm định chéo khoảng 46) thắng mốc cơ sở (65.6) và cả random forest (49.3).
+- Lưu cả pipeline, ghi phiên bản thư viện, và theo dõi dữ liệu trôi sau khi triển khai.
+
+**Đọc thêm:**
+
+- Géron, A. (2022). *Hands-On Machine Learning with Scikit-Learn, Keras, and TensorFlow*, bản 3, O'Reilly, chương 2: End-to-End Machine Learning Project. Có sẵn [notebook của chương 2](https://github.com/ageron/handson-ml3/blob/main/02_end_to_end_machine_learning_project.ipynb) và [danh sách kiểm tra dự án ML](https://github.com/ageron/handson-ml3/blob/main/ml-project-checklist.md) (phụ lục của sách) trên GitHub. Một dự án hoàn chỉnh trên dữ liệu giá nhà California, chi tiết hơn bài này ở phần EDA và tạo đặc trưng.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8: Common pitfalls and recommended practices*](https://scikit-learn.org/1.8/common_pitfalls.html). Các ví dụ rò rỉ dữ liệu khi tiền xử lý và chọn đặc trưng ngoài pipeline, kèm cách sửa.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Tuning the hyper-parameters of an estimator](https://scikit-learn.org/1.8/modules/grid_search.html). `GridSearchCV`, `RandomizedSearchCV` và cách đặt tên siêu tham số trong pipeline.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Model persistence](https://scikit-learn.org/1.8/model_persistence.html). So sánh `pickle`, `joblib`, `skops` và ONNX, các cảnh báo về bảo mật và phiên bản.
+- Kaufman, S., Rosset, S., Perlich, C., Stitelman, O. (2012). [*Leakage in Data Mining: Formulation, Detection, and Avoidance*](https://doi.org/10.1145/2382577.2382579). *ACM Transactions on Knowledge Discovery from Data* 6(4). Phân loại các kiểu rò rỉ dữ liệu, với nhiều ví dụ từ các cuộc thi.
+- Efron, B., Hastie, T., Johnstone, I., Tibshirani, R. (2004). [*Least Angle Regression*](https://doi.org/10.1214/009053604000000067). *The Annals of Statistics* 32(2), 407–499. Bài báo công bố bộ dữ liệu tiểu đường dùng trong bài.
+
+<LessonProgress />

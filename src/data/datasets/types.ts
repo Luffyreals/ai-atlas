@@ -34,3 +34,20 @@ export interface TokenDistribution {
   logits: readonly number[]; // fixed, shared by both locales, so the numbers match the Python cell
   description: Localized; // 1–2 sentences for screen readers
 }
+
+/**
+ * Binary labels and model probabilities, for ThresholdViz (docs/architecture/viz/threshold.md). Not x/y data, so
+ * not in DATASETS (that registry feeds DatasetTable): the lesson writes its own table. The lesson code copies `y`
+ * and `p` as `y_true = np.array([…])` and `p = np.array([…])` (tests/unit/viz/threshold-patients.test.ts).
+ */
+export interface ScoredDataset {
+  id: string;
+  lessons: readonly LessonId[]; // lessons whose code copies the two arrays
+  itemLabel: Localized; // what one point is: { vi: 'Một bệnh nhân', en: 'One patient' }
+  positive: Localized; // the class y = 1, for the key
+  negative: Localized; // the class y = 0
+  probability: Localized; // the x axis title
+  description: Localized; // 1–2 sentences for screen readers
+  y: readonly (0 | 1)[]; // true labels, table order
+  p: readonly number[]; // probability of y = 1, same order and length
+}

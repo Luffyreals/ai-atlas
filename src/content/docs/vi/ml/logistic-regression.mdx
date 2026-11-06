@@ -1,0 +1,390 @@
+---
+title: Hồi quy Logistic
+description: 'Đoán đậu hay trượt từ số giờ ôn thi. Hàm sigmoid cho xác suất, odds và log-odds, ranh giới quyết định, log loss dẫn từ hợp lý cực đại, gradient và phạt L2.'
+quiz:
+  - question: 'Một mô hình hồi quy logistic có hệ số $w = 0.7$ cho đặc trưng "số giờ ôn thi". Một bạn đang có xác suất đậu là 0.5. Nếu bạn ấy ôn thêm đúng 1 giờ (các đặc trưng khác giữ nguyên), xác suất đậu mới khoảng bao nhiêu?'
+    options: ['$1.2$', '$0.85$', '$0.67$', '$0.5 \cdot e^{0.7} \approx 1.01$']
+    answer: 2
+    explanation: 'Thêm 1 giờ thì log-odds tăng $0.7$, tức odds nhân với $e^{0.7} \approx 2.01$. Odds cũ là $0.5/0.5 = 1$, odds mới $\approx 2.01$, nên xác suất mới là $2.01/(1 + 2.01) \approx 0.67$. Cộng thẳng $0.7$ vào xác suất, hoặc nhân xác suất với $e^{0.7}$, đều cho số lớn hơn 1: hệ số tác động lên odds, không lên xác suất.'
+  - question: 'Mô hình có hai đặc trưng, $w_1 = 2$, $w_2 = -1$, $b = -3$. Với ngưỡng 0.5, mô hình đoán gì cho điểm $\mathbf{x} = [3, 2]^\top$?'
+    options:
+      - 'Lớp 1, với $\hat{y} = \sigma(1) \approx 0.73$'
+      - 'Lớp 0, vì $w_2$ âm'
+      - 'Lớp 1, với $\hat{y} = 1$ vì $z > 0$'
+      - 'Không đoán được, vì sigmoid chỉ dùng cho một đặc trưng'
+    answer: 0
+    explanation: '$z = 2 \cdot 3 - 1 \cdot 2 - 3 = 1 > 0$, nên điểm nằm phía lớp 1 của ranh giới $2x_1 - x_2 - 3 = 0$, và $\hat{y} = \sigma(1) \approx 0.73$. Một hệ số âm chỉ kéo $z$ xuống một phần, phải cộng đủ mọi số hạng mới biết dấu của $z$. Sigmoid không bao giờ cho đúng 1: $z > 0$ chỉ có nghĩa là $\hat{y} > 0.5$.'
+  - question: 'Một bạn đậu, nhưng mô hình đang cho $\hat{y} = 0.01$. Xét đạo hàm của mất mát của riêng mẫu này theo $z$. Vì sao huấn luyện bằng log loss sửa sai cho mẫu này nhanh hơn bằng bình phương sai số $(\hat{y} - y)^2$?'
+    options:
+      - 'Vì log loss của mẫu này nhỏ hơn: $-\ln 0.01 < (0.01 - 1)^2$'
+      - 'Vì log loss không cần tính đạo hàm của sigmoid'
+      - 'Hai cách sửa nhanh như nhau, vì cùng đi ngược gradient'
+      - 'Vì với log loss đạo hàm là $\hat{y} - y = -0.99$, còn với bình phương sai số là $2(\hat{y} - y)\hat{y}(1 - \hat{y}) \approx -0.0196$'
+    answer: 3
+    explanation: 'Bình phương sai số giữ lại thừa số $\hat{y}(1 - \hat{y}) = 0.0099$ của đạo hàm sigmoid, nên mẫu sai rất tự tin gần như không đẩy tham số: đạo hàm nhỏ hơn khoảng 50 lần. Với log loss, thừa số này bị triệt tiêu, nên sai càng nặng thì lực đẩy càng mạnh. Phương án đầu sai cả số: $-\ln 0.01 \approx 4.61$, lớn hơn nhiều so với $0.98$.'
+  - question: 'Bạn khớp `LogisticRegression(C=1e10)` trên dữ liệu đã chuẩn hóa. Độ chính xác trên tập train là 1.000, hệ số lớn nhất có trị tuyệt đối khoảng 200, và độ chính xác trên tập test thấp hơn mô hình mặc định. Nên chỉnh thế nào?'
+    options:
+      - 'Tăng `C` lên `1e12` để phạt mạnh hơn'
+      - 'Giảm `C`, ví dụ về mặc định `C=1`, để phạt L2 mạnh hơn'
+      - 'Bỏ `StandardScaler`, vì chuẩn hóa làm hệ số lớn'
+      - 'Tăng `max_iter`, vì mô hình chưa hội tụ'
+    answer: 1
+    explanation: '`C` là nghịch đảo của độ mạnh phạt: hàm mục tiêu có khoản $\frac{1}{2mC}\lVert\mathbf{w}\rVert_2^2$, nên `C` nhỏ là phạt mạnh. Khi một mặt phẳng tách hẳn hai lớp, không phạt thì log loss cứ giảm khi $\mathbf{w}$ phình ra, nên hệ số rất lớn và mô hình overfit. Tăng `C` là phạt yếu đi, ngược với ý định. Tăng `max_iter` chỉ cho $\mathbf{w}$ phình thêm.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import gdNumpyCode from '@code/ml/logistic-regression/gd-numpy.vi.py?raw';
+import lineVsSigmoidCode from '@code/ml/logistic-regression/line-vs-sigmoid.vi.py?raw';
+import breastCancerCode from '@code/ml/logistic-regression/breast-cancer.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu vì sao bài toán phân loại nhị phân (binary classification) cần một mô hình cho ra xác suất, và vì sao hồi quy tuyến tính rồi cắt ngưỡng không ổn.
+- Đọc được mô hình hồi quy logistic (logistic regression) theo ba cách: xác suất qua hàm sigmoid, log-odds tuyến tính, và ranh giới quyết định (decision boundary) $\mathbf{w}^\top\mathbf{x} + b = 0$.
+- Tự dẫn được hàm mất mát log loss từ hợp lý cực đại (maximum likelihood), và gradient $\frac{1}{m}\sum_i\left(\hat{y}^{(i)} - y^{(i)}\right)x^{(i)}_j$ của nó.
+- Cài đặt được hồi quy logistic bằng gradient descent và bằng scikit-learn, hiểu tham số `C`, và diễn giải hệ số qua odds.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+**Xác suất có điều kiện** (conditional probability) $P(y = 1 \mid \mathbf{x})$ là xác suất để $y = 1$ khi đã biết $\mathbf{x}$. Hai sự kiện **độc lập** (independent) thì xác suất cả hai cùng xảy ra là tích hai xác suất. Bài cũng dùng **logarit tự nhiên** $\ln$: $\ln(ab) = \ln a + \ln b$, $\ln a^k = k\ln a$, và $\ln$ là hàm tăng, nên số lớn hơn có $\ln$ lớn hơn.
+:::
+
+## Trực giác
+
+Thầy chủ nhiệm ghi lại số giờ ôn thi trong tuần trước kỳ thi của 18 sinh viên, và kết quả: đậu hay trượt. Số liệu dưới đây là dữ liệu tự tạo cho bài học.
+
+| Kết quả | Số giờ ôn thi |
+|---|---|
+| Trượt (9 bạn) | 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4.5, 6 |
+| Đậu (9 bạn) | 4, 5, 5.5, 6.5, 7, 7.5, 8, 9, 10 |
+
+Nhìn qua là thấy: ôn ít thì hay trượt, ôn nhiều thì hay đậu, ở giữa có vùng lẫn lộn (bạn 4 giờ đậu, bạn 4.5 giờ và 6 giờ trượt). Thầy muốn trả lời: **một bạn ôn 5 giờ thì khả năng đậu là bao nhiêu?**
+
+Đây là bài toán **phân loại** (classification): nhãn $y$ chỉ có hai giá trị, 1 (đậu) hoặc 0 (trượt). Thứ thầy cần không chỉ là "đậu hay trượt", mà là một **xác suất**: 90% và 51% đều là "đoán đậu", nhưng ý nghĩa khác hẳn nhau.
+
+### Thử hồi quy tuyến tính rồi cắt ngưỡng
+
+Cách đầu tiên ai cũng nghĩ tới: coi 0 và 1 là số, khớp một đường thẳng như bài [Hồi quy tuyến tính](/vi/ml/linear-regression/), rồi đoán "đậu" khi giá trị dự đoán từ 0.5 trở lên. Với 18 bạn, đường bình phương tối thiểu là $\hat{y} = 0.1413x - 0.1828$. Ngưỡng 0.5 rơi vào $x = 4.83$ giờ, và 16/18 bạn được đoán đúng. Nghe có vẻ ổn, nhưng có hai chỗ hỏng.
+
+**Thứ nhất, con số dự đoán không phải xác suất.** Bạn ôn 0 giờ được $\hat{y} = -0.183$, bạn ôn 10 giờ được $\hat{y} = 1.230$. Xác suất âm hay lớn hơn 1 đều vô nghĩa.
+
+**Thứ hai, đường thẳng bị kéo bởi những điểm "quá đúng".** Thêm một bạn ôn 30 giờ, và tất nhiên đậu. Bạn này chẳng làm bài toán khó thêm chút nào. Nhưng đường thẳng phải với tới điểm $(30, 1)$, nên nó nằm nghiêng hẳn xuống: $\hat{y} = 0.0421x + 0.2671$. Ngưỡng dời từ 4.83 sang **5.53 giờ**, và hai bạn ôn 5 giờ và 5.5 giờ, vốn đã đậu, giờ bị đoán trượt: trên 18 bạn cũ chỉ còn đúng 14. Nguyên nhân là bình phương sai số phạt bạn 30 giờ vì $\hat{y}$ chưa bằng đúng 1, dù với phân loại, đoán bạn ấy "rất chắc đậu" là đủ.
+
+### Ép đầu ra vào khoảng (0, 1)
+
+Thứ cần là một đường cong: đi gần 0 khi ôn rất ít, gần 1 khi ôn rất nhiều, và chuyển từ 0 sang 1 ở vùng lẫn lộn. Ở hai đầu, đường phải **nằm ngang**, để bạn 30 giờ đã ở sát 1 thì không kéo gì thêm. Đó là đường chữ S, và hồi quy logistic chính là cách khớp đường chữ S này.
+
+Bài toán của bài là: **từ các đặc trưng của một mẫu, đoán xác suất mẫu đó thuộc lớp 1, bằng một đường cong chữ S, và chọn đường cong làm cho dữ liệu đã thấy có khả năng xảy ra cao nhất.**
+
+## Lý thuyết
+
+### Phát biểu bài toán
+
+Có $m$ mẫu. Mẫu thứ $i$ có vectơ đặc trưng $\mathbf{x}^{(i)}$ gồm $n$ số và nhãn $y^{(i)} \in \{0, 1\}$. Lớp 1 gọi là lớp dương (positive class), lớp 0 là lớp âm (negative class). Với 18 sinh viên, $m = 18$, $n = 1$, $x$ là số giờ ôn.
+
+Hồi quy logistic làm hai bước. Bước một giống hệt hồi quy tuyến tính: tính một điểm số
+
+$$
+z = \mathbf{w}^\top\mathbf{x} + b
+$$
+
+với $\mathbf{w}$ là trọng số, $b$ là hệ số tự do. $z$ là một số thực bất kỳ, gọi là **logit**. Bước hai đưa $z$ qua **hàm sigmoid** $\sigma$ để được một xác suất:
+
+$$
+\hat{y} = \sigma(z) = \frac{1}{1 + e^{-z}}, \qquad \hat{y} = P(y = 1 \mid \mathbf{x})
+$$
+
+Vậy $\hat{y}$ ở bài này không còn là "giá trị dự đoán của $y$" như hồi quy tuyến tính, mà là **xác suất mô hình gán cho lớp 1**. Xác suất của lớp 0 là $1 - \hat{y}$.
+
+### Hàm sigmoid
+
+Nhìn vào công thức để thấy vì sao nó cho đường chữ S:
+
+- $z$ rất lớn: $e^{-z}$ gần 0, nên $\sigma(z)$ gần $1/1 = 1$.
+- $z$ rất âm: $e^{-z}$ rất lớn, nên $\sigma(z)$ gần 0.
+- $z = 0$: $e^{0} = 1$, nên $\sigma(0) = 1/2$.
+
+Vì $e^{-z} > 0$ với mọi $z$, mẫu số luôn lớn hơn 1, nên $\sigma(z)$ luôn nằm **trong** khoảng $(0, 1)$, không bao giờ chạm đúng 0 hay 1. Đường còn đối xứng quanh điểm $(0, 0.5)$: $\sigma(-z) = 1 - \sigma(z)$. Vài giá trị:
+
+| $z$ | $-6$ | $-4$ | $-2$ | $0$ | $2$ | $4$ | $6$ |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| $\sigma(z)$ | 0.0025 | 0.018 | 0.1192 | 0.5 | 0.8808 | 0.982 | 0.9975 |
+
+Đường dốc nhất quanh $z = 0$, và gần như nằm ngang khi $\lvert z\rvert$ vượt quá 5: đúng hình dạng mà mục Trực giác cần. Hình ở mục Minh họa vẽ đường này.
+
+### Odds và log-odds: đọc mô hình như một đường thẳng
+
+**Odds** của một xác suất $p$ là tỉ số $p/(1 - p)$: khả năng xảy ra chia cho khả năng không xảy ra. Xác suất 0.8 có odds là $0.8/0.2 = 4$, hay "4 ăn 1". Xác suất 0.5 có odds 1. Odds đi từ 0 tới vô cùng.
+
+Hãy giải ngược $\hat{y} = \sigma(z)$ để tìm $z$. Lấy nghịch đảo hai vế, trừ 1, rồi lấy $\ln$:
+
+$$
+\begin{aligned}
+\frac{1}{\hat{y}} &= 1 + e^{-z} \\
+\frac{1 - \hat{y}}{\hat{y}} &= e^{-z} \\
+\ln\frac{\hat{y}}{1 - \hat{y}} &= z = \mathbf{w}^\top\mathbf{x} + b
+\end{aligned}
+$$
+
+Dòng thứ hai trừ 1 ở hai vế và quy đồng $\frac{1}{\hat{y}} - 1 = \frac{1 - \hat{y}}{\hat{y}}$. Dòng thứ ba lật phân số (nên $e^{-z}$ thành $e^{z}$), rồi lấy $\ln$ hai vế. Vế trái là **log-odds**, cũng gọi là logit của $\hat{y}$. Vậy:
+
+:::note[Ghi nhớ]
+Hồi quy logistic là **mô hình tuyến tính cho log-odds**: $\ln\frac{\hat{y}}{1 - \hat{y}} = \mathbf{w}^\top\mathbf{x} + b$. Tên "logistic" đến từ hàm logistic, tên khác của sigmoid.
+:::
+
+Điều này cho cách đọc hệ số. Tăng $x_j$ thêm 1 đơn vị, giữ các đặc trưng khác nguyên, thì log-odds tăng đúng $w_j$, nên odds **nhân với $e^{w_j}$**:
+
+$$
+\text{odds}(x_j + 1) = e^{z + w_j} = e^{z} \cdot e^{w_j} = \text{odds}(x_j) \cdot e^{w_j}
+$$
+
+Ở ô code đầu tiên, mô hình của 18 sinh viên có $w = 1.263$, $b = -6.006$, nên mỗi giờ ôn thêm nhân odds đậu với $e^{1.263} \approx 3.54$. Bạn ôn 4 giờ có $\hat{y} = 0.278$, odds 0.386; bạn ôn 5 giờ có $\hat{y} = 0.577$, odds 1.365, đúng gấp 3.54 lần. Để ý: xác suất **không** tăng một lượng cố định. Từ 4 lên 5 giờ, xác suất tăng 0.3; từ 9 lên 10 giờ, nó gần như đứng yên vì đã sát 1. Hệ số $w_j$ âm thì $e^{w_j} < 1$, odds giảm.
+
+### Ranh giới quyết định
+
+Muốn ra một lớp cụ thể, ta so $\hat{y}$ với một **ngưỡng** (threshold), mặc định 0.5: đoán lớp 1 khi $\hat{y} \ge 0.5$. Vì $\sigma$ là hàm tăng và $\sigma(0) = 0.5$:
+
+$$
+\hat{y} \ge 0.5 \iff z \ge 0 \iff \mathbf{w}^\top\mathbf{x} + b \ge 0
+$$
+
+Tập các điểm có $\mathbf{w}^\top\mathbf{x} + b = 0$ là **ranh giới quyết định**. Với một đặc trưng, đó là một điểm: $x = -b/w = 6.006/1.263 \approx 4.75$ giờ. Với hai đặc trưng, đó là đường thẳng $w_1x_1 + w_2x_2 + b = 0$; với $n$ đặc trưng, là một siêu phẳng (hyperplane). Đường cong chữ S chỉ nằm ở khâu đổi điểm số thành xác suất, còn ranh giới luôn **phẳng**. Vì vậy hồi quy logistic là một **bộ phân loại tuyến tính** (linear classifier).
+
+Ngưỡng 0.5 chỉ là mặc định. Khi bỏ sót lớp dương nguy hiểm hơn báo nhầm (ví dụ sàng lọc bệnh), người ta hạ ngưỡng. Chọn ngưỡng và đánh giá bộ phân loại kỹ hơn độ chính xác là nội dung bài [Đánh giá mô hình: Accuracy, Precision, Recall, F1](/vi/ml/classification-metrics/).
+
+### Hàm mất mát: từ hợp lý cực đại tới log loss
+
+Cần một con số đo mô hình tốt hay tệ. Ý tưởng của **hợp lý cực đại**: chọn tham số làm cho **dữ liệu đã quan sát có xác suất xảy ra cao nhất** theo mô hình.
+
+**Bước 1: xác suất của một mẫu.** Mô hình nói $P(y = 1 \mid \mathbf{x}) = \hat{y}$ và $P(y = 0 \mid \mathbf{x}) = 1 - \hat{y}$. Gộp hai trường hợp vào một công thức:
+
+$$
+P(y \mid \mathbf{x}) = \hat{y}^{\,y}\,(1 - \hat{y})^{1 - y}
+$$
+
+Thử lại: $y = 1$ thì thừa số thứ hai là $(1 - \hat{y})^0 = 1$, còn lại $\hat{y}$. $y = 0$ thì thừa số thứ nhất là $\hat{y}^0 = 1$, còn lại $1 - \hat{y}$. Đây là phân phối Bernoulli.
+
+**Bước 2: xác suất của cả tập dữ liệu.** Coi các mẫu độc lập với nhau, xác suất để cả $m$ nhãn xảy ra đúng như đã thấy là tích:
+
+$$
+\text{Lik}(\mathbf{w}, b) = \prod_{i=1}^{m}\left(\hat{y}^{(i)}\right)^{y^{(i)}}\left(1 - \hat{y}^{(i)}\right)^{1 - y^{(i)}}
+$$
+
+Đại lượng này, xem như hàm của tham số, gọi là **likelihood**. Ta muốn làm nó lớn nhất.
+
+**Bước 3: lấy $\ln$.** Tích của nhiều số nhỏ hơn 1 rất nhanh tiến về 0. Với mô hình tốt nhất cho 18 sinh viên, likelihood chỉ là 0.0062; với vài nghìn mẫu, máy tính làm tròn nó thành 0. Vì $\ln$ là hàm tăng, làm lớn $\ln\text{Lik}$ cũng là làm lớn $\text{Lik}$. Dùng $\ln(ab) = \ln a + \ln b$ và $\ln a^k = k\ln a$:
+
+$$
+\ln\text{Lik}(\mathbf{w}, b) = \sum_{i=1}^{m}\left[y^{(i)}\ln\hat{y}^{(i)} + \left(1 - y^{(i)}\right)\ln\left(1 - \hat{y}^{(i)}\right)\right]
+$$
+
+**Bước 4: đổi thành bài toán làm nhỏ.** Quen với việc làm nhỏ hàm mất mát, ta đổi dấu và chia cho $m$ để lấy trung bình. Được **log loss**, còn gọi là **binary cross-entropy**:
+
+$$
+\mathcal{L}(\mathbf{w}, b) = -\frac{1}{m}\sum_{i=1}^{m}\left[y^{(i)}\ln\hat{y}^{(i)} + \left(1 - y^{(i)}\right)\ln\left(1 - \hat{y}^{(i)}\right)\right]
+$$
+
+Làm nhỏ $\mathcal{L}$ đúng là làm lớn likelihood, vì $\mathcal{L} = -\frac{1}{m}\ln\text{Lik}$.
+
+Đọc từng mẫu: mỗi mẫu chỉ đóng góp **$-\ln$ của xác suất mô hình gán cho nhãn đúng**. Gán 0.9 cho nhãn đúng thì mất 0.105; gán 0.5 thì mất 0.693; gán 0.1 thì mất 2.303; gán gần 0 thì mất gần vô cùng. Log loss phạt rất nặng những lần **sai mà tự tin**. Trong 18 sinh viên, hai mẫu bị phạt nặng nhất là hai bạn bị đoán sai: bạn ôn 4 giờ mà đậu ($\hat{y} = 0.278$, mất $-\ln 0.278 = 1.28$) và bạn ôn 6 giờ mà trượt ($\hat{y} = 0.828$, mất $-\ln 0.172 = 1.76$). Trung bình trên 18 bạn, $\mathcal{L} = 0.2826$. Mô hình "không biết gì", $\mathbf{w} = \mathbf{0}$, $b = 0$, cho mọi bạn 0.5, có $\mathcal{L} = \ln 2 \approx 0.6931$.
+
+### Vì sao không dùng MSE
+
+Sao không giữ MSE $\frac{1}{m}\sum_i\left(\hat{y}^{(i)} - y^{(i)}\right)^2$ với $\hat{y} = \sigma(z)$? Xét một mẫu có $y = 1$ và nhìn mất mát theo $z$:
+
+- **MSE**: $\left(\sigma(z) - 1\right)^2$. Khi $z$ rất âm, nó nằm ngang ở gần 1; khi $z$ rất dương, nằm ngang ở gần 0. Một đường đi từ nằm ngang, xuống dốc, rồi lại nằm ngang có dạng chữ S, **không phải cái bát**: nó không lồi. Cộng nhiều mẫu lại, mặt mất mát có những vùng gần như phẳng, nơi gradient descent bò rất chậm.
+- **Log loss**: $-\ln\sigma(z)$. Khi $z$ rất âm, nó tăng gần như theo đường thẳng $-z$, không hề nằm ngang. Sai càng nặng, dốc càng rõ.
+
+Bằng số: với $z = -6$ ($\hat{y} = 0.0025$, sai rất tự tin), đạo hàm theo $z$ của MSE chỉ là $-0.0049$, của log loss là $-0.9975$, mạnh hơn khoảng 200 lần. Mục sau cho thấy vì sao.
+
+### Gradient của log loss
+
+Gradient descent cần đạo hàm riêng của $\mathcal{L}$ theo từng $w_j$ và $b$. Xét một mẫu, bỏ chỉ số $(i)$: $\ell = -\left[y\ln\hat{y} + (1 - y)\ln(1 - \hat{y})\right]$, với $\hat{y} = \sigma(z)$ và $z = \mathbf{w}^\top\mathbf{x} + b$. Đây là hàm hợp ba tầng, nên dùng **quy tắc hàm hợp** (chain rule):
+
+$$
+\frac{\partial\ell}{\partial w_j} = \frac{\partial\ell}{\partial\hat{y}} \cdot \frac{d\hat{y}}{dz} \cdot \frac{\partial z}{\partial w_j}
+$$
+
+**Bước 1: đạo hàm của sigmoid.** Viết $\sigma(z) = \left(1 + e^{-z}\right)^{-1}$. Đạo hàm của $u^{-1}$ là $-u^{-2}$, nhân với đạo hàm của $1 + e^{-z}$ là $-e^{-z}$:
+
+$$
+\begin{aligned}
+\sigma'(z) &= \frac{e^{-z}}{\left(1 + e^{-z}\right)^2} \\
+&= \frac{1}{1 + e^{-z}} \cdot \frac{e^{-z}}{1 + e^{-z}} \\
+&= \sigma(z)\left(1 - \sigma(z)\right)
+\end{aligned}
+$$
+
+Dòng thứ hai tách phân số thành tích. Dòng thứ ba dùng $\frac{e^{-z}}{1 + e^{-z}} = \frac{(1 + e^{-z}) - 1}{1 + e^{-z}} = 1 - \sigma(z)$. Vậy $\frac{d\hat{y}}{dz} = \hat{y}(1 - \hat{y})$. Thừa số này lớn nhất (0.25) ở $z = 0$ và gần 0 ở hai đầu: đó là lý do MSE qua sigmoid bò chậm.
+
+**Bước 2: đạo hàm của $\ell$ theo $\hat{y}$.** Đạo hàm của $\ln u$ là $1/u$; đạo hàm của $\ln(1 - \hat{y})$ theo $\hat{y}$ là $-\frac{1}{1 - \hat{y}}$:
+
+$$
+\begin{aligned}
+\frac{\partial\ell}{\partial\hat{y}} &= -\frac{y}{\hat{y}} + \frac{1 - y}{1 - \hat{y}} \\
+&= \frac{-y(1 - \hat{y}) + (1 - y)\hat{y}}{\hat{y}(1 - \hat{y})} \\
+&= \frac{\hat{y} - y}{\hat{y}(1 - \hat{y})}
+\end{aligned}
+$$
+
+Dòng thứ hai quy đồng mẫu số. Dòng thứ ba phá ngoặc tử số: $-y + y\hat{y} + \hat{y} - y\hat{y} = \hat{y} - y$.
+
+**Bước 3: ghép lại.** $z = w_1x_1 + \dots + w_nx_n + b$, nên $\frac{\partial z}{\partial w_j} = x_j$ và $\frac{\partial z}{\partial b} = 1$. Nhân ba thừa số:
+
+$$
+\frac{\partial\ell}{\partial w_j} = \frac{\hat{y} - y}{\hat{y}(1 - \hat{y})} \cdot \hat{y}(1 - \hat{y}) \cdot x_j = (\hat{y} - y)\,x_j
+$$
+
+Thừa số $\hat{y}(1 - \hat{y})$ ở mẫu và ở tử **triệt tiêu nhau**. Đó là vì sao log loss không bò chậm khi sai tự tin: đạo hàm theo $z$ chỉ còn $\hat{y} - y$.
+
+**Bước 4: trung bình trên $m$ mẫu.** $\mathcal{L}$ là trung bình của các $\ell^{(i)}$, nên đạo hàm của nó là trung bình các đạo hàm:
+
+$$
+\frac{\partial\mathcal{L}}{\partial w_j} = \frac{1}{m}\sum_{i=1}^{m}\left(\hat{y}^{(i)} - y^{(i)}\right)x^{(i)}_j, \qquad
+\frac{\partial\mathcal{L}}{\partial b} = \frac{1}{m}\sum_{i=1}^{m}\left(\hat{y}^{(i)} - y^{(i)}\right)
+$$
+
+Viết gọn bằng ma trận $\mathbf{X}$ ($m$ hàng, mỗi hàng một mẫu, chưa có cột số 1) và vectơ $\hat{\mathbf{y}}$ chứa các $\hat{y}^{(i)}$: $\nabla_{\mathbf{w}}\mathcal{L} = \frac{1}{m}\mathbf{X}^\top\left(\hat{\mathbf{y}} - \mathbf{y}\right)$.
+
+:::note[Ghi nhớ]
+Gradient của log loss có **cùng dạng** với gradient MSE của hồi quy tuyến tính: trung bình của (dự đoán trừ nhãn) nhân đặc trưng. Hồi quy tuyến tính có thêm hệ số 2 từ bình phương, và $\hat{y}$ là $\mathbf{w}^\top\mathbf{x} + b$ thay vì $\sigma(\mathbf{w}^\top\mathbf{x} + b)$.
+:::
+
+### Huấn luyện bằng gradient descent
+
+Cho gradient bằng 0 thì được các phương trình có $\sigma$ bên trong, không giải ra công thức được như phương trình chuẩn. Nên ta dùng [gradient descent](/vi/ml/gradient-descent/):
+
+$$
+w_j \leftarrow w_j - \eta\,\frac{1}{m}\sum_{i=1}^{m}\left(\hat{y}^{(i)} - y^{(i)}\right)x^{(i)}_j, \qquad
+b \leftarrow b - \eta\,\frac{1}{m}\sum_{i=1}^{m}\left(\hat{y}^{(i)} - y^{(i)}\right)
+$$
+
+Tin tốt: **log loss là hàm lồi** theo $(\mathbf{w}, b)$. Theo $z$, mất mát của một mẫu có đạo hàm $\sigma(z) - y$ và đạo hàm bậc hai $\sigma(z)\left(1 - \sigma(z)\right) > 0$, tức cong lên như cái bát; mà $z$ lại tuyến tính theo tham số, nên tổng các mẫu vẫn lồi. Không có cực tiểu cục bộ nào để mắc kẹt. scikit-learn mặc định không dùng gradient descent thường mà dùng L-BFGS, một thuật toán dùng thêm thông tin về độ cong để đi ít bước hơn, nhưng đáy nó tìm tới là cùng một đáy.
+
+### Regularization trong scikit-learn
+
+`LogisticRegression` của scikit-learn **mặc định có phạt L2**, như Ridge ở bài [Ridge, Lasso, Elastic Net](/vi/ml/regularization/). Từ bản 1.8, tài liệu viết hàm mục tiêu (khi các mẫu có trọng số bằng nhau) là:
+
+$$
+J(\mathbf{w}, b) = \mathcal{L}(\mathbf{w}, b) + \frac{1}{2mC}\lVert\mathbf{w}\rVert_2^2
+$$
+
+- **`C` là nghịch đảo của độ mạnh phạt.** So với dạng $\mathcal{L} + \lambda\lVert\mathbf{w}\rVert_2^2$ của bài Regularization, $\lambda = \frac{1}{2mC}$. `C` nhỏ là phạt mạnh, `C` lớn là phạt yếu. Mặc định `C=1`.
+- **$b$ không bị phạt** (với solver mặc định `lbfgs`).
+- **Muốn tắt phạt**, tài liệu bản 1.8 khuyên `C=np.inf` (tham số `penalty` đã bị đánh dấu sắp bỏ). Bản 1.8.0 chạy trên trang lại in một cảnh báo thừa khi gặp `C=np.inf`, nên các ô code dùng `C=1e10`: phạt nhỏ tới mức không đổi kết quả.
+- **Nên chuẩn hóa đặc trưng**, vì cùng lý do như Ridge: phạt đối xử mọi $w_j$ như nhau.
+
+Phạt còn cứu một tình huống mà không phạt thì hỏng: khi có một siêu phẳng **tách hẳn** hai lớp (linearly separable). Lúc đó, nhân $\mathbf{w}$ và $b$ lên gấp đôi thì ranh giới giữ nguyên, nhưng mọi $\hat{y}$ bị đẩy sát 0 hoặc 1 hơn, nên log loss lại giảm. Không có đáy: các hệ số phình ra mãi. Ô code thứ ba gặp đúng chuyện này.
+
+### Giới hạn
+
+- **Ranh giới luôn phẳng.** Hai lớp xếp thành vòng tròn lồng nhau thì không đường thẳng nào tách được. Có thể thêm đặc trưng như $x_1^2$, $x_1x_2$ (giống hồi quy đa thức), hoặc dùng mô hình khác như ở bài [K-Nearest Neighbors](/vi/ml/k-nearest-neighbors/) và [Decision Tree và Random Forest](/vi/ml/decision-tree-random-forest/).
+- **Chỉ hai lớp.** Ba lớp trở lên thì dùng softmax thay cho sigmoid, ở bài [Hồi quy Softmax](/vi/ml/softmax-regression/).
+- **Xác suất chỉ đáng tin khi mô hình đúng dạng.** Log-odds thật không tuyến tính theo đặc trưng thì xác suất mô hình đưa ra có thể lệch, dù độ chính xác vẫn cao.
+- **Hệ số khó đọc khi đặc trưng tương quan mạnh** (hộp thứ ba ở mục Lỗi hay gặp).
+
+## Minh họa
+
+Hình dưới vẽ hàm sigmoid theo $z$. Hãy nhìn vào hai đầu đường cong, nơi nó nằm ngang sát hai đường tiệm cận 0 và 1, và vào điểm giữa $\sigma(0) = 0.5$. Các chấm là 18 sinh viên, đặt tại $z^{(i)} = 1.263x^{(i)} - 6.006$ của mô hình khớp ở ô code đầu tiên, ở độ cao 1 nếu đậu, 0 nếu trượt. Đường dọc $z = 0$ chính là ranh giới quyết định, ứng với 4.75 giờ ôn.
+
+{/* FIG: SigmoidFigure
+    Ý: sigmoid ép mọi z về khoảng (0, 1), dốc nhất quanh z = 0 và nằm ngang ở hai đầu; ranh giới quyết định là z = 0.
+    Khối và mũi tên: trọng tâm là đường sigmoid trên miền z từ -7 tới 7, trục tung từ -0.05 tới 1.05.
+      Hai đường đứt nằm ngang ở 0 và 1 (tiệm cận). Một đường đứt nằm ngang mảnh ở 0.5 và một đường dọc
+      ở z = 0, giao nhau tại chấm đánh dấu (0, 0.5). Nhóm thứ hai: 18 chấm dữ liệu, chấm đặc ở độ cao 1
+      (đậu), vòng rỗng ở độ cao 0 (trượt); hai chấm bị đoán sai (z = -0.95 đậu, z = 1.57 trượt) không cần
+      tô khác, chỉ cần đọc được vị trí. Vạch trục hoành ở -6, -4, -2, 0, 2, 4, 6; trục tung ở 0, 0.5, 1.
+    Nhãn: "đậu", "trượt", "ranh giới 4.75 giờ", "tiệm cận 1", "tiệm cận 0"; tên trục "điểm số z" và
+      "xác suất đậu". Giá trị 0.5 ở điểm giữa đọc từ vạch trục tung, ký hiệu σ(0) để ở chú thích.
+    Chú thích: Hàm sigmoid $\sigma(z) = 1/(1 + e^{-z})$ và 18 sinh viên tại $z = 1.263x - 6.006$; đường dọc
+      $z = 0$, tức $x \approx 4.75$ giờ, là ranh giới quyết định, nơi $\sigma(0) = 0.5$. */}
+
+## Ví dụ code
+
+Ba ô dưới đây chạy độc lập, ô nào cũng tự tạo dữ liệu. Ô chạy đầu tiên lâu hơn một chút, vì trình duyệt phải tải thêm scikit-learn; ô thứ hai còn tải thêm Matplotlib.
+
+### Gradient descent bằng NumPy
+
+Ô đầu tiên cài đặt đúng phần Lý thuyết: sigmoid, log loss, gradient $\frac{1}{m}\sum_i\left(\hat{y}^{(i)} - y^{(i)}\right)x^{(i)}$, xuất phát từ $w = b = 0$ với $\eta = 0.2$, dừng khi độ lớn gradient dưới $10^{-6}$. Cuối ô là `LogisticRegression` của scikit-learn để đối chiếu.
+
+<PythonRunner code={gdNumpyCode} title="Hồi quy logistic bằng gradient descent" />
+
+GD dừng sau 7540 bước với $w = 1.263$, $b = -6.006$, log loss 0.2826, khớp scikit-learn tới ba chữ số. Ngưỡng $-b/w = 4.754$ giờ, mỗi giờ ôn thêm nhân odds đậu với 3.54. Xác suất đậu đi 0.030, 0.278, 0.828, 0.984 khi số giờ đi 2, 4, 6, 8: tăng nhanh nhất quanh ngưỡng, chậm dần ở hai đầu, đúng hình chữ S.
+
+Hơn 7500 bước là nhiều, vì số giờ chưa chuẩn hóa: như bài [Gradient Descent](/vi/ml/gradient-descent/), đặc trưng nằm xa 0 làm mặt mất mát hẹp và dài. Hãy thử đổi `eta` thành 0.05: GD vẫn tới cùng đáp án, nhưng mất khoảng 30 000 bước.
+
+### Đường thẳng và đường cong chữ S
+
+Ô thứ hai kiểm lại các số ở mục Trực giác: khớp hồi quy tuyến tính và hồi quy logistic trên 18 sinh viên, rồi trên 19 sinh viên (thêm bạn ôn 30 giờ), in ngưỡng và độ chính xác trên 18 bạn đầu, và vẽ bốn đường.
+
+<PythonRunner
+  code={lineVsSigmoidCode}
+  title="Hồi quy tuyến tính và hồi quy logistic"
+  figureAlt={['Biểu đồ dự đoán theo số giờ ôn, từ 0 tới 32 giờ. Chấm đen là sinh viên ở độ cao 0 (trượt) hoặc 1 (đậu), một chấm đậu nằm riêng ở 30 giờ. Đường thẳng cam liền (18 bạn) đi từ khoảng -0.2 và vượt 1.5 trước 12 giờ; đường thẳng cam đứt (19 bạn) thoải hơn nhiều, cắt đường ngang 0.5 ở khoảng 5.5 giờ. Hai đường cong chữ S màu xanh (liền và đứt) gần như trùng nhau, đi lên từ 0 tới 1 quanh 4.75 giờ rồi nằm ngang sát 1.']}
+/>
+
+Với 18 bạn, hai cách cho ngưỡng gần nhau (4.83 và 4.75 giờ) và cùng đoán đúng 0.889, tức 16/18. Nhưng đường thẳng cho $-0.183$ ở 0 giờ, $1.230$ ở 10 giờ và $4.055$ ở 30 giờ: không đọc như xác suất được. Thêm bạn 30 giờ, đường thẳng nghiêng xuống, ngưỡng dời sang 5.53 giờ, độ chính xác trên 18 bạn cũ tụt còn 0.778. Đường chữ S thì gần như không động đậy: ngưỡng vẫn 4.75 giờ. Lý do nằm ở gradient: bạn 30 giờ có $\hat{y}$ sát 1, nên $\hat{y} - y$ gần 0, gần như không đẩy tham số.
+
+### Dữ liệu thật: chẩn đoán u vú
+
+Ô thứ ba dùng bộ `load_breast_cancer` có sẵn trong scikit-learn: 569 khối u, 30 đặc trưng đo từ ảnh chụp nhân tế bào (bán kính, độ sần bề mặt, độ lõm…). **Nhãn 1 là lành tính (benign)**, nhãn 0 là ác tính (malignant). Ô chia 75% train, 25% test giữ đúng tỉ lệ hai lớp (`stratify=y`), đặt `StandardScaler` trong pipeline, khớp với `C=1` (mặc định) và `C=1e10` (gần như không phạt), rồi đọc ba hệ số lớn nhất của mô hình mặc định.
+
+<PythonRunner code={breastCancerCode} title="Hồi quy logistic trên bộ dữ liệu u vú" />
+
+- **Mặc định `C=1`**: độ chính xác test 0.958, tức 137/143 khối u, hệ số lớn nhất về trị tuyệt đối chỉ 1.2.
+- **`C=1e10`**: train đúng 1.000, tức có một siêu phẳng tách hẳn hai lớp trên tập train, và hệ số lớn nhất phình tới 205.9, đúng như mục Regularization. Test tụt còn 0.944: mô hình overfit.
+- **Ba hệ số lớn nhất đều âm**: radius error (độ dao động bán kính giữa các nhân tế bào, $w = -1.213$), worst texture (độ sần ở vùng tệ nhất, $-1.107$), mean concave points (số điểm lõm trung bình, $-1.106$). Đặc trưng đã chuẩn hóa, nên đọc là: tăng **một độ lệch chuẩn** radius error, giữ các đặc trưng khác nguyên, thì odds lành tính nhân với $e^{-1.213} = 0.297$, tức còn chưa tới một phần ba. Hệ số âm ở đây nghĩa là nghiêng về ác tính, vì lớp 1 là lành tính.
+- Năm khối u đầu tiên của tập test có xác suất lành tính 0.996, 0.000, 0.000, 1.000, 0.003, và cả năm được đoán đúng. "0.000" chỉ là làm tròn: sigmoid không bao giờ cho đúng 0.
+
+## Lỗi hay gặp
+
+:::caution[Quên rằng `LogisticRegression` mặc định có phạt]
+`LogisticRegression()` là hồi quy logistic có phạt L2 với `C=1`, không phải hồi quy logistic "thuần" của sách thống kê. Trên 18 sinh viên, nó cho $w = 1.002$ thay vì $1.263$. Khi so với công thức trong sách, hay khi diễn giải hệ số như odds, hãy biết mình đang dùng `C` bằng bao nhiêu. Và nhớ chiều của `C`: nhỏ là phạt **mạnh**, ngược với $\lambda$ hay `alpha` của `Ridge`.
+:::
+
+:::caution[Đọc nhầm chiều của nhãn]
+Hệ số dương nghĩa là đặc trưng tăng thì odds của **lớp 1** tăng. Lớp nào là lớp 1 thì phải xem dữ liệu: ở `load_breast_cancer`, lớp 1 là lành tính (`data.target_names` là `['malignant', 'benign']`), nên hệ số âm mới là dấu hiệu ác tính. Đọc ngược thì kết luận cũng ngược. `predict_proba(X)[:, 1]` là xác suất của lớp đứng thứ hai trong `model.classes_`, không phải của lớp "quan trọng" hơn.
+:::
+
+:::caution[Coi hệ số là tầm quan trọng thật của đặc trưng]
+So độ lớn hệ số chỉ có nghĩa khi các đặc trưng đã chuẩn hóa, và kể cả khi đó vẫn phải cẩn thận. Bộ u vú có nhiều đặc trưng gần như trùng nhau (bán kính, chu vi, diện tích), nên mô hình có thể chia trọng số giữa chúng khá tùy ý, như Lasso ở bài Regularization. "Tăng một đặc trưng, giữ các đặc trưng khác nguyên" cũng là tình huống không có thật khi chúng luôn đi cùng nhau.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Hồi quy logistic tính $z = \mathbf{w}^\top\mathbf{x} + b$ rồi đưa qua sigmoid: $\hat{y} = \sigma(z) = 1/(1 + e^{-z}) = P(y = 1 \mid \mathbf{x})$. Khác đường thẳng, đầu ra luôn trong $(0, 1)$ và không bị kéo bởi những điểm "quá đúng".
+- Log-odds tuyến tính: $\ln\frac{\hat{y}}{1 - \hat{y}} = \mathbf{w}^\top\mathbf{x} + b$. Tăng $x_j$ một đơn vị thì odds nhân $e^{w_j}$. Ranh giới quyết định ở ngưỡng 0.5 là siêu phẳng $\mathbf{w}^\top\mathbf{x} + b = 0$.
+- **Log loss** là $-\frac{1}{m}$ lần log-likelihood:
+  $$
+  \mathcal{L}(\mathbf{w}, b) = -\frac{1}{m}\sum_{i=1}^{m}\left[y^{(i)}\ln\hat{y}^{(i)} + \left(1 - y^{(i)}\right)\ln\left(1 - \hat{y}^{(i)}\right)\right]
+  $$
+  Hàm mất mát này lồi, phạt nặng lỗi sai tự tin, và có gradient $\frac{1}{m}\sum_i\left(\hat{y}^{(i)} - y^{(i)}\right)x^{(i)}_j$, cùng dạng với hồi quy tuyến tính. Không có nghiệm dạng đóng, nên huấn luyện bằng gradient descent hoặc L-BFGS.
+- `LogisticRegression` mặc định phạt L2 với `C=1`, $\lambda = \frac{1}{2mC}$: `C` nhỏ là phạt mạnh. Phạt giữ hệ số hữu hạn khi dữ liệu tách được hoàn toàn.
+
+**Đọc thêm:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Bài 10: Logistic Regression](https://machinelearningcoban.com/2017/01/27/logisticregression/). Tiếng Việt, có dẫn hàm mất mát từ likelihood và ví dụ Python với số giờ ôn thi. Ký hiệu khác: $N$ là số mẫu, đầu ra sigmoid viết $z_i$, hàm mất mát $J(\mathbf{w})$ là tổng, không chia $N$.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Logistic regression](https://scikit-learn.org/1.8/modules/linear_model.html#logistic-regression), mục 1.1.11. Hàm mục tiêu chính xác có `C`, bảng solver, và vì sao phạt được bật sẵn.
+- Jurafsky, D., Martin, J. H. (2026). [*Speech and Language Processing*, bản nháp 3rd ed., chương 4: Logistic Regression and Text Classification](https://web.stanford.edu/~jurafsky/slp3/4.pdf) (PDF). Dẫn cross-entropy và gradient rất kỹ, ví dụ là phân loại văn bản.
+- Ma, T., Ng, A. (2026). [*CS229 Lecture Notes*](https://cs229.stanford.edu/main_notes.pdf) (PDF), mục 2.1: Logistic regression. Dẫn gradient từ log-likelihood, ký hiệu $h_\theta(x)$ cho $\hat{y}$ và làm lớn log-likelihood bằng gradient ascent.
+- Cox, D. R. (1958). [*The Regression Analysis of Binary Sequences*](https://doi.org/10.1111/j.2517-6161.1958.tb00292.x). *Journal of the Royal Statistical Society: Series B* 20(2), 215–232. Một trong những bài báo đầu tiên đưa hồi quy logistic vào thống kê.
+
+<LessonProgress />

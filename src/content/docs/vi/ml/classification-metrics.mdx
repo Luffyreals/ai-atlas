@@ -1,0 +1,393 @@
+---
+title: 'Đánh giá mô hình: Accuracy, Precision, Recall, F1'
+description: 'Mô hình luôn đoán "không bệnh" vẫn đạt accuracy 70%. Ma trận nhầm lẫn, precision, recall, F1, ngưỡng quyết định, đường cong precision–recall và ROC.'
+quiz:
+  - question: 'Có 1 000 giao dịch thẻ, trong đó 10 giao dịch gian lận (lớp dương). Một mô hình luôn đoán "hợp lệ". Accuracy và recall của nó là bao nhiêu?'
+    options:
+      - 'Accuracy 99%, recall 99%'
+      - 'Accuracy 1%, recall 0'
+      - 'Accuracy 99%, recall 0'
+      - 'Accuracy 99%, recall không tính được vì chia cho 0'
+    answer: 2
+    explanation: 'Mô hình đúng ở 990 giao dịch hợp lệ, nên accuracy là $990/1000 = 99\%$. Recall là $\text{TP}/(\text{TP}+\text{FN}) = 0/10 = 0$: mẫu số là số giao dịch gian lận thật, bằng 10, nên tính được. Chỗ chia cho 0 là precision, vì mô hình không đưa ra dự đoán dương nào: $\text{TP}+\text{FP} = 0$.'
+  - question: 'Một mô hình có precision $0.9$ và recall $0.1$. F1 của nó gần với số nào nhất?'
+    options: ['$0.5$', '$0.18$', '$0.9$', '$0.1$']
+    answer: 1
+    explanation: 'F1 là trung bình điều hòa: $2 \cdot 0.9 \cdot 0.1 / (0.9 + 0.1) = 0.18$. Con số $0.5$ là trung bình cộng, thứ mà F1 cố ý tránh: mô hình bỏ sót 9 trên 10 ca dương thì không nên được nửa điểm. Trung bình điều hòa bị kéo về phía số nhỏ hơn, nhưng vẫn lớn hơn nó một chút.'
+  - question: 'Bạn nâng ngưỡng quyết định từ $0.5$ lên $0.7$ (dự đoán dương khi $p \ge t$). Điều nào luôn đúng?'
+    options:
+      - 'Precision chắc chắn tăng và recall chắc chắn giảm'
+      - 'Accuracy chắc chắn tăng, vì mô hình thận trọng hơn'
+      - 'Cả precision lẫn recall đều tăng'
+      - 'Recall không thể tăng; precision thường tăng nhưng có thể giảm'
+    answer: 3
+    explanation: 'Nâng ngưỡng thì chỉ có mẫu rời khỏi nhóm dự đoán dương, nên TP không tăng, và recall $= \text{TP}/(\text{TP}+\text{FN})$ có mẫu số cố định nên không tăng. Precision là một tỉ số mà cả tử lẫn mẫu đều đổi: nếu mẫu vừa rời nhóm là một ca dương thật, precision có thể giảm. Ở bảng 20 bệnh nhân, nâng ngưỡng từ $0.30$ lên $0.35$ làm precision giảm từ $0.545$ xuống $0.500$.'
+  - question: 'Bạn làm bộ lọc thư rác, lớp dương là "thư rác". Thư bị lọc sẽ vào thư mục rác, người dùng hầu như không mở. Bạn nên ưu tiên chỉ số nào khi chọn ngưỡng?'
+    options:
+      - 'Precision, vì một thư bị đánh dấu là rác thì phải thật sự là rác'
+      - 'Recall, vì phải bắt được càng nhiều thư rác càng tốt'
+      - 'Accuracy, vì phần lớn thư là thư thường'
+      - 'Không chỉ số nào, vì ngưỡng 0.5 luôn là tốt nhất'
+    answer: 0
+    explanation: 'Lỗi đắt ở đây là dương tính giả: một thư công việc bị đẩy vào thư mục rác mà người dùng không bao giờ thấy. Precision $= \text{TP}/(\text{TP}+\text{FP})$ phạt đúng lỗi này. Để lọt vài thư rác vào hộp thư chính chỉ hơi phiền, nên recall xếp sau. Ngưỡng $0.5$ chỉ là mặc định, không gắn với chi phí của bài toán nào.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import ThresholdViz from '@components/viz/ThresholdViz.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import confusionMatrixCode from '@code/ml/classification-metrics/confusion-matrix.vi.py?raw';
+import thresholdCurvesCode from '@code/ml/classification-metrics/threshold-curves.vi.py?raw';
+import imbalancedCode from '@code/ml/classification-metrics/imbalanced.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Nhận ra vì sao accuracy (độ chính xác) đánh lừa khi dữ liệu mất cân bằng (imbalanced data), và luôn so nó với một mô hình cơ sở (baseline) "luôn đoán lớp đa số".
+- Đọc được ma trận nhầm lẫn (confusion matrix), rồi tính precision, recall và F1 từ bốn ô TP, FP, FN, TN. Tự dẫn được vì sao F1 dùng trung bình điều hòa (harmonic mean).
+- Hiểu đánh đổi precision–recall khi đổi ngưỡng quyết định (decision threshold), biết khi nào ưu tiên precision, khi nào ưu tiên recall, và chọn ngưỡng trên tập kiểm định.
+- Đọc được đường cong precision–recall, đường cong ROC cùng AUC, và các dòng `macro avg`, `weighted avg` trong `classification_report` của scikit-learn.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bài này đánh giá các mô hình **phân loại nhị phân** (binary classification): nhãn $y$ chỉ là 1 (**lớp dương**, positive class, thường là thứ ta cần tìm) hoặc 0 (**lớp âm**, negative class). Mô hình như [hồi quy logistic](/vi/ml/logistic-regression/) không trả thẳng nhãn mà trả một **xác suất** $p$ để mẫu thuộc lớp dương. Bài [Tổng quan về Học máy](/vi/ml/ml-overview/) đã nói vì sao mọi lựa chọn phải làm trên **tập kiểm định** (validation set), còn **tập kiểm tra** (test set, tập test) chỉ dùng ở bước cuối.
+:::
+
+## Trực giác
+
+Một phòng khám thử một mô hình sàng lọc trên 20 bệnh nhân đã biết chắc kết quả xét nghiệm. Có 6 người có bệnh. Với mỗi người, mô hình đưa ra xác suất có bệnh $p$. Bảng dưới xếp bệnh nhân theo $p$ giảm dần (dữ liệu tự tạo cho bài học).
+
+| Bệnh nhân | Xác suất $p$ | Nhãn thật $y$ |
+|---:|---:|---:|
+| 1 | 0.93 | 1 |
+| 2 | 0.86 | 1 |
+| 3 | 0.78 | 0 |
+| 4 | 0.71 | 1 |
+| 5 | 0.63 | 0 |
+| 6 | 0.58 | 1 |
+| 7 | 0.54 | 0 |
+| 8 | 0.46 | 1 |
+| 9 | 0.42 | 0 |
+| 10 | 0.36 | 0 |
+| 11 | 0.31 | 1 |
+| 12 | 0.27 | 0 |
+| 13 | 0.22 | 0 |
+| 14 | 0.18 | 0 |
+| 15 | 0.14 | 0 |
+| 16 | 0.12 | 0 |
+| 17 | 0.09 | 0 |
+| 18 | 0.07 | 0 |
+| 19 | 0.04 | 0 |
+| 20 | 0.02 | 0 |
+
+### Một mô hình không làm gì vẫn được 70%
+
+Cách chấm dễ nghĩ nhất là đếm số người đoán đúng. Quy ước: ai có $p \ge 0.5$ thì đoán "có bệnh". Bệnh nhân 1 tới 7 được đoán có bệnh, 13 người còn lại đoán không bệnh. Đối chiếu với cột $y$, mô hình đúng 15 trên 20 người, tức **75%**.
+
+Nghe khá ổn. Giờ thử một "mô hình" chẳng cần học gì: **luôn đoán không bệnh**. Nó đúng với cả 14 người không bệnh, nên được $14/20 = 70\%$. Mô hình thật chỉ hơn nó 5 điểm phần trăm.
+
+Tệ hơn, mô hình "luôn đoán không bệnh" không phát hiện được **người bệnh nào**. Nó vô dụng cho việc sàng lọc, mà vẫn được 70%. Nếu bệnh hiếm hơn, chẳng hạn 1 trên 100 người, nó được tới 99%.
+
+### Không phải lỗi nào cũng như nhau
+
+Con số 75% còn giấu một chuyện nữa: mô hình sai **kiểu gì**. Năm người bị đoán sai gồm hai loại:
+
+- Bệnh nhân 3, 5, 7 không có bệnh mà bị báo có bệnh. Họ phải đi xét nghiệm thêm, tốn tiền và lo lắng.
+- Bệnh nhân 8 và 11 có bệnh mà bị báo không. Họ về nhà, bệnh không được chữa sớm.
+
+Với sàng lọc bệnh, lỗi thứ hai đắt hơn nhiều. Accuracy đếm hai loại lỗi như nhau.
+
+Thêm nữa, con số 0.5 là do ta chọn. Hạ nó xuống 0.3 thì bệnh nhân 8 và 11 được bắt, nhưng thêm bệnh nhân 9, 10 bị báo nhầm. Mỗi ngưỡng cho một bộ lỗi khác.
+
+Bài toán của bài này là: **đo chất lượng một mô hình phân loại sao cho thấy được nó mắc loại lỗi nào, kể cả khi một lớp hiếm hơn hẳn lớp kia, và chọn ngưỡng hợp với chi phí của từng loại lỗi.**
+
+## Lý thuyết
+
+### Từ xác suất tới nhãn: ngưỡng quyết định
+
+Gọi $p^{(i)}$ là xác suất mô hình gán cho mẫu thứ $i$ thuộc lớp dương. Để ra nhãn dự đoán $\hat{y}^{(i)}$, ta so nó với một **ngưỡng quyết định** $t$:
+
+$$
+\hat{y}^{(i)} =
+\begin{cases}
+1 & \text{nếu } p^{(i)} \ge t \\
+0 & \text{nếu } p^{(i)} < t
+\end{cases}
+$$
+
+Hàm `predict` của scikit-learn dùng ngưỡng 0.5 (đúng ra là dự đoán dương khi $p > 0.5$; chỉ khác ở mẫu có $p$ đúng bằng 0.5), nhưng không có gì bắt buộc phải dùng 0.5. Mô hình học ra $p$; còn $t$ là quyết định của bạn, tùy chi phí của từng loại lỗi. Mọi chỉ số trong các mục dưới (trừ AUC) đều tính **sau khi** đã chọn $t$, nên đổi $t$ là đổi chỉ số.
+
+### Ma trận nhầm lẫn
+
+So nhãn dự đoán $\hat{y}$ với nhãn thật $y$, mỗi mẫu rơi vào đúng một trong bốn ô:
+
+| Nhãn thật | Dự đoán dương ($\hat{y} = 1$) | Dự đoán âm ($\hat{y} = 0$) |
+|---|---:|---:|
+| Dương ($y = 1$) | TP: dương tính thật | FN: âm tính giả |
+| Âm ($y = 0$) | FP: dương tính giả | TN: âm tính thật |
+
+- **TP** (true positive, dương tính thật): có bệnh, đoán có bệnh.
+- **FN** (false negative, âm tính giả): có bệnh, đoán không. Đây là ca **bỏ sót**.
+- **FP** (false positive, dương tính giả): không bệnh, đoán có bệnh. Đây là ca **báo nhầm**.
+- **TN** (true negative, âm tính thật): không bệnh, đoán không.
+
+Chữ thứ hai (P hoặc N) là điều mô hình **đoán**. Chữ thứ nhất (T hoặc F) cho biết lời đoán đó đúng hay sai. Bảng này gọi là **ma trận nhầm lẫn** (confusion matrix).
+
+Với 20 bệnh nhân và $t = 0.5$: TP gồm bệnh nhân 1, 2, 4, 6; FP gồm 3, 5, 7; FN gồm 8 và 11; mười một người còn lại là TN.
+
+| Nhãn thật | Dự đoán dương | Dự đoán âm |
+|---|---:|---:|
+| Dương (6 người) | TP = 4 | FN = 2 |
+| Âm (14 người) | FP = 3 | TN = 11 |
+
+Tổng theo hàng là số mẫu thật của mỗi lớp, không đổi dù ngưỡng ra sao. Tổng theo cột là số dự đoán của mỗi loại, đổi theo ngưỡng.
+
+### Accuracy
+
+Accuracy là tỉ lệ mẫu đoán đúng, tức hai ô trên đường chéo chia cho tổng:
+
+$$
+\text{Accuracy} = \frac{\text{TP} + \text{TN}}{\text{TP} + \text{TN} + \text{FP} + \text{FN}} = \frac{4 + 11}{20} = 0.75
+$$
+
+Mô hình "luôn đoán không bệnh" có TP = 0, FP = 0, FN = 6, TN = 14, nên accuracy là $14/20 = 0.70$. Phần lớn điểm của accuracy đến từ ô TN, ô của lớp đông người. Lớp càng lệch, ô TN càng lấn át, và accuracy càng ít nói về lớp dương.
+
+### Precision và recall
+
+Hai chỉ số sau chỉ nhìn vào lớp dương, mỗi chỉ số trả lời một câu hỏi.
+
+**Precision**: trong những người mô hình **báo có bệnh**, bao nhiêu phần thật sự có bệnh? Ta chia TP cho cả cột "dự đoán dương":
+
+$$
+\text{Precision} = \frac{\text{TP}}{\text{TP} + \text{FP}} = \frac{4}{4 + 3} \approx 0.571
+$$
+
+**Recall** (còn gọi là **độ nhạy**, sensitivity, hay tỉ lệ dương tính thật, true positive rate): trong những người **thật sự có bệnh**, mô hình bắt được bao nhiêu phần? Ta chia TP cho cả hàng "dương thật":
+
+$$
+\text{Recall} = \frac{\text{TP}}{\text{TP} + \text{FN}} = \frac{4}{4 + 2} \approx 0.667
+$$
+
+Hai công thức có cùng tử số TP, chỉ khác mẫu số. Precision bị kéo xuống bởi **báo nhầm** (FP). Recall bị kéo xuống bởi **bỏ sót** (FN).
+
+Với lớp âm cũng có một chỉ số giống recall, gọi là **độ đặc hiệu** (specificity): trong những người không bệnh, bao nhiêu phần được đoán đúng là không bệnh.
+
+$$
+\text{Specificity} = \frac{\text{TN}}{\text{TN} + \text{FP}} = \frac{11}{11 + 3} \approx 0.786
+$$
+
+Trong y khoa, xét nghiệm thường được mô tả bằng cặp độ nhạy và độ đặc hiệu. Trong học máy, cặp precision và recall hay gặp hơn.
+
+Với mô hình "luôn đoán không bệnh": recall $= 0/6 = 0$, lộ ngay chỗ accuracy 70% che đi. Precision của nó là $0/0$: không có dự đoán dương nào nên không định nghĩa được. scikit-learn khi đó in cảnh báo và trả về 0; tham số `zero_division` đổi giá trị trả về đó.
+
+### F1: gộp precision và recall thành một số
+
+Một con số thì dễ so mô hình hơn hai. Cách dễ nghĩ nhất là lấy trung bình cộng $(P + R)/2$, với $P$ là precision và $R$ là recall. Nhưng xem ngưỡng $t = 0.9$: chỉ bệnh nhân 1 được báo có bệnh, nên $P = 1/1 = 1.0$ và $R = 1/6 \approx 0.167$. Trung bình cộng là khoảng $0.583$, cao hơn cả ở ngưỡng 0.5, dù mô hình bỏ sót 5 trên 6 người bệnh.
+
+**F1** dùng **trung bình điều hòa** (harmonic mean): lấy trung bình của các **nghịch đảo**, rồi nghịch đảo lại.
+
+$$
+\frac{1}{F_1} = \frac{1}{2}\left(\frac{1}{P} + \frac{1}{R}\right)
+\quad\Longrightarrow\quad
+F_1 = \frac{2PR}{P + R}
+$$
+
+Vế phải có được bằng cách quy đồng $\frac{1}{P} + \frac{1}{R} = \frac{P + R}{PR}$, rồi nghịch đảo cả hai vế.
+
+Vì sao nghịch đảo lại giúp? Số nhỏ có nghịch đảo lớn. Với $R \approx 0.167$, $1/R = 6$ lấn át $1/P = 1$, nên trung bình của các nghịch đảo lớn và $F_1$ nhỏ. Ở $t = 0.9$:
+
+$$
+F_1 = \frac{2 \cdot 1.0 \cdot 0.167}{1.0 + 0.167} \approx 0.286
+$$
+
+F1 bị kéo về phía số nhỏ hơn. Muốn F1 cao, cả precision lẫn recall đều phải cao.
+
+Thay $P$ và $R$ bằng công thức theo TP, FP, FN, ta còn được một dạng chỉ dùng ba ô của ma trận:
+
+$$
+\begin{aligned}
+\frac{1}{F_1} &= \frac{1}{2}\left(\frac{\text{TP} + \text{FP}}{\text{TP}} + \frac{\text{TP} + \text{FN}}{\text{TP}}\right) \\
+&= \frac{2\,\text{TP} + \text{FP} + \text{FN}}{2\,\text{TP}}
+\end{aligned}
+$$
+
+Dòng đầu thay $1/P$ và $1/R$ bằng nghịch đảo của hai phân số ở mục trước. Dòng thứ hai cộng hai phân số cùng mẫu $\text{TP}$. Nghịch đảo lại:
+
+$$
+F_1 = \frac{2\,\text{TP}}{2\,\text{TP} + \text{FP} + \text{FN}}
+$$
+
+Ở $t = 0.5$: $F_1 = 8/(8 + 3 + 2) = 8/13 \approx 0.615$. Dạng này không có ô TN, nên một biển âm tính thật không làm F1 đẹp lên như với accuracy. Nó còn tính được cả khi không có dự đoán dương nào: TP = 0 thì $F_1 = 0$, trong khi precision là $0/0$.
+
+**F-beta.** Khi một loại lỗi đắt hơn loại kia, có thể dùng $F_\beta$:
+
+$$
+F_\beta = \frac{(1 + \beta^2)\,P R}{\beta^2 P + R}
+$$
+
+$\beta = 1$ cho lại $F_1$. $\beta > 1$ coi recall quan trọng hơn (ví dụ $F_2$ cho sàng lọc bệnh), $\beta < 1$ coi precision quan trọng hơn (ví dụ $F_{0.5}$). Trong scikit-learn là `fbeta_score`.
+
+:::note[Ghi nhớ]
+Precision $= \text{TP}/(\text{TP}+\text{FP})$: báo dương thì đúng được bao nhiêu. Recall $= \text{TP}/(\text{TP}+\text{FN})$: dương thật thì bắt được bao nhiêu. F1 là trung bình điều hòa của hai số đó, nên bị kéo về số nhỏ hơn. Accuracy gộp cả TN, nên dễ đẹp giả khi lớp âm đông.
+:::
+
+### Đánh đổi precision–recall theo ngưỡng
+
+Giờ đổi ngưỡng $t$ trên 20 bệnh nhân. Ô code thứ hai in đủ các ngưỡng từ 0.1 tới 0.9; dưới đây là vài ngưỡng tiêu biểu.
+
+| Ngưỡng $t$ | TP | FP | FN | TN | Accuracy | Precision | Recall | F1 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0.30 | 6 | 5 | 0 | 9 | 0.750 | 0.545 | 1.000 | 0.706 |
+| 0.50 | 4 | 3 | 2 | 11 | 0.750 | 0.571 | 0.667 | 0.615 |
+| 0.70 | 3 | 1 | 3 | 13 | 0.800 | 0.750 | 0.500 | 0.600 |
+| 0.80 | 2 | 0 | 4 | 14 | 0.800 | 1.000 | 0.333 | 0.500 |
+| 0.95 | 0 | 0 | 6 | 14 | 0.700 | không xác định | 0.000 | 0.000 |
+
+Nâng $t$ thì có ít người bị báo có bệnh hơn:
+
+- **Recall không bao giờ tăng.** Mẫu chỉ có thể rời nhóm dự đoán dương, nên TP chỉ giữ nguyên hoặc giảm, trong khi mẫu số $\text{TP} + \text{FN}$ luôn là 6.
+- **Precision thường tăng, nhưng không chắc.** FP giảm, nhưng TP cũng có thể giảm. Từ $t = 0.30$ lên $0.35$, người rời nhóm là bệnh nhân 11, một người có bệnh, nên precision **giảm** từ $0.545$ xuống $0.500$.
+- **Accuracy có thể tăng trong khi mô hình tệ đi với người bệnh.** Ở $t = 0.80$, accuracy là $0.800$, cao hơn ở $t = 0.5$, mà recall chỉ còn $0.333$: bỏ sót 4 trên 6 người bệnh.
+
+Không có ngưỡng nào tốt nhất cho mọi bài toán. Câu hỏi đúng là: **loại lỗi nào đắt hơn?**
+
+- **Ưu tiên recall khi bỏ sót đắt.** Sàng lọc bệnh: báo nhầm chỉ tốn một lần xét nghiệm thêm, còn bỏ sót có thể làm lỡ việc chữa sớm. Hạ ngưỡng. Phát hiện gian lận thẻ cũng thường theo hướng này.
+- **Ưu tiên precision khi báo nhầm đắt.** Lọc thư rác: để lọt một thư rác chỉ hơi phiền, còn đẩy nhầm thư công việc vào thư mục rác thì người dùng có thể mất thư quan trọng. Nâng ngưỡng.
+
+Chọn ngưỡng cũng là chọn một siêu tham số (hyperparameter). Vì vậy hãy chọn nó trên **tập kiểm định**, hoặc bằng kiểm định chéo (cross-validation) như bài [Overfitting và Underfitting](/vi/ml/overfitting-underfitting/), rồi chấm tập test một lần với ngưỡng đã chốt. Chọn ngưỡng cho F1 đẹp nhất trên tập test là lỗi "chọn mô hình bằng tập test" của bài [Tổng quan về Học máy](/vi/ml/ml-overview/). Ô code thứ ba làm đúng quy trình này. scikit-learn còn có sẵn `TunedThresholdClassifierCV`, tự chọn ngưỡng bằng kiểm định chéo.
+
+### Đường cong precision–recall và ROC
+
+Bảng ở trên mới là vài ngưỡng. Quét **mọi** ngưỡng và nối các điểm lại, bạn được một đường cong. Có hai cách vẽ phổ biến.
+
+**Đường cong precision–recall** (precision–recall curve) đặt recall ở trục ngang, precision ở trục dọc. Mỗi điểm là một ngưỡng. Mô hình tốt có đường đi sát góc trên bên phải: recall cao mà precision vẫn cao. Mức của mô hình đoán bừa là một đường ngang ở độ cao bằng tỉ lệ lớp dương, ở đây $6/20 = 0.3$.
+
+**Đường cong ROC** (receiver operating characteristic) đặt ở trục ngang **tỉ lệ dương tính giả** (false positive rate, FPR), tức tỉ lệ người không bệnh bị báo nhầm:
+
+$$
+\text{FPR} = \frac{\text{FP}}{\text{FP} + \text{TN}} = 1 - \text{Specificity}
+$$
+
+và ở trục dọc là recall (tỉ lệ dương tính thật). Hạ ngưỡng từ 1 xuống 0, đường đi từ góc $(0, 0)$ (không báo ai) tới góc $(1, 1)$ (báo tất cả). Đoán bừa cho đường chéo.
+
+**AUC** (area under the curve) là diện tích dưới đường cong ROC, từ 0 tới 1. Nó có một nghĩa dễ nhớ: chọn ngẫu nhiên một người bệnh và một người không bệnh, AUC là xác suất mô hình cho người bệnh $p$ cao hơn. Với 20 bệnh nhân có $6 \times 14 = 84$ cặp như vậy. Đếm từ bảng: bệnh nhân 4 xếp dưới 1 người không bệnh (bệnh nhân 3), bệnh nhân 6 dưới 2 người, bệnh nhân 8 dưới 3, bệnh nhân 11 dưới 5. Tổng cộng 11 cặp xếp sai, nên
+
+$$
+\text{AUC} = \frac{84 - 11}{84} \approx 0.869
+$$
+
+AUC chỉ phụ thuộc **thứ tự** của các $p$, không phụ thuộc ngưỡng. Nó hợp để so hai mô hình trước khi chọn ngưỡng. Khi lớp dương rất hiếm, ô TN khổng lồ làm FPR luôn nhỏ, nên đường ROC trông đẹp hơn thực tế. Khi đó đường precision–recall cho thấy rõ hơn mô hình làm tốt tới đâu với lớp dương.
+
+### Nhiều lớp: trung bình macro, micro và weighted
+
+Với $K$ lớp (ví dụ phân loại chữ số 0 tới 9, bài [Hồi quy Softmax](/vi/ml/softmax-regression/)), ta tính precision, recall, F1 cho **từng lớp** bằng cách coi lớp đó là dương, mọi lớp khác là âm. Rồi gộp $K$ con số theo một trong ba cách:
+
+- **Macro**: trung bình cộng của $K$ con số, lớp nào cũng nặng như nhau. Một lớp hiếm làm tệ sẽ kéo điểm macro xuống rõ.
+- **Weighted** (có trọng số): trung bình có trọng số theo số mẫu thật của mỗi lớp (cột `support` của scikit-learn). Lớp đông chiếm phần lớn điểm.
+- **Micro**: cộng dồn TP, FP, FN của mọi lớp rồi mới tính một lần. Khi mỗi mẫu có đúng một nhãn, precision, recall và F1 kiểu micro đều bằng accuracy.
+
+Muốn biết mô hình có bỏ rơi lớp hiếm không, hãy nhìn macro. Ô code thứ ba cho thấy hai cách gộp cách nhau xa đến đâu.
+
+### Giới hạn
+
+- **Dữ liệu ít thì chỉ số nhảy mạnh.** Với 6 người bệnh, mỗi ca bắt thêm hay bỏ sót làm recall đổi $1/6 \approx 0.167$. Hãy coi các chỉ số trên 20 bệnh nhân là để minh họa.
+- **Chỉ số không biết chi phí thật.** F1 coi FP và FN nặng như nhau; $F_\beta$ chỉ chỉnh tỉ lệ đó một cách thô. Nếu biết chi phí từng loại lỗi bằng tiền, hãy chọn ngưỡng làm tổng chi phí nhỏ nhất.
+- **Chỉ số theo ngưỡng không cho biết $p$ có đáng tin không.** Nếu xác suất được **hiệu chỉnh** (calibrated) tốt, thì trong 100 ca mô hình báo $p = 0.9$, khoảng 90 ca là dương thật. Bài này không đi vào chuyện đó.
+- **Đo được mất cân bằng chưa phải là sửa được nó.** Các cách xử lý dữ liệu mất cân bằng (lấy mẫu lại, đặt trọng số lớp) nằm ở bài [Xử lý dữ liệu](/vi/ml/data-preprocessing/).
+
+## Minh họa
+
+Hình dưới đặt 20 bệnh nhân lên một trục xác suất từ 0 tới 1, mỗi người một chấm, tô màu theo nhãn thật (có bệnh hoặc không). Thanh trượt đặt ngưỡng $t$ từ 0 tới 1, bước 0.05; một vạch dọc trên trục cho thấy ngưỡng, mọi chấm ở bên phải vạch (kể cả chấm nằm đúng trên vạch) được đoán có bệnh. Bên cạnh là ma trận nhầm lẫn 2×2 và bốn số accuracy, precision, recall, F1, đổi ngay khi bạn kéo. Hãy thử:
+
+1. Lúc đầu $t = 0.50$: TP = 4, FP = 3, FN = 2, TN = 11. Accuracy 0.750, precision 0.571, recall 0.667, F1 0.615. Hai chấm "có bệnh" nằm bên trái vạch: đó là hai ca bỏ sót.
+2. Kéo xuống $t = 0.30$: cả 6 chấm có bệnh đều sang bên phải vạch, recall 1.000. Đổi lại FP tăng lên 5 và precision giảm còn 0.545. F1 lên 0.706.
+3. Kéo lên $t = 0.80$: không còn ca báo nhầm nào, FP = 0, precision 1.000. Nhưng recall chỉ còn 0.333, và accuracy lại **tăng** lên 0.800: accuracy thưởng cho việc bỏ sót người bệnh, vì lớp không bệnh đông hơn.
+4. Kéo lên $t = 0.95$: không còn ai bị báo có bệnh. Precision hiện "—" vì là $0/0$, recall và F1 bằng 0, còn accuracy là 0.700, đúng bằng mô hình "luôn đoán không bệnh".
+
+<ThresholdViz />
+
+## Ví dụ code
+
+Ba ô dưới đây chạy độc lập: ô nào cũng tự import và tự tạo dữ liệu. Hai ô đầu chép đúng bảng 20 bệnh nhân. Ô chạy đầu tiên lâu hơn một chút, vì trình duyệt phải tải thêm scikit-learn.
+
+Ô đầu tiên đặt ngưỡng $t = 0.5$, đếm bốn ô của ma trận nhầm lẫn bằng NumPy, tính bốn chỉ số bằng tay, rồi đối chiếu với các hàm trong `sklearn.metrics`. `(p >= t).astype(int)` biến dãy đúng/sai thành dãy 1/0. `(y_pred == 1) & (y_true == 1)` đánh dấu những mẫu thỏa cả hai điều kiện, và `np.sum` đếm chúng.
+
+<PythonRunner code={confusionMatrixCode} title="Ma trận nhầm lẫn ở ngưỡng 0.5" />
+
+Dòng đầu cho đúng ma trận ở phần Lý thuyết: TP = 4, FP = 3, FN = 2, TN = 11. Bốn chỉ số tính tay và tính bằng scikit-learn trùng nhau: accuracy 0.750, precision 0.571, recall 0.667, F1 0.615. Dòng cuối là mô hình "luôn đoán không bệnh", accuracy 0.700.
+
+Để ý cách `confusion_matrix` của scikit-learn xếp ô: hàng là nhãn thật, cột là nhãn dự đoán, và **lớp 0 đứng trước**. Vì vậy ô trên trái `11` là TN, ô dưới phải `4` là TP. Bảng trong bài đặt lớp dương lên trước, nên hai bảng ngược thứ tự nhau.
+
+Ô thứ hai quét ngưỡng từ 0.1 tới 0.9, in precision, recall, F1 ở mỗi ngưỡng, rồi vẽ hai đường cong. `precision_recall_curve` và `roc_curve` tự thử mọi ngưỡng cần thiết, nên chỉ cần đưa vào xác suất $p$, không phải nhãn đã cắt ngưỡng.
+
+<PythonRunner
+  code={thresholdCurvesCode}
+  title="Quét ngưỡng, đường cong PR và ROC"
+  figureAlt={['Hai biểu đồ cạnh nhau. Bên trái là đường cong precision–recall: precision bằng 1 khi recall dưới 0.35, rồi đi xuống theo hình răng cưa tới khoảng 0.55 khi recall bằng 1, rồi rơi thẳng xuống 0.3; một đường ngang nét đứt màu xám ở precision 0.3. Bên phải là đường cong ROC dạng bậc thang, đi từ góc dưới trái lên tới recall 1 khi tỉ lệ dương tính giả khoảng 0.36, rồi đi ngang tới góc trên phải, nằm hẳn trên đường chéo nét đứt màu xám; chú giải ghi AUC = 0.87.']}
+/>
+
+Đọc bảng theo từng cột:
+
+- **Recall** đứng ở 1.000 tới ngưỡng 0.3, rồi giảm dần còn 0.167 ở ngưỡng 0.9. Nó không bao giờ tăng khi ngưỡng tăng.
+- **Precision** đi từ 0.375 lên 1.000, nhưng không đều: có những đoạn gần như đứng yên (0.545, 0.556, 0.571 ở ba ngưỡng 0.3, 0.4, 0.5).
+- **F1** cao nhất ở ngưỡng 0.3, khoảng 0.706, nghĩa là trên bộ dữ liệu này, hạ ngưỡng xuống dưới 0.5 có lợi.
+
+`ROC AUC = 0.869` khớp phép đếm 73 trên 84 cặp ở phần Lý thuyết. Trên hình bên trái, đường precision–recall có dạng răng cưa: mỗi lần ngưỡng đi qua một người không bệnh, precision tụt xuống; đi qua một người bệnh, recall nhích sang phải và precision nhích lên. Với dữ liệu lớn, các răng cưa nhỏ lại và đường mượt hơn.
+
+Ô thứ ba làm với dữ liệu mất cân bằng thật hơn: 2 000 mẫu do `make_classification` sinh ra, chỉ khoảng 5% thuộc lớp dương. Dữ liệu được chia thành ba tập train, kiểm định và test (60%, 20%, 20%); `stratify` giữ tỉ lệ lớp ở mỗi tập. Ô so ba thứ: `DummyClassifier` luôn đoán lớp đa số, hồi quy logistic với ngưỡng mặc định, và hồi quy logistic với ngưỡng chọn trên tập kiểm định.
+
+<PythonRunner code={imbalancedCode} title="Dữ liệu mất cân bằng và chọn ngưỡng" />
+
+Tập test có 400 mẫu, 22 mẫu dương (cột `support`).
+
+- **Mô hình "ngốc"** có accuracy 0.945 mà recall 0.000: không bắt được mẫu dương nào.
+- **Hồi quy logistic ở ngưỡng 0.5** có accuracy 0.960, chỉ hơn mô hình ngốc 1.5 điểm phần trăm. Dòng của lớp `1` nói rõ hơn nhiều: precision 1.000 nhưng recall 0.273, tức chỉ bắt được 6 trên 22 mẫu dương. Mô hình quá thận trọng.
+- **Ngưỡng chọn trên tập kiểm định** là 0.20 (ngưỡng cho F1 cao nhất trên tập kiểm định). Chấm một lần trên tập test: recall lên 0.500 (11 trên 22), precision còn 0.647, F1 của lớp `1` tăng từ 0.429 lên 0.564. Accuracy thì gần như đứng yên, thậm chí giảm nhẹ từ 0.960 xuống 0.958. Nhìn accuracy thôi, bạn sẽ không thấy mô hình đã bắt được gần gấp đôi số mẫu dương.
+
+Hai dòng cuối mỗi bảng là hai cách gộp. Ở ngưỡng 0.5, F1 kiểu `macro avg` là 0.704, còn `weighted avg` là 0.949. Cách weighted cho lớp `0` (378 mẫu) gần như toàn bộ trọng số, nên che mất F1 0.429 của lớp hiếm. Cách macro cho hai lớp nặng như nhau, nên lộ ra điểm yếu đó.
+
+## Lỗi hay gặp
+
+:::caution[Báo accuracy mà không so với mô hình cơ sở]
+Accuracy 0.960 ở ô code thứ ba nghe rất tốt, cho tới khi biết mô hình "luôn đoán lớp đa số" đã có 0.945. Với dữ liệu mất cân bằng, hãy luôn đặt cạnh nó accuracy của `DummyClassifier(strategy="most_frequent")`, và báo thêm precision, recall, F1 của lớp hiếm (`classification_report` in sẵn cả ba).
+:::
+
+:::caution[Chọn ngưỡng trên tập test]
+Quét ngưỡng trên tập test rồi báo F1 ở ngưỡng tốt nhất là đã dùng tập test để chọn một siêu tham số. Con số báo ra sẽ lạc quan hơn những gì mô hình làm được trên dữ liệu mới. Hãy chọn ngưỡng trên tập kiểm định (như ô code thứ ba) hoặc bằng kiểm định chéo (`TunedThresholdClassifierCV`), rồi chấm tập test một lần.
+:::
+
+:::caution[Chỉ báo precision, hoặc chỉ báo recall]
+Mỗi chỉ số đứng riêng đều dễ làm đẹp. Báo dương cho tất cả ($t = 0$) thì recall là 1.000, dù precision chỉ 0.300. Chỉ báo dương cho một ca chắc chắn nhất ($t = 0.9$) thì precision là 1.000, dù recall chỉ 0.167. Luôn báo cả hai, kèm ngưỡng đã dùng, hoặc báo F1, đường cong precision–recall.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Accuracy $= (\text{TP}+\text{TN})/m$, với $m$ là số mẫu, dễ đánh lừa khi một lớp hiếm: mô hình "luôn đoán lớp đa số" đã đạt tỉ lệ của lớp đó (70% với 20 bệnh nhân, 94.5% ở ô code thứ ba). Luôn so với mô hình cơ sở này.
+- Ma trận nhầm lẫn tách lỗi thành báo nhầm (FP) và bỏ sót (FN). Precision $= \text{TP}/(\text{TP}+\text{FP})$ phạt báo nhầm, recall $= \text{TP}/(\text{TP}+\text{FN})$ phạt bỏ sót. $F_1 = 2PR/(P+R) = 2\text{TP}/(2\text{TP}+\text{FP}+\text{FN})$ là trung bình điều hòa, bị kéo về số nhỏ hơn.
+- Mô hình cho xác suất $p$, còn ngưỡng $t$ là lựa chọn của bạn. Nâng $t$ thì recall không tăng, precision thường tăng. Ưu tiên recall khi bỏ sót đắt (sàng lọc bệnh), precision khi báo nhầm đắt (lọc thư rác). Chọn $t$ trên tập kiểm định, không trên tập test.
+- Đường cong precision–recall và ROC quét mọi ngưỡng. AUC là xác suất một mẫu dương được xếp trên một mẫu âm; khi lớp dương rất hiếm, đường precision–recall nói thật hơn. Với nhiều lớp, macro cho mọi lớp nặng như nhau, weighted theo số mẫu, micro bằng accuracy khi mỗi mẫu có một nhãn.
+
+**Đọc thêm:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Bài 33: Các phương pháp đánh giá một hệ thống phân lớp](https://machinelearningcoban.com/2017/08/31/evaluation/). Tiếng Việt, đủ các chủ đề của bài: ma trận nhầm lẫn, ROC và AUC, precision–recall, F1, micro và macro. Bài giữ nguyên tên tiếng Anh precision, recall như bài này.
+- Google (không ghi năm). [*Machine Learning Crash Course*: Accuracy, recall, precision, and related metrics](https://developers.google.com/machine-learning/crash-course/classification/accuracy-precision-recall) và [ROC and AUC](https://developers.google.com/machine-learning/crash-course/classification/roc-and-auc). Ngắn, có ví dụ khi nào nên ưu tiên chỉ số nào, và nghĩa "xếp hạng" của AUC.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Metrics and scoring](https://scikit-learn.org/1.8/modules/model_evaluation.html), mục 3.4.4 (classification metrics). Định nghĩa chính xác của `average='macro'`, `'micro'`, `'weighted'` và `zero_division`. Xem thêm mục 3.3 [Tuning the decision threshold](https://scikit-learn.org/1.8/modules/classification_threshold.html): vì sao ngưỡng 0.5 hiếm khi tối ưu, và `TunedThresholdClassifierCV`.
+- Fawcett, T. (2006). [*An introduction to ROC analysis*](https://doi.org/10.1016/j.patrec.2005.10.010). *Pattern Recognition Letters* 27(8), 861–874. Bài nhập môn kinh điển về đường cong ROC và AUC. Bài dùng "tp rate", "fp rate" thay cho recall và FPR.
+- Saito, T., Rehmsmeier, M. (2015). [*The Precision-Recall Plot Is More Informative than the ROC Plot When Evaluating Binary Classifiers on Imbalanced Datasets*](https://doi.org/10.1371/journal.pone.0118432). *PLOS ONE* 10(3), e0118432. Vì sao đường precision–recall hợp hơn ROC khi lớp dương hiếm.
+
+<LessonProgress />
