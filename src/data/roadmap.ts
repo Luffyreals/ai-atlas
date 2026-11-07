@@ -260,7 +260,7 @@ export const LESSONS: readonly Lesson[] = [
     id: 'ml/decision-tree-random-forest',
     title: { vi: 'Decision Tree và Random Forest', en: 'Decision Trees and Random Forests' },
     prerequisites: ['ml/overfitting-underfitting', 'ml/classification-metrics'],
-    status: { vi: 'published', en: 'planned' },
+    status: { vi: 'published', en: 'published' },
   },
   {
     id: 'ml/data-preprocessing',

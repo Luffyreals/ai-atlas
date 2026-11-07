@@ -1,0 +1,392 @@
+---
+title: Decision Trees and Random Forests
+description: Predicting whether Minh plays soccer this afternoon using a sequence of yes/no questions. Selecting splits with Gini impurity, why deep trees overfit, and why forests produce more robust predictions.
+quiz:
+  - question: 'A node contains 10 samples: 5 of class A, 5 of class B. Candidate split P produces two branches with (4 A, 1 B) and (1 A, 4 B). Candidate split Q produces (5 A, 3 B) and (0 A, 2 B). Using Gini impurity, which split does CART choose?'
+    options:
+      - 'Q, because Q creates a pure branch'
+      - 'P, because the weighted Gini impurity of P is smaller'
+      - 'Both splits tie because the total class counts before and after splitting are unchanged'
+    answer: 1
+    explanation: 'For P, each child branch has Gini $1 - 0.8^2 - 0.2^2 = 0.32$, so the weighted average is $0.32$. For Q, the 8-sample branch has Gini $1 - (5/8)^2 - (3/8)^2 \approx 0.469$, weighted by $8/10$ giving $0.375$; the pure branch contributes 0. Since $0.32 < 0.375$, CART selects P. A small pure branch cannot compensate for a large, heavily impure branch.'
+  - question: 'You convert the temperature feature of the 12 afternoons from Celsius to Fahrenheit ($F = 1.8C + 32$) and retrain the decision tree. What happens?'
+    options:
+      - 'The tree changes drastically because larger Fahrenheit numbers give temperature higher priority at the root'
+      - 'The temperature column must be standardized first, otherwise the tree splits incorrectly'
+      - 'The tree retains the exact same structure and predictions, with only the split threshold shifting from 33 to 91.4'
+    answer: 2
+    explanation: 'Decision trees rely solely on the order of values within a feature. The monotonic transformation $F = 1.8C + 32$ preserves order, so every candidate threshold partitions the afternoons into the exact same subsets with identical Gini impurities. Only the numerical threshold shifts: the midpoint between 89.6 and 93.2 °F is 91.4. This is why trees do not require feature scaling, unlike KNN or gradient descent.'
+  - question: 'In the tree trained on the 12 afternoons, the rain question sits at the root. Yet `feature_importances_` assigns temperature $0.643$ and rain only $0.357$. Why?'
+    options:
+      - 'Feature importance aggregates impurity reduction (weighted by sample fraction) across all nodes using that feature. The temperature split reduced Gini of an 8-sample node from $0.4688$ to 0, contributing more total reduction than the rain question at the root'
+      - 'The root feature is mathematically required to be the most important, so this is a scikit-learn numerical bug'
+      - 'Temperature has continuous unique values and thus artificially receives inflated importance'
+    answer: 0
+    explanation: 'Rain contributes $\frac{12}{12}(0.4861 - 0.3125) = 0.1736$. Temperature contributes $\frac{8}{12}(0.4688 - 0) = 0.3125$. Dividing by their sum $0.4861$ yields $0.357$ and $0.643$. The root question only reduces impurity most at the initial step, but does not necessarily contribute the largest total reduction across the full tree.'
+  - question: 'A forest of 500 trees uses `max_features=None` (considering all features at every split) on data with one dominant predictor. Increasing to 5,000 trees fails to improve validation score. What change is most likely to help?'
+    options:
+      - 'Increase further to 50,000 trees'
+      - 'Set `bootstrap=False` so each tree sees all training data'
+      - 'Completely drop the dominant feature from the dataset'
+      - 'Set `max_features="sqrt"` so individual trees become less correlated'
+    answer: 3
+    explanation: 'Every tree picks the dominant feature at the root, making individual trees highly correlated with large $\rho$. The variance of the ensemble average is $\rho\sigma^2 + \frac{1-\rho}{B}\sigma^2$. Increasing $B$ only diminishes the second term, leaving the non-zero $\rho\sigma^2$ floor intact. Randomly sampling feature subsets lowers correlation $\rho$. Disabling bootstrap makes trees even more identical, and dropping the strong feature discards critical signal.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import giniSplitCode from '@code/ml/decision-tree-random-forest/gini-split.en.py?raw';
+import depthCode from '@code/ml/decision-tree-random-forest/depth.en.py?raw';
+import randomForestCode from '@code/ml/decision-tree-random-forest/random-forest.en.py?raw';
+
+## Objectives
+
+After this lesson, you will be able to:
+
+- Understand how a decision tree operates as a sequence of binary questions to classify new instances.
+- Manually calculate Gini impurity, entropy, and information gain to choose optimal splits, and reproduce them using `DecisionTreeClassifier`.
+- Recognize why unconstrained trees overfit, and apply regularizing controls such as `max_depth`, `min_samples_leaf`, and cost-complexity pruning.
+- Explain why random forests reduce variance over single trees, and interpret out-of-bag (OOB) scores and feature importances reliably.
+
+## Prerequisites
+
+{/* List pulled dynamically from prerequisites in roadmap.ts */}
+
+<Prerequisites />
+
+:::tip[Quick Reminder]
+This lesson builds on **accuracy** and **F1** from [Model Evaluation: Accuracy, Precision, Recall, F1](/en/ml/classification-metrics/), alongside **overfitting** and **underfitting** from [Overfitting and Underfitting](/en/ml/overfitting-underfitting/): training metrics alone cannot establish model quality; evaluation must rely on held-out data.
+:::
+
+## Intuition
+
+Minh frequently joins friends to play soccer in the afternoon, but not every day. A friend recorded weather conditions and Minh's attendance over 12 recent afternoons:
+
+| Afternoon | Rain | Temperature (°C) | High Wind | Plays Soccer |
+|---:|---|---:|---|---|
+| 1 | no | 30 | no | yes |
+| 2 | no | 35 | no | no |
+| 3 | yes | 27 | yes | no |
+| 4 | no | 32 | yes | yes |
+| 5 | no | 28 | no | yes |
+| 6 | yes | 25 | no | no |
+| 7 | no | 34 | yes | no |
+| 8 | no | 31 | no | yes |
+| 9 | yes | 29 | yes | no |
+| 10 | no | 36 | no | no |
+| 11 | no | 29 | no | yes |
+| 12 | yes | 26 | yes | no |
+
+Today, it is not raining, the temperature is 31°C, and it is windy. Will Minh play?
+
+Examining the table reveals a natural hierarchy of questions. **Is it raining?** On all 4 rainy days, Minh stayed home. If not raining, the next question is: **is it hotter than 33°C?** On the 3 hot days (34–36°C), Minh stayed home; on the remaining 5 temperate days, Minh played. Because today is dry and 31°C, we predict **yes**.
+
+This cascade of binary conditions defines a decision tree: each step asks a yes/no question, progressively narrowing candidate possibilities.
+
+### Which Question to Ask First?
+
+You intuitively chose "rain" as the initial test because it cleanly separates the data. Compare it against testing "high wind":
+
+- Splitting on **rain**: the "rain" branch contains 4 afternoons, all staying home (pure). The "no rain" branch has 8 afternoons (5 play, 3 stay home).
+- Splitting on **wind**: the "windy" branch has 5 afternoons (1 play, 4 stay home). The "calm" branch has 7 afternoons (4 play, 3 stay home).
+
+The rain query produces an entirely pure subset, whereas the wind query leaves two mixed subsets. An optimal query isolates subsets that are as **pure** as possible—concentrated on a single class. With 3 features and 12 rows, inspection by eye suffices. With 30 features and thousands of rows, automated quantification is essential.
+
+The objective of this lesson is: **quantify the impurity of a sample subset with a numerical score, enabling algorithms to select optimal split questions automatically, and determine when to stop growing the tree.**
+
+## Theory
+
+### Anatomy of a Tree
+
+A decision tree consists of **nodes**:
+
+- **Root node**: The initial question where all training samples enter.
+- **Internal node**: A test of the form "$x_j \le t$?", where $x_j$ is the $j$-th feature and $t$ is a numerical **threshold**. An affirmative answer routes the sample to the left child; negative routes to the right.
+- **Leaf node**: A terminal node asking no further questions. In classification, a leaf predicts the **majority class** among training instances reaching it.
+
+The length of the longest path from root to any leaf defines the **depth** of the tree. Minh's decision tree has depth 2.
+
+Predicting for a new observation is straightforward: start at the root, evaluate each test, and traverse branches until reaching a leaf. Categorical features are encoded numerically as 0/1; "Is it raining?" translates to "rain $\le 0.5$?", where no rain (0) routes left and rain (1) routes right.
+
+### Measuring Impurity: Gini and Entropy
+
+Consider a node with $m$ samples belonging to $K$ classes. Let $p_k$ denote the fraction of samples belonging to class $k$ within the node ($K = 2$ here: "yes" and "no").
+
+**Gini impurity** is defined as:
+
+$$
+G = 1 - \sum_{k=1}^{K} p_k^2
+$$
+
+Intuition: randomly draw a sample from the node, and predict its label by sampling from the class distribution $p_k$. $G$ is the probability of misclassification. A pure node ($p_k = 1$) has $G = 0$. A perfectly balanced 50/50 binary node has $G = 1 - 0.5^2 - 0.5^2 = 0.5$, representing maximum binary impurity.
+
+**Entropy** measures disorder from an information-theoretic angle:
+
+$$
+H = -\sum_{k=1}^{K} p_k \log_2 p_k
+$$
+
+with convention $0 \cdot \log_2 0 = 0$. A pure node yields $H = 0$; a 50/50 node yields $H = 1$ bit (requiring exactly one binary question to resolve class identity).
+
+A candidate split divides a node into a left child with $m_L$ samples and a right child with $m_R$ samples ($m_L + m_R = m$). The post-split impurity is the **weighted average** across both children:
+
+$$
+G_{\text{split}} = \frac{m_L}{m}G_L + \frac{m_R}{m}G_R
+$$
+
+Weighting is critical: a pure branch containing only 1 sample does not offset a large 100-sample branch that remains completely mixed. The optimal question minimizes $G_{\text{split}}$, maximizing **Gini reduction** $G - G_{\text{split}}$. Under entropy, this reduction is termed **information gain** ($\mathrm{IG}$):
+
+$$
+\mathrm{IG} = H - \left(\frac{m_L}{m}H_L + \frac{m_R}{m}H_R\right)
+$$
+
+In practice, Gini and entropy select nearly identical splits. Scikit-learn uses Gini by default (`criterion="gini"`), which is slightly faster because it avoids computing logarithms.
+
+### Manual Calculation on the 12 Afternoons
+
+**Step 1: Impurity at the root.** There are 5 "yes" and 7 "no" afternoons, giving $p_{\text{yes}} = 5/12$ and $p_{\text{no}} = 7/12$:
+
+$$
+\begin{aligned}
+G &= 1 - \left(\tfrac{5}{12}\right)^2 - \left(\tfrac{7}{12}\right)^2 \\
+&= 1 - \tfrac{25}{144} - \tfrac{49}{144} \\
+&= \tfrac{70}{144} \approx 0.4861
+\end{aligned}
+$$
+
+The root impurity sits near 0.5, reflecting high uncertainty.
+
+**Step 2: Evaluating the "rain" split.** The "no rain" branch has 8 days (5 yes, 3 no), and the "rain" branch has 4 days (0 yes, 4 no):
+
+$$
+\begin{aligned}
+G_L &= 1 - \left(\tfrac{5}{8}\right)^2 - \left(\tfrac{3}{8}\right)^2 = \tfrac{30}{64} \approx 0.4688 \\
+G_R &= 1 - 0^2 - 1^2 = 0 \\
+G_{\text{split}} &= \tfrac{8}{12} \cdot 0.4688 + \tfrac{4}{12} \cdot 0 = 0.3125
+\end{aligned}
+$$
+
+**Step 3: Comparing candidates.** Testing "windy" yields branches with 7 days (4 yes, 3 no) and 5 days (1 yes, 4 no). Testing "temperature $\le 33$" yields 9 days (5 yes, 4 no) and 3 days (0 yes, 3 no). The table summarizes candidate splits:
+
+| Candidate Question | Left Branch ("yes") | Right Branch ("no") | $G_{\text{split}}$ | Gini Reduction | Information Gain |
+|---|---|---|---:|---:|---:|
+| No rain? | 5 yes, 3 no | 0 yes, 4 no | 0.3125 | 0.1736 | 0.3436 |
+| Calm wind? | 4 yes, 3 no | 1 yes, 4 no | 0.4190 | 0.0671 | 0.1043 |
+| Temperature $\le 33$? | 5 yes, 4 no | 0 yes, 3 no | 0.3704 | 0.1157 | 0.2366 |
+
+The "no rain" question wins under both metrics, confirming our initial intuition. It forms the root node.
+
+**Step 4: Recursing on child nodes.** The "rain" branch is pure (4 no) and becomes a leaf predicting "no". The "no rain" branch retains 8 days with $G = 0.4688$. Evaluating all candidate questions on **these 8 days alone**, the condition "temperature $\le 33$?" splits them into 5 "yes" and 3 "no" days, achieving $G_L = 0, G_R = 0$, and $G_{\text{split}} = 0$. Both child leaves are now pure, terminating growth.
+
+{/* FIG: DecisionTreeFigure
+    Concept: Depth-2 decision tree learned on 12 afternoons; Gini decreases from root down to leaves.
+    Blocks & arrows: Top-down layout. Root node at top. Two downward branches: left ("yes"), right ("no").
+      Left branch leads to second internal node; right leads to "no" leaf. From internal node, two arrows lead
+      to "yes" leaf (left) and "no" leaf (right). Internal nodes represent tests; leaves show class labels.
+    Labels: Root "No rain?" / "Gini 0.486 · 12 days" / "5 yes, 7 no". Internal node "Temp ≤ 33°C?" / "Gini 0.469 · 8 days".
+      Left leaf "Play: yes" / "Gini 0 · 5 days". Middle leaf "Play: no" / "Gini 0 · 3 days". Right leaf "Play: no" / "Gini 0 · 4 days".
+    Caption: Each internal node tests condition $x_j \le t$; leaves output majority class, each reaching $G = 0$. */}
+
+### CART: A Greedy Algorithm
+
+The process above describes the **CART** algorithm (Classification And Regression Trees; Breiman et al., 1984), as implemented by scikit-learn:
+
+1. For each feature $x_j$, sort unique values in the current node in ascending order. Every candidate threshold $t$ is the **midpoint** between adjacent sorted values. Temperature has 11 distinct values, generating 10 candidate thresholds (33 is the midpoint of 32 and 34).
+2. Compute $G_{\text{split}}$ across all (feature, threshold) pairs and pick the pair achieving minimum impurity.
+3. Split the node and recursively repeat step 1 on each child.
+4. Stop when a node is pure or a stopping criterion (e.g., maximum depth) is reached.
+
+CART is a **greedy algorithm**: it selects the best immediate split at each step without anticipating downstream tree configurations. Finding the globally optimal tree is NP-complete; greedy partitioning provides a computationally efficient and practically effective approximation.
+
+### Regression Trees
+
+Trees adapt naturally to continuous targets as **regression trees**:
+
+- Leaves predict the **mean** $\bar{y}$ of training targets reaching that leaf, rather than a majority class.
+- Node impurity is measured using mean squared error around that mean: $\frac{1}{m}\sum_i (y^{(i)} - \bar{y})^2$, choosing splits that minimize weighted child MSE.
+
+The resulting regression function is a **piecewise constant step function**, outputting a constant prediction per leaf.
+
+### Deep Trees and Overfitting
+
+If left unconstrained, CART continues splitting until every leaf is pure, effectively creating custom leaves for outlier noise: training accuracy hits 1.000 while test performance degrades. Tree **depth** controls model capacity, analogous to polynomial degree in [Overfitting and Underfitting](/en/ml/overfitting-underfitting/).
+
+Three common regularization strategies include:
+
+- **`max_depth`**: Caps the maximum path length from root to leaf. A depth of $d$ yields at most $2^d$ leaves.
+- **`min_samples_leaf`**: Requires every terminal leaf to contain at least a specified number of samples, preventing single-sample outlier splits.
+- **Cost-complexity pruning**: Allows the tree to grow deep, then prunes branches contributing negligible impurity gain via hyperparameter `ccp_alpha`, penalizing leaf count in the spirit of [Regularization](/en/ml/regularization/).
+
+These hyperparameters must be selected using cross-validation rather than the test set.
+
+### Pros and Cons of a Single Decision Tree
+
+| Property | Decision Trees |
+|---|---|
+| Interpretability | Highly transparent: directly inspectable as explicit "if-then" rules |
+| Feature Scaling | Unnecessary: splits depend strictly on relative ordering, remaining invariant to monotonic transformations |
+| Decision Boundaries | **Axis-aligned orthogonal steps**, because each split evaluates a single feature. Diagonal boundaries must be approximated via fine stairs |
+| Variance | High: minor alterations in training data can flip the root split, fundamentally altering the entire downstream tree |
+| Extrapolation | None: outside training feature bounds, regression trees output the flat constant of the nearest leaf |
+
+High variance is the primary limitation of single trees. Random forests were invented specifically to address this weakness.
+
+### Random Forests: Many Trees, Each Slightly Different
+
+Rather than relying on one tree, plant an **ensemble** of randomized trees and aggregate their predictions. Random forests (Breiman, 2001) inject two distinct sources of randomness:
+
+**1. Bootstrap sampling.** Each tree is trained on a **bootstrap sample**: drawing $m$ instances from the training set with replacement. Some instances appear multiple times; others are omitted. Combining predictions across bootstrap-trained models is called **bagging** (bootstrap aggregating):
+
+- Classification: Trees cast votes. Scikit-learn averages predicted class probabilities across trees and takes the argmax.
+- Regression: Predictions are averaged directly.
+
+**2. Random feature selection.** At **each split**, the tree only evaluates a random subset of features, typically $\sqrt{n}$ out of $n$ available features (`max_features="sqrt"`, default for `RandomForestClassifier`). With 30 features, each split evaluates only 5. This prevents a single dominant feature from dictating the root across all trees, which would cause ensemble predictions to be overly correlated.
+
+### Why Averaging Multiple Trees Reduces Variance
+
+Treat individual tree predictions at an input point as random variables with variance $\sigma^2$ and pairwise correlation $\rho$. The variance of the ensemble mean across $B$ trees evaluates to:
+
+$$
+\operatorname{Var}\left(\frac{1}{B}\sum_{b=1}^{B} f_b\right) = \rho\sigma^2 + \frac{1-\rho}{B}\sigma^2
+$$
+
+where $f_b$ is the prediction of tree $b$.
+
+<details>
+<summary>Derivation</summary>
+
+The variance of a sum equals the sum of individual variances plus pairwise covariances across all $B(B-1)$ ordered pairs:
+
+$$
+\operatorname{Var}\left(\sum_{b=1}^{B} f_b\right) = B\sigma^2 + B(B-1)\rho\sigma^2
+$$
+
+Dividing the sum by $B$ scales variance by $1/B^2$:
+
+$$
+\begin{aligned}
+\operatorname{Var}\left(\frac{1}{B}\sum_{b=1}^{B} f_b\right) &= \frac{\sigma^2}{B} + \frac{(B-1)\rho\sigma^2}{B} \\
+&= \rho\sigma^2 + \frac{1-\rho}{B}\sigma^2
+\end{aligned}
+$$
+
+</details>
+
+Inspecting both terms:
+
+- The second term $\frac{1-\rho}{B}\sigma^2$ vanishes as tree count $B \to \infty$. Adding trees never causes overfitting; beyond a certain size, returns simply plateau.
+- The first term $\rho\sigma^2$ remains irreducible regardless of tree count $B$. Minimizing it requires decorrelating trees (lowering $\rho$) through bagging and random feature selection.
+
+Individual trees are grown deep (low bias, high variance). Ensemble averaging handles the variance reduction.
+
+### OOB Score: A Free Validation Set
+
+A specific sample is not drawn on an individual bootstrap trial with probability $1 - \frac{1}{m}$. Over $m$ independent draws, the probability of never being selected is:
+
+$$
+\left(1 - \frac{1}{m}\right)^m \approx e^{-1} \approx 0.368
+$$
+
+for large $m$. Roughly 37% of training data is left out for each tree. These omitted points represent the **out-of-bag** (OOB) set.
+
+The OOB score evaluates each training sample using only the sub-forest of trees that never saw it, computing an unbiased estimate of generalization error without requiring a separate validation split (`oob_score=True`).
+
+### Feature Importance
+
+The `feature_importances_` attribute measures **Mean Decrease in Impurity** (MDI). For each feature, impurity reductions are summed across all nodes split on that feature, weighted by the fraction of samples traversing each node, and normalized to sum to 1. In a forest, MDI is averaged across all trees.
+
+In Minh's tree: the root rain split contributes $\frac{12}{12}(0.4861 - 0.3125) = 0.1736$, while the temperature split on 8 days contributes $\frac{8}{12}(0.4688 - 0) = 0.3125$. Temperature is assigned higher importance ($0.643$ vs. $0.357$) despite appearing below rain.
+
+MDI carries two notable biases: it is computed on **training data** (attributing score to noise splits in deep unregularized trees) and **favors high-cardinality numerical features** offering numerous candidate thresholds. Permutation importance on a test split provides a more reliable alternative.
+
+:::note[Key Takeaway]
+Trees greedily select splits minimizing weighted impurity $\frac{m_L}{m}G_L + \frac{m_R}{m}G_R$. Unconstrained trees overfit and exhibit high variance. Random forests average predictions over decorrelated bootstrap trees using randomized feature subsets, driving ensemble variance down to $\rho\sigma^2$.
+:::
+
+### Limitations
+
+- **Interpretability loss.** While a single tree reads as transparent logic, aggregating hundreds of trees yields an opaque black box.
+- **Axis-aligned boundaries.** Averaging softens staircase boundaries into fine steps, but regression forests still cannot extrapolate beyond observed feature domains.
+- **Gradient Boosting.** Alternative tree ensembles like **gradient boosting** (XGBoost, LightGBM) train trees sequentially to correct predecessor residuals, frequently outperforming random forests on tabular data.
+
+## Visualization
+
+To see how bagging diversifies trees, consider training a mini-ensemble of 3 trees on the 12 afternoons using bootstrap sampling (`np.random.default_rng(0)`):
+
+| Tree | Sampled Days (with replacement) | OOB Days | Root Question | OOB Accuracy |
+|---:|---|---|---|---:|
+| 1 | 1, 1, 1, 3, 4, 4, 7, 8, 8, 10, 11, 11 | 2, 5, 6, 9, 12 | Temp $\le 33$? | 5/5 |
+| 2 | 1, 4, 7, 7, 7, 8, 8, 9, 9, 10, 12, 12 | 2, 3, 5, 6, 11 | Calm wind? | 4/5 |
+| 3 | 1, 1, 2, 3, 5, 7, 7, 9, 10, 11, 11, 11 | 4, 6, 8, 12 | Temp $\le 32$? | 2/4 |
+
+- **Three trees select three different root splits**, none selecting "rain" first. Minor sample perturbations fundamentally alter tree structure, manifesting high variance.
+- **Each tree leaves out 4–5 days**, closely matching the theoretical 37% OOB fraction.
+- **Tree 2 misclassifies Day 6** (rain, 25°C, calm). In its bootstrap sample, all rainy days were windy, leading it to associate calm conditions with play. Individual trees make uncorrelated errors that balance out when aggregated over hundreds of trees.
+
+## Code Examples
+
+The three cells below execute independently.
+
+The first cell implements manual calculations: defining `gini`, `entropy`, and weighted child `score` functions with NumPy, followed by fitting `DecisionTreeClassifier` and inspecting tree structure via `export_text`.
+
+<PythonRunner code={giniSplitCode} title="Gini, entropy, and decision tree on 12 afternoons" />
+
+Root impurity evaluates to Gini 0.4861 and entropy 0.9799. The candidate splits match our manual derivations: Gini impurities evaluate to 0.3125 (rain), 0.4190 (wind), and 0.3704 (temp). Scikit-learn outputs the exact structure calculated by hand: splitting on `rain <= 0.50`, then `temp <= 33.00`.
+
+The second cell uses the `load_breast_cancer` dataset (569 samples, 30 features, malignant vs. benign), sweeping `max_depth` from 1 through unconstrained depth.
+
+<PythonRunner code={depthCode} title="Tree depth and overfitting" />
+
+- Training accuracy increases monotonically: 0.930, 0.932, 0.977, 0.986, reaching 1.000 at depth 5 once all 18 leaves become pure.
+- Test accuracy peaks at depth 3 (0.916) and declines to 0.902 under unconstrained growth, highlighting overfitting.
+- Setting `min_samples_leaf=10` produces an 8-leaf tree matching peak test accuracy (0.916) without manual depth tuning.
+
+The third cell compares a single tree against a 200-tree random forest across five distinct train/test splits, evaluating OOB scores, F1, and top feature importances.
+
+<PythonRunner code={randomForestCode} title="Random forest: OOB score and feature importances" />
+
+- **The forest consistently outperforms the single tree.** Across five random splits, single-tree test accuracy fluctuates between 0.902 and 0.951; the forest remains stable between 0.944 and 0.972.
+- **OOB score accurately mirrors test accuracy.** OOB accuracy (0.965) aligns with test performance (0.944) without holding out validation data.
+- **F1 for the malignant class reaches 0.925**, prioritizing detection of severe cases where misses carry high clinical cost.
+- **Top features**: `worst perimeter` (0.144), `worst radius` (0.136), `worst concave points` (0.131), `worst area` (0.103). The forest distributes credit across correlated dimensions of tumor size.
+
+## Common Pitfalls
+
+:::caution[Taking MDI Feature Importance as Ground Truth]
+Mean Decrease in Impurity (MDI) is calculated on training data and inflates high-cardinality features. On correlated features, an unconstrained single tree places `worst perimeter` at the root with 0.725 importance, leaving `worst radius` with only 0.037 simply because perimeter was tested first. A random forest distributes importance more evenly (0.144 vs. 0.136). For unbiased importance, use `permutation_importance` on the test set.
+:::
+
+:::caution[Evaluating Trees or Forests on Training Accuracy]
+Unconstrained decision trees and random forests both trivially reach 1.000 training accuracy on breast cancer data because trees grow until all leaves are pure. This number indicates memorization rather than generalization. Always evaluate models via cross-validation, test sets, or OOB scores.
+:::
+
+:::caution[Fearing That More Trees Cause Overfitting in Random Forests]
+Unlike polynomial degree or tree depth, ensemble size `n_estimators` does not control model capacity. Increasing tree count solely drives the Monte Carlo variance term $\frac{1-\rho}{B}\sigma^2$ toward zero, monotonically stabilizing predictions. If a forest overfits, regularize individual constituent trees (`max_depth`, `min_samples_leaf`) or reduce `max_features`—do not decrease tree count.
+:::
+
+## Quick Check
+
+{/* Questions defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and Further Reading
+
+**Key Takeaways:**
+
+- Decision trees route samples along binary tests $x_j \le t$ from root to leaf, predicting majority class (classification) or mean target (regression). They require no feature scaling and are easily interpreted.
+- CART greedily selects splits minimizing weighted impurity $\frac{m_L}{m}G_L + \frac{m_R}{m}G_R$, using Gini impurity $G = 1 - \sum_k p_k^2$ or entropy for information gain.
+- Unconstrained trees overfit and have high variance. Regularize growth with `max_depth`, `min_samples_leaf`, or cost-complexity pruning (`ccp_alpha`) tuned via cross-validation.
+- Random forests average decorrelated bootstrap-trained trees with randomized feature subsets, reducing variance to the $\rho\sigma^2$ baseline. OOB scores provide validation metrics without data holdouts.
+
+**Further Reading:**
+
+- Vũ Hữu Tiệp (2018). [*Machine Learning cơ bản*, Bài 34: Decision Trees (1): Iterative Dichotomiser 3](https://machinelearningcoban.com/2018/01/14/id3/). Classic Vietnamese guide explaining ID3, entropy, and information gain.
+- James, G., Witten, D., Hastie, T., Tibshirani, R. (2021). [*An Introduction to Statistical Learning*](https://www.statlearning.com/) (2nd ed.). Chapter 8 provides an accessible, thorough treatment of trees, pruning, bagging, random forests, and boosting.
+- Breiman, L. (2001). [*Random Forests*](https://doi.org/10.1023/A:1010933404324). *Machine Learning*, 45(1), 5–32. Foundational paper introducing random feature selection, OOB estimation, and variance reduction proofs.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Decision Trees](https://scikit-learn.org/1.8/modules/tree.html), Section 1.10. Mathematical formulas, complexity notes, and pruning guides.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Ensembles](https://scikit-learn.org/1.8/modules/ensemble.html), Section 1.11.2. Random forest mechanics, probability averaging, and MDI warnings.
+
+<LessonProgress />
