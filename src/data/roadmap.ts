@@ -236,7 +236,7 @@ export const LESSONS: readonly Lesson[] = [
     id: 'ml/k-nearest-neighbors',
     title: { vi: 'K-Nearest Neighbors (KNN)', en: 'K-Nearest Neighbors (KNN)' },
     prerequisites: ['ml/ml-overview', 'math/linear-algebra'],
-    status: { vi: 'published', en: 'planned' },
+    status: { vi: 'published', en: 'published' },
   },
   {
     id: 'ml/logistic-regression',

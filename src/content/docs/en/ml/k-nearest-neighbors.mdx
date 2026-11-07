@@ -1,0 +1,327 @@
+---
+title: K-Nearest Neighbors (KNN)
+description: Predicting labels for new points by querying their closest neighbors. Majority voting and averaging, choosing k, decision boundaries, feature scaling, and the curse of dimensionality.
+quiz:
+  - question: 'You fit KNN with $k = 1$ and compute training accuracy on the training set itself, obtaining $1.000$. What does this result tell you?'
+    options:
+      - 'Virtually nothing: each training point is its own nearest neighbor'
+      - 'The model generalizes exceptionally well, so you should keep $k = 1$'
+      - 'The dataset contains zero noise'
+      - 'Test accuracy is guaranteed to be close to $1.000$'
+    answer: 0
+    explanation: 'When evaluating on training data, the point itself exists in the training set at distance 0, acting as its own nearest neighbor and casting a vote for its true label. Training accuracy equals 1 on any dataset without duplicate identical points having conflicting labels, even on heavily corrupted noise. On our 50-point dataset, $k = 1$ reaches $1.000$ on train but only $0.733$ on test.'
+  - question: 'A KNN model uses two unscaled features: height (meters) and weight (kg). A colleague converts the height column to centimeters and refits with the same $k$. How do predictions change?'
+    options:
+      - 'No change, because changing units does not alter data information'
+      - 'No change, because KNN has no learned parameters'
+      - 'Predictions may change: height differences become 100 times larger and dominate distances, potentially altering nearest neighbors'
+      - 'Accuracy strictly degrades because centimeters represent a smaller measurement unit'
+    answer: 2
+    explanation: 'Multiplying height differences by 100 multiplies their squared differences by 10,000, causing Euclidean distance to be overwhelmingly dictated by height alone. The set of nearest neighbors shifts accordingly, which may alter predictions. While KNN does not learn weights, its predictions depend entirely on distance metrics. Placing `StandardScaler` in a pipeline eliminates unit dependency.'
+  - question: 'A training set contains 35 points: 18 belonging to class 1, 17 to class 0. You configure $k = 35$. What does KNN predict for an arbitrary query point?'
+    options:
+      - 'The class of the single closest training point'
+      - 'It depends on query position because closer points receive priority'
+      - 'Cannot predict because $k$ must be strictly smaller than sample count'
+      - 'Always class 1, regardless of query coordinates'
+    answer: 3
+    explanation: 'When $k = m$, all training points are included in the neighbor set for every query location. The vote tally is perpetually 18 to 17, guaranteeing class 1 wins globally: the model completely ignores feature inputs, representing extreme underfitting. Proximity weighting only applies if `weights="distance"` is specified; by default, all votes are unweighted.'
+  - question: 'Data is uniformly distributed throughout a 20-dimensional unit hypercube. Approximately what is the edge length of a sub-hypercube enclosing 10% of the data?'
+    options:
+      - 'Approximately $0.005$, from $10\%$ divided by 20 dimensions'
+      - 'Approximately $0.1$, matching the 1D case'
+      - 'Approximately $0.89$, spanning nearly the entire unit edge'
+      - 'Approximately $0.5$, half the unit edge'
+    answer: 2
+    explanation: 'The volume of the sub-cube is $\ell^{20} = 0.1$, giving edge length $\ell = 0.1^{1/20} \approx 0.89$. To capture just 10% of the data volume in 20 dimensions, each coordinate axis must span roughly 89% of its total range, meaning "neighbors" are no longer close in space. Edge length 0.1 only holds in 1D; as dimensions grow, edge length approaches 1.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import knnNumpyCode from '@code/ml/k-nearest-neighbors/knn-numpy.en.py?raw';
+import chooseKCode from '@code/ml/k-nearest-neighbors/choose-k.en.py?raw';
+import scalingCode from '@code/ml/k-nearest-neighbors/scaling.en.py?raw';
+
+## Objectives
+
+After this lesson, you will be able to:
+
+- Understand how K-Nearest Neighbors (KNN) makes predictions: finding the $k$ closest training points and applying majority voting for classification or averaging for regression.
+- Calculate Euclidean distances, interpret decision boundaries, and evaluate classifier accuracy.
+- Explain why $k = 1$ leads to overfitting, excessively large $k$ causes underfitting, and how to select $k$ via cross-validation.
+- Recognize two primary vulnerabilities of KNN: strict sensitivity to feature scaling and degradation in high dimensions caused by the curse of dimensionality.
+
+## Prerequisites
+
+{/* List pulled dynamically from prerequisites in roadmap.ts */}
+
+<Prerequisites />
+
+:::tip[Quick Reminder]
+A sample with $n$ features is represented as a **vector** $\mathbf{x} = [x_1, \dots, x_n]^\top$, corresponding to a point in $n$-dimensional space. The **norm** (length) of vector $\mathbf{v}$ is $\lVert\mathbf{v}\rVert = \sqrt{v_1^2 + \dots + v_n^2}$, which in 2D is the Pythagorean theorem. Distance between two points is the norm of their vector difference. This lesson relies on train/test splits from [Introduction to Machine Learning](/en/ml/ml-overview/) and error curves from [Overfitting and Underfitting](/en/ml/overfitting-underfitting/).
+:::
+
+## Intuition
+
+A common proverb says: "You are the average of the five people you spend the most time with." KNN operates on the exact same premise: to determine properties of a new data point, query its closest **neighbors**.
+
+You encountered this principle in [Introduction to Machine Learning](/en/ml/ml-overview/): classifying whether an apartment is expensive or cheap by inspecting the 3 apartments closest in floor area. Similarly, a 1-nearest-neighbor memorization model matched the price of the single closest apartment, achieving training MSE of 0.0000. This lesson deconstructs how neighbor-based learning works.
+
+### Two Interlocking Moons
+
+Our working dataset consists of 50 2D points, each characterized by features $x_1$ and $x_2$ with a binary label (class 0 or class 1). Data is generated via scikit-learn's `make_moons`: class 0 forms a downward crescent at the top, while class 1 forms an upward crescent below, interlocking with each other. Random noise shifts several points into territory dominated by the opposing class. We partition this dataset into 35 training points and 15 test points.
+
+The true boundary separating both classes is an S-shaped curve. No single straight line can separate these interlocking crescents. With neighbor-based methods, however, you do not need to assume the mathematical shape of the boundary: you simply inspect the local neighborhood around the query point.
+
+### One Neighbor or Five Neighbors
+
+Consider a query point at $(-0.4, 0.6)$, situated inside the upper crescent (class 0 territory). Its five nearest training points are:
+
+| Neighbor | Coordinates | True Class | Euclidean Distance |
+|---:|---|---:|---:|
+| 1 | $(-0.25, 0.64)$ | 1 | 0.155 |
+| 2 | $(-0.54, 0.18)$ | 0 | 0.443 |
+| 3 | $(-0.01, 0.93)$ | 0 | 0.511 |
+| 4 | $(-0.81, 0.95)$ | 0 | 0.539 |
+| 5 | $(-0.96, 0.68)$ | 0 | 0.566 |
+
+The single closest neighbor happens to belong to class 1—an outlier perturbed by noise into class 0 space. If you consult only **one** neighbor, you predict class 1. If you consult **five** neighbors, the vote tallies 4 against 1, and you correctly predict class 0.
+
+How many neighbors should we poll? How do we measure distance rigorously? When can geometric distance mislead us?
+
+The fundamental problem of this lesson is: **predict the label of a query point from its nearest neighbors, selecting neighborhood size $k$ to filter out isolated noise without smoothing away true decision patterns.**
+
+## Theory
+
+### Problem Formulation
+
+We have $m$ training samples $\left(\mathbf{x}^{(i)}, y^{(i)}\right)$, each containing $n$ features. For our two moons dataset, $m = 35$, $n = 2$, and $y^{(i)} \in \{0, 1\}$. Given a new **query point** $\mathbf{x}$, we predict $\hat{y}$.
+
+KNN follows three steps:
+
+1. Compute distances between $\mathbf{x}$ and all $m$ training points.
+2. Identify the $k$ training points with smallest distances. Their indices form neighborhood set $\mathcal{N}_k(\mathbf{x})$.
+3. Aggregate the labels of these $k$ neighbors into a single prediction.
+
+Here $k$ is a hyperparameter: an architectural choice set in advance rather than learned by parameters.
+
+### Distance Metrics
+
+The standard metric is **Euclidean distance**, representing straight-line distance between two points:
+
+$$
+d\left(\mathbf{x}, \mathbf{x}^{(i)}\right) = \sqrt{\sum_{j=1}^{n}\left(x_j - x^{(i)}_j\right)^2} = \left\lVert \mathbf{x} - \mathbf{x}^{(i)} \right\rVert
+$$
+
+Compute coordinate differences, square them, sum across all dimensions, and take the square root. For query point $\mathbf{x} = (-0.4, 0.6)$ and its nearest neighbor $(-0.25, 0.64)$:
+
+$$
+\begin{aligned}
+d &= \sqrt{(-0.4 + 0.25)^2 + (0.6 - 0.64)^2} \\
+&= \sqrt{0.0225 + 0.0016} \\
+&= \sqrt{0.0241} \approx 0.155
+\end{aligned}
+$$
+
+Notice that the difference along $x_1$ (0.15) is roughly $4\times$ larger than along $x_2$ (0.04), but after squaring contributes $14\times$ more to the distance. Dimensions with larger numerical magnitudes dominate Euclidean metrics, an issue addressed in the feature scaling section.
+
+An alternative metric is **Manhattan distance** (taxicab distance), summing absolute coordinate differences: $\sum_{j}\left\lvert x_j - x^{(i)}_j\right\rvert$, representing grid travel. For the two points above, Manhattan distance equals $0.15 + 0.04 = 0.19$. In scikit-learn, `KNeighborsClassifier` uses Euclidean distance by default; setting `p=1` switches to Manhattan.
+
+### Majority Voting and Averaging
+
+**Classification.** Each neighbor casts one vote for its label. The majority class wins:
+
+$$
+\hat{y} = \arg\max_{c} \sum_{i \in \mathcal{N}_k(\mathbf{x})} \mathbb{I}\left[y^{(i)} = c\right]
+$$
+
+where $\mathbb{I}[\cdot]$ is the indicator function evaluating to 1 if true and 0 otherwise, counting votes for class $c$. For point $(-0.4, 0.6)$ with $k = 5$, class 0 receives 4 votes and class 1 receives 1 vote, yielding $\hat{y} = 0$.
+
+**Regression.** Labels are continuous numbers. Instead of voting, predictions average neighbor values:
+
+$$
+\hat{y} = \frac{1}{k}\sum_{i \in \mathcal{N}_k(\mathbf{x})} y^{(i)}
+$$
+
+In the apartment example, a 50 m² unit surrounded by apartments of 48, 55, and 42 m² (priced at 9.4, 12.2, and 8.8 million) is predicted at $(9.4 + 12.2 + 8.8)/3 \approx 10.13$ million under $k = 3$ (`KNeighborsRegressor`).
+
+**Ties.** Even values of $k$ in binary classification can result in ties (e.g., 2 vs. 2). Scikit-learn breaks ties by selecting whichever class appears first in `classes_` (the smaller label index). To avoid arbitrary tie-breaking, use odd values of $k$ for binary classification. When multiple training points share identical distances along the $k$-th boundary, scikit-learn documentation specifies that selection depends on internal data order.
+
+### Lazy Learning
+
+Linear regression concentrates computation during training: computing parameters $\mathbf{w}$ and $b$, after which training data can be discarded. Prediction requires only $n$ scalar multiplications.
+
+KNN does the exact opposite. Calling `fit` merely **stores the training data**, learning zero model weights. All computational workload is deferred to prediction time: every query point computes distances to all $m$ training samples, taking roughly $\mathcal{O}(m \cdot n)$ operations per query. This paradigm is known as **lazy learning** or instance-based learning. For 1,000,000 samples and 100 features, a single inference demands $\approx 10^8$ operations. While spatial indexing trees (KD-trees or Ball trees) accelerate queries during `fit`, their speedups diminish rapidly in higher dimensions.
+
+### Decision Boundaries and Accuracy
+
+Coloring every coordinate on a plane by its KNN predicted class partitions feature space into distinct decision regions separated by **decision boundaries**. KNN decision boundaries bend flexibly around data clusters rather than remaining constrained to hyperplanes, allowing it to conform to interlocking crescents.
+
+In classification, performance is measured by **accuracy**: the proportion of correct predictions:
+
+$$
+\text{accuracy} = \frac{1}{m}\sum_{i=1}^{m}\mathbb{I}\left[\hat{y}^{(i)} = y^{(i)}\right]
+$$
+
+If 11 out of 15 test points are correct, accuracy is $11/15 \approx 0.733$. Higher accuracy is better, opposite to MSE. On imbalanced datasets, however, raw accuracy can be misleading, as examined in [Model Evaluation](/en/ml/classification-metrics/).
+
+### Choosing k
+
+Neighborhood size $k$ governs model capacity, behaving inversely to polynomial degree in [Overfitting and Underfitting](/en/ml/overfitting-underfitting/): smaller $k$ represents higher flexibility.
+
+- **$k = 1$:** Every training point commands a small territory around itself. An isolated noise point like $(-0.25, 0.64)$ carves out an island of class 1 inside class 0 territory, creating highly jagged boundaries. Training accuracy is guaranteed to be 1.000 (each training point matches itself at distance 0). This is extreme overfitting.
+- **Moderate $k$:** Minority noise points are outvoted by surrounding clusters. Boundaries smooth out, conforming to true crescent trajectories.
+- **Excessively large $k$:** Neighborhoods expand excessively, absorbing opposite-class points across the boundary. Boundaries flatten into coarse partitions. At $k = m$, all training points vote on every query, unconditionally predicting the majority training class globally—the definition of underfitting.
+
+Performance across our two moons dataset illustrates this behavior:
+
+| $k$ | Training Accuracy | Test Accuracy |
+|---:|---:|---:|
+| 1 | 1.000 | 0.733 |
+| 3 | 0.943 | 0.800 |
+| 7 | 0.943 | 1.000 |
+| 15 | 0.914 | 0.800 |
+| 25 | 0.743 | 0.800 |
+| 35 | 0.514 | 0.467 |
+
+Training accuracy declines monotonically as $k$ increases, whereas test accuracy rises to a peak at $k = 7$ before declining—an **inverted U-curve** characteristic of model capacity trade-offs. At $k = 35 = m$, the training set contains 18 class-1 points and 17 class-0 points; every query point is predicted as class 1, plummeting test accuracy to 0.467.
+
+A test accuracy of 1.000 at $k = 7$ on 15 samples should not be used as the criterion to pick $k$; that commits the error of evaluating on the test set. Parameter $k$ should be selected using **cross-validation** on the training set.
+
+### Feature Scaling
+
+Euclidean distance calculates the sum of squared differences **in raw measurement units**. Features with large numerical ranges completely overpower those with smaller ranges.
+
+In the `load_wine` dataset (13 chemical features), `proline` ranges from 278 to 1680, whereas `hue` ranges from 0.48 to 1.71. A difference of 100 units in proline—a modest relative variation—contributes $100^2 = 10,000$ to squared distance. The entire range of hue ($1.71 - 0.48 = 1.23$) contributes at most $1.23^2 \approx 1.51$. Unscaled KNN essentially ignores hue: proline accounts for 99.76% of all pairwise squared distances.
+
+The solution is **standardization** via z-scores, as introduced in [Regularization](/en/ml/regularization/):
+
+$$
+z_j = \frac{x_j - \mu_j}{\sigma_j}
+$$
+
+where $\mu_j$ and $\sigma_j$ are the feature mean and standard deviation computed **strictly on the training set** (`StandardScaler`). With wine data, $\sigma$ is 325.4 for proline and 0.221 for hue. After scaling, a 100-unit proline difference scales to $100/325.4 \approx 0.31$, while a 1.23-unit hue variation scales to $1.23/0.221 \approx 5.57$. Each feature is measured in standard deviations, preventing arbitrary units from dominating.
+
+The moons dataset did not require this step because both coordinates naturally share comparable scales (ranging roughly from $-1.3$ to $2.2$).
+
+### Distance-Weighted Neighbors
+
+Standard voting treats the 1st neighbor and the $k$-th neighbor equally. A distance-weighted variant assigns each neighbor weight $1/d_i$, where $d_i = d\left(\mathbf{x}, \mathbf{x}^{(i)}\right)$:
+
+$$
+\hat{y} = \arg\max_{c} \sum_{i \in \mathcal{N}_k(\mathbf{x})} \frac{1}{d_i}\,\mathbb{I}\left[y^{(i)} = c\right]
+$$
+
+Closer points exert stronger influence. At $(-0.4, 0.6)$ with $k = 5$, class 1 receives $1/0.155 \approx 6.44$ weight, while class 0 accumulates $1/0.443 + 1/0.511 + 1/0.539 + 1/0.566 \approx 7.84$. Class 0 still wins, but by a narrower margin. In scikit-learn, this is enabled via `weights='distance'`. If a query point coincides with a training point ($d_i = 0$), scikit-learn directly returns that point's label.
+
+### The Curse of Dimensionality
+
+KNN relies on the assumption that close points share similar properties. In low dimensions, this assumption holds. As dimensionality grows, the concept of spatial proximity breaks down.
+
+Suppose data points are uniformly distributed inside an $n$-dimensional unit hypercube $[0, 1]^n$. To gather a local neighborhood of 10% of total data points, you construct a smaller hypercube with edge length $\ell$. Its volume is $\ell^n = 0.1$, so its edge length is:
+
+$$
+\ell = 0.1^{1/n}
+$$
+
+- $n = 1$: $\ell = 0.1$ (a small 10% interval).
+- $n = 2$: $\ell \approx 0.316$.
+- $n = 10$: $\ell \approx 0.794$.
+- $n = 100$: $\ell \approx 0.977$ (spanning nearly the entire unit cube).
+
+In 100 dimensions, capturing merely 10% of data requires spanning almost the entire width of every coordinate axis. Consequently, "nearest neighbors" are not genuinely local: all pairwise distances become nearly identical. This phenomenon is the **curse of dimensionality**. To make KNN viable in high-dimensional spaces, one needs exponential sample sizes or dimensionality reduction techniques such as PCA.
+
+:::note[Key Takeaway]
+KNN predicts from $k$ nearest training samples: majority voting for classification, averaging for regression. Small $k$ overfits, large $k$ underfits; choose $k$ via cross-validation and use odd $k$ for binary tasks. Always standardize features inside a pipeline, as raw distances are dominated by unscaled feature ranges.
+:::
+
+### Limitations
+
+- **Slow inference on large datasets.** Every query scans the training set ($\mathcal{O}(m \cdot n)$).
+- **Sensitive to feature scale and irrelevant attributes.** Noise features degrade Euclidean distances as much as informative ones.
+- **Degrades in high dimensions** due to the curse of dimensionality.
+- **Provides zero feature interpretability.** Unlike linear regression weights, KNN provides no direct measure of feature importance.
+
+## Visualization
+
+The interactive tool below displays 35 training points (solid dots) and 15 test points (open circles) from the two moons dataset. Background coloring indicates the class predicted by KNN across space, tracing decision boundaries where colors change. The slider adjusts $k$ across odd integers from 1 to 35, updating training and test accuracies below. You can drag the query marker (crosshair) anywhere: it connects to its $k$ nearest neighbors, displaying vote counts per class. Try the following:
+
+1. Initial state at $k = 1$: boundaries are jagged, with an isolated class-1 island around noisy point $(-0.25, 0.64)$ inside class 0 territory. Training accuracy is 1.000, test accuracy is 0.733.
+2. Drag the crosshair to $(-0.4, 0.6)$: at $k = 1$, it connects to the outlier, predicting class 1. Increasing to $k = 5$ shifts the vote to 4 vs. 1, correctly predicting class 0.
+3. Slide $k$ to 7: the noise island vanishes, forming smooth boundaries matching the crescents. Training accuracy settles at 0.943 while test accuracy reaches 1.000.
+4. Advance $k$ to 15 and 35: boundaries flatten, and test accuracy drops to 0.800 then 0.467. At $k = 35$, the entire background turns class 1.
+
+{/* VIZ: KnnViz
+    Concept: Small k produces jagged boundaries and 100% training accuracy (overfitting); moderate k yields smooth boundaries and peak test accuracy; large k erases geometric structure (underfitting).
+    Interactivity: Slider k over odd values 1, 3, ..., 35 re-renders prediction grid, updating train/test accuracy. Drag or click crosshair query point, drawing connector lines to k nearest neighbors with vote tallies.
+    Dataset: make_moons(n_samples=50, noise=0.3, random_state=11), 35 train points, 15 test points. Euclidean distance, uniform weights; default query (-0.4, 0.6). */}
+
+## Code Examples
+
+The three cells below execute independently.
+
+The first cell implements KNN from scratch using NumPy for query point $(-0.4, 0.6)$ at $k = 5$. `np.argsort(dist)` orders points by increasing distance, `[:k]` extracts the nearest neighbors, and `np.bincount` tallies votes.
+
+<PythonRunner code={knnNumpyCode} title="Custom KNN implementation for a query point" />
+
+The first five rows match our manual intuition table: neighbor $(-0.25, 0.64)$ belongs to class 1 at distance 0.155, followed by four class-0 neighbors. The vote is 4 to 1 for class 0, whereas $k = 1$ would predict class 1.
+
+The second cell runs `KNeighborsClassifier` across all odd values of $k$ from 1 to 35, printing sample accuracies and plotting train and test curves against $k$.
+
+<PythonRunner
+  code={chooseKCode}
+  title="Training and test accuracy across k"
+  figureAlt={['Line plot of classification accuracy versus neighborhood size k, with odd values from 1 to 35. Solid line with circular markers shows training accuracy starting at 1.0 at k=1, staying near 0.94 through k=9, near 0.91 through k=15, then declining to 0.51 at k=35. Dashed line with square markers shows test accuracy climbing from 0.73 at k=1 to a peak of 1.0 at k=7, leveling between 0.73 and 0.80 for k between 13 and 33, before dropping to 0.47 at k=35.']}
+/>
+
+The output verifies our table: training accuracy decreases monotonically, while test accuracy peaks at $k = 7$ before falling, forming the classic inverted U-curve. At $k = 7$, exactly two training points are misclassified: $(-0.25, 0.64)$ and $(0.25, 0.83)$—both outliers. Tolerating errors on these two points yields a regularized, generalizable boundary.
+
+The third cell evaluates the `load_wine` dataset: 178 bottles, 13 features, 3 cultivars. It prints standard deviations for proline and hue, their squared distance contributions, and benchmarks KNN accuracy with and without `StandardScaler`. Finally, `GridSearchCV` selects optimal $k$ via 5-fold cross-validation on training data.
+
+<PythonRunner code={scalingCode} title="Standardization and parameter tuning via cross-validation" />
+
+- Standard deviations are 325.4 for proline and 0.221 for hue. Proline accounts for 99.76% of unscaled squared distances, blinding the model to other chemical dimensions.
+- With $k = 5$, standardizing features boosts test accuracy from 0.722 (39/54 correct) to 0.963 (52/54 correct)—purely from normalization without model alterations.
+- Cross-validation identifies $k = 25$ with CV score 0.976. Retrained on full training data, final test accuracy reaches 0.981 (53/54 bottles).
+
+Notice that `StandardScaler` resides **inside** the pipeline, ensuring means and variances are recomputed per fold to prevent validation leakage.
+
+## Common Pitfalls
+
+:::caution[Omitting Feature Standardization]
+Failing to scale features allows large-scale variables to dominate distance calculations simply due to measurement units. In the wine experiment, unscaled proline accounts for 99.76% of distances, depressing test accuracy to 0.722 compared to 0.963 when scaled. Always encapsulate preprocessing and estimation in a pipeline: `make_pipeline(StandardScaler(), KNeighborsClassifier(...))`.
+:::
+
+:::caution[Selecting k Based on Training Accuracy or Test Performance]
+Selecting $k$ via training accuracy will always choose $k = 1$ (1.000 accuracy) due to trivial self-matching. Conversely, picking $k = 7$ because it scored 1.000 on the test set overfits hyperparameter selection to the test split. Optimize $k$ using cross-validation on training data (`GridSearchCV`), evaluating the test set strictly once at the end.
+:::
+
+:::caution[Using Even k for Binary Classification]
+An even $k$ can produce vote ties (e.g., 2 vs. 2). Scikit-learn breaks ties by arbitrarily picking the smaller class index without warning. Always use odd values of $k$ for binary problems. In multi-class problems where ties remain possible, `weights='distance'` breaks ties continuously by proximity.
+:::
+
+## Quick Check
+
+{/* Questions defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and Further Reading
+
+**Key Takeaways:**
+
+- KNN predicts using the $k$ closest training points under Euclidean distance $\lVert\mathbf{x} - \mathbf{x}^{(i)}\rVert$: majority voting for classification and mean averaging for regression. As a lazy learner, `fit` merely stores samples, with inference costing $\mathcal{O}(m \cdot n)$.
+- Small $k$ creates jagged boundaries and overfits (training accuracy 1.000); large $k$ over-smooths, with $k = m$ unconditionally predicting the global majority class (underfitting). Tune $k$ via cross-validation, using odd $k$ for binary classification.
+- Always scale features inside a pipeline. On the wine dataset, `StandardScaler` alone lifts test accuracy from 0.722 to 0.963.
+- Parameter `weights='distance'` weights votes inversely by proximity. In high dimensions, the curse of dimensionality expands hypercube neighborhoods to $\ell = 0.1^{1/n}$, rendering distance metrics indistinguishable.
+
+**Further Reading:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Bài 6: K-nearest neighbors](https://machinelearningcoban.com/2017/01/08/knn/). Introductory guide with iris examples, distance weighting, and regression variants.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Nearest Neighbors](https://scikit-learn.org/1.8/modules/neighbors.html), Sections 1.6.1 and 1.6.2. Details on neighbor search algorithms (`kd_tree`, `ball_tree`, `brute`), weighting schemes, and tie-breaking policies.
+- James, G., Witten, D., Hastie, T., Tibshirani, R. (2021). [*An Introduction to Statistical Learning*](https://www.statlearning.com/) (2nd ed.). Section 2.2.3 and 3.5 analyze KNN flexibility, comparing it with linear models and examining the curse of dimensionality.
+- Cover, T. M., Hart, P. E. (1967). [*Nearest neighbor pattern classification*](https://doi.org/10.1109/TIT.1967.1053964). *IEEE Transactions on Information Theory* 13(1), 21–27. Foundational theoretical paper proving error bounds for 1-nearest neighbor classification.
+
+<LessonProgress />
