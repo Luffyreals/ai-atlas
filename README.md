@@ -81,6 +81,14 @@ Mở trình duyệt tại [http://localhost:4321/vi/](http://localhost:4321/vi/)
 
 ---
 
+## 👤 Tác giả & Liên hệ
+
+- **Tác giả:** Nguyễn Hoàng Tùng ([@Luffyreals](https://github.com/Luffyreals))
+- **Email:** [hoangtungcnh@gmail.com](mailto:hoangtungcnh@gmail.com)
+- **Website dự án:** [https://ai-atlas-7nb.pages.dev/](https://ai-atlas-7nb.pages.dev/)
+
+---
+
 ## 🤝 Đóng góp & Giấy phép
 
 Mọi đóng góp, báo lỗi nội dung hoặc đề xuất cải tiến đều được hoan nghênh qua [Issues](https://github.com/Luffyreals/ai-atlas/issues) và [Pull Requests](https://github.com/Luffyreals/ai-atlas/pulls). Xem hướng dẫn chi tiết tại [CONTRIBUTING.md](.github/CONTRIBUTING.md).

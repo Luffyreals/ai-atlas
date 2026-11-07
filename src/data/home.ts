@@ -171,7 +171,7 @@ export const HOME = {
         'AI Atlas bắt đầu từ một giáo án học AI. Mình sắp các buổi học lại thành một tấm bản đồ, để ai cũng thấy nên học gì trước, học gì sau, và vì sao.',
         'Mỗi bài viết bằng tiếng Việt trước, rồi mới dịch sang tiếng Anh. Code trong bài đều được chạy thử, nguồn tham khảo đều có thật.',
         'Trang này miễn phí và **không cần tài khoản**. Tiến độ học được lưu ngay trên trình duyệt của bạn, không gửi đi đâu cả.',
-        'Bài đầu tiên đã mở: [Tổng quan về Học máy](lesson:ml/ml-overview). Hẹn gặp bạn ở đó.',
+        'Bài đầu tiên đã mở: [Làm quen công cụ: Google Colab, Kaggle](lesson:python/colab-kaggle). Hẹn gặp bạn ở đó.',
       ],
       en: [
         'Hello,',

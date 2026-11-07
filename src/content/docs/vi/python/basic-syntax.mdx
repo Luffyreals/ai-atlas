@@ -1,0 +1,224 @@
+---
+title: 'Cú pháp cơ bản: biến, nhập/xuất, điều kiện, vòng lặp, toán tử logic'
+description: 'Nắm vững nền tảng Python cho AI: biến, kiểu dữ liệu, toán tử logic, short-circuit, rẽ nhánh điều kiện và vòng lặp ứng dụng trong thuật toán tối ưu.'
+quiz:
+  - question: 'Cho hai danh sách `x = [1, 2, 3]` và `y = [1, 2, 3]`. Kết quả của hai biểu thức `x == y` và `x is y` lần lượt là gì?'
+    options:
+      - '`True` và `True`'
+      - '`True` và `False`'
+      - '`False` và `True`'
+      - '`False` và `False`'
+    answer: 1
+    explanation: 'Toán tử `==` so sánh giá trị nội dung của hai đối tượng (cùng chứa các phần tử 1, 2, 3 nên là `True`). Toán tử `is` so sánh định danh vùng nhớ (`id(x) == id(y)`): vì đây là hai đối tượng danh sách độc lập được cấp phát ở hai ô nhớ khác nhau nên trả về `False`.'
+  - question: 'Biểu thức `False and (10 / 0 > 1)` có gây ra lỗi chia cho số không (`ZeroDivisionError`) hay không, và vì sao?'
+    options:
+      - 'Có lỗi, vì Python luôn đánh giá toàn bộ biểu thức từ trái sang phải trước khi kết luận'
+      - 'Không lỗi, nhờ cơ chế đánh giá ngắn mạch (short-circuit evaluation): vế đầu là `False` nên Python dừng lại ngay lập tức và trả về `False`'
+      - 'Có lỗi, nhưng chỉ khi biểu thức được đặt trong một khối lệnh `if`'
+      - 'Không lỗi, vì Python tự động chuyển `10 / 0` thành giá trị vô cùng (`inf`)'
+    answer: 1
+    explanation: 'Với toán tử logic `and`, nếu vế đầu tiên là `False` thì toàn bộ mệnh đề chắc chắn là `False`. Python lập tức dừng tính toán vế sau (short-circuit), do đó phép chia `10 / 0` không bao giờ được thực thi.'
+  - question: 'Vì sao trong Python, biểu thức `0.1 + 0.2 == 0.3` lại cho kết quả là `False`?'
+    options:
+      - 'Vì hàm `print` làm tròn số sai'
+      - 'Do chuẩn số thực dấu phẩy động IEEE 754 không thể biểu diễn chính xác số thập phân tuần hoàn ở hệ nhị phân'
+      - 'Vì Python tự động ép kiểu `0.3` thành số nguyên `0`'
+      - 'Do toán tử `==` không áp dụng được cho số thực `float`'
+    answer: 1
+    explanation: 'Máy tính biểu diễn số thực bằng hệ nhị phân theo chuẩn IEEE 754. Các phân số thập phân như 0.1 và 0.2 khi chuyển sang nhị phân sẽ thành số vô hạn tuần hoàn, dẫn đến tổng `0.1 + 0.2` bằng xấp xỉ `0.30000000000000004`, khác `0.3`. Khi so sánh số thực, bạn nên dùng hàm `math.isclose()`.'
+  - question: 'Dãy số nào được sinh ra bởi lời gọi `list(range(2, 11, 3))`?'
+    options:
+      - '`[2, 5, 8, 11]`'
+      - '`[2, 5, 8]`'
+      - '`[3, 6, 9]`'
+      - '`[2, 4, 6, 8, 10]`'
+    answer: 1
+    explanation: 'Hàm `range(start, stop, step)` bắt đầu từ `start = 2`, mỗi bước cộng thêm `step = 3` và luôn dừng trước giá trị `stop = 11`. Các giá trị lần lượt là 2, 5, 8. Giá trị tiếp theo là 11 chạm ngưỡng `stop` nên bị loại trừ.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import gradLoopCode from '@code/python/basic-syntax/gradient-step-loop.vi.py?raw';
+import filterCode from '@code/python/basic-syntax/data-filtering.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu bản chất biến trong Python là một nhãn tham chiếu đến đối tượng trong bộ nhớ, phân biệt các kiểu dữ liệu nguyên thủy (`int`, `float`, `bool`, `str`).
+- Nắm vững toán tử số học, phân biệt so sánh giá trị (`==`) với so sánh định danh vùng nhớ (`is`).
+- Sử dụng thành thạo toán tử logic (`and`, `or`, `not`) và nắm bắt cơ chế đánh giá ngắn mạch (short-circuit evaluation).
+- Viết thành thạo cấu trúc rẽ nhánh (`if` – `elif` – `else`) và các vòng lặp (`for`, `while`), kết hợp `range()`, `enumerate()`, `break`, `continue`.
+- Áp dụng trực tiếp cú pháp điều khiển để xây dựng vòng lặp tối ưu hóa tham số mô hình AI.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Python là ngôn ngữ thông dịch (interpreted) và định kiểu động (dynamically typed). Bạn không cần khai báo kiểu dữ liệu trước cho biến; Python tự suy luận kiểu khi bạn gán giá trị tại thời điểm chạy.
+:::
+
+## Trực giác
+
+Hãy tưởng tượng bạn đang huấn luyện một mô hình trí tuệ nhân tạo để nhận biết khách hàng tiềm năng. Mô hình cần liên tục thực hiện hàng loạt quyết định logic:
+
+- "Nếu điểm tín dụng của khách hàng lớn hơn 700 và thu nhập trên 15 triệu, hãy xếp vào nhóm A."
+- "Lặp lại quá trình điều chỉnh trọng số 100 lần, nhưng nếu độ dốc gradient giảm xuống gần bằng 0 thì dừng lại ngay để tiết kiệm thời gian."
+
+Mọi thuật toán AI dù phức tạp đến đâu — từ hồi quy tuyến tính đến các mô hình ngôn ngữ lớn (LLM) — đều được xây dựng từ những viên gạch cơ bản nhất của ngôn ngữ lập trình: **lưu trữ dữ liệu vào biến**, **kiểm tra điều kiện**, và **lặp lại các phép tính**.
+
+Hiểu sâu sắc cú pháp và cơ chế thực thi bên dưới của Python sẽ giúp bạn tránh được những lỗi logic tai hại khi xử lý hàng triệu điểm dữ liệu huấn luyện.
+
+## Lý thuyết
+
+### Biến và Cơ chế Tham chiếu Đối tượng
+
+Trong nhiều ngôn ngữ lập trình như C++ hay Java, một biến giống như một chiếc hộp chứa giá trị: gán giá trị nghĩa là đổ dữ liệu vào hộp. Nhưng trong Python:
+
+> **Biến là một chiếc nhãn (name tag) dán vào một đối tượng cụ thể trong bộ nhớ RAM.**
+
+Khi bạn viết `x = 10`, Python tạo ra một đối tượng số nguyên có giá trị `10` trong vùng nhớ, sau đó gán nhãn `x` trỏ tới đối tượng đó.
+
+- Hàm `type(x)`: Trả về kiểu dữ liệu của đối tượng mà biến đang trỏ tới.
+- Hàm `id(x)`: Trả về mã số định danh duy nhất (tương ứng với địa chỉ ô nhớ) của đối tượng.
+
+```python
+a = [1, 2, 3]
+b = a  # b dán nhãn vào cùng danh sách mà a đang trỏ tới!
+b.append(4)
+# Lúc này a cũng trở thành [1, 2, 3, 4]
+```
+
+### Các Kiểu Dữ Liệu Nguyên Thủy
+
+1. **Số nguyên (`int`):** Có độ chính xác tùy ý, không bị giới hạn tràn số như kiểu 32-bit hay 64-bit trong các ngôn ngữ khác.
+2. **Số thực (`float`):** Tuân theo chuẩn IEEE 754 (độ chính xác kép 64-bit). Cần đặc biệt chú ý sai số xấp xỉ nhị phân: không bao giờ dùng `==` để so sánh hai số thực trong các thuật toán máy học; hãy dùng khoảng sai số epsilon hoặc `math.isclose(a, b)`.
+3. **Giá trị logic (`bool`):** Chỉ mang một trong hai giá trị `True` hoặc `False`.
+4. **Chuỗi văn bản (`str`):** Chuỗi ký tự Unicode bất biến (immutable). Dùng f-string (`f"Giá trị: {val:.2f}"`) để định dạng văn bản trực quan.
+
+### Toán Tử Logic và Đánh Giá Ngắn Mạch
+
+Python hỗ trợ ba toán tử logic: `and`, `or`, và `not`.
+
+Quy tắc chuyển đổi sang chân lý (Truthy và Falsy): Trong ngữ cảnh điều kiện, các giá trị sau đây được coi là `False`:
+- Số `0`, `0.0`
+- Đối tượng rỗng: `""`, `[]`, `()`, `{}`, `set()`
+- Hằng số `None` và `False`
+
+Mọi giá trị khác đều được coi là `True`.
+
+**Cơ chế Đánh giá Ngắn mạch (Short-circuit Evaluation):**
+- Với `A or B`: Nếu `A` đúng, Python kết luận ngay kết quả là `True` mà không bao giờ tính biểu thức `B`.
+- Với `A and B`: Nếu `A` sai, Python kết luận ngay kết quả là `False` mà bỏ qua `B`.
+
+Đặc tính này rất hữu ích khi bạn cần kiểm tra điều kiện an toàn trước khi truy xuất dữ liệu:
+
+```python
+if data is not None and len(data) > 0:
+    process(data)
+```
+
+### Cấu Trúc Điều Kiển: Điều Kiện và Vòng Lặp
+
+Python dùng khoảng thụt lề (thường là 4 dấu cách) để xác định khối lệnh (block scope), thay vì dùng cặp dấu ngoặc nhọn `{}`:
+
+1. **Rẽ nhánh `if` – `elif` – `else`:** Kiểm tra tuần tự từ trên xuống dưới, chỉ thực thi khối lệnh đầu tiên có điều kiện thỏa mãn.
+2. **Vòng lặp `for`:** Lặp qua từng phần tử của một đối tượng có thể lặp (iterable) như dãy số, danh sách:
+   - `range(stop)` hoặc `range(start, stop, step)`: Sinh dãy chỉ số.
+   - `enumerate(iterable)`: Trả về cặp `(chỉ_số, phần_tử)`, rất phổ biến khi cần đếm số bước huấn luyện (step/epoch).
+   - `zip(list1, list2)`: Ghép từng cặp phần tử tương ứng của hai danh sách cùng lúc.
+3. **Vòng lặp `while`:** Tiếp tục lặp chừng nào điều kiện còn đúng. Thường dùng khi thuật toán tối ưu chưa đạt ngưỡng hội tụ.
+4. **`break` và `continue`:**
+   - `break`: Thoát khỏi vòng lặp ngay lập tức.
+   - `continue`: Bỏ qua các câu lệnh còn lại của vòng lặp hiện tại để chuyển sang vòng lặp kế tiếp.
+
+## Minh họa
+
+Bảng dưới đây tóm tắt các phép toán số học và toán tử logic cốt lõi trong Python:
+
+| Toán tử | Cú pháp | Ý nghĩa trong tính toán AI | Ví dụ |
+| :--- | :--- | :--- | :--- |
+| **Chia thực** | `/` | Chia trả về kết quả số thực `float` | `7 / 2 -> 3.5` |
+| **Chia nguyên** | `//` | Chia lấy phần sàn, thường dùng chia batch | `7 // 2 -> 3` |
+| **Chia dư** | `%` | Lấy phần dư, dùng để in log mỗi $N$ epoch | `step % 10 == 0` |
+| **Lũy thừa** | `**` | Tính mũ (bình phương sai số trong loss) | `error ** 2` |
+| **So sánh giá trị** | `==`, `!=` | Kiểm tra độ tương đương nội dung | `y_pred == y_true` |
+| **So sánh vùng nhớ** | `is`, `is not` | Kiểm tra đối tượng duy nhất (thường dùng cho `None`) | `model is None` |
+| **Toán tử logic** | `and`, `or`, `not` | Kết hợp nhiều điều kiện lọc mẫu dữ liệu | `score > 0.8 and not flagged` |
+
+Quy trình vòng lặp tối ưu hóa hội tụ cơ bản trong máy học:
+
+```text
+[ Khởi tạo trọng số w ]
+        │
+        ▼
+   ┌──► [ Tính gradient của hàm mất mát: grad = 2 * w ]
+   │    │
+   │    ▼
+   │  { Kiểm tra: abs(grad) < tolerance? }
+   │    ├─► ĐÚNG ──► [ Đã hội tụ! Thoát vòng lặp: break ] ──► (Kết thúc)
+   │    │
+   │    └─► SAI
+   │         │
+   │         ▼
+   │       [ Cập nhật trọng số: w = w - lr * grad ]
+   └─────────┘ (Lặp lại cho epoch tiếp theo)
+```
+
+## Ví dụ code
+
+Các ô dưới đây chạy độc lập. Bạn có thể nhấn nút **Chạy** để xem ngay kết quả mô phỏng.
+
+Ô thứ nhất ứng dụng vòng lặp `for`, điều kiện dừng sớm `break` và phép tính số học để tìm cực tiểu của hàm số $f(w) = w^2$ thông qua đạo hàm (gradient).
+
+<PythonRunner code={gradLoopCode} title="Vòng lặp tối ưu hóa gradient descent cơ bản" />
+
+Ở đây, hàm số có cực tiểu tại $w = 0$. Tại mỗi epoch, thuật toán cập nhật $w$ ngược chiều độ dốc. Khi gradient giảm xuống dưới ngưỡng sai số `tolerance = 1e-4`, lệnh `break` lập tức dừng vòng lặp, giúp tránh lãng phí tài nguyên tính toán.
+
+Ô thứ hai minh họa kỹ thuật dùng toán tử logic (`and`, `not`) và hàm `enumerate()` để lọc các mẫu dữ liệu dự đoán hợp lệ từ một tập dữ liệu thô.
+
+<PythonRunner code={filterCode} title="Lọc dữ liệu bằng toán tử so sánh và logic" />
+
+Kết quả tính toán đưa ra số lượng mẫu thỏa mãn điều kiện và tỷ lệ phần trăm mẫu đạt chuẩn. Đây chính là thao tác lọc mẫu (filtering) xuất hiện liên tục trong giai đoạn tiền xử lý dữ liệu trước khi đưa vào mô hình học máy.
+
+## Lỗi hay gặp
+
+:::caution[Nhầm lẫn giữa toán tử `==` và `is`]
+Toán tử `==` dùng để so sánh **giá trị** của hai biến có tương đương nhau hay không. Toán tử `is` dùng để so sánh **định danh** xem hai biến có cùng trỏ tới một địa chỉ ô nhớ trong RAM hay không. Khi kiểm tra một biến có rỗng hay không, quy chuẩn PEP 8 khuyên bạn luôn viết `if x is None:` chứ không dùng `if x == None:`.
+:::
+
+:::caution[So sánh số thực bằng toán tử `==`]
+Do sai số biểu diễn nhị phân của chuẩn IEEE 754, phép so sánh `0.1 + 0.2 == 0.3` trả về `False`. Trong các thuật toán huấn luyện học máy, khi muốn so sánh sự hội tụ của hàm mất mát giữa các epoch, luôn sử dụng khoảng dung sai cho phép: `abs(loss_new - loss_old) < 1e-5` hoặc dùng hàm `math.isclose()`.
+:::
+
+:::caution[Bẫy lặp vô hạn và lỗi lệch 1 (Off-by-one error)]
+Trong vòng lặp `while`, nếu bạn quên cập nhật biến điều kiện bên trong thân vòng lặp, chương trình sẽ rơi vào trạng thái treo vô tận (infinite loop). Ngoài ra, hàm `range(start, stop)` chỉ chạy tới `stop - 1`. Viết `range(1, 5)` sẽ chỉ tạo ra các số `1, 2, 3, 4` chứ không bao gồm số `5`.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Biến trong Python là con trỏ tham chiếu đến đối tượng trong bộ nhớ, phân biệt rõ kiểm tra giá trị (`==`) và kiểm tra ô nhớ (`is`).
+- Số thực luôn đi kèm sai số nhị phân IEEE 754, cần dùng khoảng sai số khi so sánh độ hội tụ.
+- Cơ chế đánh giá ngắn mạch (short-circuit) của toán tử `and` và `or` giúp tăng tốc độ kiểm tra và ngăn chặn các lỗi truy xuất bộ nhớ nguy hiểm.
+- Cấu trúc `if` – `elif` – `else` kết hợp các vòng lặp `for` (cùng `range`, `enumerate`, `zip`) tạo nên bộ khung vận hành cho mọi vòng lặp tối ưu hóa thuật toán AI.
+
+**Đọc thêm:**
+
+- Python Software Foundation (2024). [*The Python Tutorial: More Control Flow Tools*](https://docs.python.org/3/tutorial/controlflow.html). Hướng dẫn chính thức về vòng lặp, khối điều kiện và hàm `range`.
+- David Goldberg (1991). [*What Every Computer Scientist Should Know About Floating-Point Arithmetic*](https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html). Bài viết kinh điển giải thích tường tận nguyên lý và sai số của số thực dấu phẩy động.
+- Python Software Foundation (2024). [*Built-in Types - Truth Value Testing*](https://docs.python.org/3/library/stdtypes.html#truth-value-testing). Tài liệu tra cứu chi tiết về cơ chế Truthy/Falsy và toán tử logic trong Python.
+
+<LessonProgress />

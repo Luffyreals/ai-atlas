@@ -1,0 +1,202 @@
+---
+title: 'Làm quen công cụ: Google Colab, Kaggle'
+description: 'Làm quen hai nền tảng đám mây Google Colab và Kaggle: sổ tay Jupyter, tăng tốc phần cứng GPU miễn phí, lệnh magic và quản lý dữ liệu cho AI.'
+quiz:
+  - question: 'Khi chạy lệnh `!cd dataset` trong một ô code của Google Colab, thư mục làm việc hiện tại của ô code tiếp theo sẽ như thế nào?'
+    options:
+      - 'Đã chuyển vào thư mục `dataset`'
+      - 'Không thay đổi, vẫn giữ nguyên thư mục trước đó'
+      - 'Báo lỗi cú pháp vì dấu `!` không được chấp nhận trong Python'
+      - 'Tự động tạo mới thư mục `dataset` nếu chưa tồn tại'
+    answer: 1
+    explanation: 'Dấu `!` gọi một shell con riêng biệt (subshell) để chạy lệnh rồi đóng lại ngay, nên thay đổi thư mục không tác động đến kernel hiện tại. Muốn đổi thư mục làm việc trong notebook, bạn cần dùng lệnh magic `%cd dataset`.'
+  - question: 'Bạn huấn luyện một mô hình trong 2 giờ trên Google Colab và lưu file trọng số `model.pt` tại `/content/model.pt`. Sau khi tắt trình duyệt 4 tiếng và mở lại notebook, file đó sẽ ra sao?'
+    options:
+      - 'Vẫn còn nguyên vì Google Colab tự động sao lưu vào tài khoản Google'
+      - 'Bị mất vì máy ảo đã bị giải phóng (runtime reset) sau thời gian nhàn rỗi'
+      - 'Chuyển tự động vào thùng rác của Google Drive'
+      - 'Được mã hóa và yêu cầu tài khoản Colab Pro để tải lại'
+    answer: 1
+    explanation: 'Ổ đĩa cục bộ trên Google Colab (`/content`) là bộ nhớ tạm thời (ephemeral storage). Khi ngắt kết nối hoặc hết thời gian chờ (idle timeout), máy ảo sẽ bị thu hồi và toàn bộ dữ liệu trên ổ đĩa tạm sẽ mất hoàn toàn trừ khi bạn lưu vào Google Drive.'
+  - question: 'Trong sổ tay Jupyter Notebook, nếu bạn chạy ô code thứ 3 trước khi chạy ô code thứ 1 (nơi khai báo biến `X = 10`), điều gì sẽ xảy ra tại ô thứ 3?'
+    options:
+      - 'Trình duyệt tự động tìm và chạy ô thứ 1 trước'
+      - 'Ô thứ 3 báo lỗi `NameError` nếu biến `X` chưa từng được nạp vào bộ nhớ kernel'
+      - 'Giá trị của `X` được gán mặc định bằng 0'
+      - 'Toàn bộ notebook bị khởi động lại từ đầu'
+    answer: 1
+    explanation: 'Jupyter thực thi code theo trạng thái bộ nhớ của kernel, phụ thuộc vào thứ tự bạn bấm chạy ô chứ không theo thứ tự từ trên xuống dưới trên trang màn hình. Nếu biến chưa được định nghĩa trong phiên hiện tại, Python sẽ ném ngoại lệ `NameError`.'
+  - question: 'Điểm khác biệt nổi bật của Kaggle Notebooks so với Google Colab khi làm việc với các bài toán khoa học dữ liệu là gì?'
+    options:
+      - 'Kaggle không cho phép chạy mã Python'
+      - 'Kaggle tích hợp sẵn kho dữ liệu thi đấu khổng lồ và cấp hạn ngạch GPU cố định theo tuần'
+      - 'Kaggle bắt buộc phải trả phí hàng tháng mới dùng được GPU'
+      - 'Kaggle không hỗ trợ cài thêm thư viện ngoài qua lệnh pip'
+    answer: 1
+    explanation: 'Kaggle cung cấp môi trường gắn liền với kho hàng nghìn dataset cộng đồng, cho phép đính kèm trực tiếp chỉ bằng một cú nhấp chuột và cấp khoảng 30 giờ GPU miễn phí mỗi tuần.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import benchmarkCode from '@code/python/colab-kaggle/benchmark-env.vi.py?raw';
+import storageCode from '@code/python/colab-kaggle/notebook-storage.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu bản chất môi trường tương tác sổ tay (notebook) và kiến trúc máy khách – máy chủ (client – kernel) của Jupyter.
+- Sử dụng thành thạo Google Colab và Kaggle Notebooks để viết code, chạy thử nghiệm và tận dụng GPU miễn phí.
+- Phân biệt lệnh shell (`!`) và lệnh ma thuật (magic commands `%` và `%%`).
+- Nắm vững cách quản lý tệp, hiểu tính chất tạm thời (ephemeral storage) của máy ảo và cách lưu trữ dữ liệu an toàn.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Bạn chỉ cần một trình duyệt web hiện đại (Chrome, Edge, Firefox) và tài khoản Google hoặc Kaggle để bắt đầu. Bạn chưa cần cài đặt Python hay card đồ họa trên máy tính cá nhân.
+:::
+
+## Trực giác
+
+Khi bắt đầu học trí tuệ nhân tạo (AI), rào cản lớn nhất của người mới học thường không phải là giải thuật, mà là **khâu cài đặt môi trường**: xung đột phiên bản thư viện Python, cài đặt trình điều khiển GPU (NVIDIA CUDA driver), hay cấu hình bộ nhớ. Nếu máy tính cá nhân của bạn không có card đồ họa rời đủ mạnh, việc huấn luyện một mạng nơ-ron học sâu (deep learning) có thể mất hàng ngày trời.
+
+Để giải quyết vấn đề này, các nền tảng đám mây như **Google Colab** và **Kaggle** cung cấp môi trường tính toán hoàn toàn miễn phí trên nền web:
+
+- Bạn không cần cài đặt bất kỳ phần mềm nào vào máy tính.
+- Máy chủ đám mây đã cài sẵn Python, NumPy, Pandas, Scikit-learn, PyTorch và TensorFlow.
+- Bạn được cấp quyền sử dụng các bộ vi xử lý đồ họa (GPU - Graphics Processing Unit) hiệu năng cao chỉ với vài cú nhấp chuột.
+
+Thay vì phải gõ lệnh trong các file mã nguồn `.py` dài dằng dặc rồi chạy lại từ đầu mỗi khi sửa lỗi, bạn làm việc trên các **sổ tay điện tử** (notebooks). Bạn có thể chia nhỏ chương trình thành từng ô, thử nghiệm từng dòng code, xem ngay đồ thị biểu diễn dữ liệu và ghi chú giải thích bên cạnh.
+
+## Lý thuyết
+
+### Cấu trúc sổ tay Jupyter Notebook
+
+Tệp notebook có đuôi mở rộng `.ipynb` (Jupyter Notebook Format). Một notebook bao gồm hai thành phần chính:
+
+1. **Giao diện người dùng (Front-end):** Trình duyệt web hiển thị các ô văn bản (Markdown cell) và ô mã nguồn (Code cell).
+2. **Nhân tính toán (Kernel):** Một tiến trình máy chủ chạy ngầm thực thi mã Python và lưu giữ toàn bộ biến, hàm và đối tượng trong bộ nhớ RAM.
+
+Khi bạn bấm chạy (phím tắt `Shift + Enter`) một ô code, trình duyệt gửi đoạn code đó đến kernel. Kernel tính toán và trả kết quả (văn bản, bảng dữ liệu, biểu đồ) ngược lại màn hình.
+
+### Google Colab vs Kaggle Notebooks
+
+Cả hai nền tảng đều dựa trên nền tảng Jupyter nhưng có mục đích sử dụng tối ưu khác nhau:
+
+| Đặc tính | Google Colab | Kaggle Notebooks |
+| :--- | :--- | :--- |
+| **Nhà cung cấp** | Google Research | Kaggle (thuộc Google) |
+| **Phần cứng miễn phí** | GPU T4, CPU, TPU | GPU T4 x2, P100, CPU |
+| **Hạn mức GPU** | Hạn mức động theo nhu cầu | Khoảng 30 giờ/tuần |
+| **Thời gian chạy tối đa** | 12 giờ/phiên (idle 90 phút) | 9 giờ/phiên (12 giờ khi submit) |
+| **Lưu trữ dữ liệu** | Gắn kết trực tiếp Google Drive | Gắn kèm Kaggle Datasets |
+| **Mục đích phù hợp nhất** | Học tập, thử nghiệm nhanh, tạo mẫu ý tưởng | Tham gia thi đấu dữ liệu, chia sẻ dự án cộng đồng |
+
+### Lệnh Shell và Lệnh Magic
+
+Trong môi trường notebook, ngoài mã Python thông thường, bạn có thể tương tác trực tiếp với hệ điều hành Linux máy ảo thông qua:
+
+- **Lệnh Shell (`!`):** Cho phép chạy một lệnh hệ thống đơn lẻ. Ví dụ: `!pip install transformers` để cài thư viện, hoặc `!nvidia-smi` để kiểm tra thông số card đồ họa GPU.
+- **Lệnh Magic theo dòng (`%` - Line Magic):** Tác động lên một dòng duy nhất để thay đổi cấu hình môi trường kernel:
+  - `%pwd`: In đường dẫn thư mục hiện tại.
+  - `%cd /content/sample_data`: Đổi thư mục làm việc của kernel.
+  - `%time expression`: Đo thời gian thực thi của một biểu thức đơn lẻ.
+- **Lệnh Magic theo ô (`%%` - Cell Magic):** Tác động lên toàn bộ nội dung của ô đó:
+  - `%%time`: Đo tổng thời gian chạy của cả ô code.
+  - `%%writefile script.py`: Lưu toàn bộ nội dung ô thành một tệp tin trên đĩa.
+
+### Bộ nhớ tạm thời và cách giữ dữ liệu
+
+Máy ảo trên Colab và Kaggle hoạt động theo cơ chế **bộ nhớ tạm thời (ephemeral runtime)**:
+
+- Ổ đĩa `/content` (trên Colab) hoặc `/kaggle/working` (trên Kaggle) chỉ tồn tại trong thời gian phiên làm việc còn hiệu lực.
+- Nếu bạn tắt trình duyệt quá lâu, mạng bị ngắt, hoặc phiên chạm ngưỡng thời gian tối đa, máy ảo sẽ tự động bị hủy và xóa sạch mọi tệp tin vừa tải về hoặc sinh ra.
+- **Giải pháp giữ dữ liệu:**
+  - Trên Colab: Gắn kết tài khoản Google Drive bằng lệnh `from google.colab import drive; drive.mount('/content/drive')` và lưu file mô hình vào `/content/drive/MyDrive/...`.
+  - Trên Kaggle: Bấm nút **Save Version** để xuất bản notebook và giữ lại tệp đầu ra (output artifacts) lên kho lưu trữ đám mây của Kaggle.
+
+## Minh họa
+
+Sơ đồ dưới đây minh họa luồng giao tiếp giữa trình duyệt, máy chủ kernel và các vùng lưu trữ dữ liệu trong một phiên làm việc đám mây:
+
+```text
+[ Trình duyệt Web ]
+  │  (Gõ code, bấm Shift + Enter)
+  ▼
+[ Jupyter Server / Kernel (VM) ]
+  ├── Bộ nhớ RAM: Lưu biến, hàm, mô hình đang chạy
+  ├── Bộ tăng tốc GPU: Tính toán ma trận song song
+  │
+  ├── Ổ đĩa tạm thời (Ephemeral Disk: /content)
+  │     └─► BỊ XÓA khi ngắt phiên hoặc hết giờ!
+  │
+  └── Lưu trữ bền vững (Persistent Storage)
+        ├─► Google Drive (Gắn qua drive.mount)
+        └─► Kaggle Dataset / Output Versions
+```
+
+Quy trình làm việc chuẩn cho một dự án AI trên đám mây:
+
+1. **Khởi tạo môi trường:** Chọn loại máy tính (Runtime $\to$ Change runtime type $\to$ T4 GPU).
+2. **Nạp dữ liệu:** Tải tệp từ nguồn ngoài hoặc liên kết thư mục đám mây.
+3. **Thực thi phân tích:** Chạy từng ô để khám phá dữ liệu và huấn luyện mô hình.
+4. **Lưu trữ kết quả:** Xuất tệp trọng số (checkpoint) sang bộ nhớ bền vững trước khi đóng tab.
+
+## Ví dụ code
+
+Các ô dưới đây chạy độc lập. Bạn có thể bấm nút **Chạy** để thực thi trực tiếp trên trình duyệt bằng môi trường mô phỏng.
+
+Ô thứ nhất minh họa bài đo tốc độ thực thi (benchmark) - nguyên lý nền tảng giúp bạn hiểu vì sao cần đo đếm thời gian tính toán của các tác vụ dữ liệu.
+
+<PythonRunner code={benchmarkCode} title="Đo thời gian thực thi thuật toán" />
+
+Kết quả in ra cho thấy cách dùng hàm dựng sẵn (`sum` với generator) cho tốc độ tính toán tối ưu hơn so với việc tích lũy thủ công bằng vòng lặp `for` thông thường. Trên Colab, bạn có thể kiểm tra trực tiếp điều này bằng lệnh magic `%time`.
+
+Ô thứ hai mô phỏng quy trình kiểm tra thư mục làm việc và quản lý tệp trên máy ảo.
+
+<PythonRunner code={storageCode} title="Kiểm tra hệ thống tệp và dọn dẹp bộ nhớ" />
+
+Chương trình tạo một tệp dữ liệu giả lập, lấy kích thước tệp và dọn dẹp an toàn. Thói quen kiểm tra kích thước và giải phóng bộ nhớ đĩa là kỹ năng quan trọng khi bạn làm việc với các tập dữ liệu lớn hàng gigabyte trên Colab hay Kaggle.
+
+## Lỗi hay gặp
+
+:::caution[Nhầm lẫn giữa lệnh `!cd` và `%cd`]
+Khi bạn viết `!cd my_folder`, hệ thống sẽ khởi tạo một tiến trình shell phụ (subshell) độc lập, chuyển vào `my_folder`, rồi đóng tiến trình lại. Thư mục làm việc của sổ tay chính hoàn toàn không thay đổi! Để đổi thư mục làm việc của notebook, bạn bắt buộc phải dùng lệnh magic `%cd my_folder`.
+:::
+
+:::caution[Mất toàn bộ kết quả huấn luyện do phụ thuộc ổ đĩa tạm]
+Nhiều bạn chạy mô hình huấn luyện qua đêm rồi để máy tự ngắt kết nối. Sáng hôm sau mở lại thì toàn bộ dữ liệu tại `/content` đã biến mất. Hãy luôn tạo checkpoint lưu vào Google Drive hoặc tải file trọng số quan trọng về máy ngay sau khi hoàn thành.
+:::
+
+:::caution[Chạy ô lộn xộn dẫn đến sai lệch trạng thái biến]
+Thứ tự các ô trên màn hình từ trên xuống dưới không quyết định thứ tự thực thi trong bộ nhớ. Số thứ tự trong ngoặc vuông cạnh ô code (ví dụ `[5]`) thể hiện thời điểm ô đó được chạy. Nếu bạn sửa ô số 1 nhưng không chạy lại, các ô phía dưới vẫn sẽ dùng giá trị cũ trong bộ nhớ RAM, gây ra những lỗi khó phát hiện.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Google Colab và Kaggle cung cấp môi trường tính toán dựa trên sổ tay Jupyter Notebook với GPU miễn phí trên nền tảng đám mây.
+- Sổ tay tách biệt giữa giao diện hiển thị trong trình duyệt và tiến trình tính toán kernel chạy ngầm.
+- Lệnh shell (`!`) dùng cho các thao tác hệ thống đơn lẻ, trong khi lệnh magic (`%` và `%%`) cấu hình và điều khiển phiên làm việc của kernel.
+- Ổ đĩa cục bộ của máy ảo là tạm thời (ephemeral), cần liên kết với Google Drive hoặc xuất bản phiên bản Kaggle để bảo toàn dữ liệu.
+
+**Đọc thêm:**
+
+- Google Colab Team (2024). [*Google Colaboratory Frequently Asked Questions*](https://research.google.com/colaboratory/faq.html). Tài liệu giải đáp chi tiết về giới hạn tài nguyên và kiến trúc máy ảo Colab.
+- Kaggle Documentation (2024). [*Kaggle Notebooks Documentation*](https://www.kaggle.com/docs/notebooks). Hướng dẫn chính thức về quản lý tài nguyên GPU, chia sẻ dataset và tham gia giải đấu.
+- Project Jupyter (2024). [*Jupyter Notebook Documentation*](https://docs.jupyter.org/en/latest/). Tài liệu chuẩn của tổ chức mã nguồn mở Jupyter về định dạng `.ipynb` và cơ chế kernel.
+
+<LessonProgress />

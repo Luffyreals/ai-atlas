@@ -1,0 +1,207 @@
+---
+title: 'Cấu trúc dữ liệu: list, tuple, set, dict'
+description: 'Bốn cấu trúc dữ liệu cốt lõi trong Python: list, tuple, set, dict. Cơ chế bảng băm, độ phức tạp O(1) vs O(n), sao chép nông/sâu và kỹ thuật cắt lát batch.'
+quiz:
+  - question: 'Bạn có một tập hợp 1 000 000 từ vựng. Cấu trúc dữ liệu nào cho phép kiểm tra một từ có nằm trong tập hợp hay không (`word in collection`) với tốc độ nhanh nhất?'
+    options:
+      - '`list`, vì các phần tử được lưu trữ liên tiếp trong bộ nhớ'
+      - '`tuple`, vì tuple là kiểu dữ liệu bất biến nên duyệt nhanh hơn'
+      - '`set`, vì sử dụng bảng băm (hash table) cho tốc độ tìm kiếm trung bình là $O(1)$'
+      - 'Không có sự khác biệt về tốc độ giữa bốn cấu trúc dữ liệu trên'
+    answer: 2
+    explanation: 'Với `list` và `tuple`, thao tác kiểm tra phần tử bằng toán tử `in` phải duyệt tuần tự từ đầu đến cuối danh sách với độ phức tạp thời gian $O(n)$. Trong khi đó, `set` và `dict` sử dụng cơ chế bảng băm (hash table), tính trực tiếp vị trí ô nhớ từ mã băm của phần tử nên đạt độ phức tạp tìm kiếm trung bình là $O(1)$ độc lập với kích thước dữ liệu.'
+  - question: 'Đối tượng nào sau đây KHÔNG THỂ dùng làm khóa (key) trong một `dict` hoặc phần tử của một `set`?'
+    options:
+      - 'Số thực `3.14`'
+      - 'Chuỗi văn bản `"learning_rate"`'
+      - 'Bộ giá trị `(1, 2, "epoch")`'
+      - 'Danh sách `[1, 2, 3]`'
+    answer: 3
+    explanation: 'Khóa của từ điển và phần tử của tập hợp bắt buộc phải có tính băm (hashable) và bất biến (immutable) để mã băm không bao giờ thay đổi trong suốt vòng đời. Danh sách (`list`) là kiểu dữ liệu khả biến (mutable), có thể thêm bớt phần tử bất cứ lúc nào nên không thể băm, nếu dùng làm key sẽ lập tức ném ra lỗi `TypeError: unhashable type: ''list''''.'
+  - question: 'Cho đoạn mã sau: `a = [[1, 2], [3, 4]]` và `b = a.copy()`. Nếu ta thực hiện `b[0][0] = 99`, giá trị của `a[0][0]` sẽ là bao nhiêu?'
+    options:
+      - '`1`, vì `b` là một bản sao hoàn toàn độc lập với `a`'
+      - '`99`, vì phương thức `.copy()` chỉ thực hiện sao chép nông (shallow copy)'
+      - 'Báo lỗi `TypeError` vì danh sách hai chiều không hỗ trợ hàm `.copy()`'
+      - '`None`, vì đối tượng gốc bị khóa khi tạo bản sao'
+    answer: 1
+    explanation: 'Phương thức `.copy()` (hoặc cắt lát toàn bộ `a[:]`) chỉ thực hiện sao chép nông (shallow copy): nó tạo ra một danh sách ngoài mới, nhưng các phần tử bên trong (ở đây là các danh sách con `[1, 2]`) vẫn là cùng một địa chỉ ô nhớ được tham chiếu bởi cả `a` và `b`. Để sao chép hoàn toàn độc lập mọi tầng lồng nhau, bạn phải dùng hàm `copy.deepcopy()`.'
+  - question: 'Kết quả của biểu thức list comprehension `[x ** 2 for x in range(6) if x % 2 == 1]` là gì?'
+    options:
+      - '`[0, 4, 16]`'
+      - '`[1, 9, 25]`'
+      - '`[1, 3, 5]`'
+      - '`[1, 4, 9, 16, 25]`'
+    answer: 1
+    explanation: 'Dãy `range(6)` gồm các số từ 0 đến 5. Điều kiện `if x % 2 == 1` chỉ giữ lại các số lẻ: 1, 3, 5. Phép biến đổi `x ** 2` tính bình phương từng số lẻ đó, cho kết quả lần lượt là $1^2 = 1$, $3^2 = 9$ và $5^2 = 25$, tức danh sách `[1, 9, 25]`.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import vocabCode from '@code/python/data-structures/vocab-indexer.vi.py?raw';
+import batchCode from '@code/python/data-structures/batch-slicing.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Nắm vững đặc tính và cú pháp của 4 cấu trúc dữ liệu cốt lõi trong Python: `list`, `tuple`, `set`, `dict`.
+- Phân biệt rõ tính khả biến (mutable) và bất biến (immutable), thứ tự (ordered) và không trùng lặp (unique elements).
+- Hiểu cơ chế hoạt động của bảng băm (hash table) và lý do vì sao tra cứu trong `set` và `dict` đạt tốc độ $O(1)$ thay vì $O(n)$ như `list`.
+- Sử dụng thành thạo kỹ thuật cắt lát (slicing), list comprehension và dict comprehension để xử lý tập dữ liệu.
+- Phân biệt sao chép nông (shallow copy) và sao chép sâu (deep copy) để tránh bẫy thay đổi dữ liệu ngoài ý muốn.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Trong bài trước, bạn đã biết biến chỉ là nhãn dán tham chiếu tới vùng nhớ. Khi làm việc với các cấu trúc dữ liệu phức tạp chứa nhiều phần tử, cơ chế tham chiếu này quyết định việc sửa đổi dữ liệu ở một nơi có ảnh hưởng đến nơi khác hay không.
+:::
+
+## Trực giác
+
+Trong khoa học dữ liệu và AI, dữ liệu thực tế không bao giờ là các số đơn lẻ mà luôn là các tập hợp lớn: danh sách hàng nghìn bức ảnh, từ điển chứa hàng triệu từ vựng văn bản, hoặc các vector đặc trưng của người dùng.
+
+Hãy hình dung bạn cần tìm một cuốn sách trong một thư viện:
+
+1. **Cách 1 (Danh sách - List):** Sách xếp lộn xộn trên một dãy kệ dài. Muốn tìm một cuốn, bạn phải đi từ đầu kệ đến cuối kệ, lật từng gáy sách cho tới khi tìm thấy. Nếu có 1 triệu cuốn sách, bạn có thể phải xem qua cả 1 triệu lần.
+2. **Cách 2 (Bảng tra cứu băm - Dict / Set):** Thư viện có một bảng chỉ mục băm. Bạn gõ tên cuốn sách vào máy tính, máy lập tức tính toán ra chính xác vị trí ô kệ số mấy. Bạn bước thẳng tới đó và lấy sách ra trong tích tắc, bất kể thư viện có 100 cuốn hay 100 triệu cuốn.
+
+Việc chọn đúng cấu trúc dữ liệu không chỉ giúp mã nguồn của bạn gọn gàng, dễ đọc mà còn quyết định sự khác biệt giữa một chương trình nạp dữ liệu chạy trong vài giây so với một chương trình mất cả tiếng đồng hồ chỉ để duyệt danh sách.
+
+## Lý thuyết
+
+### Bốn Cấu Trúc Dữ Liệu Cốt Lõi
+
+Python cung cấp sẵn 4 kiểu cấu trúc dữ liệu tập hợp:
+
+| Cấu trúc | Cú pháp | Có thứ tự? | Khả biến (Mutable)? | Trùng lặp phần tử? | Cấu trúc bên dưới |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`list`** | `[1, 2, 3]` | Có | Có | Có | Mảng động (Dynamic Array) |
+| **`tuple`** | `(1, 2, 3)` | Có | **Không** (Immutable) | Có | Mảng tĩnh cố định |
+| **`set`** | `{1, 2, 3}` | Không | Có | **Không** (Duy nhất) | Bảng băm (Hash Table) |
+| **`dict`** | `{"a": 1}` | Có (từ Python 3.7) | Có | Khóa (key) duy nhất | Bảng băm (Hash Table) |
+
+### Cơ Chế Bảng Băm và Tính Băm (Hashable)
+
+Vì sao tìm kiếm trong `set` và `dict` lại nhanh vượt trội?
+
+- Khi bạn thêm một phần tử vào `set` hoặc một cặp `key: value` vào `dict`, Python truyền khóa qua một hàm băm: `hash(key)`.
+- Hàm băm tính toán một số nguyên duy nhất, từ đó ánh xạ thẳng tới một ngăn nhớ (bucket) cụ thể.
+- Khi cần kiểm tra `key in my_dict`, Python không duyệt tuần tự từ đầu đến cuối mà chỉ cần băm khóa đó rồi nhảy thẳng tới vị trí ô nhớ tương ứng. Độ phức tạp thời gian đạt **$O(1)$** (thời gian hằng số).
+
+**Điều kiện để một đối tượng trở thành khóa (Hashable):**
+Đối tượng đó bắt buộc phải **bất biến (immutable)** trong suốt thời gian tồn tại.
+- Các kiểu hashable hợp lệ: `int`, `float`, `str`, `tuple` (chỉ chứa các phần tử con bất biến).
+- Các kiểu KHÔNG hashable: `list`, `dict`, `set`. Nếu cố gắng dùng `list` làm key, Python sẽ báo lỗi `TypeError: unhashable type: 'list'`.
+
+### Kỹ Thuật Cắt Lát (Slicing) trên Danh Sách
+
+Cú pháp cắt lát tổng quát: `sequence[start:stop:step]`
+
+- `start`: Chỉ số bắt đầu (mặc định là `0`).
+- `stop`: Chỉ số kết thúc (không bao gồm chính vị trí `stop`).
+- `step`: Bước nhảy (nếu là số âm, danh sách sẽ được duyệt ngược lại: `seq[::-1]`).
+- Chỉ số âm: `-1` là phần tử cuối cùng, `-2` là phần tử kế cuối.
+
+Kỹ thuật cắt lát thường được dùng để phân chia tập dữ liệu thành các lô nhỏ (mini-batches) hoặc tách nhãn khỏi tập đặc trưng:
+
+```python
+train_data = all_data[:800]   # 800 mẫu đầu để huấn luyện
+test_data = all_data[800:]    # các mẫu còn lại để kiểm tra
+```
+
+### Comprehensions: Viết Code Tinh Gọn và Hiệu Quả
+
+Comprehension cho phép bạn tạo mới một danh sách hoặc từ điển chỉ trong một dòng lệnh, nhanh hơn việc dùng vòng lặp `for` với phương thức `.append()` thủ công:
+
+- **List comprehension:** `[f(x) for x in data if condition]`
+- **Dict comprehension:** `{k: v for k, v in pairs}`
+- **Set comprehension:** `{normalize(w) for w in text}`
+
+### Sao Chép Nông (Shallow Copy) vs Sao Chép Sâu (Deep Copy)
+
+Khi làm việc với danh sách lồng nhau (ma trận 2 chiều, cấu trúc tham số mô hình):
+
+1. **Phép gán `b = a`:** Không hề tạo ra bản sao mới! Cả `a` và `b` cùng chia sẻ một đối tượng duy nhất.
+2. **Sao chép nông (`b = a.copy()` hoặc `b = a[:]`):** Tạo ra một vỏ danh sách mới, nhưng các phần tử con bên trong vẫn cùng trỏ tới các đối tượng cũ. Sửa phần tử con trong `b` sẽ làm đổi cả trong `a`!
+3. **Sao chép sâu (`import copy; b = copy.deepcopy(a)`):** Đệ quy tạo bản sao độc lập cho toàn bộ các tầng lồng nhau bên trong.
+
+## Minh họa
+
+Sơ đồ so sánh cơ chế tìm kiếm giữa mảng động tuần tự (`list`) và bảng băm (`dict` / `set`):
+
+```text
+Tìm kiếm trên List (Độ phức tạp O(n)):
+  Query: "cat"
+  [0: "dog"] ──► [1: "bird"] ──► [2: "cat"] (Tìm thấy sau 3 bước duyệt!)
+   (Nếu danh sách có 1 000 000 phần tử, phải duyệt tới 1 000 000 lần)
+
+Tìm kiếm trên Set / Dict (Độ phức tạp O(1)):
+  Query: "cat"
+       │
+       ▼
+  [ Hàm băm hash("cat") ] ──► Tính ra chỉ số ô nhớ #42
+       │
+       ▼
+  [ Bucket #42: "cat" ] (Nhảy thẳng tới đúng ô nhớ trong 1 bước duy nhất!)
+```
+
+## Ví dụ code
+
+Các ô dưới đây chạy độc lập. Bạn có thể nhấn nút **Chạy** để quan sát kết quả.
+
+Ô thứ nhất ứng dụng `set` để lọc từ vựng duy nhất và `dict` để đánh mã định danh hai chiều (Word-to-ID và ID-to-Word). Đây là bước mở đầu bắt buộc trong mọi bài toán Xử lý ngôn ngữ tự nhiên (NLP) và xây dựng bộ mã hóa (Tokenization).
+
+<PythonRunner code={vocabCode} title="Xây dựng bộ từ vựng NLP bằng set và dict" />
+
+Mỗi từ xuất hiện nhiều lần trong văn bản được `set` tự động gom lại thành tập duy nhất. Sau đó, từ điển ánh xạ từ sang số giúp mô hình AI chuyển đổi văn bản thành các vector số học có thể tính toán được.
+
+Ô thứ hai minh họa kỹ thuật cắt lát (slicing) kết hợp hàm `zip()` để chia tập dữ liệu thành các lô nhỏ (mini-batches).
+
+<PythonRunner code={batchCode} title="Kỹ thuật chia mini-batch dữ liệu bằng slicing" />
+
+Kết quả in ra cho thấy tập dữ liệu 10 mẫu đã được chia thành 3 lô (2 lô đầu gồm 4 mẫu, lô cuối chứa 2 mẫu còn lại). Đây là nền tảng cốt lõi của giải thuật huấn luyện Mini-batch Stochastic Gradient Descent trong học sâu.
+
+## Lỗi hay gặp
+
+:::caution[Bẫy sao chép nông danh sách lồng nhau]
+Khi bạn khởi tạo một ma trận bằng cú pháp `matrix = [[0] * 3] * 3`, cả 3 hàng của ma trận thực chất đều trỏ tới cùng một đối tượng danh sách duy nhất trong bộ nhớ. Khi bạn sửa `matrix[0][0] = 1`, cả 3 hàng đều sẽ bị đổi thành `[1, 0, 0]`. Cú pháp an toàn đúng đắn là dùng list comprehension: `matrix = [[0] * 3 for _ in range(3)]`.
+:::
+
+:::caution[Sửa đổi kích thước tập hợp khi đang lặp trực tiếp]
+Không bao giờ dùng `.remove()` hoặc `.pop()` để xóa phần tử của một `list`, `set` hay `dict` khi đang dùng vòng lặp `for` duyệt trực tiếp qua nó. Việc thay đổi kích thước đột ngột sẽ làm sai lệch chỉ số duyệt nội bộ, gây bỏ sót phần tử hoặc báo lỗi `RuntimeError: dictionary changed size during iteration`. Hãy tạo bản sao để lặp hoặc dùng comprehension để lọc.
+:::
+
+:::caution[Dùng kiểu dữ liệu khả biến làm khóa từ điển]
+Nếu bạn cố gắng dùng `list` làm khóa cho `dict` (ví dụ `d[[1, 2]] = "point"`), chương trình sẽ sập ngay với lỗi `TypeError: unhashable type: 'list'`. Nếu bạn muốn dùng một chuỗi các số làm khóa, hãy chuyển nó thành một `tuple`: `d[(1, 2)] = "point"`.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- `list` (mảng động, thay đổi được) và `tuple` (mảng tĩnh, bất biến) là hai cấu trúc lưu trữ dãy tuần tự có thứ tự.
+- `set` (tập hợp duy nhất) và `dict` (ánh xạ khóa-giá trị) dựa trên bảng băm (hash table), đạt độ phức tạp tìm kiếm $O(1)$.
+- Khóa của từ điển và phần tử tập hợp bắt buộc phải có tính băm (hashable) và bất biến (immutable).
+- Kỹ thuật cắt lát (slicing) và comprehension giúp code ngắn gọn, tối ưu hóa quá trình tiền xử lý và phân chia batch dữ liệu huấn luyện.
+- Phân biệt rõ sao chép nông (`copy()`) và sao chép sâu (`deepcopy()`) khi cấu trúc dữ liệu có nhiều tầng lồng nhau.
+
+**Đọc thêm:**
+
+- Python Software Foundation (2024). [*The Python Tutorial: Data Structures*](https://docs.python.org/3/tutorial/datastructures.html). Hướng dẫn chi tiết về các thao tác nâng cao trên danh sách, tuple và từ điển.
+- Laurent Luce (2012). [*Python list implementation*](https://www.laurentluce.com/posts/python-list-implementation/). Bài phân tích sâu về kiến trúc mảng động và chiến lược cấp phát bộ nhớ của `list` trong CPython.
+- Python Software Foundation (2024). [*TimeComplexity Wiki*](https://wiki.python.org/moin/TimeComplexity). Bảng tra cứu độ phức tạp thuật toán Big-O chính thức cho mọi thao tác trên các kiểu dữ liệu của Python.
+
+<LessonProgress />

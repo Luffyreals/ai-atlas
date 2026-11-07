@@ -1,0 +1,215 @@
+---
+title: 'Hàm, chuỗi, đọc/ghi file'
+description: 'Tổ chức mã nguồn Python bài bản: hàm, type hints, tham số mặc định, bất biến của chuỗi, và đọc/ghi file định dạng JSON/CSV an toàn với context manager.'
+quiz:
+  - question: 'Cho hàm sau: `def append_token(tok, tokens=[]): tokens.append(tok); return tokens`. Kết quả của hai lần gọi `append_token("a")` rồi `append_token("b")` lần lượt là gì?'
+    options:
+      - '`["a"]` và `["b"]`'
+      - '`["a"]` và `["a", "b"]`'
+      - '`["a"]` và `["b", "a"]`'
+      - 'Báo lỗi `TypeError` vì danh sách rỗng không thể làm giá trị mặc định'
+    answer: 1
+    explanation: 'Đây là cạm bẫy đối số mặc định khả biến (mutable default argument). Biểu thức giá trị mặc định `tokens=[]` chỉ được định trị một lần duy nhất khi hàm được định nghĩa, chứ không phải mỗi lần hàm được gọi. Do đó, các lần gọi hàm sau sẽ cùng dùng chung một đối tượng danh sách duy nhất đó, dẫn đến kết quả lần hai là `["a", "b"]`.'
+  - question: 'Quy tắc tìm kiếm phạm vi biến (scope) trong Python tuân theo thứ tự ưu tiên nào (từ gần nhất đến xa nhất)?'
+    options:
+      - 'Global $\to$ Local $\to$ Enclosing $\to$ Built-in'
+      - 'Local $\to$ Enclosing $\to$ Global $\to$ Built-in (LEGB)'
+      - 'Built-in $\to$ Global $\to$ Local $\to$ Enclosing'
+      - 'Local $\to$ Global $\to$ Enclosing $\to$ Built-in'
+    answer: 1
+    explanation: 'Python tìm kiếm tên biến theo quy tắc LEGB: Local (cục bộ trong hàm hiện tại), Enclosing (trong hàm cha bao bọc nếu có hàm lồng nhau), Global (cấp tệp module), và cuối cùng là Built-in (các hàm và hằng số dựng sẵn của hệ thống).'
+  - question: 'Khi thực hiện phép nối chuỗi trong một vòng lặp lớn gồm 100 000 lần bằng toán tử `+` (`s = s + token`), vì sao hiệu năng của chương trình bị giảm sút nghiêm trọng?'
+    options:
+      - 'Vì Python giới hạn độ dài chuỗi tối đa là 1 000 ký tự'
+      - 'Vì chuỗi là kiểu dữ liệu bất biến (immutable), mỗi phép `+` buộc Python phải cấp phát một vùng nhớ hoàn toàn mới và sao chép toàn bộ dữ liệu cũ sang, tạo ra độ phức tạp thời gian $O(N^2)$'
+      - 'Vì toán tử `+` tự động ép kiểu chuỗi thành danh sách số nguyên'
+      - 'Vì bộ thu gom rác (garbage collector) của Python bị treo khi chuỗi quá dài'
+    answer: 1
+    explanation: 'Do chuỗi là bất biến (immutable), bạn không thể sửa đổi nội dung chuỗi tại chỗ. Phép nối `s = s + token` liên tục tạo ra chuỗi mới và sao chép toàn bộ ký tự của chuỗi cũ sang ô nhớ mới, dẫn đến tổng số phép sao chép tăng theo cấp số nhân ($O(N^2)$). Cách tối ưu là gom các token vào một `list` rồi gọi `"".join(tokens)` chỉ trong $O(N)$.'
+  - question: 'Lợi ích cốt lõi nhất của việc dùng cú pháp ngữ cảnh `with open("data.csv", "r", encoding="utf-8") as f:` khi làm việc với tệp là gì?'
+    options:
+      - 'Tăng gấp đôi tốc độ đọc tệp từ ổ cứng'
+      - 'Tệp được đảm bảo tự động đóng và giải phóng tài nguyên hệ điều hành ngay cả khi xảy ra lỗi ngoại lệ bên trong khối lệnh'
+      - 'Tự động sửa lỗi sai cú pháp của tệp CSV'
+      - 'Cho phép nhiều tiến trình cùng ghi vào một tệp cùng lúc mà không bị xung đột'
+    answer: 1
+    explanation: 'Câu lệnh `with` đóng vai trò là một Context Manager (gọi phương thức `__enter__` khi bắt đầu và `__exit__` khi kết thúc). Nó bảo đảm tệp luôn được đóng (close) và xả bộ đệm (flush buffer) hoàn toàn, ngay cả khi code phát sinh ngoại lệ đột ngột. Việc chỉ định tường minh `encoding="utf-8"` cũng ngăn chặn các lỗi đọc sai bảng mã trên hệ điều hành Windows.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import textCode from '@code/python/functions-strings-files/text-preprocessor.vi.py?raw';
+import logCode from '@code/python/functions-strings-files/metrics-logger.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Định nghĩa và tổ chức hàm (functions) rõ ràng với tham số vị trí (positional), tham số từ khóa (keyword), giá trị mặc định và chú thích kiểu (type hints).
+- Nắm vững quy tắc phạm vi biến LEGB (Local, Enclosing, Global, Built-in) và cơ chế truyền tham số đối tượng (pass-by-assignment).
+- Hiểu tính bất biến (immutability) của chuỗi văn bản (`str`) và làm chủ các phương thức xử lý chuỗi phục vụ chuẩn hóa dữ liệu NLP.
+- Đọc và ghi tệp tin an toàn với trình quản lý ngữ cảnh (context manager `with open(...)`), xử lý chuẩn định dạng JSON và mã hóa ký tự UTF-8.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Trong bài trước, bạn đã làm quen với các cấu trúc dữ liệu `list`, `dict`. Bài học này sẽ ứng dụng các cấu trúc đó để lưu trữ dữ liệu đọc được từ tệp đĩa và truyền qua lại giữa các hàm xử lý.
+:::
+
+## Trực giác
+
+Khi một dự án AI lớn dần lên, bạn không thể viết hàng nghìn dòng lệnh trong một tệp duy nhất. Bạn cần:
+
+- Gom các đoạn code lặp đi lặp lại thành các **hàm** có thể tái sử dụng nhiều lần: hàm nạp dữ liệu, hàm tính sai số, hàm chuẩn hóa văn bản.
+- Đảm bảo rằng việc chỉnh sửa dữ liệu bên trong hàm không vô tình làm biến đổi dữ liệu ở ngoài phạm vi mong muốn.
+- Đọc các tệp dữ liệu huấn luyện từ đĩa cứng và lưu trữ trọng số mô hình hoặc nhật ký kết quả huấn luyện sau mỗi chu kỳ (epoch).
+
+Mọi ứng dụng AI trong thực tế — từ pipeline tiền xử lý dữ liệu đến việc tải mô hình (checkpoint loader) — đều xoay quanh ba trụ cột: **hàm để xử lý**, **chuỗi để biểu diễn văn bản**, và **hệ thống tệp để lưu trữ bền vững**.
+
+## Lý thuyết
+
+### Cấu Trúc Hàm và Type Hints
+
+Một hàm chuẩn trong Python bắt đầu bằng từ khóa `def`, tên hàm, danh sách tham số và giá trị trả về `return`:
+
+```python
+def compute_loss(y_true: float, y_pred: float) -> float:
+    """Tính sai số bình phương giữa giá trị thực và giá trị dự đoán."""
+    return (y_true - y_pred) ** 2
+```
+
+- **Type hints:** Giúp người đọc và các công cụ kiểm tra tĩnh (như MyPy) phát hiện sớm các lỗi sai kiểu dữ liệu mà không làm giảm tốc độ chạy của Python.
+- **Tham số vị trí và tham số từ khóa:** Bạn có thể gọi `compute_loss(1.0, 0.8)` hoặc gọi tường minh `compute_loss(y_pred=0.8, y_true=1.0)`.
+- **Tham số linh hoạt `*args` và `**kwargs`:**
+  - `*args`: Thu nhận các tham số vị trí phụ thành một `tuple`.
+  - `**kwargs`: Thu nhận các tham số từ khóa phụ thành một `dict`.
+
+### Phạm Vi Biến (LEGB Scope)
+
+Khi bạn tham chiếu một tên biến trong hàm, Python tìm kiếm theo quy tắc **LEGB**:
+
+1. **L (Local):** Các biến được định nghĩa ngay bên trong hàm hiện tại.
+2. **E (Enclosing):** Các biến thuộc hàm cha bao bọc (nếu hàm nằm lồng trong một hàm khác).
+3. **G (Global):** Các biến ở cấp độ tệp module.
+4. **B (Built-in):** Các từ khóa và hàm mặc định của Python (`print`, `len`, `range`).
+
+Muốn sửa đổi một biến toàn cục từ bên trong thân hàm, bạn phải dùng từ khóa `global`. Tuy nhiên, trong lập trình AI chuyên nghiệp, việc lạm dụng biến toàn cục là điều tối kỵ vì nó khiến mã nguồn khó theo dõi và dễ gây ra hiệu ứng phụ ngoài ý muốn (side effects).
+
+### Xử Lý Chuỗi Văn Bản (Strings)
+
+Chuỗi ký tự (`str`) trong Python là **bất biến (immutable)**. Một khi chuỗi đã được tạo trong bộ nhớ, bạn không thể gán lại từng ký tự như danh sách (`s[0] = 'H'` sẽ gây lỗi `TypeError`).
+
+Các phương thức chuẩn hóa chuỗi quan trọng cho NLP:
+- `.strip()`: Cắt bỏ khoảng trắng dư thừa ở đầu và cuối chuỗi.
+- `.lower()`: Chuyển toàn bộ chuỗi về chữ thường.
+- `.replace(old, new)`: Thay thế chuỗi con.
+- `.split(sep)`: Tách chuỗi thành danh sách các từ.
+- `sep.join(list_of_strings)`: Nối danh sách các chuỗi thành một chuỗi duy nhất với ký tự ngăn cách.
+
+### Đọc và Ghi File An Toàn với Context Manager
+
+Khi mở một tệp trên hệ điều hành, chương trình nhận về một bộ định danh tệp (file descriptor). Nếu mở quá nhiều tệp mà không đóng lại, hệ điều hành sẽ cạn kiệt tài nguyên.
+
+Cú pháp chuẩn mực để thao tác với tệp là sử dụng từ khóa `with`:
+
+```python
+with open("data.txt", mode="r", encoding="utf-8") as f:
+    content = f.read()
+# Ra khỏi khối with, tệp sẽ được tự động đóng ngay lập tức!
+```
+
+Các chế độ mở tệp phổ biến (`mode`):
+- `"r"`: Đọc tệp văn bản (ném lỗi nếu tệp không tồn tại).
+- `"w"`: Ghi tệp văn bản (xóa sạch nội dung cũ nếu tệp đã tồn tại, hoặc tạo mới nếu chưa có).
+- `"a"`: Ghi nối tiếp vào cuối tệp (append).
+
+**Lưu trữ định dạng có cấu trúc với JSON:** Thư viện chuẩn `json` cho phép bạn chuyển đổi qua lại giữa cấu trúc dữ liệu Python (`dict`, `list`) và chuỗi văn bản JSON thông qua hai hàm chính:
+- `json.dump(obj, file)`: Ghi trực tiếp đối tượng ra tệp.
+- `json.load(file)`: Đọc và giải mã dữ liệu từ tệp vào đối tượng Python.
+
+## Minh họa
+
+Quy tắc tìm kiếm biến LEGB trong Python:
+
+```text
+       [ B - Built-in Scope ] (Hàm dựng sẵn: print, len, sum...)
+                 ▲
+       [ G - Global Scope ] (Biến ở cấp tệp ngoài cùng)
+                 ▲
+       [ E - Enclosing Scope ] (Hàm cha bên ngoài)
+                 ▲
+       [ L - Local Scope ] (Bên trong hàm đang thực thi)
+```
+
+Quy trình quản lý tệp an toàn với Context Manager `with`:
+
+```text
+[ open("file.json", "w") ] ──► Gọi __enter__(): Mở tệp, cấp phát File Descriptor
+           │
+           ▼
+[ Khối lệnh thực thi ] ──► Ghi dữ liệu vào đĩa, xử lý logic...
+           │
+           ├─► (Thành công bình thường) ┐
+           │                             ├──► Gọi __exit__(): ĐÓNG TỆP TỰ ĐỘNG!
+           └─► (Phát sinh ngoại lệ Exception) ┘
+```
+
+## Ví dụ code
+
+Các ô dưới đây chạy độc lập. Bạn có thể nhấn nút **Chạy** để xem ngay kết quả.
+
+Ô thứ nhất xây dựng một hàm tiền xử lý văn bản NLP hoàn chỉnh: sử dụng type hints, giá trị mặc định, phương thức chuỗi (`strip`, `lower`, `replace`, `split`) và gom nối chuỗi bằng `join`.
+
+<PythonRunner code={textCode} title="Hàm tiền xử lý và chuẩn hóa văn bản NLP" />
+
+Đoạn mã nhận một chuỗi văn bản lộn xộn chứa khoảng trắng và dấu câu, tự động làm sạch và chuyển đổi thành danh sách các token chuẩn hóa. Đây là bước đầu tiên không thể thiếu trong mọi bài toán phân tích cảm xúc hay dịch máy.
+
+Ô thứ hai mô phỏng việc lưu trữ và nạp lại nhật ký huấn luyện (training history) của mô hình học máy bằng định dạng JSON với câu lệnh ngữ cảnh `with open(...)`.
+
+<PythonRunner code={logCode} title="Ghi và đọc nhật ký huấn luyện mô hình bằng JSON" />
+
+Dữ liệu lịch sử đo lường được chuyển đổi thành JSON, ghi xuống tệp tin tạm trên hệ thống rồi đọc ngược lại bộ nhớ một cách an toàn. Bạn có thể trích xuất chính xác sai số `loss` và `val_loss` của epoch cuối cùng để theo dõi tiến trình huấn luyện.
+
+## Lỗi hay gặp
+
+:::caution[Bẫy đối số mặc định khả biến (Mutable Default Argument)]
+Khi bạn viết `def train_step(data, history=[]):`, đối tượng danh sách rỗng `[]` chỉ được khởi tạo **một lần duy nhất** lúc Python nạp hàm vào bộ nhớ. Nếu bạn gọi hàm nhiều lần mà không truyền tham số `history`, mọi lần gọi đều sẽ sửa đổi chung trên cùng một danh sách đó. Cách viết chuẩn mực luôn là: `def train_step(data, history=None): if history is None: history = []`.
+:::
+
+:::caution[Quên chỉ định mã hóa `encoding="utf-8"` khi mở tệp]
+Trên hệ điều hành Windows, hàm `open()` mặc định có thể sử dụng bảng mã ANSI (như CP1252), dẫn đến lỗi vỡ font hoặc ném ra ngoại lệ `UnicodeDecodeError` khi đọc các tệp chứa tiếng Việt hoặc ký tự đặc biệt. Hãy luôn nhớ truyền tường minh tham số `encoding="utf-8"` mỗi khi thao tác với tệp văn bản.
+:::
+
+:::caution[Nối chuỗi bằng toán tử `+` trong vòng lặp lớn]
+Chuỗi là bất biến nên mỗi lần bạn viết `text += token`, Python phải tạo mới một chuỗi hoàn chỉnh và sao chép toàn bộ ký tự cũ sang. Với hàng chục nghìn token, thuật toán sẽ bị chậm cấp số nhân. Hãy tích lũy các phần tử vào một `list` rồi dùng `"".join(list)` ở bước cuối cùng.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Hàm đóng gói logic, sử dụng type hints để làm rõ ràng kiểu dữ liệu và ngăn chặn lỗi sớm.
+- Tránh xa bẫy đối số mặc định khả biến: luôn dùng `None` làm giá trị mặc định cho `list` hay `dict`.
+- Quy tắc phạm vi LEGB xác định quyền truy xuất biến từ cục bộ đến toàn cục.
+- Chuỗi văn bản là bất biến: thao tác biến đổi chuỗi luôn tạo ra đối tượng mới; dùng `join()` khi gom nhiều chuỗi.
+- Sử dụng `with open(...)` cùng `encoding="utf-8"` để đảm bảo an toàn tài nguyên tệp và tránh lỗi mã hóa ký tự.
+
+**Đọc thêm:**
+
+- Python Software Foundation (2024). [*The Python Tutorial: Defining Functions*](https://docs.python.org/3/tutorial/controlflow.html#defining-functions). Tài liệu hướng dẫn định nghĩa hàm, đối số mặc định và tham số từ khóa.
+- Python Software Foundation (2024). [*PEP 484 – Type Hints*](https://peps.python.org/pep-0484/). Đề xuất tiêu chuẩn chính thức của Python về hệ thống chú thích kiểu dữ liệu.
+- Python Software Foundation (2024). [*Reading and Writing Files*](https://docs.python.org/3/tutorial/inputoutput.html#reading-and-writing-files). Hướng dẫn chính thức về thao tác với tệp, context manager và thư viện `json`.
+
+<LessonProgress />
