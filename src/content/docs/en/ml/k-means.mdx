@@ -1,0 +1,333 @@
+---
+title: K-means
+description: Clustering unlabeled data with Lloyd's algorithm. Inertia objective function, alternating assignment and update steps, K-means++ initialization, and the Elbow and Silhouette methods.
+quiz:
+  - question: 'You run K-means on the same dataset with $k = 3$ and $k = 4$. How do their inertia values $J$ compare?'
+    options:
+      - 'The $k = 4$ model always has inertia $J$ less than or equal to the $k = 3$ model'
+      - 'The $k = 4$ model always has larger inertia because an extra cluster is introduced'
+      - 'The $k = 4$ model is guaranteed to achieve $J = 0$'
+      - 'Inertia cannot be compared across different cluster counts'
+    answer: 0
+    explanation: 'Increasing the cluster count $k$ provides every point with the option of assigning to an additional closer centroid or retaining its previous one. Consequently, the minimum squared distance can only decrease or stay unchanged. Inertia $J$ is monotonically non-increasing in $k$, reaching 0 only when $k = m$ (each point is its own centroid).'
+  - question: 'In the update step of Lloyd''s algorithm, why is the new centroid $\boldsymbol{\mu}_j$ computed as the arithmetic mean of all points assigned to that cluster?'
+    options:
+      - 'Because the mean cancels the gradient of the sum of squared Euclidean distances'
+      - 'Because the arithmetic mean always coincides with an actual observed data point'
+      - 'Because the mean is less sensitive to outliers than the median'
+      - 'Because the algorithm requires every cluster to have equal cardinality'
+    answer: 0
+    explanation: 'The objective measures squared Euclidean distances $\sum \lVert \mathbf{x}^{(i)} - \boldsymbol{\mu}_j \rVert^2$. Differentiating with respect to $\boldsymbol{\mu}_j$ yields $-2 \sum (\mathbf{x}^{(i)} - \boldsymbol{\mu}_j) = \mathbf{0}$, whose unique solution is $\boldsymbol{\mu}_j = \frac{1}{|C_j|} \sum \mathbf{x}^{(i)}$. Under Manhattan ($L_1$) distance, the optimal point would be the coordinate median.'
+  - question: 'How does the K-means++ initialization algorithm select each subsequent centroid?'
+    options:
+      - 'Points farther from currently selected centroids are favored, with probability proportional to squared distance $D(\mathbf{x})^2$'
+      - 'Selecting the data point with highest absolute feature magnitude across the dataset'
+      - 'Drawing uniformly at random among all data points with equal probability'
+      - 'Computing the global dataset centroid and adding Gaussian noise'
+    answer: 0
+    explanation: 'K-means++ computes the distance $D(\mathbf{x})$ from each point to its nearest already chosen centroid, then selects the next centroid with probability proportional to $D(\mathbf{x})^2$. Points remote from existing centers have higher probability of selection, dispersing centroids evenly across space and avoiding clumping.'
+  - question: 'A data point has a Silhouette coefficient of $s \approx -0.6$. What does this indicate?'
+    options:
+      - 'The point is likely misclustered, as it is closer to points in a neighboring cluster than to points in its assigned cluster'
+      - 'The cluster enclosing this point is dense and well isolated'
+      - 'The point lies directly on the decision boundary between two clusters'
+      - 'The K-means algorithm has converged to the global optimum'
+    answer: 0
+    explanation: 'The Silhouette coefficient is $s = (b - a) / \max(a, b)$, where $a$ is mean intra-cluster distance and $b$ is mean distance to the nearest neighboring cluster. When $s < 0$ ($s \approx -0.6$ here), $a > b$, indicating the point is farther from its cluster peers than from neighbors in an adjacent cluster.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import lloydCode from '@code/ml/k-means/lloyd.en.py?raw';
+import initCode from '@code/ml/k-means/init.en.py?raw';
+import chooseKCode from '@code/ml/k-means/choose-k.en.py?raw';
+
+## Objectives
+
+After this lesson, you will be able to:
+
+- Understand the fundamentals of unsupervised learning and the clustering problem.
+- Master the inertia objective function $J$ and Lloyd's algorithm with its two alternating phases: cluster assignment and centroid update.
+- Explain why random initialization is prone to poor local minima and how K-means++ resolves this vulnerability.
+- Select an appropriate number of clusters $k$ using the Elbow method and Silhouette scores.
+
+## Prerequisites
+
+<Prerequisites />
+
+:::tip[Quick Reminder]
+Each sample is represented as a **vector** $\mathbf{x} = [x_1, \dots, x_n]^\top$ in $n$-dimensional space. The **Euclidean distance** between points $\mathbf{x}$ and $\boldsymbol{\mu}$ is $\lVert \mathbf{x} - \boldsymbol{\mu} \rVert = \sqrt{\sum_{j=1}^n (x_j - \mu_j)^2}$, and squared Euclidean distance is $\lVert \mathbf{x} - \boldsymbol{\mu} \rVert^2 = \sum_{j=1}^n (x_j - \mu_j)^2$. Unlike supervised learning in [Introduction to Machine Learning](/en/ml/ml-overview/), this setting features no target labels $y$.
+:::
+
+## Intuition
+
+Imagine you manage a retail fashion chain with tens of thousands of customers. For each customer, you record monthly visit frequency and average transaction spending. You want to group customers to tailor marketing promotions, but possess no predefined labels such as "VIP", "Budget", or "Bargain Hunter".
+
+This is the domain of **unsupervised learning** and **clustering**: grouping similar observations together such that points within the same group are as close as possible, while separate groups remain well separated.
+
+### Clustering Around Centroids
+
+A natural way to define a cluster is to appoint a representative center—a **centroid**. Suppose you want to partition data into $k = 3$ clusters:
+
+1. Place 3 candidate centroids at arbitrary locations across the store space.
+2. Each customer observes the centroids and associates with the one closest to them, forming 3 temporary clusters.
+3. Each centroid steps to the center of gravity (arithmetic mean) of all customers assigned to it.
+4. As centroids relocate, some customers find another centroid now closer, switching groups accordingly.
+
+This process alternates. After several rounds, assignments stabilize and centroids stop moving. The algorithm has converged.
+
+### 36-Point Sample Dataset
+
+Our working dataset comprises 36 2D points arranged into 3 natural clusters (12 points each) centered near $(2, 2)$, $(8, 3)$, and $(5, 8)$. Representative coordinates include:
+
+| Sample Index | Coordinates $(x_1, x_2)$ | Visual Region |
+|---:|---|---|
+| 0 | $(1.39, 1.86)$ | Bottom-left cluster |
+| 1 | $(1.78, 2.45)$ | Bottom-left cluster |
+| 12 | $(8.85, 3.21)$ | Bottom-right cluster |
+| 24 | $(5.20, 7.82)$ | Upper cluster |
+
+The human eye easily detects three isolated clusters. A computer, however, sees only an unlabeled $36 \times 2$ coordinate matrix.
+
+The objective is: **partition $m$ unlabeled observations into $k$ clusters minimizing the total sum of squared Euclidean distances from each point to its assigned cluster centroid.**
+
+## Theory
+
+### Problem Formulation
+
+Given $m$ samples $\mathbf{x}^{(1)}, \mathbf{x}^{(2)}, \dots, \mathbf{x}^{(m)} \in \mathbb{R}^n$ without target labels $y$, we partition them into $k$ disjoint subsets:
+
+$$
+C_1 \cup C_2 \cup \dots \cup C_k = \{1, 2, \dots, m\}, \quad C_i \cap C_j = \emptyset \; (\forall i \ne j)
+$$
+
+Each cluster $j \in \{1, \dots, k\}$ possesses centroid $\boldsymbol{\mu}_j \in \mathbb{R}^n$. Let $c^{(i)} \in \{1, \dots, k\}$ denote the cluster assigned to sample $i$.
+
+The objective to minimize is total squared distance from points to centroids, termed **inertia** or **distortion**:
+
+$$
+J(\mathbf{c}, \boldsymbol{\mu}) = \sum_{i=1}^m \lVert \mathbf{x}^{(i)} - \boldsymbol{\mu}_{c^{(i)}} \rVert^2
+$$
+
+where:
+- $\mathbf{c} = [c^{(1)}, c^{(2)}, \dots, c^{(m)}]^\top$ represents sample assignments.
+- $\boldsymbol{\mu} = \{\boldsymbol{\mu}_1, \dots, \boldsymbol{\mu}_k\}$ denotes the set of centroids.
+
+Simultaneous optimization over both discrete assignments $\mathbf{c}$ and continuous coordinates $\boldsymbol{\mu}$ is NP-hard. We turn to an alternating iterative heuristic: **Lloyd's algorithm** (commonly referred to as standard K-means).
+
+### Lloyd's Algorithm: Two Alternating Steps
+
+Lloyd's algorithm alternates between optimizing assignments $\mathbf{c}$ and centroids $\boldsymbol{\mu}$:
+
+```
+Initialize k candidate centroids μ_1, ..., μ_k
+Repeat until convergence:
+    Step 1 (Assignment): Fix μ, find optimal assignments c
+    Step 2 (Update): Fix c, find optimal centroids μ
+```
+
+#### Step 1: Cluster Assignment
+
+Holding centroids $\boldsymbol{\mu}_1, \dots, \boldsymbol{\mu}_k$ fixed, minimizing $J$ decouples across individual samples. Each sample $\mathbf{x}^{(i)}$ is assigned to its nearest centroid:
+
+$$
+c^{(i)} = \arg\min_{j \in \{1, \dots, k\}} \lVert \mathbf{x}^{(i)} - \boldsymbol{\mu}_j \rVert^2
+$$
+
+Ties are broken arbitrarily. At this step, inertia is guaranteed non-increasing: $J(\mathbf{c}^{(t+1)}, \boldsymbol{\mu}^{(t)}) \le J(\mathbf{c}^{(t)}, \boldsymbol{\mu}^{(t)})$.
+
+#### Step 2: Centroid Update
+
+Holding assignments $\mathbf{c}$ fixed, we optimize coordinates $\boldsymbol{\mu}_j$ to minimize $J$:
+
+$$
+J(\mathbf{c}, \boldsymbol{\mu}) = \sum_{j=1}^k \sum_{i \in C_j} \lVert \mathbf{x}^{(i)} - \boldsymbol{\mu}_j \rVert^2
+$$
+
+Because clusters partition samples independently, we minimize each cluster sum separately. Differentiating with respect to centroid $\boldsymbol{\mu}_j$:
+
+$$
+\begin{aligned}
+\nabla_{\boldsymbol{\mu}_j} J &= \nabla_{\boldsymbol{\mu}_j} \sum_{i \in C_j} (\mathbf{x}^{(i)} - \boldsymbol{\mu}_j)^\top (\mathbf{x}^{(i)} - \boldsymbol{\mu}_j) \\
+&= \sum_{i \in C_j} -2(\mathbf{x}^{(i)} - \boldsymbol{\mu}_j) \\
+&= -2 \left( \sum_{i \in C_j} \mathbf{x}^{(i)} - |C_j| \boldsymbol{\mu}_j \right)
+\end{aligned}
+$$
+
+Setting the gradient to $\mathbf{0}$:
+
+$$
+\sum_{i \in C_j} \mathbf{x}^{(i)} - |C_j| \boldsymbol{\mu}_j = \mathbf{0} \implies \boldsymbol{\mu}_j = \frac{1}{|C_j|} \sum_{i \in C_j} \mathbf{x}^{(i)}
+$$
+
+The optimal centroid is the **arithmetic mean** (centroid) of all samples currently in that cluster. Inertia is again non-increasing: $J(\mathbf{c}^{(t+1)}, \boldsymbol{\mu}^{(t+1)}) \le J(\mathbf{c}^{(t+1)}, \boldsymbol{\mu}^{(t)})$.
+
+:::note[Convergence of Lloyd's Algorithm]
+Because inertia $J$ decreases monotonically at each half-step, and the finite number of distinct assignments ($k^m$) precludes infinite descent, Lloyd's algorithm **is guaranteed to converge** in a finite number of iterations. Growth halts once assignments cease changing.
+:::
+
+### Initialization and the K-means++ Algorithm
+
+Although guaranteed to converge, Lloyd's algorithm settles at a **local minimum** dictated heavily by initial centroid placement:
+
+- Poor initial seeds (e.g., placing two initial centroids within a single natural cluster) can split one true cluster while merging two separate clusters.
+- Empty clusters ($|C_j| = 0$) can emerge if an initial centroid attracts no samples.
+
+#### Strategy 1: Multiple Random Restarts (`n_init`)
+
+The simplest mitigation is running Lloyd's algorithm across multiple independent random initializations (historically `n_init=10` in scikit-learn), retaining the solution achieving lowest final inertia $J$.
+
+#### Strategy 2: The K-means++ Algorithm
+
+Arthur & Vassilvitskii (2007) proposed **K-means++**, establishing that initial centroids should be seeded as far apart as possible.
+
+K-means++ seeding steps:
+1. Choose the first centroid $\boldsymbol{\mu}_1$ uniformly at random from the dataset.
+2. For each sample $\mathbf{x}^{(i)}$, compute its distance $D(\mathbf{x}^{(i)})$ to the nearest already chosen centroid:
+   $$
+   D(\mathbf{x}^{(i)}) = \min_{j} \lVert \mathbf{x}^{(i)} - \boldsymbol{\mu}_j \rVert
+   $$
+3. Select the next centroid with probability proportional to squared distance:
+   $$
+   P(\mathbf{x}^{(i)}) = \frac{D(\mathbf{x}^{(i)})^2}{\sum_{l=1}^m D(\mathbf{x}^{(l)})^2}
+   $$
+4. Repeat steps 2 and 3 until $k$ centroids are chosen.
+
+Samples remote from established centroids exhibit large $D(\mathbf{x})^2$, drastically boosting their odds of becoming subsequent centroids. This dramatically curbs poor local minima and accelerates convergence. K-means++ is the standard default across modern libraries (`init='k-means++'`).
+
+### Choosing Number of Clusters k: Elbow and Silhouette
+
+In real applications, ground-truth cluster count $k$ is typically unknown. Why not simply select $k$ that minimizes inertia $J$?
+
+Because inertia strictly decreases as $k$ increases. At $k = m$, every sample is its own centroid, achieving $J = 0$ trivially. This extreme lacks practical grouping utility. Two quantitative heuristics guide selection:
+
+#### The Elbow Method
+
+Plot inertia $J$ across $k \in \{1, 2, \dots\}$. As $k$ advances toward the true cluster count, $J$ plunges sharply. Once past the true count, additional centroids merely subdivide natural clusters, causing $J$ to flatten.
+
+The resulting curve exhibits an angle resembling a bent elbow. The location of this "elbow" provides an intuitive trade-off between compactness and model complexity.
+
+#### The Silhouette Score
+
+When the elbow curve is ambiguous, the **Silhouette score** (Rousseeuw, 1987) measures cluster quality directly per sample via intra-cluster cohesion and inter-cluster separation.
+
+For each sample $\mathbf{x}^{(i)} \in C_I$:
+1. Compute $a^{(i)}$: average distance from $\mathbf{x}^{(i)}$ to all other points within its assigned cluster $C_I$ (intra-cluster cohesion; lower is better):
+   $$
+   a^{(i)} = \frac{1}{|C_I| - 1} \sum_{j \in C_I, j \ne i} \lVert \mathbf{x}^{(i)} - \mathbf{x}^{(j)} \rVert
+   $$
+2. Compute $b^{(i)}$: smallest average distance from $\mathbf{x}^{(i)}$ to all points in any other cluster $C_J \ne C_I$ (nearest-cluster separation; higher is better):
+   $$
+   b^{(i)} = \min_{J \ne I} \frac{1}{|C_J|} \sum_{j \in C_J} \lVert \mathbf{x}^{(i)} - \mathbf{x}^{(j)} \rVert
+   $$
+3. The Silhouette coefficient of sample $i$ is:
+   $$
+   s^{(i)} = \frac{b^{(i)} - a^{(i)}}{\max(a^{(i)}, b^{(i)})} \in [-1, 1]
+   $$
+
+Interpretation of $s^{(i)}$:
+- $s^{(i)} \approx 1$: $a^{(i)} \ll b^{(i)}$; the sample is deeply embedded within its cluster, far from neighboring clusters (ideal).
+- $s^{(i)} \approx 0$: $a^{(i)} \approx b^{(i)}$; the sample sits right on the boundary between two clusters.
+- $s^{(i)} < 0$: $a^{(i)} > b^{(i)}$; the sample is closer to an adjacent cluster than its assigned cluster (misclustered).
+
+The mean Silhouette score across all samples $\bar{s} = \frac{1}{m} \sum_{i=1}^m s^{(i)}$ peaks at the optimal cluster count $k$.
+
+### Limitations
+
+- **Requires predetermining $k$.** K-means cannot automatically deduce intrinsic cluster counts.
+- **Assumes convex, isotropic clusters.** Because it minimizes Euclidean distance, K-means partitions space into linear Voronoi polyhedra. It fails when clusters have non-convex geometries (such as interlocking crescents or concentric circles) or drastically disparate densities.
+- **Sensitive to outliers.** Squaring Euclidean distances gives distant anomalies outsized leverage, pulling centroids away from dense modes.
+- **Demands feature scaling.** If one feature has vastly larger numerical magnitude than others, Euclidean distance is dominated by that single dimension.
+
+## Visualization
+
+The table below traces Lloyd's algorithm across our 36-sample dataset with 3 initial centroids seeded at samples 2, 20, and 1:
+
+| Iteration $t$ | Phase | Inertia $J$ | Dynamics Summary |
+|---:|---|---:|---|
+| 0 | Init | — | Samples 2, 20, and 1 selected as initial seeds $\boldsymbol{\mu}_1, \boldsymbol{\mu}_2, \boldsymbol{\mu}_3$ |
+| 1 | Assign | 406.70 | Samples assign to nearest candidate centroid |
+| 1 | Update | 241.67 | Centroids shift to means of assigned points, dropping $J$ |
+| 2 | Assign | 230.88 | Boundary samples switch to closer updated centers |
+| 2 | Update | 200.73 | Centroids migrate toward natural point cloud centers |
+| 3 | Assign | 139.13 | Reassignments induce structural partition shift |
+| 3 | Update | 83.62 | Inertia drops sharply as 3 distinct clusters crystallize |
+| 4 | Assign | 58.49 | Final boundary points settle |
+| 4 | Update | 52.12 | Centroids stabilize at $(1.92, 2.19)$, $(8.20, 3.09)$, $(5.41, 7.90)$ |
+| 5 | Assign | 52.12 | Zero reassignments occur $\to$ Convergence reached |
+
+Key takeaways:
+1. Inertia $J$ declines monotonically at each step: from 406.70 to 241.67, 230.88, 200.73, 139.13, 83.62, 58.49, halting at 52.12.
+2. At iteration 5, assignments are identical to iteration 4, confirming convergence after 4 updates. Final cluster sizes partition evenly: 12, 12, 12.
+
+{/* VIZ: KMeansViz
+    Concept: Lloyd's algorithm converges in few iterations, migrating centroids to cluster centers and monotonically minimizing J.
+    Interactivity: "Next Step" toggles assignment and update phases with Voronoi region coloring; slider k sweeps 1 to 6; "Reinitialize" tests random seeds or K-means++.
+    Dataset: make_blobs(n_samples=36, centers=[[2, 2], [8, 3], [5, 8]], cluster_std=1.0, random_state=10). */}
+
+## Code Examples
+
+The three cells execute independently.
+
+The first cell implements Lloyd's algorithm from scratch with NumPy: computing pairwise distance matrices via array broadcasting, updating centroids via conditional cluster means, and terminating when assignments freeze.
+
+<PythonRunner code={lloydCode} title="Lloyd's algorithm step-by-step with NumPy" />
+
+The console output matches our theoretical trace: converging in 4 iterations at $J = 52.12$. Centroids settle at $(1.92, 2.19)$, $(8.20, 3.09)$, and $(5.41, 7.90)$—closely reproducing true data-generation centers $(2, 2)$, $(8, 3)$, and $(5, 8)$.
+
+The second cell uses scikit-learn's `KMeans` to illustrate local minimum vulnerabilities: comparing 50 random initializations (`init="random"`) against `init="k-means++"`.
+
+<PythonRunner code={initCode} title="Random initialization, K-means++, and local minimum traps" />
+
+Under single random restarts (`init="random", n_init=1`), 3 of 50 trials (6%) become trapped in suboptimal local minima with $J \approx 230.40$. In contrast, K-means++ achieves the global minimum $52.12$ across all 50/50 trials without trapping.
+
+The third cell sweeps $k$ from 1 to 6 using scikit-learn, generating Elbow and Silhouette diagnostic curves.
+
+<PythonRunner
+  code={chooseKCode}
+  title="Selecting k via Elbow and Silhouette methods"
+  figureAlt={['Two side-by-side diagnostic plots evaluating cluster count k from 1 to 6. Left: Elbow plot shows inertia J dropping steeply from 516.00 at k=1 to 237.64 at k=2 and 52.12 at k=3, forming a sharp elbow at k=3, before leveling off gradually from 40.89 to 29.83 through k=6. Right: Silhouette plot shows average silhouette scores for k from 2 to 6, reaching a sharp peak at k=3 with value 0.728, compared to 0.534 at k=2 and tapering from 0.619 down to 0.447 as k increases to 6.']}
+/>
+
+Both diagnostics cleanly identify $k = 3$ as optimal:
+1. The Elbow plot displays an inflection point at $k = 3$, after which reductions in $J$ plateau.
+2. The Silhouette curve achieves an isolated maximum at $k = 3$ with score $0.728$.
+
+## Common Pitfalls
+
+:::caution[Omitting Feature Standardization Before Clustering]
+Because K-means relies on Euclidean distance $\sum (x_j - \mu_j)^2$, features with large numerical magnitudes dominate cluster assignments. Always scale features to zero mean and unit variance using `StandardScaler` prior to clustering.
+:::
+
+:::caution[Expecting K-means to Segment Non-Spherical Clusters]
+Voronoi partitions form linear decision boundaries. On datasets with non-convex geometries (like concentric rings or interlocking crescents), K-means cuts across natural manifolds. Use density-based algorithms such as DBSCAN or Spectral Clustering for arbitrary shapes.
+:::
+
+:::caution[Selecting k Solely by Minimizing Inertia]
+Inertia $J$ decreases monotonically as $k$ increases, reaching $J = 0$ when $k = m$. Clustering aims to discover compact latent structures, not assign custom singletons. Always evaluate candidate counts via the Elbow inflection point or Silhouette peak.
+:::
+
+## Quick Check
+
+<Quiz />
+
+## Summary and Further Reading
+
+**Key Takeaways:**
+
+- K-means is a foundational unsupervised algorithm partitioning $m$ unlabeled samples into $k$ clusters by minimizing inertia $J = \sum_{i=1}^m \lVert \mathbf{x}^{(i)} - \boldsymbol{\mu}_{c^{(i)}} \rVert^2$.
+- Lloyd's algorithm alternates between assigning points to closest centroids and updating centroids to cluster arithmetic means, guaranteed to reach local convergence.
+- K-means++ initialization disperses initial seeds using $D(\mathbf{x})^2$ probability weighting, preventing poor local minima.
+- Optimal cluster count $k$ is identified via Elbow inflection points and maximum Silhouette scores. Always scale features beforehand.
+
+**Further Reading:**
+
+- Lloyd, S. (1982). [*Least squares quantization in PCM*](https://ieeexplore.ieee.org/document/1056489) (PDF). IEEE Transactions on Information Theory, 28(2), 129–137. Original paper introducing K-means iterative clustering.
+- Arthur, D., & Vassilvitskii, S. (2007). [*k-means++: The advantages of careful seeding*](http://ilpubs.stanford.edu:8090/778/1/2006-13.pdf) (PDF). Foundational paper on K-means++ initialization.
+- Rousseeuw, P. J. (1987). [*Silhouettes: A graphical aid to the interpretation and validation of cluster analysis*](https://doi.org/10.1016/0377-0427(87)90125-7). Introduces the Silhouette cluster validation metric.
+- Vũ Hữu Tiệp (2017). [*Bài 4: K-means Clustering*](https://machinelearningcoban.com/2017/01/01/kmeans/). Vietnamese guide detailing K-means step-by-step with graphics.
+- scikit-learn documentation. [*K-means*](https://scikit-learn.org/stable/modules/clustering.html#k-means). Official documentation for `sklearn.cluster.KMeans`.
+
+<LessonProgress />
