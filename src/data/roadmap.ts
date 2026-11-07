@@ -248,7 +248,7 @@ export const LESSONS: readonly Lesson[] = [
     id: 'ml/classification-metrics',
     title: { vi: 'Đánh giá mô hình: Accuracy, Precision, Recall, F1', en: 'Model Evaluation: Accuracy, Precision, Recall, F1' },
     prerequisites: ['ml/logistic-regression'],
-    status: { vi: 'published', en: 'planned' },
+    status: { vi: 'published', en: 'published' },
   },
   {
     id: 'ml/softmax-regression',
