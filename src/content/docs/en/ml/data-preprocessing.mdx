@@ -1,0 +1,311 @@
+---
+title: 'Data Preprocessing, Augmentation, and Imbalanced Data'
+description: Real-world tables have missing values, categorical columns, disparate scales, and rare classes. Imputation, one-hot encoding, scaling, leakage prevention via Pipelines, augmentation, and imbalance handling.
+quiz:
+  - question: 'A dataset contains 1,000 transactions, with 20 being fraudulent. You replicate each fraudulent transaction 10 times before performing a train/test split. Test recall reaches 0.98. Why is this metric suspect?'
+    options:
+      - 'Because replication causes model underfitting'
+      - 'Because duplicate copies of the same transaction land in both train and test splits, allowing the model to simply memorize exact records'
+      - 'Because recall is fundamentally incompatible with imbalanced datasets'
+      - 'It is not suspicious: replicating samples before or after splitting is mathematically equivalent'
+    answer: 1
+    explanation: 'Each fraudulent transaction has 10 identical duplicates; random splitting virtually guarantees copies land across both training and test sets. The model simply recognizes previously seen samples, inflating test recall artificially. This is identical-record data leakage. Proper methodology requires splitting first, then resampling only within the training fold.'
+  - question: 'You convert a floor area column from m² to dm² (multiplying by 100) without standardization, leaving other features unchanged. Which model''s predictions are almost certain to change?'
+    options:
+      - 'A decision tree'
+      - 'Unregularized linear regression (ordinary least squares)'
+      - 'KNN using Euclidean distance'
+      - 'None of the above'
+    answer: 2
+    explanation: 'Euclidean distance sums squared coordinate differences. Multiplying area by 100 multiplies its squared contribution by 10,000, causing area to completely dominate distance metrics and altering nearest neighbor sets. Decision trees evaluate monotonic threshold splits ($x_j \le t$), remaining invariant. In unregularized least squares, the learned weight simply scales down by 100, leaving predictions unchanged.'
+  - question: 'A "car color" feature has values red, green, and white. You encode red = 0, green = 1, white = 2 and fit linear regression. What implicit assumption is imposed?'
+    options:
+      - 'The three colors are equally spaced along a line: the white effect is twice the green effect, and green sits intermediate between red and white'
+      - 'No assumption is made, because numbers are arbitrary labels'
+      - 'The three colors exert completely independent effects'
+      - 'Car color does not influence price'
+    answer: 0
+    explanation: 'A linear model adds $w \cdot \text{code}$, evaluating to $0$ for red, $w$ for green, and $2w$ for white, forcing a rigid arithmetic progression. Linear models cannot interpret codes as categorical identifiers. One-hot encoding assigns an independent weight per category, providing the true independence described in the third option.'
+  - question: 'A training set contains 1,000 samples: 20 in class 1 and 980 in class 0. Under `class_weight="balanced"`, how many times heavier is the weight of a class-1 sample compared to a class-0 sample?'
+    options: ['$2$', '$25$', '$50$', '$49$']
+    answer: 3
+    explanation: 'Class weight evaluates to $s_c = m / (K m_c)$: class 1 receives $1000 / (2 \cdot 20) = 25$, while class 0 receives $1000 / (2 \cdot 980) \approx 0.51$. Their ratio is $980 / 20 = 49$, matching the sample ratio so each class contributes equal total loss weight.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import preprocessCode from '@code/ml/data-preprocessing/preprocess.en.py?raw';
+import leakageCode from '@code/ml/data-preprocessing/leakage.en.py?raw';
+import imbalancedCode from '@code/ml/data-preprocessing/imbalanced.en.py?raw';
+
+## Objectives
+
+After this lesson, you will be able to:
+
+- Handle the three most common tabular data challenges: missing values, categorical variables, and unscaled features using `SimpleImputer`, `OneHotEncoder`, and `StandardScaler` inside a `ColumnTransformer`.
+- Understand why all preprocessing steps must be learned **strictly from the training set**, identifying data leakage when transformations are fitted globally.
+- Understand what data augmentation is and when it is applicable.
+- Address imbalanced datasets properly: evaluating with precision, recall, and F1, splitting with `stratify`, and choosing between class weighting, resampling, and decision threshold adjustment.
+
+## Prerequisites
+
+{/* List pulled dynamically from prerequisites in roadmap.ts */}
+
+<Prerequisites />
+
+:::tip[Quick Reminder]
+A pandas **DataFrame** is a tabular data structure with named columns and typed series. Missing values are represented as `NaN` (not a number). `df.isna().sum()` tallies missing entries per column, and `df["area"]` selects an individual column.
+:::
+
+## Intuition
+
+### Real-World Data Is Messy
+
+Suppose you want to predict apartment rental prices. Unlike the tidy synthetic table in [Linear Regression](/en/ml/linear-regression/), real survey data from 8 applicants appears as follows:
+
+| Apartment | Area (m²) | Floor | District | Balcony |
+|---:|---:|---:|---|---|
+| 1 | 30 | 5 | Cau Giay | yes |
+| 2 | 45 | *missing* | Ba Dinh | no |
+| 3 | *missing* | 12 | Hoang Mai | yes |
+| 4 | 60 | 3 | Cau Giay | *missing* |
+| 5 | 52 | 8 | Hoang Mai | no |
+| 6 | 38 | 2 | Ba Dinh | yes |
+| 7 | 75 | 15 | *missing* | yes |
+| 8 | 41 | 6 | Cau Giay | no |
+
+This table exhibits three critical obstacles for machine learning models:
+
+- **Missing values.** A linear model computes $\mathbf{w}^\top\mathbf{x} + b$. A missing entry in $\mathbf{x}$ makes the dot product undefined, causing algorithms to crash.
+- **Text columns.** Words like "Cau Giay" cannot be multiplied directly by numerical weights. We must encode text into numbers without inventing artificial mathematical relationships.
+- **Disparate scales.** Area spans tens of square meters, floors span single digits, and binary indicators span 0 and 1. As shown in [Gradient Descent](/en/ml/gradient-descent/), unscaled features severely hinder optimization.
+
+### Rare Classes and Limited Data
+
+Consider another problem: fraud detection. Out of every 100 transactions, only 5 are fraudulent. A trivial baseline predicting "legitimate" every single time achieves 95% accuracy. Yet as shown in [Model Evaluation: Accuracy, Precision, Recall, F1](/en/ml/classification-metrics/), this model is completely useless because it catches zero fraudulent transactions.
+
+Conversely, when training data is scarce (e.g., a few hundred medical images), data augmentation creates valid synthetic variations: horizontally flipping a cat photo still yields a cat photo.
+
+The core challenge of this lesson is: **transform raw, messy tabular data into model-ready features without leaking information from test sets into the learning pipeline.**
+
+## Theory
+
+### Missing Values
+
+**Dropping data.** The quickest reaction is dropping rows with missing values (`df.dropna()`). In our 8-row table, missing entries span four separate rows; dropping them discards half the dataset. Dropping an entire column is only defensible when it is overwhelmingly empty. Moreover, dropping rows introduces selection bias: if budget tenants frequently omit area details, the remaining data no longer represents the target population.
+
+**Imputation.** Replace missing entries with aggregate statistics:
+
+- **Mean** or **median** for numerical features. The 7 observed apartment areas have a mean of $341 / 7 \approx 48.71$ and median of $45$. The median is robust to outliers: replacing the 75 m² apartment with a 500 m² penthouse skews the mean to ~109, whereas the median remains 45.
+- **Mode** (most frequent value) for categorical features. "Cau Giay" appears 3 times, making it the mode for Apartment 7.
+
+**Missingness indicators.** The fact that an entry is missing can itself convey predictive signal: a landlord might intentionally withhold area if an apartment is unusually cramped. Practitioners frequently append a binary indicator column flagging whether an entry was imputed (`MissingIndicator`).
+
+### Categorical Variables
+
+The naive approach is integer assignment: Ba Dinh = 0, Cau Giay = 1, Hoang Mai = 2 (**ordinal encoding**). Under a linear model, the district's contribution to price evaluates to $w \cdot \text{code}$:
+
+$$
+\text{Ba Dinh: } 0, \qquad \text{Cau Giay: } w, \qquad \text{Hoang Mai: } 2w
+$$
+
+This forces the model to assume the three districts lie along an equally spaced spectrum, with Cau Giay mathematically situated halfway between Ba Dinh and Hoang Mai. Changing the arbitrary numbering order alters model predictions.
+
+**One-hot encoding** resolves this by replacing one categorical column with $K$ binary indicator columns:
+
+| Apartment | District | District Ba Dinh | District Cau Giay | District Hoang Mai |
+|---:|---|---:|---:|---:|
+| 1 | Cau Giay | 0 | 1 | 0 |
+| 2 | Ba Dinh | 1 | 0 | 0 |
+| 3 | Hoang Mai | 0 | 0 | 1 |
+
+Each district receives its own independent weight $w_{\text{BD}}$, $w_{\text{CG}}$, and $w_{\text{HM}}$. The trade-off is dimensional expansion: a categorical feature with 500 unique levels expands into 500 columns.
+
+Ordinal encoding is only appropriate when categories possess a **natural ranking** (e.g., furnishing levels: "none" < "basic" < "full"). Tree-based models ([Decision Trees and Random Forests](/en/ml/decision-tree-random-forest/)) tolerate ordinal encodings better because they evaluate threshold splits.
+
+In production, test sets may encounter unseen categories. Configuring `OneHotEncoder(handle_unknown="ignore")` sets all binary columns to 0 for unknown levels rather than throwing an exception.
+
+### Feature Scaling
+
+Two standard scaling transformations for feature $j$:
+
+$$
+\text{z-score: } z_j = \frac{x_j - \mu_j}{\sigma_j}
+\qquad\qquad
+\text{min-max: } \tilde{x}_j = \frac{x_j - \min_j}{\max_j - \min_j}
+$$
+
+**Standardization** (`StandardScaler`) subtracts mean $\mu_j$ and divides by standard deviation $\sigma_j$, yielding zero mean and unit variance. **Min-max scaling** (`MinMaxScaler`) bounds values to $[0, 1]$. Min-max is sensitive to outliers: an extreme 500 m² value compresses all typical apartments into a narrow cluster near 0.
+
+Which models **require** feature scaling?
+
+- **KNN** ([K-Nearest Neighbors](/en/ml/k-nearest-neighbors/)): Euclidean distance sums squared feature differences, allowing unscaled large features to completely dictate neighborhood proximity.
+- **Gradient descent**: Disparate feature scales create elongated contour valleys, causing slow convergence or divergence.
+- **Regularized models** ([Ridge, Lasso, Elastic Net](/en/ml/regularization/)): Penalty terms treat all $w_j$ equally, requiring weights to be invariant to measurement units.
+
+Models that **do not require** scaling: decision trees and tree ensembles, which split features independently based on ordinal rank.
+
+**Outliers.** Differentiate between data entry errors (4,500 m² due to an extra zero) and valid extreme instances (a luxury penthouse). Errors should be corrected or removed; valid extremes should be retained using robust scalers (`RobustScaler`, scaling via median and interquartile range).
+
+### Data Leakage During Preprocessing
+
+Every preprocessing step **learns parameters** from data: medians for imputation, category dictionaries for one-hot encodings, and $(\mu_j, \sigma_j)$ for standardization. In accordance with [Introduction to Machine Learning](/en/ml/ml-overview/), these parameters must be learned **strictly from the training split**:
+
+- On training data: `fit` (learn parameters) followed by `transform`, combined via `fit_transform`.
+- On test data and new queries: **strictly** `transform` using previously learned training parameters.
+
+Fitting scalers across the full dataset prior to splitting exposes $\mu_j$ to test distributions. While scaling leakage is subtle, leakage during **feature selection** (ranking features by target correlation) is disastrous: the second code example demonstrates a model achieving 85% accuracy on pure random noise.
+
+In cross-validation, every fold has its own training split. Scikit-learn's **`Pipeline`** packages transformers and estimators into a unified object, ensuring preprocessing parameters are fitted strictly on each fold's training subset. **`ColumnTransformer`** applies tailored pipelines to distinct column types (imputing and scaling numericals, while imputing and one-hot encoding categoricals) before concatenating them.
+
+:::note[Key Takeaway]
+Any transformation learning from data must be fitted strictly on the training set. Encapsulate preprocessing and models within a `Pipeline` to ensure correct fold isolation during cross-validation.
+:::
+
+### Data Augmentation
+
+**Data augmentation** creates synthetic training instances by applying transformations that **preserve the ground-truth label**. This teaches the model invariance to irrelevant variations:
+
+- **Images**: Horizontal flips, small rotations, random crops, brightness adjustments. Transformations must respect domain semantics: flipping a cat image preserves cat identity, but flipping a digit 6 turns it into a 9.
+- **Tabular data**: Adding subtle Gaussian noise $x_j + \varepsilon$ with $\varepsilon \ll \sigma_j$. Tabular augmentation is less common because label-preserving invariant transformations are harder to define.
+- **Text**: Synonym replacement or back-translation through intermediate languages.
+
+Augment **only the training set**, strictly after splitting. Placing augmented copies of a training sample into the test set causes identical-record evaluation leakage.
+
+### Imbalanced Data
+
+**Evaluation.** Because majority classes distort accuracy, evaluate performance via precision, recall, and F1 on the minority class ([Model Evaluation](/en/ml/classification-metrics/)). When partitioning data, specify `stratify=y` in `train_test_split` to maintain identical class ratios across splits.
+
+Three principal remedies exist for severe class imbalance:
+
+**1. Class weighting.** Scale individual sample losses inversely by class prevalence. Let $\ell^{(i)}$ be sample loss and $s_c$ be class weight:
+
+$$
+\mathcal{L} = \frac{1}{m}\sum_{i=1}^{m} s_{y^{(i)}}\,\ell^{(i)},
+\qquad
+s_c = \frac{m}{K\,m_c}
+$$
+
+where $K$ is class count and $m_c$ is sample count of class $c$. This corresponds to `class_weight="balanced"`. Multiplying $s_c$ by $m_c$ yields $m / K$ for all classes, equalizing cumulative loss contributions. In our third code example ($m = 1400, m_1 = 74, m_0 = 1326$):
+
+$$
+s_1 = \frac{1400}{2 \cdot 74} \approx 9.46,
+\qquad
+s_0 = \frac{1400}{2 \cdot 1326} \approx 0.53
+$$
+
+Each minority transaction is weighted ~18 times more heavily than a majority transaction ($1326 / 74$).
+
+**2. Training resampling.**
+
+- **Random oversampling**: Duplicating minority instances with replacement until balanced. Replicating a sample $k$ times scales its loss contribution by $k$, making random oversampling mathematically similar to class weighting while consuming more memory.
+- **Undersampling**: Discarding majority instances. Computationally efficient on massive datasets, but discards genuine information.
+- **SMOTE** (Synthetic Minority Over-sampling Technique; Chawla et al., 2002): Generates synthetic minority instances by interpolating between a minority sample $\mathbf{x}^{(i)}$ and its minority neighbor $\mathbf{x}^{(z)}$:
+
+$$
+\mathbf{x}_{\text{new}} = \mathbf{x}^{(i)} + u\left(\mathbf{x}^{(z)} - \mathbf{x}^{(i)}\right), \qquad u \sim \mathcal{U}[0, 1]
+$$
+
+**3. Threshold adjustment.** Retain standard model training and lower decision threshold $t$: predicting the minority class whenever $p \ge t$ with $t < 0.5$. This boosts recall while decreasing precision, tuned on the validation set.
+
+All resampling and augmentation techniques must be applied **strictly to training data**. Test sets must preserve original class distributions.
+
+### Limitations
+
+- **No universal recipe.** Median vs. mean imputation, outlier removal vs. retention: optimal strategies depend on data properties and model families. Compare pipelines using cross-validation.
+- **Imbalance techniques cannot manufacture new information.** Class weighting and resampling primarily rebalance the precision–recall trade-off; substantial improvements demand acquiring more minority samples or higher-fidelity features.
+- **Augmentation requires domain expertise.** Unchecked transformations risk corrupting ground-truth labels.
+
+## Visualization
+
+The reference guide below summarizes standard preprocessing steps, their learned training statistics, and associated scikit-learn classes:
+
+| Pipeline Step | Learned Training Statistics | Scikit-learn Class | Relevant Models |
+|---|---|---|---|
+| Numerical imputation | Mean or median | `SimpleImputer(strategy="median")` | All models lacking native NaN support |
+| Missingness indicator | Identified missing columns | `MissingIndicator` | When missingness carries predictive signal |
+| Categorical imputation | Most frequent level (mode) | `SimpleImputer(strategy="most_frequent")` | All models |
+| One-hot encoding | Set of unique categories | `OneHotEncoder(handle_unknown="ignore")` | Linear models, KNN, neural networks |
+| Scaling | Mean $\mu_j$, std $\sigma_j$ (or min, max) | `StandardScaler`, `MinMaxScaler` | KNN, gradient descent, regularized models |
+| Feature selection | Predictive features | `SelectKBest` | High-dimensional settings |
+| Class weighting | Class counts $m_c$ | `class_weight="balanced"` | Imbalanced classification |
+| Resampling / Augmentation | Target sample subsets | Custom scripts / `imblearn` | Imbalanced datasets, small sample regimes |
+
+## Code Examples
+
+The three cells below run independently.
+
+### A ColumnTransformer for the 8 Apartments
+
+The first cell processes the 8-apartment survey table: imputing numericals with the median and standardizing them, generating missingness indicators, and imputing categoricals with the mode followed by one-hot encoding.
+
+<PythonRunner code={preprocessCode} title="Imputation, one-hot encoding, and scaling" />
+
+The output transforms the raw table into a clean, 9-column numerical matrix with zero missing values:
+
+- Apartment 3 (index 2) had a missing area, imputed with the median 45 m², yielding normalized `area` $= -0.25$ identical to Apartment 2. The appended indicator `miss_area` $= 1$ preserves the distinction.
+- Apartment 7 had a missing district, imputed with mode "Cau Giay". Apartment 4 had a missing balcony, imputed with "yes".
+- Learned scaling parameters: $\mu = 48.25$ m² and $7.12$ floors, with $\sigma = 13.13$ and $4.14$.
+
+### Data Leakage: Feature Selection Before Splitting
+
+The second cell evaluates a dataset containing **zero signal**: 100 samples with 5,000 random Gaussian features and coin-flip binary labels. An honest model scores ~50% accuracy. The code compares selecting the top 20 features before versus inside a cross-validated pipeline.
+
+<PythonRunner code={leakageCode} title="Feature selection outside vs. inside a Pipeline" />
+
+Selecting features across the full dataset prior to cross-validation yields 85.0% accuracy on pure random noise. Among 5,000 random columns, spurious correlations inevitably align with target labels; pre-selecting them leaks validation targets. Encapsulating selection within a `Pipeline` restricts feature ranking strictly to each fold's training set, returning accuracy to 48.0% (random baseline).
+
+### Imbalance: Comparing Four Strategies on the Same Data
+
+The third cell generates 2,000 samples with 5% positive instances, splits 70/30 with `stratify=y`, and evaluates four logistic regression configurations: default, lowered threshold (0.2), `class_weight="balanced"`, and random oversampling.
+
+<PythonRunner code={imbalancedCode} title="Class weighting, oversampling, and threshold tuning" />
+
+The training set contains 74 positive samples out of 1,400; the test set contains 31 out of 600. A majority baseline achieves $569 / 600 \approx 0.948$ accuracy.
+
+- **Default model**: Accuracy is 0.968, but recall is only 0.516 (missing nearly half the positive cases: 16 of 31 caught).
+- **`class_weight="balanced"`**: Recall surges to 0.903 (28 of 31 caught), while precision drops from 0.800 to 0.509. Overall F1 improves modestly from 0.627 to 0.651.
+- **Random oversampling**: Produces results identical to `class_weight="balanced"`, confirming their mathematical equivalence.
+- **Lowered threshold ($t = 0.2$)**: Achieves the highest F1 score (0.788) with recall 0.839 and precision 0.743. In production, thresholds must be tuned on validation splits rather than test data.
+
+## Common Pitfalls
+
+:::caution[Fitting Preprocessors Across the Full Dataset]
+Calling `StandardScaler().fit_transform(X)` before `train_test_split` leaks test distribution statistics into training parameters. Calling `fit_transform` on the test split is even worse, scaling test data by different parameters than the training set. Always split data first, then bind transformers and estimators within a `Pipeline`.
+:::
+
+:::caution[Resampling or Augmenting Before Splitting]
+Replicating minority samples before splitting places identical copies across both training and test sets, artificially inflating test metrics. Similarly, applying SMOTE globally interpolates synthetic training instances from test coordinates. Always split data first with `stratify=y`, applying resampling strictly to the training fold.
+:::
+
+:::caution[Imposing Ordinal Encodings on Nominal Features]
+Assigning arbitrary integers (e.g., 0, 1, 2) to nominal categories forces linear models to assume artificial metric spacing. Use `OneHotEncoder` for nominal categories, reserving `OrdinalEncoder` strictly for inherently ranked variables.
+:::
+
+## Quick Check
+
+{/* Questions defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and Further Reading
+
+**Key Takeaways:**
+
+- Missing values: avoid row deletion; impute with median (numerical) or mode (categorical), appending missingness indicators when omissions carry signal. Encode nominal categories via one-hot encoding.
+- Scale features via z-score $z_j = (x_j - \mu_j)/\sigma_j$ or min-max for KNN, gradient descent, and regularized models; decision trees require no scaling.
+- All transformations learning from data must fit strictly on training splits. `Pipeline` and `ColumnTransformer` enforce fold isolation during cross-validation.
+- Imbalanced datasets: evaluate via precision, recall, and F1; split with `stratify=y`. Address imbalances via class weighting $s_c = m / (K m_c)$, resampling, or threshold adjustment on the training set.
+
+**Further Reading:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Bài 11: Giới thiệu về Feature Engineering](https://machinelearningcoban.com/general/2017/02/06/featureengineering/). Vietnamese guide to min-max scaling, standardization, and normalization.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Common pitfalls and recommended practices](https://scikit-learn.org/1.8/common_pitfalls.html). Comprehensive breakdown of data leakage and pipeline best practices.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Preprocessing data](https://scikit-learn.org/1.8/modules/preprocessing.html) and [Compose](https://scikit-learn.org/1.8/modules/compose.html). API documentation for `StandardScaler`, `OneHotEncoder`, `SimpleImputer`, and `ColumnTransformer`.
+- Chawla, N. V. et al. (2002). [*SMOTE: Synthetic Minority Over-sampling Technique*](https://doi.org/10.1613/jair.953). *Journal of Artificial Intelligence Research* 16, 321–357. Original SMOTE paper.
+- He, H., & Garcia, E. A. (2009). [*Learning from Imbalanced Data*](https://doi.org/10.1109/TKDE.2008.239). *IEEE Transactions on Knowledge and Data Engineering* 21(9), 1263–1284. Comprehensive survey on imbalanced classification.
+- Kaufman, S. et al. (2012). [*Leakage in Data Mining: Formulation, Detection, and Avoidance*](https://doi.org/10.1145/2382577.2382579). *ACM Transactions on Knowledge Discovery from Data* 6(4), 1–21. Detailed taxonomy of data leakage modes.
+
+<LessonProgress />

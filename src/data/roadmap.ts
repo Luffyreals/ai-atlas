@@ -267,7 +267,7 @@ export const LESSONS: readonly Lesson[] = [
     title: { vi: 'Xử lý dữ liệu, tăng cường dữ liệu, dữ liệu mất cân bằng', en: 'Data Preprocessing, Augmentation, and Imbalanced Data' },
     shortTitle: { vi: 'Xử lý dữ liệu', en: 'Data Preprocessing' },
     prerequisites: ['ml/classification-metrics', 'python/numpy-pandas'],
-    status: { vi: 'published', en: 'planned' },
+    status: { vi: 'published', en: 'published' },
   },
   {
     id: 'ml/end-to-end-project',
