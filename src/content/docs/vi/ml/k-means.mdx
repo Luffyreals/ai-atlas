@@ -1,0 +1,336 @@
+---
+title: K-means
+description: Phân cụm dữ liệu không nhãn bằng thuật toán Lloyd. Hàm mục tiêu quán tính, hai bước gán và cập nhật, khởi tạo K-means++, phương pháp Elbow và Silhouette.
+quiz:
+  - question: 'Bạn chạy K-means trên cùng một tập dữ liệu với $k = 3$ và $k = 4$. So sánh hàm mục tiêu quán tính (inertia) $J$ giữa hai mô hình?'
+    options:
+      - 'Mô hình $k = 4$ luôn có $J$ nhỏ hơn hoặc bằng mô hình $k = 3$'
+      - 'Mô hình $k = 4$ luôn có $J$ lớn hơn vì có thêm một cụm'
+      - 'Mô hình $k = 4$ chắc chắn đạt $J = 0$'
+      - 'Không so sánh được vì số cụm khác nhau'
+    answer: 0
+    explanation: 'Khi tăng số cụm $k$, mỗi điểm dữ liệu có thêm lựa chọn tâm gần hơn hoặc giữ nguyên tâm cũ, nên khoảng cách tới tâm gần nhất chỉ có thể giảm hoặc không đổi. Do đó, hàm mục tiêu quán tính $J$ luôn là hàm giảm đơn điệu theo $k$. Khi $k = m$ (mỗi điểm là một tâm), $J$ mới bằng 0.'
+  - question: 'Trong bước cập nhật (update step) của thuật toán Lloyd, vì sao tâm cụm mới $\boldsymbol{\mu}_j$ luôn được tính bằng trung bình cộng các điểm trong cụm?'
+    options:
+      - 'Vì trung bình cộng làm triệt tiêu đạo hàm của tổng bình phương khoảng cách Euclid'
+      - 'Vì trung bình cộng luôn trùng với một điểm dữ liệu có thật trong cụm'
+      - 'Vì trung bình cộng ít bị ảnh hưởng bởi điểm ngoại lai hơn trung vị'
+      - 'Vì thuật toán bắt buộc mọi cụm phải có số điểm bằng nhau'
+    answer: 0
+    explanation: 'Hàm mục tiêu tính theo bình phương khoảng cách Euclid $\sum \lVert \mathbf{x}^{(i)} - \boldsymbol{\mu}_j \rVert^2$. Đạo hàm riêng theo $\boldsymbol{\mu}_j$ cho $-2 \sum (\mathbf{x}^{(i)} - \boldsymbol{\mu}_j) = \mathbf{0}$, giải ra đúng nghiệm $\boldsymbol{\mu}_j = \frac{1}{|C_j|} \sum \mathbf{x}^{(i)}$. Nếu dùng khoảng cách Manhattan ($L_1$), điểm tối ưu sẽ là trung vị (median) thay vì trung bình.'
+  - question: 'Thuật toán khởi tạo K-means++ chọn tâm cụm tiếp theo như thế nào?'
+    options:
+      - 'Ưu tiên chọn các điểm ở xa các tâm đã chọn với xác suất tỉ lệ với bình phương khoảng cách $D(\mathbf{x})^2$'
+      - 'Chọn điểm có giá trị đặc trưng lớn nhất trong toàn bộ tập dữ liệu'
+      - 'Rút ngẫu nhiên đều các điểm dữ liệu với xác suất như nhau'
+      - 'Tính trọng tâm của toàn bộ tập dữ liệu rồi dịch chuyển ngẫu nhiên'
+    answer: 0
+    explanation: 'K-means++ tính khoảng cách $D(\mathbf{x})$ từ mỗi điểm tới tâm gần nó nhất đã có, rồi chọn tâm tiếp theo với xác suất tỉ lệ với $D(\mathbf{x})^2$. Điểm càng xa các tâm hiện tại càng có cơ hội cao được chọn làm tâm mới, giúp các tâm khởi tạo phân bố đều khắp dữ liệu và tránh bị dồn cụm.'
+  - question: 'Một điểm dữ liệu có hệ số Silhouette $s \approx -0.6$. Con số này phản ánh điều gì?'
+    options:
+      - 'Điểm này nhiều khả năng bị gán sai cụm, vì nó gần các điểm thuộc cụm lân cận hơn các điểm cùng cụm'
+      - 'Cụm chứa điểm này có mật độ rất cao và nằm tách biệt rõ rệt'
+      - 'Điểm này nằm ngay trên ranh giới phân chia giữa hai cụm'
+      - 'Thuật toán K-means đã hội tụ về nghiệm tối ưu toàn cục'
+    answer: 0
+    explanation: 'Hệ số Silhouette $s = (b - a) / \max(a, b)$ với $a$ là khoảng cách trung bình nội cụm và $b$ là khoảng cách trung bình tới cụm lân cận gần nhất. Khi $s < 0$ (ở đây $s \approx -0.6$), ta có $a > b$, nghĩa là điểm này xa các bạn cùng cụm hơn nhiều so với các điểm ở cụm hàng xóm, báo hiệu việc gán cụm không hợp lý.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import lloydCode from '@code/ml/k-means/lloyd.vi.py?raw';
+import initCode from '@code/ml/k-means/init.vi.py?raw';
+import chooseKCode from '@code/ml/k-means/choose-k.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu bản chất của học không giám sát (unsupervised learning) và bài toán phân cụm (clustering).
+- Nắm vững hàm mục tiêu quán tính (inertia) $J$ và thuật toán Lloyd với hai pha luân phiên: gán cụm (assignment) và cập nhật tâm (update).
+- Giải thích được vì sao khởi tạo ngẫu nhiên dễ rơi vào cực tiểu cục bộ và cách thuật toán K-means++ khắc phục nhược điểm này.
+- Biết cách chọn số cụm $k$ hợp lý bằng phương pháp khuỷu tay (Elbow method) và hệ số Silhouette (Silhouette score).
+
+## Cần biết trước
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Mỗi mẫu dữ liệu là một **vectơ** (vector) $\mathbf{x} = [x_1, \dots, x_n]^\top$ trong không gian $n$ chiều. **Khoảng cách Euclid** (Euclidean distance) giữa hai điểm $\mathbf{x}$ và $\boldsymbol{\mu}$ là $\lVert \mathbf{x} - \boldsymbol{\mu} \rVert = \sqrt{\sum_{j=1}^n (x_j - \mu_j)^2}$, và bình phương khoảng cách bằng $\lVert \mathbf{x} - \boldsymbol{\mu} \rVert^2 = \sum_{j=1}^n (x_j - \mu_j)^2$. Khác với học có giám sát ở bài [Tổng quan về Học máy](/vi/ml/ml-overview/), dữ liệu ở bài này hoàn toàn không có nhãn đầu ra $y$.
+:::
+
+## Trực giác
+
+Hãy tưởng tượng bạn là chủ một chuỗi bán lẻ thời trang với hàng chục nghìn khách hàng. Mỗi khách hàng có hai thông tin: số lần mua sắm mỗi tháng và số tiền chi tiêu trung bình mỗi lần ghé tiệm. Bạn muốn chia họ thành các nhóm khách hàng để thiết kế chương trình ưu đãi phù hợp, nhưng trong tay bạn không hề có nhãn phân loại sẵn nào như "khách VIP", "khách bình dân" hay "khách săn hàng giảm giá".
+
+Đó là lúc bạn cần đến **học không giám sát** (unsupervised learning) và bài toán **phân cụm** (clustering): tự động nhóm các điểm dữ liệu tương đồng lại gần nhau, sao cho các điểm trong cùng một nhóm thì gần nhau nhất, còn các nhóm khác nhau thì cách xa nhau nhất.
+
+### Gom cụm quanh các tâm
+
+Cách tự nhiên nhất để định hình một nhóm là chọn ra một người đại diện đứng ở trung tâm nhóm — gọi là **tâm cụm** (centroid). Giả sử bạn muốn chia dữ liệu thành $k = 3$ nhóm:
+
+1. Bạn đặt tạm 3 người đại diện vào 3 vị trí bất kỳ trong cửa hàng.
+2. Mỗi khách hàng nhìn quanh và bước về phía người đại diện gần mình nhất. Lúc này khách hàng đã tạm chia thành 3 cụm.
+3. Người đại diện của mỗi cụm bước tới vị trí trung bình cộng (trọng tâm) của tất cả khách hàng vừa chọn mình.
+4. Khi người đại diện đổi chỗ, một số khách hàng nhận ra người đại diện khác nay lại gần họ hơn, nên họ đổi sang nhóm mới.
+
+Quá trình này lặp đi lặp lại. Sau vài lượt, không còn ai đổi nhóm nữa và các người đại diện cũng đứng yên tại chỗ. Thuật toán đã ổn định!
+
+### Dữ liệu mẫu 36 điểm
+
+Dữ liệu của bài học này là 36 điểm trên mặt phẳng 2D, được tạo thành từ 3 đám mây điểm tự nhiên (mỗi đám 12 điểm) quanh các tọa độ $(2, 2)$, $(8, 3)$ và $(5, 8)$. Dưới đây là tọa độ của vài điểm tiêu biểu:
+
+| Chỉ số mẫu | Tọa độ $(x_1, x_2)$ | Vị trí trực quan |
+|---:|---|---|
+| 0 | $(1.39, 1.86)$ | Cụm dưới bên trái |
+| 1 | $(1.78, 2.45)$ | Cụm dưới bên trái |
+| 12 | $(8.85, 3.21)$ | Cụm dưới bên phải |
+| 24 | $(5.20, 7.82)$ | Cụm phía trên |
+
+Mắt thường dễ dàng thấy 3 cụm tách biệt. Nhưng máy tính chỉ nhận được một mảng số thô gồm 36 hàng và 2 cột, không hề có nhãn gợi ý điểm nào thuộc cụm nào.
+
+Bài toán của bài này là: **chia $m$ điểm dữ liệu chưa có nhãn vào $k$ cụm sao cho tổng bình phương khoảng cách từ mỗi điểm tới tâm của cụm nó thuộc về đạt giá trị nhỏ nhất.**
+
+## Lý thuyết
+
+### Phát biểu bài toán
+
+Cho tập dữ liệu gồm $m$ mẫu $\mathbf{x}^{(1)}, \mathbf{x}^{(2)}, \dots, \mathbf{x}^{(m)} \in \mathbb{R}^n$, không có nhãn mục tiêu $y$. Ta muốn phân hoạch $m$ mẫu này thành $k$ cụm không giao nhau:
+
+$$
+C_1 \cup C_2 \cup \dots \cup C_k = \{1, 2, \dots, m\}, \quad C_i \cap C_j = \emptyset \; (\forall i \ne j)
+$$
+
+Mỗi cụm $j \in \{1, \dots, k\}$ có một vectơ tâm $\boldsymbol{\mu}_j \in \mathbb{R}^n$. Gọi $c^{(i)} \in \{1, \dots, k\}$ là chỉ số cụm được gán cho mẫu thứ $i$.
+
+Đại lượng cần làm nhỏ nhất là tổng bình phương khoảng cách từ mỗi điểm tới tâm cụm của nó, thường gọi là **quán tính** (inertia) hoặc **độ biến dạng** (distortion):
+
+$$
+J(\mathbf{c}, \boldsymbol{\mu}) = \sum_{i=1}^m \lVert \mathbf{x}^{(i)} - \boldsymbol{\mu}_{c^{(i)}} \rVert^2
+$$
+
+Trong đó:
+- $\mathbf{c} = [c^{(1)}, c^{(2)}, \dots, c^{(m)}]^\top$ là tập hợp các chỉ số gán cụm.
+- $\boldsymbol{\mu} = \{\boldsymbol{\mu}_1, \dots, \boldsymbol{\mu}_k\}$ là tập hợp các tâm cụm.
+
+Bài toán tối ưu hóa đồng thời cả $\mathbf{c}$ và $\boldsymbol{\mu}$ là một bài toán NP-khó (NP-hard). Thay vì tìm nghiệm tối ưu toàn cục bằng cách duyệt mọi cách phân hoạch, ta dùng một thuật toán lặp xấp xỉ cục bộ rất hiệu quả: **thuật toán Lloyd** (thường gọi đơn giản là thuật toán K-means).
+
+### Thuật toán Lloyd: hai bước luân phiên
+
+Thuật toán Lloyd giải quyết việc tối ưu hai nhóm biến $\mathbf{c}$ và $\boldsymbol{\mu}$ bằng cách cố định một nhóm rồi tối ưu nhóm còn lại, lặp đi lặp lại:
+
+```
+Khởi tạo k tâm cụm ban đầu μ_1, ..., μ_k
+Lặp cho tới khi hội tụ:
+    Bước 1 (Gán cụm): Cố định μ, tìm gán cụm c tối ưu
+    Bước 2 (Cập nhật tâm): Cố định c, tìm tâm μ tối ưu
+```
+
+#### Bước 1: Gán cụm (Assignment step)
+
+Giữ cố định các tâm cụm $\boldsymbol{\mu}_1, \dots, \boldsymbol{\mu}_k$. Để làm nhỏ nhất tổng $J$, mỗi số hạng $\lVert \mathbf{x}^{(i)} - \boldsymbol{\mu}_{c^{(i)}} \rVert^2$ phải nhỏ nhất độc lập với nhau. Do đó, ta gán mỗi mẫu $\mathbf{x}^{(i)}$ vào cụm có tâm gần nó nhất:
+
+$$
+c^{(i)} = \arg\min_{j \in \{1, \dots, k\}} \lVert \mathbf{x}^{(i)} - \boldsymbol{\mu}_j \rVert^2
+$$
+
+Nếu có nhiều tâm cùng đạt khoảng cách nhỏ nhất bằng nhau, ta có thể chọn bất kỳ tâm nào trong số đó. Sau bước này, giá trị $J$ chắc chắn giảm hoặc giữ nguyên: $J(\mathbf{c}^{(t+1)}, \boldsymbol{\mu}^{(t)}) \le J(\mathbf{c}^{(t)}, \boldsymbol{\mu}^{(t)})$.
+
+#### Bước 2: Cập nhật tâm (Update step)
+
+Giữ cố định các chỉ số gán cụm $\mathbf{c}$. Bây giờ ta cần tìm các tâm $\boldsymbol{\mu}_j$ sao cho $J$ nhỏ nhất:
+
+$$
+J(\mathbf{c}, \boldsymbol{\mu}) = \sum_{j=1}^k \sum_{i \in C_j} \lVert \mathbf{x}^{(i)} - \boldsymbol{\mu}_j \rVert^2
+$$
+
+Vì các cụm rời nhau, ta có thể cực tiểu hóa riêng rẽ từng cụm $j$. Lấy đạo hàm riêng theo vectơ tâm $\boldsymbol{\mu}_j$:
+
+$$
+\begin{aligned}
+\nabla_{\boldsymbol{\mu}_j} J &= \nabla_{\boldsymbol{\mu}_j} \sum_{i \in C_j} (\mathbf{x}^{(i)} - \boldsymbol{\mu}_j)^\top (\mathbf{x}^{(i)} - \boldsymbol{\mu}_j) \\
+&= \sum_{i \in C_j} -2(\mathbf{x}^{(i)} - \boldsymbol{\mu}_j) \\
+&= -2 \left( \sum_{i \in C_j} \mathbf{x}^{(i)} - |C_j| \boldsymbol{\mu}_j \right)
+\end{aligned}
+$$
+
+Cho đạo hàm bằng vectơ $\mathbf{0}$ để tìm điểm cực tiểu:
+
+$$
+\sum_{i \in C_j} \mathbf{x}^{(i)} - |C_j| \boldsymbol{\mu}_j = \mathbf{0} \implies \boldsymbol{\mu}_j = \frac{1}{|C_j|} \sum_{i \in C_j} \mathbf{x}^{(i)}
+$$
+
+Tâm mới chính là **trung bình cộng** (mean / centroid) của tất cả các điểm được gán vào cụm đó. Sau bước cập nhật này, giá trị $J$ lại tiếp tục giảm hoặc giữ nguyên: $J(\mathbf{c}^{(t+1)}, \boldsymbol{\mu}^{(t+1)}) \le J(\mathbf{c}^{(t+1)}, \boldsymbol{\mu}^{(t)})$.
+
+:::note[Tính hội tụ của thuật toán Lloyd]
+Vì $J$ luôn giảm hoặc giữ nguyên sau mỗi bước, và số cách phân hoạch $m$ điểm vào $k$ cụm là hữu hạn ($k^m$ cách), thuật toán Lloyd **chắc chắn hội tụ** sau một số hữu hạn bước lặp mà không bao giờ bị lặp vô tận. Khi không còn điểm nào đổi cụm ($c^{(i)}$ giữ nguyên), thuật toán dừng lại.
+:::
+
+### Khởi tạo và thuật toán K-means++
+
+Mặc dù luôn hội tụ, thuật toán Lloyd chỉ hội tụ về một **cực tiểu cục bộ** (local minimum). Vị trí hội tụ phụ thuộc rất lớn vào vị trí khởi tạo của $k$ tâm ban đầu:
+
+- Nếu khởi tạo xấu (ví dụ hai tâm đặt quá gần nhau trong cùng một cụm tự nhiên), một cụm thật có thể bị xẻ đôi, trong khi hai cụm thật khác bị gộp chung làm một.
+- Nghiêm trọng hơn, có thể xuất hiện cụm rỗng ($|C_j| = 0$) nếu một tâm không hút được điểm nào.
+
+#### Chiến lược 1: Khởi tạo ngẫu nhiên nhiều lần (`n_init`)
+
+Cách khắc phục đơn giản nhất là khởi tạo ngẫu nhiên nhiều lần độc lập (mặc định trong scikit-learn từng là `n_init=10`), chạy thuật toán Lloyd cho mỗi lần, rồi chọn nghiệm có quán tính $J$ cuối cùng nhỏ nhất.
+
+#### Chiến lược 2: Thuật toán K-means++
+
+Năm 2007, David Arthur và Sergei Vassilvitskii đề xuất thuật toán **K-means++** với nguyên lý trực quan: các tâm ban đầu nên nằm càng cách xa nhau càng tốt.
+
+Các bước của K-means++:
+1. Chọn ngẫu nhiên tâm đầu tiên $\boldsymbol{\mu}_1$ từ tập dữ liệu với phân phối đều.
+2. Với mỗi điểm $\mathbf{x}^{(i)}$, tính khoảng cách ngắn nhất $D(\mathbf{x}^{(i)})$ từ nó tới bất kỳ tâm nào đã được chọn:
+   $$
+   D(\mathbf{x}^{(i)}) = \min_{j} \lVert \mathbf{x}^{(i)} - \boldsymbol{\mu}_j \rVert
+   $$
+3. Chọn điểm tiếp theo làm tâm mới với xác suất tỉ lệ thuận với bình phương khoảng cách:
+   $$
+   P(\mathbf{x}^{(i)}) = \frac{D(\mathbf{x}^{(i)})^2}{\sum_{l=1}^m D(\mathbf{x}^{(l)})^2}
+   $$
+4. Lặp lại bước 2 và 3 cho tới khi chọn đủ $k$ tâm.
+
+Điểm nào nằm càng xa các tâm đã có thì $D(\mathbf{x})^2$ càng lớn, xác suất được chọn làm tâm tiếp theo càng cao. K-means++ giúp thuật toán gần như không bao giờ bị kẹt ở các cấu hình tâm tồi và tăng tốc độ hội tụ đáng kể. Đây là phương pháp khởi tạo mặc định trong mọi thư viện học máy hiện đại (`init='k-means++'`).
+
+### Chọn số cụm k: Elbow và Silhouette
+
+Trong thực tế, bạn thường không biết trước số cụm $k$ thực sự của dữ liệu. Vì sao ta không thể đơn giản chọn $k$ có quán tính $J$ nhỏ nhất?
+
+Bởi vì khi $k$ tăng, $J$ luôn giảm. Nếu đặt $k = m$, mỗi điểm dữ liệu là một tâm, và $J = 0$ tuyệt đối! Con số $J = 0$ đó hoàn toàn vô nghĩa vì không còn ý nghĩa gom nhóm. Để chọn $k$ hợp lý, ta cần hai công cụ định lượng:
+
+#### Phương pháp khuỷu tay (Elbow Method)
+
+Ta vẽ đồ thị quán tính $J$ theo số cụm $k \in \{1, 2, \dots\}$. Khi $k$ tăng từ 1 lên giá trị số cụm thực sự, $J$ giảm rất nhanh. Khi vượt qua số cụm thực sự, việc thêm tâm mới chỉ chia nhỏ các cụm vốn đã khép kín, nên $J$ giảm chậm lại rõ rệt.
+
+Đồ thị tạo thành một khúc gập giống như khuỷu tay (elbow). Giá trị $k$ tại "khuỷu tay" chính là lựa chọn cân bằng tối ưu giữa việc giảm sai số và giữ số cụm tinh gọn.
+
+#### Hệ số Silhouette (Silhouette Score)
+
+Phương pháp Elbow đôi khi cho điểm gập không rõ ràng. **Hệ số Silhouette** (Peter Rousseeuw, 1987) đánh giá chất lượng phân cụm trực tiếp cho từng điểm dữ liệu dựa trên hai yếu tố: độ gắn kết nội cụm và độ tách biệt ngoại cụm.
+
+Với mỗi mẫu $\mathbf{x}^{(i)} \in C_I$:
+1. Tính $a^{(i)}$: khoảng cách trung bình từ $\mathbf{x}^{(i)}$ tới tất cả các điểm khác trong cùng cụm $C_I$ (mức độ gắn kết nội bộ, càng nhỏ càng tốt):
+   $$
+   a^{(i)} = \frac{1}{|C_I| - 1} \sum_{j \in C_I, j \ne i} \lVert \mathbf{x}^{(i)} - \mathbf{x}^{(j)} \rVert
+   $$
+2. Tính $b^{(i)}$: khoảng cách trung bình nhỏ nhất từ $\mathbf{x}^{(i)}$ tới các điểm của một cụm khác $C_J \ne C_I$ (khoảng cách tới cụm lân cận gần nhất, càng lớn càng tốt):
+   $$
+   b^{(i)} = \min_{J \ne I} \frac{1}{|C_J|} \sum_{j \in C_J} \lVert \mathbf{x}^{(i)} - \mathbf{x}^{(j)} \rVert
+   $$
+3. Hệ số Silhouette của mẫu $i$ là:
+   $$
+   s^{(i)} = \frac{b^{(i)} - a^{(i)}}{\max(a^{(i)}, b^{(i)})} \in [-1, 1]
+   $$
+
+Ý nghĩa của $s^{(i)}$:
+- $s^{(i)} \approx 1$: $a^{(i)} \ll b^{(i)}$, mẫu nằm rất sâu bên trong cụm của mình, cách rất xa cụm khác (phân cụm hoàn hảo).
+- $s^{(i)} \approx 0$: $a^{(i)} \approx b^{(i)}$, mẫu nằm ngay sát ranh giới giữa hai cụm.
+- $s^{(i)} < 0$: $a^{(i)} > b^{(i)}$, mẫu gần cụm hàng xóm hơn cụm được gán (gán nhầm cụm).
+
+Điểm số Silhouette trung bình trên toàn bộ dữ liệu $\bar{s} = \frac{1}{m} \sum_{i=1}^m s^{(i)}$ đạt đỉnh cực đại tại giá trị $k$ phù hợp nhất.
+
+### Giới hạn
+
+- **Phải xác định trước số cụm $k$.** K-means không thể tự phát hiện có bao nhiêu cụm tự nhiên trong dữ liệu.
+- **Giả định cụm có dạng hình cầu lồi (spherical / convex).** Vì dùng khoảng cách Euclid, ranh giới giữa các cụm tạo bởi K-means luôn là các đa giác phẳng (đa giác Voronoi). K-means hoàn toàn thất bại khi các cụm có hình dạng phức tạp (như hình trăng khuyết lồng nhau, dải xoắn) hoặc kích thước, mật độ chênh lệch lớn.
+- **Nhạy cảm với giá trị ngoại lai (outliers).** Vì tối ưu tổng bình phương khoảng cách, một điểm ngoại lai nằm rất xa có thể kéo lệch hẳn tâm cụm về phía nó.
+- **Bắt buộc phải chuẩn hóa đặc trưng.** Nếu một đặc trưng có biên độ đo đạc lớn hơn các đặc trưng khác hàng nghìn lần (ví dụ thu nhập theo triệu đồng so với số con theo người), khoảng cách Euclid sẽ bị chi phối hoàn toàn bởi đặc trưng đó.
+
+## Minh họa
+
+Dưới đây là bảng theo dõi từng bước lặp của thuật toán Lloyd trên 36 điểm dữ liệu mẫu 2D (3 cụm thực sự) khi khởi tạo 3 tâm ban đầu tại 3 điểm dữ liệu số 2, 20 và 1:
+
+| Vòng lặp $t$ | Pha | Quán tính $J$ | Nhận xét diễn biến |
+|---:|---|---:|---|
+| 0 | Khởi tạo | — | Chọn 3 điểm số 2, 20 và 1 làm 3 tâm ban đầu $\boldsymbol{\mu}_1, \boldsymbol{\mu}_2, \boldsymbol{\mu}_3$ |
+| 1 | Gán cụm | 406.70 | Mọi điểm chọn tâm gần nhất trong 3 tâm ban đầu |
+| 1 | Cập nhật | 241.67 | 3 tâm chuyển về trọng tâm các điểm vừa gán, $J$ giảm mạnh |
+| 2 | Gán cụm | 230.88 | Nhiều điểm ở biên đổi sang cụm có tâm mới gần hơn |
+| 2 | Cập nhật | 200.73 | Các tâm tiếp tục trôi dần về tâm của 3 đám mây |
+| 3 | Gán cụm | 139.13 | Điểm đổi cụm tạo bước nhảy lớn về cấu trúc |
+| 3 | Cập nhật | 83.62 | Quán tính giảm sâu, cấu trúc 3 cụm bắt đầu tách bạch |
+| 4 | Gán cụm | 58.49 | Chỉ còn vài điểm biên dịch chuyển |
+| 4 | Cập nhật | 52.12 | 3 tâm đạt vị trí tối ưu: $(1.92, 2.19)$, $(8.20, 3.09)$, $(5.41, 7.90)$ |
+| 5 | Gán cụm | 52.12 | Không còn bất kỳ điểm nào đổi cụm $\to$ Thuật toán dừng lại |
+
+Hãy để ý hai đặc điểm quan trọng:
+1. Giá trị $J$ giảm liên tục sau mỗi pha: từ 406.70 xuống 241.67, 230.88, 200.73, 139.13, 83.62, 58.49 và dừng lại ở 52.12.
+2. Tại vòng 5, kết quả gán cụm giống hệt vòng 4 nên thuật toán công nhận hội tụ và dừng lại sau đúng 4 bước cập nhật. Kích thước 3 cụm lúc này chia đều hoàn hảo: 12, 12, 12 điểm.
+
+{/* VIZ: KMeansViz
+    Ý: Thuật toán Lloyd hội tụ sau vài bước lặp, kéo các tâm về trung tâm của các đám mây điểm và giảm đơn điệu hàm mục tiêu J.
+    Tương tác: nút "Bước tiếp theo" chuyển đổi luân phiên giữa pha gán (nối đường từ điểm tới tâm, tô màu vùng Voronoi) và pha cập nhật (tâm di chuyển về trọng tâm mới); thanh trượt k từ 1 tới 6 cập nhật phân cụm; nút "Khởi tạo lại" thử các seed ngẫu nhiên khác nhau hoặc chuyển chế độ K-means++.
+    Dữ liệu: make_blobs(n_samples=36, centers=[[2, 2], [8, 3], [5, 8]], cluster_std=1.0, random_state=10), np.round(X, 2).
+    Ký hiệu: x_1, x_2 trên hai trục tọa độ; μ_1, μ_2, μ_3 (dấu x lớn); c^(i) (màu điểm); quán tính J. */}
+
+## Ví dụ code
+
+Ba ô code dưới đây chạy độc lập. Ô chạy đầu tiên mất vài giây để trình duyệt tải thư viện scikit-learn qua WebAssembly (Pyodide). Cả ba ô đều sử dụng chung bộ dữ liệu 36 điểm 2D được làm tròn 2 chữ số thập phân sinh từ `make_blobs` với 3 tâm chuẩn $(2, 2)$, $(8, 3)$, $(5, 8)$.
+
+Ô đầu tiên cài đặt nguyên bản thuật toán Lloyd bằng NumPy: tính ma trận bình phương khoảng cách giữa các điểm và tâm bằng mảng đa chiều (broadcasting), cập nhật tâm bằng trung bình cộng và dừng khi mảng gán cụm $c$ không còn thay đổi.
+
+<PythonRunner code={lloydCode} title="Thuật toán Lloyd cài đặt từng bước bằng NumPy" />
+
+Kết quả in ra tái hiện chính xác bảng theo dõi ở mục Minh họa. Sau 4 bước lặp, thuật toán hội tụ tại $J = 52.12$. Ba cụm có kích thước đồng đều $[12, 12, 12]$ và ba tâm hội tụ tại $(1.92, 2.19)$, $(8.20, 3.09)$ và $(5.41, 7.90)$ — rất sát với ba tâm gốc $(2, 2)$, $(8, 3)$, $(5, 8)$ dùng để sinh dữ liệu.
+
+Ô thứ hai dùng lớp `KMeans` của scikit-learn để kiểm chứng sự nguy hiểm của cực tiểu cục bộ: chạy thử nghiệm 50 seed ngẫu nhiên với `init="random"`, so sánh với `init="k-means++"`, và in ra chi tiết một lần bị kẹt ở seed 13.
+
+<PythonRunner code={initCode} title="Khởi tạo ngẫu nhiên, K-means++ và bẫy cực tiểu cục bộ" />
+
+Dòng đầu tiên cho thấy: nếu chỉ chọn 3 điểm ngẫu nhiên làm tâm (`init="random", n_init=1`), có 3 trong số 50 lần thử (6%) thuật toán bị kẹt ở nghiệm xấu với quán tính $J$ lên tới $230.40$ (thay vì $52.12$). Ngược lại, K-means++ (`init="k-means++", n_init=1`) đạt kết quả tối ưu $52.12$ ở cả 50/50 lần chạy mà không một lần bị kẹt. Nếu buộc phải dùng khởi tạo ngẫu nhiên, ta cần tăng `n_init=10` để lấy giá trị tốt nhất trong 10 lần chạy.
+
+Ở lần kẹt tại `seed 13`, kích thước các cụm bị lệch nặng thành $[3, 24, 9]$: hai tâm bị hút vào cùng một đám mây phía dưới $(2.04, 0.82)$ và $(1.87, 2.65)$, khiến hai đám mây còn lại bị gộp chung vào một tâm duy nhất $(6.80, 5.49)$ với $J = 230.04$.
+
+Ô thứ ba khảo sát số cụm $k$ từ 1 đến 6 bằng scikit-learn, tính quán tính $J$ và hệ số Silhouette, rồi vẽ biểu đồ Elbow và Silhouette.
+
+<PythonRunner
+  code={chooseKCode}
+  title="Chọn số cụm k bằng phương pháp Elbow và Silhouette"
+  figureAlt={['Hai biểu đồ đường đánh giá số cụm k từ 1 đến 6. Biểu đồ Elbow bên trái vẽ quán tính J giảm mạnh từ 516.00 ở k bằng 1 xuống 237.64 ở k bằng 2 và 52.12 ở k bằng 3, tạo thành điểm gập khuỷu tay rõ rệt tại k bằng 3, sau đó giảm chậm dần từ 40.89 về 29.83 khi k tăng tới 6. Biểu đồ Silhouette bên phải vẽ hệ số silhouette trung bình màu cam cho k từ 2 đến 6, đạt đỉnh cao nhất tại k bằng 3 với giá trị 0.728, so với 0.534 ở k bằng 2 và giảm dần từ 0.619 xuống 0.447 ở k từ 4 đến 6.']}
+/>
+
+Cả hai đồ thị đều chỉ rõ ràng đáp án tối ưu là $k = 3$:
+1. Đồ thị Elbow bên trái gập góc dốc nhất tại $k = 3$, nơi $J$ rơi từ $237.64$ xuống $52.12$. Sau $k = 3$, đường cong gần như đi thoai thoải.
+2. Đồ thị Silhouette bên phải đạt đỉnh cực đại duy nhất tại $k = 3$ với giá trị rất cao $0.728$, cao hơn hẳn $k = 2$ ($0.534$) hay $k = 4$ ($0.619$).
+
+## Lỗi hay gặp
+
+:::caution[Không chuẩn hóa đặc trưng trước khi phân cụm]
+K-means sử dụng khoảng cách Euclid $\sum (x_j - \mu_j)^2$. Nếu đặc trưng $x_1$ tính theo tiền lương (hàng chục triệu đồng) còn đặc trưng $x_2$ là tuổi (20 đến 60), chênh lệch vài trăm nghìn đồng ở $x_1$ sẽ hoàn toàn lấn át toàn bộ biến thiên ở $x_2$. K-means khi đó chỉ còn phân cụm theo tiền lương và bỏ qua tuổi. Luôn dùng `StandardScaler` để đưa các đặc trưng về cùng thang đo (trung bình 0, phương sai 1) trước khi đưa vào K-means.
+:::
+
+:::caution[Kỳ vọng K-means phát hiện được các cụm có hình dạng phi cầu]
+Ranh giới giữa các cụm trong K-means là các đường trung trực / mặt phẳng phân cách (tế bào Voronoi), luôn có dạng lồi. Nếu dữ liệu có dạng hai vầng trăng lồng nhau (như bộ dữ liệu `make_moons` ở bài [K-Nearest Neighbors](/vi/ml/k-nearest-neighbors/)) hoặc hai vòng tròn đồng tâm, K-means sẽ cắt ngang các dải cong thay vì đi theo hình dáng thực tế. Trong trường hợp đó, bạn cần dùng các thuật toán phân cụm dựa trên mật độ như DBSCAN hoặc phương pháp phổ (Spectral Clustering).
+:::
+
+:::caution[Chọn k chỉ bằng cách tìm giá trị quán tính J nhỏ nhất]
+Một hiểu nhầm rất phổ biến của người mới bắt đầu là nghĩ rằng $k$ càng lớn thì mô hình càng tốt vì $J$ càng nhỏ. Quán tính $J$ luôn giảm đơn điệu khi tăng $k$, và khi $k = m$ thì $J = 0$. Mục tiêu của phân cụm là tìm cấu trúc rút gọn của dữ liệu, không phải chia nhỏ dữ liệu thành từng cá thể. Luôn tìm điểm gập của đường cong Elbow hoặc giá trị cực đại của hệ số Silhouette.
+:::
+
+## Kiểm tra nhanh
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- K-means là thuật toán học không giám sát kinh điển, phân hoạch $m$ mẫu dữ liệu vào $k$ cụm nhằm cực tiểu hóa hàm quán tính $J = \sum_{i=1}^m \lVert \mathbf{x}^{(i)} - \boldsymbol{\mu}_{c^{(i)}} \rVert^2$.
+- Thuật toán Lloyd lặp lại hai pha luân phiên: gán mỗi điểm vào tâm gần nhất, rồi cập nhật tâm thành trung bình cộng của các điểm trong cụm. Thuật toán luôn hội tụ về một cực tiểu cục bộ.
+- Khởi tạo K-means++ chọn các tâm ban đầu cách xa nhau với xác suất tỉ lệ thuận với bình phương khoảng cách $D(\mathbf{x})^2$, giải quyết triệt để vấn đề kẹt ở cực tiểu cục bộ xấu.
+- Số cụm $k$ được lựa chọn tối ưu thông qua điểm gập trên đồ thị Elbow và điểm cực đại của hệ số Silhouette. Cần chuẩn hóa đặc trưng trước khi chạy thuật toán.
+
+**Đọc thêm:**
+
+- Lloyd, S. (1982). [*Least squares quantization in PCM*](https://ieeexplore.ieee.org/document/1056489) (PDF). IEEE Transactions on Information Theory, 28(2), 129–137. Bài báo gốc công bố thuật toán lặp phân cụm K-means.
+- Arthur, D., & Vassilvitskii, S. (2007). [*k-means++: The advantages of careful seeding*](http://ilpubs.stanford.edu:8090/778/1/2006-13.pdf) (PDF). Proceedings of the 18th Annual ACM-SIAM Symposium on Discrete Algorithms, 1027–1035. Bài báo gốc về phương pháp khởi tạo K-means++.
+- Rousseeuw, P. J. (1987). [*Silhouettes: A graphical aid to the interpretation and validation of cluster analysis*](https://doi.org/10.1016/0377-0427(87)90125-7). Journal of Computational and Applied Mathematics, 20, 53–65. Đề xuất hệ số Silhouette đánh giá chất lượng phân cụm.
+- Vũ Hữu Tiệp (2017). [*Bài 4: K-means Clustering*](https://machinelearningcoban.com/2017/01/01/kmeans/) trong Machine Learning cơ bản. Bài viết tiếng Việt chi tiết với hình vẽ trực quan từng bước thuật toán K-means.
+- scikit-learn documentation. [*K-means*](https://scikit-learn.org/stable/modules/clustering.html#k-means). Tài liệu hướng dẫn sử dụng `sklearn.cluster.KMeans`.
+
+<LessonProgress />

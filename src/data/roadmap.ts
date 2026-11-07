@@ -230,7 +230,7 @@ export const LESSONS: readonly Lesson[] = [
     id: 'ml/k-means',
     title: { vi: 'K-means', en: 'K-means' },
     prerequisites: ['ml/ml-overview', 'math/linear-algebra'],
-    status: { vi: 'planned', en: 'planned' },
+    status: { vi: 'published', en: 'planned' },
   },
   {
     id: 'ml/k-nearest-neighbors',

@@ -49,7 +49,8 @@
 .atlas-viz-xticks,
 .atlas-viz-yticks,
 .atlas-viz-axis-title,
-.atlas-viz-key {
+.atlas-viz-key,
+.atlas-viz-table thead th {
   font-size: var(--sl-text-sm);
   color: var(--atlas-viz-muted);
   font-variant-numeric: tabular-nums;
@@ -235,11 +236,6 @@
   white-space: nowrap;
 }
 
-.atlas-viz-table thead th {
-  font-size: var(--sl-text-sm);
-  color: var(--atlas-viz-muted);
-}
-
 .atlas-viz-table td:nth-child(2) {
   width: 100%;
 }
@@ -362,7 +358,6 @@
 /* The chosen one: filled with the accent, text in the page background's ink on it (7.42 dark / 6.42 light).
    Its fill against an unchosen button's gray-5 is 4.63 / 3.79, so the two never look alike. */
 .atlas-viz-choice > .atlas-viz-toggle[aria-pressed='true'] {
-  border-inline-start-color: var(--sl-color-accent);
   background: var(--sl-color-accent);
   color: var(--sl-color-black);
 }
@@ -386,7 +381,6 @@
 .atlas-viz-swatch {
   flex: none;
   width: 24px;
-  height: 1.75em;
   height: 1lh;
   overflow: visible;
 }
@@ -483,7 +477,7 @@
   font-weight: 600;
   text-align: start;
   cursor: pointer;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s;
 }
 
 .atlas-viz-toggle:hover:not(:disabled, [aria-disabled='true']) {
@@ -491,7 +485,7 @@
 }
 
 .atlas-viz-toggle:active {
-  transform: translateY(0);
+  transform: none;
 }
 
 .atlas-viz-toggle[aria-pressed='true'] {
@@ -500,8 +494,9 @@
 }
 
 .atlas-viz-slider:disabled,
-.atlas-viz-toggle:disabled {
-  color: var(--sl-color-gray-3);
+.atlas-viz-toggle:disabled,
+.atlas-viz-toggle[aria-disabled='true'] {
+  color: var(--atlas-viz-muted);
   cursor: not-allowed;
 }
 
@@ -510,8 +505,6 @@
 .atlas-viz-toggle[aria-disabled='true'] {
   background: none;
   box-shadow: inset 0 0 0 1px var(--atlas-viz-muted);
-  color: var(--atlas-viz-muted);
-  cursor: not-allowed;
 }
 
 .atlas-viz-toggle-box {
@@ -521,7 +514,7 @@
   justify-content: center;
   width: 20px;
   height: 20px;
-  border: 2px solid var(--sl-color-gray-3);
+  border: 2px solid var(--atlas-viz-muted);
   background: var(--sl-color-bg);
   color: var(--sl-color-black);
 }
@@ -542,7 +535,6 @@
 
 /* Status: one line kept free, so a message does not move the page while dragging. */
 .atlas-viz-status {
-  min-height: 1.75em;
   min-height: 1lh;
 }
 
