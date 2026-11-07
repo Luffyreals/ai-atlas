@@ -1,0 +1,287 @@
+---
+title: 'Giải tích'
+description: 'Làm chủ giải tích cho AI: đạo hàm, đạo hàm riêng, vectơ gradient, quy tắc dây chuyền (chain rule) trong backpropagation và ma trận Hessian.'
+quiz:
+  - question: 'Vectơ gradient $\nabla f(\mathbf{x})$ của một hàm số nhiều biến tại điểm $\mathbf{x}$ chỉ về hướng nào trên bề mặt hàm số?'
+    options:
+      - 'Hướng hàm số giảm giá trị nhanh nhất'
+      - 'Hướng hàm số tăng giá trị nhanh nhất (dốc nhất)'
+      - 'Hướng tiếp tuyến nằm ngang nơi hàm số không thay đổi giá trị'
+      - 'Luôn trỏ thẳng về gốc tọa độ $(0, 0)$'
+    answer: 1
+    explanation: 'Theo định nghĩa giải tích nhiều biến, vectơ gradient $\nabla f(\mathbf{x})$ tập hợp các đạo hàm riêng và luôn trỏ về hướng làm cho hàm số tăng giá trị nhanh nhất (hướng dốc nhất). Vì vậy trong học máy, để cực tiểu hóa hàm mất mát, chúng ta phải di chuyển ngược lại với hướng gradient, tức là đi theo hướng $-\nabla f(\mathbf{x})$ (thuật toán Gradient Descent).'
+  - question: 'Xét hàm hợp mất mát của mạng nơ-ron: $L = g(h(w))$. Theo quy tắc chuỗi (Chain Rule), đạo hàm của $L$ theo trọng số $w$ được tính bằng biểu thức nào?'
+    options:
+      - '$\frac{\partial L}{\partial w} = \frac{\partial g}{\partial h} + \frac{\partial h}{\partial w}$'
+      - '$\frac{\partial L}{\partial w} = \frac{\partial L}{\partial h} \cdot \frac{\partial h}{\partial w}$'
+      - '$\frac{\partial L}{\partial w} = \frac{\partial L}{\partial h} / \frac{\partial h}{\partial w}$'
+      - '$\frac{\partial L}{\partial w} = \left(\frac{\partial L}{\partial h}\right)^2$'
+    answer: 1
+    explanation: 'Quy tắc chuỗi (Chain Rule) khẳng định rằng tốc độ thay đổi của đại lượng đầu cuối $L$ theo biến số ban đầu $w$ là tích của các tốc độ thay đổi trung gian: $\frac{\partial L}{\partial w} = \frac{\partial L}{\partial h} \cdot \frac{\partial h}{\partial w}$. Đây là nguyên lý then chốt của thuật toán lan truyền ngược (Backpropagation), cho phép tính đạo hàm qua hàng trăm lớp mạng nơ-ron bằng cách nhân các gradient cục bộ.'
+  - question: 'Tại sao khi kiểm tra đạo hàm (gradient checking), người ta dùng sai phân trung tâm $\frac{f(x+\epsilon) - f(x-\epsilon)}{2\epsilon}$ thay vì sai phân tiến $\frac{f(x+\epsilon) - f(x)}{\epsilon}$?'
+    options:
+      - 'Vì sai phân trung tâm chỉ cần tính hàm số đúng một lần duy nhất'
+      - 'Vì sai phân trung tâm có sai số xấp xỉ bậc hai $\mathcal{O}(\epsilon^2)$, chính xác hơn rất nhiều so với bậc nhất $\mathcal{O}(\epsilon)$ của sai phân tiến'
+      - 'Vì sai phân tiến không áp dụng được cho số âm'
+      - 'Vì sai phân trung tâm luôn cho kết quả tuyệt đối chính xác không có sai số'
+    answer: 1
+    explanation: 'Khi khai triển chuỗi Taylor quanh $x$: sai phân tiến bỏ sót số hạng bậc một của đạo hàm cấp hai nên có sai số xấp xỉ cỡ $\mathcal{O}(\epsilon)$. Trong khi đó, ở sai phân trung tâm, các số hạng bậc chẵn tự động triệt tiêu lẫn nhau, dẫn đến sai số chỉ còn ở bậc $\mathcal{O}(\epsilon^2)$. Với $\epsilon = 10^{-5}$, sai số của sai phân tiến là $\approx 10^{-5}$ trong khi sai phân trung tâm có sai số siêu nhỏ $\approx 10^{-10}$.'
+  - question: 'Ma trận Hessian $\mathbf{H}$ trong giải tích nhiều biến là gì và nó cung cấp thông tin gì về bề mặt hàm mất mát?'
+    options:
+      - 'Là ma trận chứa các đạo hàm riêng bậc nhất, cho biết hướng đi dốc nhất'
+      - 'Là ma trận chứa tất cả các đạo hàm riêng bậc hai $\frac{\partial^2 f}{\partial x_i \partial x_j}$, cho biết độ cong (curvature) của hàm số'
+      - 'Là ma trận đảo chiều không gian dữ liệu'
+      - 'Là ma trận các giá trị mất mát tại các epoch'
+    answer: 1
+    explanation: 'Ma trận Hessian gom tất cả các đạo hàm riêng bậc hai của hàm nhiều biến. Nếu vectơ gradient cho biết hướng nghiêng bậc nhất của mặt dốc, thì ma trận Hessian cho biết độ uốn cong bậc hai. Vùng có độ cong lớn (Hessian có trị riêng lớn) đòi hỏi tốc độ học $\eta$ nhỏ để tránh bị dao động bắn ra khỏi đáy lòng chảo.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import numericalGradCode from '@code/math/calculus/numerical-gradient.vi.py?raw';
+import chainRuleCode from '@code/math/calculus/chain-rule-backprop.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu bản chất cốt lõi của **đạo hàm** (derivative) như tốc độ thay đổi tức thời và độ dốc của tiếp tuyến.
+- Mở rộng sang hàm nhiều biến với **đạo hàm riêng** (partial derivatives) và vectơ **Gradient** ($\nabla f$) — "kim chỉ nam" định hướng tối ưu hóa mô hình.
+- Làm chủ **Quy tắc chuỗi** (Chain Rule) và hiểu rõ cách nó tạo nên thuật toán **lan truyền ngược** (Backpropagation) trong mạng nơ-ron sâu.
+- Hiểu ý nghĩa của khai triển xấp xỉ Taylor và ma trận **Hessian** (độ cong bậc hai), giải thích hiện tượng bùng nổ hoặc dao động gradient khi chọn tốc độ học không phù hợp.
+
+## Cần biết trước
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Trong bài [Đại số tuyến tính](/vi/math/linear-algebra/), bạn đã làm quen với các phép toán trên vectơ và ma trận. Trong bài này, chúng ta sẽ kết hợp đại số tuyến tính với **giải tích vi tích phân** để tìm ra cách thức một mô hình AI tự điều chỉnh hàng triệu trọng số nhằm đạt sai số nhỏ nhất.
+:::
+
+## Trực giác
+
+Hãy tưởng tượng bạn đang bị bịt mắt và đứng trên đỉnh một ngọn núi sương mù dày đặc. Nhiệm vụ của bạn là phải tìm đường xuống đáy thung lũng an toàn và nhanh nhất có thể. Bạn sẽ làm thế nào?
+
+Vì không thể nhìn thấy toàn cảnh, cách duy nhất là dùng chân cảm nhận độ nghiêng của mặt đất ngay tại vị trí bạn đang đứng:
+1. Bạn xoay người một vòng để tìm xem hướng nào làm mặt đất **dốc xuống mạnh nhất**.
+2. Bạn bước một bước nhỏ cẩn thận về hướng dốc xuống đó.
+3. Tại điểm mới, bạn lặp lại phép đo độ nghiêng và tiếp tục bước.
+
+Trong học máy:
+- Ngọn núi sương mù chính là **bề mặt hàm mất mát** (loss surface) phức tạp nhiều chiều.
+- Độ nghiêng mặt đất dưới chân bạn chính là **đạo hàm** và **vectơ Gradient**.
+- Mỗi bước chân di chuyển chính là một bước cập nhật trọng số trong thuật toán **Gradient Descent**.
+
+Giải tích chính là công cụ toán học giúp máy tính "cảm nhận độ dốc" để tự động bước về điểm cực tiểu tối ưu!
+
+## Lý thuyết
+
+### 1. Đạo Hàm: Tốc Độ Biến Thiên Tức Thời
+
+Xét một hàm số một biến $f(x)$. Khi ta thay đổi đầu vào một lượng nhỏ $\epsilon$, đầu ra thay đổi một lượng $f(x + \epsilon) - f(x)$. **Đạo hàm** của hàm số tại điểm $x$, ký hiệu là $f'(x)$ hay $\frac{df}{dx}$, là tỉ số biến thiên khi $\epsilon$ tiến dần về $0$:
+
+$$
+f'(x) = \lim_{\epsilon \to 0} \frac{f(x + \epsilon) - f(x)}{\epsilon}
+$$
+
+Ý nghĩa hình học: $f'(x)$ chính là **hệ số góc** (độ dốc - slope) của đường tiếp tuyến với đồ thị tại điểm $x$:
+- Nếu $f'(x) > 0$: hàm số đang đồng biến (tăng). Tăng $x$ sẽ làm tăng $f(x)$; muốn giảm $f(x)$, ta phải giảm $x$.
+- Nếu $f'(x) < 0$: hàm số đang nghịch biến (giảm). Tăng $x$ sẽ làm giảm $f(x)$.
+- Nếu $f'(x) = 0$: tiếp tuyến nằm ngang, điểm $x$ có thể là cực tiểu, cực đại hoặc điểm uốn.
+
+### 2. Đạo Hàm Riêng và Vectơ Gradient
+
+Trong thực tế, mô hình AI có hàng ngàn hoặc hàng tỉ trọng số $w_1, w_2, \dots, w_n$. Hàm mất mát $\mathcal{L}(\mathbf{w})$ là một hàm nhiều biến.
+
+#### Đạo Hàm Riêng (Partial Derivatives)
+
+**Đạo hàm riêng** của hàm $f$ theo biến $x_i$, ký hiệu là $\frac{\partial f}{\partial x_i}$, đo lường mức độ biến thiên của $f$ khi ta chỉ thay đổi một mình biến $x_i$ và **giữ nguyên toàn bộ các biến khác như những hằng số**:
+
+$$
+\frac{\partial f}{\partial x_i} = \lim_{\epsilon \to 0} \frac{f(x_1, \dots, x_i + \epsilon, \dots, x_n) - f(x_1, \dots, x_i, \dots, x_n)}{\epsilon}
+$$
+
+#### Vectơ Gradient ($\nabla f$)
+
+Khi gom tất cả các đạo hàm riêng của một hàm số thành một vectơ cột, ta được **vectơ Gradient**, ký hiệu là $\nabla f(\mathbf{x})$:
+
+$$
+\nabla f(\mathbf{x}) = \begin{bmatrix} \frac{\partial f}{\partial x_1} \\ \frac{\partial f}{\partial x_2} \\ \vdots \\ \frac{\partial f}{\partial x_n} \end{bmatrix} = \left[ \frac{\partial f}{\partial x_1}, \frac{\partial f}{\partial x_2}, \dots, \frac{\partial f}{\partial x_n} \right]^\top
+$$
+
+**Định lý quan trọng nhất của Gradient trong tối ưu hóa:**
+1. Vectơ $\nabla f(\mathbf{x})$ luôn trỏ về **hướng mà giá trị hàm số tăng nhanh nhất**.
+2. Độ dài $\|\nabla f(\mathbf{x})\|_2$ biểu thị mức độ dốc lớn nhất tại điểm đó.
+3. Vectơ ngược chiều $-\nabla f(\mathbf{x})$ luôn trỏ về **hướng mà giá trị hàm số giảm nhanh nhất** (hướng giảm dốc nhất).
+
+Chính vì vậy, quy tắc cập nhật tham số trong thuật toán Gradient Descent có dấu trừ:
+
+$$
+\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \eta \nabla \mathcal{L}(\boldsymbol{\theta})
+$$
+
+Trong đó $\eta > 0$ là **tốc độ học** (learning rate) điều khiển độ dài của mỗi bước bước chân.
+
+:::note[Ghi nhớ]
+Gradient là la bàn của học máy: muốn làm cực đại thì đi theo chiều $\nabla f$, muốn giảm thiểu mất mát thì đi ngược chiều $-\nabla f$.
+:::
+
+---
+
+### 3. Quy Tắc Chuỗi (Chain Rule) và Lan Truyền Ngược
+
+Một mạng nơ-ron sâu là một hàm hợp khổng lồ gồm nhiều tầng xếp chồng lên nhau:
+Đầu vào $\mathbf{x} \longrightarrow$ Lớp 1 ($z_1$) $\longrightarrow$ Lớp 2 ($z_2$) $\longrightarrow \dots \longrightarrow$ Dự đoán $\hat{y} \longrightarrow$ Mất mát $\mathcal{L}$.
+
+Làm sao ta có thể tính đạo hàm của hàm mất mát cuối cùng $\mathcal{L}$ đối với một trọng số $w$ ở tận lớp đầu tiên?
+
+#### Quy Tắc Chuỗi Trong Giải Tích
+
+Nếu biến $z$ phụ thuộc vào $y$, và $y$ phụ thuộc vào $x$ ($z = f(g(x))$), thì tốc độ thay đổi của $z$ theo $x$ bằng tích các tốc độ thay đổi trung gian:
+
+$$
+\frac{dz}{dx} = \frac{dz}{dy} \cdot \frac{dy}{dx}
+$$
+
+Với trường hợp biến trung gian nhiều nhánh: nếu $z = f(y_1, y_2)$ và mỗi $y_j = g_j(x)$, thì:
+
+$$
+\frac{\partial z}{\partial x} = \sum_{j} \frac{\partial z}{\partial y_j} \cdot \frac{\partial y_j}{\partial x}
+$$
+
+#### Ứng Dụng Trong Lan Truyền Ngược (Backpropagation)
+
+Xét một nơ-ron hồi quy đơn giản:
+1. **Lan truyền tiến (Forward pass):**
+   $$
+   \hat{y} = w x + b
+   $$
+   $$
+   \mathcal{L} = (\hat{y} - y)^2
+   $$
+2. **Lan truyền ngược (Backward pass):**
+   - Đạo hàm của loss theo dự đoán:
+     $$
+     \frac{\partial \mathcal{L}}{\partial \hat{y}} = 2(\hat{y} - y)
+     $$
+   - Đạo hàm của dự đoán theo trọng số $w$ và bias $b$:
+     $$
+     \frac{\partial \hat{y}}{\partial w} = x, \quad \frac{\partial \hat{y}}{\partial b} = 1
+     $$
+   - Áp dụng quy tắc chuỗi:
+     $$
+     \frac{\partial \mathcal{L}}{\partial w} = \frac{\partial \mathcal{L}}{\partial \hat{y}} \cdot \frac{\partial \hat{y}}{\partial w} = 2(\hat{y} - y) x
+     $$
+     $$
+     \frac{\partial \mathcal{L}}{\partial b} = \frac{\partial \mathcal{L}}{\partial \hat{y}} \cdot \frac{\partial \hat{y}}{\partial b} = 2(\hat{y} - y)
+     $$
+
+Nhờ quy tắc chuỗi, ta không cần giải phương trình đạo hàm phức tạp cho cả mạng nơ-ron cùng lúc. Thay vào đó, mỗi tầng chỉ cần tính đạo hàm cục bộ (local gradient) của phép toán của riêng nó, rồi nhân dồn ngược từ đầu ra về đầu vào.
+
+---
+
+### 4. Đạo Hàm Bậc Hai và Ma Trận Hessian
+
+Đạo hàm bậc nhất cho biết độ nghiêng (hướng dốc), nhưng không cho biết bề mặt đang phẳng hay uốn cong gấp khúc. **Đạo hàm bậc hai** đo lường mức độ uốn cong (độ cong - curvature) của hàm số.
+
+Với hàm nhiều biến, tất cả các đạo hàm riêng bậc hai được gom thành **ma trận Hessian** $\mathbf{H} \in \mathbb{R}^{n \times n}$:
+
+$$
+\mathbf{H}_{ij} = \frac{\partial^2 f}{\partial x_i \partial x_j}
+$$
+
+Theo khai triển Taylor bậc hai:
+
+$$
+f(\mathbf{x} + \boldsymbol{\Delta x}) \approx f(\mathbf{x}) + \nabla f(\mathbf{x})^\top \boldsymbol{\Delta x} + \frac{1}{2} \boldsymbol{\Delta x}^\top \mathbf{H} \boldsymbol{\Delta x}
+$$
+
+- Nếu ma trận Hessian có trị riêng lớn nhất là $L$ ($\lambda_{\max} = L$), độ cong theo hướng đó rất dốc. Nếu chọn tốc độ học $\eta > \frac{2}{L}$, thuật toán Gradient Descent sẽ bị văng ra khỏi lòng chảo và **phân kỳ** (diverge).
+- Sự chênh lệch giữa độ cong lớn nhất và nhỏ nhất (tỉ số điều kiện $\kappa = \lambda_{\max}/\lambda_{\min}$) giải thích vì sao hàm mất mát dạng "thung lũng hẹp" khiến Gradient Descent dao động qua lại rất chậm chạp.
+
+### Giới hạn
+
+- **Điểm yên ngựa (Saddle points):** Trong không gian hàng nghìn chiều, gradient bằng $0$ thường rơi vào điểm yên ngựa (một chiều cong lên, một chiều cong xuống) thay vì đáy cực tiểu toàn cục.
+- **Biến mất / bùng nổ gradient:** Khi mạng nơ-ron có nhiều lớp, việc nhân liên tiếp hàng chục đạo hàm cục bộ có độ lớn nhỏ hơn $1$ sẽ khiến gradient tiến dần về $0$ (vanishing gradient) làm mô hình ngừng học; ngược lại nếu lớn hơn $1$ sẽ gây bùng nổ gradient (exploding gradient).
+
+## Minh họa
+
+Sơ đồ dưới đây minh họa sự khác biệt giữa đạo hàm giải tích và kiểm tra số trị bằng sai phân, cùng dòng chảy của quy tắc chuỗi trong lan truyền ngược:
+
+```text
+1. SAI PHÂN HỮU HẠN KIỂM TRA ĐẠO HÀM (GRADIENT CHECKING):
+    Sai phân tiến (lệch một bên, sai số O(ε)):
+           f(x + ε) - f(x)
+      ─────────────────────────
+                  ε
+    Sai phân trung tâm (đối xứng hai phía, sai số O(ε²)):
+       f(x + ε) - f(x - ε)
+      ─────────────────────   ◄── Độ chính xác gấp hàng triệu lần!
+              2ε
+
+2. DÒNG CHẢY QUY TẮC CHUỖI (BACKPROPAGATION):
+    Lan truyền tiến (Forward):
+       x ──► [ × w ] ──► z ──► [ + b ] ──► y_hat ──► [ Loss ] ──► L
+    Lan truyền ngược (Backward):
+       dL/dw ◄── [ * x ] ◄── dL/dz ◄── [ * 1 ] ◄── dL/dy_hat ◄── dL/dL (= 1)
+```
+
+## Ví dụ code
+
+Các ô dưới đây chạy độc lập và không phụ thuộc vào trạng thái trước đó.
+
+Ô đầu tiên thực hiện kỹ thuật **Gradient Checking**: so sánh gradient giải tích (tính bằng công thức toán) với gradient số trị (tính bằng sai phân trung tâm) để đảm bảo không bị sai sót công thức.
+
+<PythonRunner code={numericalGradCode} title="Kiểm tra gradient giải tích bằng sai phân trung tâm" />
+
+Kết quả chạy cho thấy:
+- Tại điểm kiểm tra $\mathbf{x} = [2.0, -1.0]$, gradient giải tích tính ra đúng bằng $[1.0, 2.0]$.
+- Gradient số trị tính bằng sai phân trung tâm với bước $\epsilon = 10^{-5}$ cũng cho ra $[1.0, 2.0]$.
+- Sai số tuyệt đối giữa hai phương pháp đạt mức cực nhỏ: $3.89 \times 10^{-11}$. Phép kiểm tra `diff < 1e-7` trả về `True`, xác nhận công thức đạo hàm đã được cài đặt chính xác tuyệt đối.
+
+Ô thứ hai minh họa thuật toán lan truyền ngược từng bước (Backpropagation) cho một nơ-ron hồi quy đơn giản bằng cách áp dụng trực tiếp quy tắc chuỗi và đối chiếu với đạo hàm giải tích trực tiếp.
+
+<PythonRunner code={chainRuleCode} title="Cài đặt quy tắc chuỗi từng bước cho lan truyền ngược" />
+
+Kết quả in ra đối chiếu:
+- Với $x = 2.0$, $y = 7.0$, $w = 1.5$, $b = 0.5$, mô hình dự đoán $\hat{y} = 3.5$, dẫn tới hàm mất mát $\mathcal{L} = (3.5 - 7.0)^2 = 12.25$.
+- Bằng quy tắc chuỗi qua biến trung gian $\frac{\partial \mathcal{L}}{\partial \hat{y}} = -7.0$, ta thu được $\frac{\partial \mathcal{L}}{\partial w} = -14.0000$ và $\frac{\partial \mathcal{L}}{\partial b} = -7.0000$.
+- Cả hai đạo hàm tính theo chuỗi đều trùng khớp hoàn toàn với công thức đạo hàm trực tiếp. Giá trị âm cho thấy nếu ta tăng $w$ và $b$ lên, $\hat{y}$ sẽ tiến gần về $7.0$ hơn và hàm mất mát sẽ giảm xuống.
+
+## Lỗi hay gặp
+
+:::caution[Quên dấu trừ khi cập nhật trọng số trong Gradient Descent]
+Quy tắc cập nhật đúng là $\mathbf{w} \leftarrow \mathbf{w} - \eta \nabla \mathcal{L}$. Nếu bạn sơ suất viết thành $\mathbf{w} \leftarrow \mathbf{w} + \eta \nabla \mathcal{L}$, bạn đang thực hiện thuật toán leo dốc (Gradient Ascent) để tìm điểm làm hàm mất mát lớn nhất! Giá trị loss sẽ lập tức bùng nổ tới vô cùng (`inf` hoặc `NaN`) chỉ sau vài bước lặp.
+:::
+
+:::caution[Chọn bước sai phân $\epsilon$ quá lớn hoặc quá nhỏ khi kiểm tra đạo hàm]
+Nếu chọn $\epsilon$ quá lớn (ví dụ $\epsilon = 0.1$), sai số cắt cụt của phép xấp xỉ chuỗi Taylor sẽ lớn, khiến gradient số trị lệch xa gradient giải tích. Ngược lại, nếu chọn $\epsilon$ quá nhỏ (nhỏ hơn $10^{-12}$), máy tính sẽ gặp hiện tượng triệt tiêu chữ số có nghĩa (catastrophic cancellation) do giới hạn độ chính xác số thực dấu phẩy động 64-bit (`float64`). Bước tối ưu trong thực tế là $\epsilon \approx 10^{-5}$ hoặc $10^{-7}$.
+:::
+
+:::caution[Quên coi các biến khác là hằng số khi lấy đạo hàm riêng]
+Khi tính đạo hàm riêng $\frac{\partial}{\partial x_1}(x_1^2 + 3 x_1 x_2 + 2 x_2^2)$, nhiều người học thường quên rằng $x_2$ đang đóng vai trò hằng số cố định, dẫn đến tính sai thành phần $3 x_1 x_2$. Trong toán học, đạo hàm của $c \cdot x_1$ theo $x_1$ luôn bằng $c$; do đó với $c = 3 x_2$, đạo hàm riêng chính xác là $3 x_2$.
+:::
+
+## Kiểm tra nhanh
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Đạo hàm đo tốc độ biến thiên tức thời; vectơ gradient tổng hợp các đạo hàm riêng và trỏ về hướng làm hàm số tăng dốc nhất.
+- Gradient Descent tối ưu hóa mô hình bằng cách bước ngược chiều gradient: $\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \eta \nabla \mathcal{L}(\boldsymbol{\theta})$.
+- Quy tắc chuỗi (Chain Rule) là nền móng toán học cho phép thuật toán lan truyền ngược (Backpropagation) tính đạo hàm hiệu quả qua hàng trăm tầng mạng nơ-ron.
+- Đạo hàm bậc hai và ma trận Hessian quyết định độ cong của bề mặt mất mát và chi phối việc lựa chọn tốc độ học $\eta$.
+
+**Đọc thêm:**
+
+- Grant Sanderson (3Blue1Brown) (2017). [*Essence of Calculus*](https://www.3blue1brown.com/topics/calculus), loạt video trực quan hóa trực giác giải tích vi tích phân xuất sắc.
+- Ian Goodfellow, Yoshua Bengio, Aaron Courville (2016). [*Deep Learning*](https://www.deeplearningbook.org/), Chương 4: Numerical Computation, phân tích gradient descent, điểm yên ngựa và ma trận Hessian.
+- Michael Nielsen (2015). [*Neural Networks and Deep Learning*](http://neuralnetworksanddeeplearning.com/chap2.html), Chương 2: How the backpropagation algorithm works, dẫn dắt 4 phương trình cơ bản của lan truyền ngược.
+- Christopher M. Bishop (2006). [*Pattern Recognition and Machine Learning*](https://www.microsoft.com/en-us/research/people/cmbishop/prml-book/), Mục 5.3 (Error Backpropagation).
+
+<LessonProgress />

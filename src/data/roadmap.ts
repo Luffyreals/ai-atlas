@@ -173,19 +173,19 @@ export const LESSONS: readonly Lesson[] = [
     id: 'math/linear-algebra',
     title: { vi: 'Đại số tuyến tính', en: 'Linear Algebra' },
     prerequisites: ['python/numpy-pandas'],
-    status: { vi: 'planned', en: 'planned' },
+    status: { vi: 'published', en: 'planned' },
   },
   {
     id: 'math/calculus',
     title: { vi: 'Giải tích', en: 'Calculus' },
     prerequisites: ['math/linear-algebra'],
-    status: { vi: 'planned', en: 'planned' },
+    status: { vi: 'published', en: 'planned' },
   },
   {
     id: 'math/probability-statistics',
     title: { vi: 'Xác suất thống kê', en: 'Probability and Statistics' },
     prerequisites: ['math/calculus'],
-    status: { vi: 'planned', en: 'planned' },
+    status: { vi: 'published', en: 'planned' },
   },
 
   // Part 3: Machine Learning (14)

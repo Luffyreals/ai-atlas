@@ -1,0 +1,294 @@
+---
+title: 'Đại số tuyến tính'
+description: 'Làm chủ đại số tuyến tính cho AI: vectơ, ma trận như phép biến đổi không gian, tích vô hướng, chuẩn L1/L2, cosine similarity, trị riêng và vectơ riêng.'
+quiz:
+  - question: 'Cho hai vectơ nhúng (embedding) $\mathbf{u}$ và $\mathbf{v}$ có cùng hướng chính xác nhưng $\|\mathbf{v}\|_2 = 3 \|\mathbf{u}\|_2$. Giá trị độ đo tương đồng Cosine giữa chúng bằng bao nhiêu?'
+    options:
+      - '$1.0$'
+      - '$3.0$'
+      - '$0.333$'
+      - '$0.0$'
+    answer: 0
+    explanation: 'Cosine similarity đo góc giữa hai vectơ qua $\cos(\theta) = \frac{\mathbf{u} \cdot \mathbf{v}}{\|\mathbf{u}\|_2 \|\mathbf{v}\|_2}$. Vì hai vectơ cùng hướng nên góc giữa chúng là $\theta = 0^\circ$, suy ra $\cos(0^\circ) = 1.0$. Độ lớn (độ dài) của vectơ hoàn toàn bị triệt tiêu ở mẫu số, giúp cosine similarity không bị ảnh hưởng bởi độ dài văn bản.'
+  - question: 'Cho hai ma trận vuông $\mathbf{A}$ và $\mathbf{B}$ cùng kích thước $n \times n$. Khẳng định nào sau đây là ĐÚNG về phép nhân ma trận?'
+    options:
+      - 'Phép nhân ma trận luôn có tính giao hoán: $\mathbf{A}\mathbf{B} = \mathbf{B}\mathbf{A}$'
+      - 'Phép nhân ma trận có tính kết hợp: $(\mathbf{A}\mathbf{B})\mathbf{C} = \mathbf{A}(\mathbf{B}\mathbf{C})$, nhưng nói chung không giao hoán: $\mathbf{A}\mathbf{B} \neq \mathbf{B}\mathbf{A}$'
+      - 'Nếu $\mathbf{A}\mathbf{B} = \mathbf{0}$ thì chắc chắn $\mathbf{A} = \mathbf{0}$ hoặc $\mathbf{B} = \mathbf{0}$'
+      - 'Ma trận nghịch đảo $(\mathbf{A}\mathbf{B})^{-1}$ luôn bằng $\mathbf{A}^{-1}\mathbf{B}^{-1}$'
+    answer: 1
+    explanation: 'Phép nhân ma trận biểu diễn phép hợp của các phép biến đổi không gian. Thứ tự thực hiện biến đổi rất quan trọng (ví dụ: quay rồi tịnh tiến khác với tịnh tiến rồi quay), do đó nói chung $\mathbf{A}\mathbf{B} \neq \mathbf{B}\mathbf{A}$. Tuy nhiên phép nhân ma trận luôn thỏa mãn tính chất kết hợp. Ngoài ra, $(\mathbf{A}\mathbf{B})^{-1} = \mathbf{B}^{-1}\mathbf{A}^{-1}$.'
+  - question: 'Nếu định thức của một ma trận vuông bằng $0$ ($\det(\mathbf{A}) = 0$), điều đó mang ý nghĩa hình học gì đối với không gian?'
+    options:
+      - 'Ma trận bảo toàn nguyên vẹn thể tích không gian'
+      - 'Ma trận làm xoay không gian một góc $90^\circ$'
+      - 'Không gian bị nén xẹp xuống số chiều thấp hơn (thể tích vùng biến đổi bằng $0$) và ma trận không có nghịch đảo'
+      - 'Mọi vectơ trong không gian đều đổi dấu'
+    answer: 2
+    explanation: 'Định thức $\det(\mathbf{A})$ thể hiện tỉ lệ co giãn diện tích (trong không gian 2D) hoặc thể tích (trong 3D). Khi $\det(\mathbf{A}) = 0$, toàn bộ không gian bị nén xẹp thành một đường thẳng hoặc một điểm (diện tích/thể tích bằng 0). Do thông tin bị mất mát hoàn toàn khi bị nén xẹp, bạn không thể đảo ngược phép biến đổi, đồng nghĩa với việc ma trận không khả nghịch (không tồn tại $\mathbf{A}^{-1}$).'
+  - question: 'Trong phương trình định nghĩa trị riêng và vectơ riêng $\mathbf{A}\mathbf{v} = \lambda \mathbf{v}$, vectơ $\mathbf{v}$ biến đổi như thế nào dưới tác động của ma trận $\mathbf{A}$?'
+    options:
+      - 'Vectơ $\mathbf{v}$ bị quay sang một hướng vuông góc'
+      - 'Vectơ $\mathbf{v}$ giữ nguyên phương ban đầu và chỉ bị co giãn độ dài theo hệ số tỉ lệ $\lambda$'
+      - 'Vectơ $\mathbf{v}$ luôn bị triệt tiêu về vectơ không'
+      - 'Vectơ $\mathbf{v}$ bị hoán vị các phần tử tọa độ'
+    answer: 1
+    explanation: 'Vectơ riêng $\mathbf{v}$ (khác vectơ không) đại diện cho các trục đặc biệt của phép biến đổi: khi ma trận $\mathbf{A}$ tác động lên $\mathbf{v}$, kết quả thu được là một vectơ cùng phương với $\mathbf{v}$, chỉ bị kéo giãn (nếu $|\lambda| > 1$), co ngắn (nếu $|\lambda| < 1$) hoặc đảo chiều (nếu $\lambda < 0$) theo đúng độ lớn của trị riêng $\lambda$.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import vectorCode from '@code/math/linear-algebra/vector-operations.vi.py?raw';
+import matrixCode from '@code/math/linear-algebra/matrix-transformation.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu sâu bản chất hình học của **vectơ** (vector) như các điểm/hướng trong không gian và **ma trận** (matrix) như những cỗ máy biến đổi không gian (spatial transformation).
+- Thành thạo các phép toán cốt lõi: tích vô hướng (**dot product**), chuẩn vectơ (**L1, L2 norm**) và độ đo tương đồng Cosine (**Cosine Similarity**) dùng trong tìm kiếm ngữ nghĩa và RAG.
+- Nắm vững tính chất của phép nhân ma trận, ý nghĩa hình học của định thức (**determinant**) và điều kiện khả nghịch của ma trận.
+- Làm chủ trực giác về **trị riêng** (eigenvalue) và **vectơ riêng** (eigenvector) — nền tảng toán học của các thuật toán phân tích thành phần chính (PCA) và nén mô hình AI.
+
+## Cần biết trước
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Trong bài [NumPy và Pandas](/vi/python/numpy-pandas/), bạn đã thao tác với mảng đa chiều `ndarray` và các phép toán vector hóa. Bài học này sẽ xây dựng nền móng toán học giải thích tại sao các mảng số đó lại có thể nhận diện hình ảnh, chuyển ngữ văn bản hay định hướng cho mô hình AI.
+:::
+
+## Trực giác
+
+Làm thế nào máy tính có thể hiểu được ý nghĩa của bức ảnh một chú mèo hay ngữ nghĩa của một bài báo khoa học?
+
+Máy tính không thể trực tiếp cảm nhận màu sắc hay đọc hiểu ngữ nghĩa từ ngữ. Tất cả dữ liệu đa phương tiện trong AI đều được chuyển đổi thành các dãy số thực:
+- Một bức ảnh đen trắng $28 \times 28$ điểm ảnh được biểu diễn thành một ma trận $28 \times 28$ con số, hoặc trải phẳng thành một **vectơ** 784 chiều.
+- Một đoạn văn bản được mô hình ngôn ngữ mã hóa thành một vectơ nhúng (**embedding vector**) 1536 chiều trong không gian ngữ nghĩa.
+- Một lớp mạng nơ-ron truyền thẳng (Dense layer) nhận vào một vectơ đặc trưng, nhân với một **ma trận trọng số** và cộng thêm hệ số tự do để biến đổi không gian biểu diễn.
+
+Nếu đại số sơ cấp ở trường phổ thông coi ma trận chỉ là một "bảng chữ nhật chứa các con số", thì trong Trí tuệ Nhân tạo, bạn hãy nhìn ma trận như một **phép biến đổi không gian**: nó có thể kéo giãn, co cụm, xoay tròn hoặc bẻ cong không gian dữ liệu để làm nổi bật các quy luật tiềm ẩn.
+
+## Lý thuyết
+
+### 1. Vectơ: Điểm và Hướng trong Không gian
+
+Một **vectơ** $n$ chiều là một dãy có thứ tự gồm $n$ số thực, ký hiệu là $\mathbf{x} \in \mathbb{R}^n$:
+
+$$
+\mathbf{x} = \begin{bmatrix} x_1 \\ x_2 \\ \vdots \\ x_n \end{bmatrix} = [x_1, x_2, \dots, x_n]^\top
+$$
+
+Về mặt hình học:
+- Vectơ có thể được xem là một mũi tên xuất phát từ gốc tọa độ $(0, 0, \dots, 0)$ trỏ tới điểm $(x_1, x_2, \dots, x_n)$.
+- Hướng mũi tên biểu thị **phương hướng**, và độ dài mũi tên biểu thị **độ lớn** (magnitude) của đại lượng.
+
+#### Tích Vô Hướng (Dot Product)
+
+Tích vô hướng giữa hai vectơ $\mathbf{u}, \mathbf{v} \in \mathbb{R}^n$ là tổng các tích của từng cặp phần tử tương ứng:
+
+$$
+\mathbf{u} \cdot \mathbf{v} = \mathbf{u}^\top \mathbf{v} = \sum_{i=1}^n u_i v_i
+$$
+
+Về mặt hình học, tích vô hướng liên hệ mật thiết với góc $\theta$ giữa hai vectơ:
+
+$$
+\mathbf{u} \cdot \mathbf{v} = \|\mathbf{u}\|_2 \|\mathbf{v}\|_2 \cos(\theta)
+$$
+
+- Nếu $\mathbf{u} \cdot \mathbf{v} > 0$: góc nhọn ($\theta < 90^\circ$), hai vectơ trỏ về cùng một hướng tổng quát.
+- Nếu $\mathbf{u} \cdot \mathbf{v} = 0$: hai vectơ vuông góc nhau (trực giao - orthogonal).
+- Nếu $\mathbf{u} \cdot \mathbf{v} < 0$: góc tù ($\theta > 90^\circ$), hai vectơ trỏ về hai hướng đối nghịch nhau.
+
+Trong cơ chế Attention của mô hình Transformer, phép tính chấm điểm tương quan $\mathbf{q} \cdot \mathbf{k}$ giữa vectơ truy vấn (Query) và vectơ khóa (Key) chính là một phép tính tích vô hướng!
+
+#### Chuẩn Vectơ (Vector Norms)
+
+**Chuẩn** (norm) đo lường độ lớn hoặc độ dài của một vectơ:
+
+1. **Chuẩn $L_1$ (Manhattan norm):** Tổng giá trị tuyệt đối của các phần tử:
+   $$
+   \|\mathbf{x}\|_1 = \sum_{i=1}^n |x_i|
+   $$
+   Chuẩn $L_1$ là cơ sở của kỹ thuật Regularization Lasso, giúp ép các trọng số không quan trọng về đúng $0$, tạo ra mô hình thưa (sparse model).
+
+2. **Chuẩn $L_2$ (Euclidean norm):** Độ dài hình học đường thẳng thẳng từ gốc tọa độ đến ngọn vectơ:
+   $$
+   \|\mathbf{x}\|_2 = \sqrt{\sum_{i=1}^n x_i^2} = \sqrt{\mathbf{x}^\top \mathbf{x}}
+   $$
+   Chuẩn $L_2$ là cơ sở của kỹ thuật Regularization Ridge (Weight Decay), giúp giới hạn độ lớn của trọng số mạng nơ-ron để tránh hiện tượng học vẹt (overfitting).
+
+#### Độ Đo Tương Đồng Cosine (Cosine Similarity)
+
+Khi so sánh hai đoạn văn bản qua các vectơ embedding, một bài báo dài 5000 từ và một bài báo ngắn 500 từ có cùng chủ đề sẽ có độ dài chuẩn $L_2$ rất chênh lệch. Để đo mức tương đồng ngữ nghĩa mà không bị độ dài làm sai lệch, ta dùng **Cosine Similarity**:
+
+$$
+\text{CosineSimilarity}(\mathbf{u}, \mathbf{v}) = \frac{\mathbf{u} \cdot \mathbf{v}}{\|\mathbf{u}\|_2 \|\mathbf{v}\|_2} = \cos(\theta)
+$$
+
+Giá trị này luôn nằm trong đoạn $[-1, 1]$:
+- Bằng $1.0$: hoàn toàn trùng hướng ngữ nghĩa.
+- Bằng $0.0$: hoàn toàn độc lập, không liên quan.
+- Bằng $-1.0$: hoàn toàn đối lập về ý nghĩa.
+
+:::note[Ghi nhớ]
+Khoảng cách Euclid bị chi phối bởi độ lớn của vectơ, còn Cosine Similarity chỉ quan tâm đến **góc lệch** giữa hai vectơ trong không gian đặc trưng.
+:::
+
+---
+
+### 2. Ma Trận: Cỗ Máy Biến Đổi Tuyến Tính
+
+Một ma trận $\mathbf{A} \in \mathbb{R}^{m \times n}$ gồm $m$ hàng và $n$ cột:
+
+$$
+\mathbf{A} = \begin{bmatrix} a_{11} & a_{12} & \dots & a_{1n} \\ a_{21} & a_{22} & \dots & a_{2n} \\ \vdots & \vdots & \ddots & \vdots \\ a_{m1} & a_{m2} & \dots & a_{mn} \end{bmatrix}
+$$
+
+Khi nhân ma trận $\mathbf{A}$ với một vectơ $\mathbf{x} \in \mathbb{R}^n$, ta nhận được một vectơ mới $\mathbf{y} \in \mathbb{R}^m$:
+
+$$
+\mathbf{y} = \mathbf{A}\mathbf{x}
+$$
+
+Mỗi cột thứ $j$ của ma trận $\mathbf{A}$ chính là vị trí mới của vectơ cơ sở thứ $j$ sau khi không gian bị biến đổi. Ma trận chính là "bản đồ chuyển dịch" của toàn bộ không gian tọa độ.
+
+#### Phép Nhân Ma Trận
+
+Phép nhân hai ma trận $\mathbf{A} \in \mathbb{R}^{m \times k}$ và $\mathbf{B} \in \mathbb{R}^{k \times p}$ cho ra ma trận $\mathbf{C} \in \mathbb{R}^{m \times p}$ với:
+
+$$
+C_{ij} = \sum_{r=1}^k A_{ir} B_{rj}
+$$
+
+**Tính chất sống còn cần nhớ:**
+- **Tính kết hợp:** $(\mathbf{A}\mathbf{B})\mathbf{C} = \mathbf{A}(\mathbf{B}\mathbf{C})$.
+- **Nói chung KHÔNG giao hoán:** $\mathbf{A}\mathbf{B} \neq \mathbf{B}\mathbf{A}$. Đổi thứ tự nhân sẽ làm thay đổi kết quả biến đổi không gian hoặc sai lệch kích thước!
+- **Chuyển vị của tích:** $(\mathbf{A}\mathbf{B})^\top = \mathbf{B}^\top \mathbf{A}^\top$ (đảo ngược thứ tự các nhân tử).
+
+#### Định Thức và Ma Trận Nghịch Đảo
+
+- **Định thức ($\det(\mathbf{A})$ hay $|\mathbf{A}|$):** Đo tỉ lệ thay đổi diện tích hoặc thể tích khi không gian bị biến đổi qua ma trận vuông $\mathbf{A}$.
+  - Nếu $\det(\mathbf{A}) = 2$: diện tích mọi hình học trong không gian tăng lên gấp đôi.
+  - Nếu $\det(\mathbf{A}) < 0$: không gian bị lật ngược hướng định hướng (reflection).
+  - Nếu $\det(\mathbf{A}) = 0$: không gian bị xẹp xuống (ví dụ: mặt phẳng 2D bị ép thành một đoạn thẳng 1D).
+- **Ma trận nghịch đảo ($\mathbf{A}^{-1}$):** Phép biến đổi đưa không gian trở lại trạng thái ban đầu:
+  $$
+  \mathbf{A}^{-1} \mathbf{A} = \mathbf{A} \mathbf{A}^{-1} = \mathbf{I}
+  $$
+  Một ma trận vuông chỉ có nghịch đảo khi và chỉ khi $\det(\mathbf{A}) \neq 0$ (ma trận không suy biến - non-singular).
+
+---
+
+### 3. Trị Riêng và Vectơ Riêng (Eigenvalues & Eigenvectors)
+
+Khi ma trận $\mathbf{A}$ biến đổi không gian, hầu hết các vectơ sẽ bị quay sang một hướng mới. Tuy nhiên, luôn tồn tại những hướng đặc biệt mà tại đó các vectơ **không hề bị quay**, mà chỉ bị kéo dài ra hoặc co ngắn lại!
+
+Các vectơ đặc biệt đó gọi là **vectơ riêng** (eigenvector $\mathbf{v}$), và tỉ lệ co giãn tương ứng gọi là **trị riêng** (eigenvalue $\lambda$):
+
+$$
+\mathbf{A}\mathbf{v} = \lambda \mathbf{v} \quad (\mathbf{v} \neq \mathbf{0})
+$$
+
+Để tìm các trị riêng $\lambda$, ta giải phương trình đặc trưng:
+
+$$
+\det(\mathbf{A} - \lambda \mathbf{I}) = 0
+$$
+
+**Ứng dụng cốt lõi trong AI:**
+- **PCA (Principal Component Analysis):** Vectơ riêng ứng với trị riêng lớn nhất của ma trận hiệp phương sai chính là hướng mà dữ liệu có độ biến thiên (phương sai) lớn nhất — tức chứa nhiều thông tin nhất. Bằng cách chiếu dữ liệu lên các vectơ riêng này, ta giảm số chiều từ hàng nghìn xuống vài chiều mà vẫn giữ được đặc trưng quan trọng.
+- **Phân rã giá trị suy biến (SVD):** Cơ sở của nén ma trận trọng số LoRA (Low-Rank Adaptation) trong các mô hình ngôn ngữ lớn LLM.
+
+### Giới hạn
+
+- **Độ phức tạp tính toán:** Phép nhân ma trận truyền thống tốn $\mathcal{O}(n^3)$ phép tính; việc tìm ma trận nghịch đảo cũng tốn $\mathcal{O}(n^3)$. Với các mô hình AI hàng tỉ tham số, ta không bao giờ tính nghịch đảo trực tiếp mà dùng thuật toán tối ưu xấp xỉ như Gradient Descent.
+- **Bất ổn định số học:** Khi ma trận có định thức rất gần $0$ (số điều kiện condition number $\kappa$ rất lớn), các phép tính ma trận trên máy tính dễ gặp sai số làm tròn số thực dấu phẩy động.
+
+## Minh họa
+
+Dưới đây là sơ đồ trực quan hóa bản chất hình học của ba khái niệm cốt lõi:
+
+```text
+1. TÍCH VÔ HƯỚNG VÀ COSINE SIMILARITY:
+        v
+       ↗
+      /  \  Góc θ nhỏ  --> cos(θ) gần 1.0 (Rất tương đồng)
+     / θ  \ Góc θ = 90° --> cos(θ) = 0.0  (Trực giao, độc lập)
+    +------> u
+
+2. MA TRẬN NHƯ PHÉP BIẾN ĐỔI KHÔNG GIAN 2D:
+    Không gian gốc [i, j]                Sau khi nhân ma trận A:
+          y                                    y
+          |                                    |    A @ [1, 2] = [5, 4]
+          |  [1, 2]                            |     ↗
+          +------> x                           +------> x
+    (Hệ trục vuông góc)                  (Không gian bị kéo xiên và giãn)
+
+3. TRỊ RIÊNG VÀ VECTƠ RIÊNG (A @ v = λ * v):
+    Vectơ thường u:  u ──► A @ u  (Bị xoay lệch hướng!)
+    Vectơ riêng v:   v ──► A @ v = λ * v  (Cùng hướng, chỉ bị co giãn độ dài λ lần!)
+```
+
+## Ví dụ code
+
+Các ô dưới đây chạy độc lập. Cả hai ô đều dùng NumPy để tính toán đại số tuyến tính với hiệu năng C tối ưu.
+
+Ô đầu tiên thực hiện các phép toán trên vectơ: tính tích vô hướng, chuẩn $L_1$, chuẩn $L_2$ và độ đo tương đồng Cosine giữa hai vectơ nhúng biểu diễn văn bản.
+
+<PythonRunner code={vectorCode} title="Tính toán vectơ, chuẩn L1/L2 và Cosine Similarity" />
+
+Kết quả in ra cho thấy:
+- Tích vô hướng $\mathbf{u} \cdot \mathbf{v} = 25.0000$.
+- Chuẩn $L_1$ của $\mathbf{u}$ là $6.0000$ (tổng trị tuyệt đối $|1| + |2| + |3| = 6$).
+- Chuẩn $L_2$ (độ dài Euclid) của $\mathbf{u}$ là $3.7417$ và của $\mathbf{v}$ là $6.7082$.
+- Cosine similarity đạt xấp xỉ $0.9960$ (rất gần $1.0$), chứng minh rằng mặc dù vectơ $\mathbf{v}$ có độ dài lớn gần gấp đôi $\mathbf{u}$, hai vectơ này gần như cùng chỉ về một hướng trong không gian ngữ nghĩa.
+
+Ô thứ hai biến đổi một vectơ tọa độ qua ma trận vuông $2 \times 2$, tính định thức $\det(\mathbf{A})$ và tìm cặp trị riêng - vectơ riêng bằng `np.linalg.eig`.
+
+<PythonRunner code={matrixCode} title="Biến đổi không gian, định thức và trị riêng bằng NumPy" />
+
+Kết quả kiểm chứng:
+- Phép nhân ma trận đưa điểm $(1, 2)$ thành tọa độ mới $(5, 4)$.
+- Định thức $\det(\mathbf{A}) = 6.0000 > 0$, chứng minh ma trận bảo toàn tính khả nghịch và làm dãn diện tích không gian gấp 6 lần.
+- Hàm `np.linalg.eig` tìm được hai trị riêng $\lambda_1 = 3.0$ và $\lambda_2 = 2.0$.
+- Phép kiểm tra `A @ v0` cho kết quả chính xác bằng `lambda0 * v0` (`[3., 0.]`), và hàm `np.allclose` trả về `True`, xác nhận định nghĩa toán học của vectơ riêng.
+
+## Lỗi hay gặp
+
+:::caution[Nhầm lẫn giữa nhân từng phần tử (`*`) và nhân ma trận (`@`)]
+Trong NumPy, toán tử `*` thực hiện phép nhân Hadamard (nhân từng phần tử tương ứng giữa hai mảng cùng kích thước). Để thực hiện phép nhân ma trận đại số tuyến tính $(\mathbf{A}\mathbf{B})$, bạn phải dùng toán tử `@` hoặc hàm `np.dot(A, B)`. Viết nhầm `A * B` sẽ dẫn đến lỗi kích thước hoặc cho ra ma trận sai lệch hoàn toàn về ý nghĩa biến đổi không gian.
+:::
+
+:::caution[Dùng khoảng cách Euclid thay vì Cosine Similarity cho văn bản có độ dài lệch nhau]
+Khi so khớp hai bài viết trong hệ thống tìm kiếm (RAG), nếu dùng khoảng cách Euclid $\|\mathbf{u} - \mathbf{v}\|_2$, một văn bản tóm tắt 3 câu và một bài phân tích chuyên sâu 30 trang dù bàn về cùng một chủ đề AI vẫn sẽ có khoảng cách rất lớn (do số lượng từ và độ lớn vectơ khác nhau). Chuẩn hóa góc bằng Cosine Similarity là lựa chọn chuẩn mực để loại bỏ hoàn toàn độ chênh lệch về độ dài văn bản.
+:::
+
+:::caution[Giả định mọi ma trận vuông đều có ma trận nghịch đảo]
+Một ma trận vuông chỉ khả nghịch khi định thức của nó khác $0$ ($\det(\mathbf{A}) \neq 0$). Nếu dữ liệu có các đặc trưng phụ thuộc tuyến tính (ví dụ một cột đo diện tích bằng $m^2$ và một cột khác đổi sang $ft^2$), ma trận dữ liệu $\mathbf{X}^\top \mathbf{X}$ sẽ bị suy biến, định thức bằng $0$, khiến phương trình nghiệm đóng giải tích của hồi quy tuyến tính không thể tính được nghiệm.
+:::
+
+## Kiểm tra nhanh
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Vectơ đại diện cho các mẫu dữ liệu hoặc các hướng trong không gian; tích vô hướng đo mức độ cùng hướng giữa hai vectơ.
+- Chuẩn $L_1$ và $L_2$ đo độ dài vectơ, là nền tảng của kỹ thuật phạt trọng số Lasso và Ridge trong học máy.
+- Ma trận là phép biến đổi không gian; định thức đo tỉ lệ biến dạng diện tích/thể tích và quyết định tính khả nghịch của ma trận.
+- Trị riêng và vectơ riêng chỉ ra các hướng bảo toàn phương vị khi biến đổi không gian, là gốc rễ của thuật toán giảm chiều dữ liệu PCA và nén mô hình SVD/LoRA.
+
+**Đọc thêm:**
+
+- Grant Sanderson (3Blue1Brown) (2016). [*Essence of Linear Algebra*](https://www.3blue1brown.com/topics/linear-algebra), chuỗi bài giảng trực quan hóa hình học trực quan nhất về đại số tuyến tính.
+- Gilbert Strang (2016). [*Introduction to Linear Algebra*](https://math.mit.edu/~gs/linearalgebra/), giáo trình kinh điển của giáo sư MIT về đại số tuyến tính ứng dụng.
+- Marc Peter Deisenroth, A. Aldo Faisal, Cheng Soon Ong (2020). [*Mathematics for Machine Learning*](https://mml-book.github.io/) (PDF), Chương 2 (Linear Algebra) và Chương 3 (Analytic Geometry).
+- Scipy Lecture Notes (2023). [*Operations on arrays and linear algebra with NumPy*](https://numpy.org/doc/stable/reference/routines.linalg.html), tài liệu tra cứu chính thức mô-đun `numpy.linalg`.
+
+<LessonProgress />

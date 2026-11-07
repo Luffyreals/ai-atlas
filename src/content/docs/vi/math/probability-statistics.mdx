@@ -1,0 +1,298 @@
+---
+title: 'Xác suất thống kê'
+description: 'Làm chủ xác suất thống kê cho AI: phân phối Gaussian, Bernoulli, kỳ vọng, phương sai, Định lý Bayes và ước lượng hợp lý cực đại MLE.'
+quiz:
+  - question: 'Cho biến ngẫu nhiên liên tục $X$ tuân theo phân phối chuẩn tắc $X \sim \mathcal{N}(0, 1)$. Giá trị xác suất để $X$ nhận chính xác giá trị bằng $1.5$ ($P(X = 1.5)$) là bao nhiêu?'
+    options:
+      - '$0.1295$'
+      - '$0$'
+      - '$0.5$'
+      - '$1.0$'
+    answer: 1
+    explanation: 'Đối với mọi biến ngẫu nhiên liên tục, diện tích dưới đường cong tại một điểm duy nhất có độ rộng bằng 0 ($\int_{x_0}^{x_0} f(x) dx = 0$). Do đó xác suất tại một điểm chính xác luôn bằng 0. Giá trị $f(1.5) \approx 0.1295$ không phải là xác suất mà là giá trị hàm mật độ xác suất (PDF). Ta chỉ có thể tính xác suất khi xét trên một khoảng, ví dụ $P(1.49 \le X \le 1.51)$.'
+  - question: 'Trong một cộng đồng có tỉ lệ mắc bệnh hiếm là $1\%$. Một xét nghiệm có độ nhạy $95\%$ và tỉ lệ dương tính giả $5\%$. Nếu một người ngẫu nhiên nhận kết quả xét nghiệm dương tính, xác suất người đó thực sự mắc bệnh là khoảng bao nhiêu?'
+    options:
+      - 'Khoảng $95\%$'
+      - 'Khoảng $50\%$'
+      - 'Khoảng $16.1\%$'
+      - 'Gần như $100\%$'
+    answer: 2
+    explanation: 'Đây là nghịch lý dương tính giả (Base Rate Fallacy). Trong 10 000 người: có 100 người mắc bệnh (xét nghiệm ra 95 người dương tính thật) và 9900 người khỏe mạnh (xét nghiệm ra $9900 \times 5\% = 495$ người dương tính giả). Tổng số người dương tính là $95 + 495 = 590$ người. Do đó, tỉ lệ người thực sự có bệnh trong số những người dương tính chỉ là $95 / 590 \approx 16.1\%$.'
+  - question: 'Trong học máy, khi giả định sai số dự đoán (nhiễu) giữa nhãn thật và đầu ra mô hình tuân theo phân phối chuẩn Gaussian, phương pháp ước lượng hợp lý cực đại (MLE) dẫn thẳng tới hàm mất mát quen thuộc nào?'
+    options:
+      - 'Hàm mất mát bản lề (Hinge Loss)'
+      - 'Hàm mất mát sai số bình phương trung bình (Mean Squared Error - MSE)'
+      - 'Hàm mất mát Cross-Entropy'
+      - 'Độ đo tương đồng Cosine'
+    answer: 1
+    explanation: 'Khi giả định sai số $\epsilon = y - \hat{y} \sim \mathcal{N}(0, \sigma^2)$, hàm likelihood có chứa số mũ $e^{-(y - \hat{y})^2 / (2\sigma^2)}$. Lấy logarit tự nhiên và đổi dấu để biến bài toán cực đại hóa likelihood thành cực tiểu hóa, số hạng phụ thuộc tham số chính là $\sum (y - \hat{y})^2$, tức là sai số bình phương (MSE). Điều này chứng minh rằng việc tối ưu MSE hoàn toàn bắt nguồn từ nguyên lý xác suất thống kê vững chắc.'
+  - question: 'Tại sao khi tối ưu hóa tham số theo phương pháp MLE, chúng ta luôn lấy logarit của hàm likelihood (Log-Likelihood $\sum \ln p(x^{(i)})$) thay vì nhân trực tiếp các xác suất $\prod p(x^{(i)})$?'
+    options:
+      - 'Vì logarit làm cho mọi số âm thành số dương'
+      - 'Vì nhân hàng ngàn xác suất nhỏ trong đoạn $[0, 1]$ sẽ gây hiện tượng tràn dưới số thực (numerical underflow), và logarit biến phép nhân thành phép cộng giúp lấy đạo hàm dễ dàng hơn'
+      - 'Vì hàm logarit làm thay đổi vị trí nghiệm tối ưu của bài toán'
+      - 'Vì các máy tính không hỗ trợ phép nhân ma trận'
+    answer: 1
+    explanation: 'Khi nhân hàng ngàn hoặc hàng triệu xác suất nhỏ (ví dụ $0.01^{1000}$), giá trị sẽ nhanh chóng tiến về 0 và gây lỗi tràn dưới số thực (underflow) trên máy tính. Vì hàm $\ln(x)$ là hàm đồng biến đơn điệu, giá trị tham số làm cực đại hóa $L(\theta)$ cũng chính là giá trị làm cực đại hóa $\ln L(\theta)$. Hơn nữa, đạo hàm của một tổng $\sum \ln p_i$ đơn giản hơn rất nhiều so với đạo hàm của một tích khổng lồ.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import gaussianCode from '@code/math/probability-statistics/gaussian-distribution.vi.py?raw';
+import bayesMleCode from '@code/math/probability-statistics/bayes-mle.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Phân biệt rõ ràng giữa biến ngẫu nhiên **rời rạc** và **liên tục**, hiểu bản chất của hàm khối xác suất (PMF) và hàm mật độ xác suất (PDF).
+- Nắm vững các phân phối xác suất cốt lõi trong AI: phân phối chuẩn **Gaussian**, phân phối **Bernoulli** và **Uniform**, cùng ý nghĩa của Định lý giới hạn trung tâm.
+- Làm chủ các đại lượng thống kê: kỳ vọng (**Expectation / Mean**), phương sai (**Variance**), độ lệch chuẩn (**Standard Deviation**) và hiệp phương sai (**Covariance**).
+- Hiểu sâu sắc **Định lý Bayes** (Bayes' Theorem) để cập nhật niềm tin từ dữ liệu quan sát, và tránh được cạm bẫy dương tính giả.
+- Hiểu phương pháp **Ước lượng hợp lý cực đại** (Maximum Likelihood Estimation - MLE) và chứng minh được nguồn gốc xác suất của hai hàm mất mát kinh điển: MSE và Cross-Entropy.
+
+## Cần biết trước
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Trong bài [Giải tích](/vi/math/calculus/), bạn đã thành thạo đạo hàm và gradient để tìm điểm cực tiểu của một hàm số. Trong bài này, chúng ta sẽ áp dụng các công cụ giải tích đó vào **Lý thuyết xác suất** để xây dựng phương pháp ước lượng tham số tối ưu (MLE) cho mô hình AI.
+:::
+
+## Trực giác
+
+Thế giới thực chứa đầy sự không chắc chắn (uncertainty) và nhiễu (noise):
+- Một cảm biến nhiệt độ không bao giờ đo ra cùng một con số tuyệt đối trong môi trường ổn định; nó luôn dao động nhẹ quanh nhiệt độ thật.
+- Khi người dùng nhấp vào một quảng cáo trực tuyến, ta không thể biết chắc 100% họ có mua hàng hay không; ta chỉ có thể dự đoán một **xác suất**.
+- Mô hình nhận diện chữ viết tay nhìn thấy chữ số "8" bị nhòe: nó không khẳng định chắc nịch mà đưa ra phân phối: $85\%$ là số 8, $12\%$ là số 3, $3\%$ là số 0.
+
+Xác suất thống kê chính là ngôn ngữ toán học giúp AI định lượng sự bất định, mô hình hóa nhiễu thực tế và đưa ra quyết định tối ưu dựa trên bằng chứng dữ liệu có hạn.
+
+## Lý thuyết
+
+### 1. Biến Ngẫu Nhiên: Rời Rạc và Liên Tục
+
+Một **biến ngẫu nhiên** (random variable) $X$ là một quy tắc gán một giá trị số cho mỗi kết quả ngẫu nhiên trong không gian mẫu.
+
+#### Biến Ngẫu Nhiên Rời Rạc (Discrete)
+
+Nhận các giá trị riêng biệt (đếm được), ví dụ nhãn phân loại $y \in \{0, 1, 2\}$ hoặc số token trong một câu.
+- Được mô tả bởi **hàm khối xác suất** (Probability Mass Function - PMF): $p(x) = P(X = x)$.
+- Tổng xác suất trên toàn bộ không gian mẫu luôn bằng 1:
+  $$
+  \sum_{x} P(X = x) = 1, \quad 0 \le P(X = x) \le 1
+  $$
+
+#### Biến Ngẫu Nhiên Liên Tục (Continuous)
+
+Nhận giá trị trong một khoảng liên tục trên trục số thực $\mathbb{R}$, ví dụ giá nhà, thời gian chạy, trọng lượng.
+- Được mô tả bởi **hàm mật độ xác suất** (Probability Density Function - PDF), ký hiệu $f(x)$.
+- Diện tích dưới toàn bộ đường cong PDF bằng 1:
+  $$
+  \int_{-\infty}^{+\infty} f(x) \, dx = 1, \quad f(x) \ge 0
+  $$
+- **Lưu ý cốt tử:** Xác suất tại một điểm chính xác $P(X = x_0) = 0$! Xác suất chỉ có nghĩa khi xét trên một khoảng $[a, b]$:
+  $$
+  P(a \le X \le b) = \int_a^b f(x) \, dx
+  $$
+
+---
+
+### 2. Các Phân Phối Cốt Lõi Trong AI
+
+#### Phân Phối Chuẩn Gaussian ($\mathcal{N}(\mu, \sigma^2)$)
+
+Phân phối hình chuông đối xứng đặc trưng, hoàn toàn được xác định bởi hai tham số: kỳ vọng $\mu$ (tâm chuông) và phương sai $\sigma^2$ (độ bè của chuông):
+
+$$
+f(x) = \frac{1}{\sigma \sqrt{2\pi}} \exp\left( -\frac{(x - \mu)^2}{2\sigma^2} \right)
+$$
+
+**Định lý giới hạn trung tâm (Central Limit Theorem):** Tổng của một số lượng lớn các biến ngẫu nhiên độc lập bất kỳ (dù bản thân chúng có phân phối gì) sẽ dần hội tụ về phân phối chuẩn Gaussian. Đây là lý do vì sao hầu hết các loại nhiễu tự nhiên và sai số đo lường trong học máy đều được mô hình hóa bằng phân phối chuẩn.
+
+#### Phân Phối Bernoulli
+
+Mô tả một phép thử nhị phân với hai kết quả: thành công ($y = 1$) với xác suất $p$, và thất bại ($y = 0$) với xác suất $1 - p$:
+
+$$
+P(Y = y) = p^y (1 - p)^{1 - y}, \quad y \in \{0, 1\}
+$$
+
+Đây chính là phân phối nền tảng của bài toán phân loại nhị phân và hàm mất mát Binary Cross-Entropy.
+
+---
+
+### 3. Kỳ Vọng, Phương Sai và Hiệp Phương Sai
+
+- **Kỳ vọng (Expectation / Mean $\mathbb{E}[X]$ hay $\mu$):** Giá trị trung bình theo trọng số xác suất của biến ngẫu nhiên. Với biến liên tục: $\mathbb{E}[X] = \int_{-\infty}^{+\infty} x f(x) \, dx$; với biến rời rạc: $\mathbb{E}[X] = \sum x p(x)$.
+- **Phương sai (Variance $\mathrm{Var}(X)$ hay $\sigma^2$):** Đo lường mức độ phân tán của dữ liệu xung quanh giá trị kỳ vọng:
+  $$
+  \mathrm{Var}(X) = \mathbb{E}\left[(X - \mathbb{E}[X])^2\right] = \mathbb{E}[X^2] - (\mathbb{E}[X])^2
+  $$
+- **Độ lệch chuẩn (Standard Deviation $\sigma$):** Căn bậc hai của phương sai: $\sigma = \sqrt{\mathrm{Var}(X)}$, có cùng đơn vị đo lường với dữ liệu gốc.
+- **Hiệp phương sai (Covariance $\mathrm{Cov}(X, Y)$):** Đo lường mức độ biến thiên cùng chiều hay ngược chiều giữa hai biến ngẫu nhiên:
+  $$
+  \mathrm{Cov}(X, Y) = \mathbb{E}\left[(X - \mu_X)(Y - \mu_Y)\right]
+  $$
+  Nếu $\mathrm{Cov}(X, Y) > 0$, khi $X$ tăng thì $Y$ có xu hướng tăng theo.
+
+---
+
+### 4. Định Lý Bayes: Cập Nhật Niềm Tin Từ Bằng Chứng
+
+Xác suất có điều kiện $P(A \mid B)$ là xác suất xảy ra biến cố $A$ khi ta biết chắc chắn biến cố $B$ đã xảy ra:
+
+$$
+P(A \mid B) = \frac{P(A \cap B)}{P(B)}
+$$
+
+Từ định nghĩa này, **Định lý Bayes** (Bayes' Theorem) cho phép ta đảo ngược điều kiện suy luận:
+
+$$
+P(\theta \mid \mathcal{D}) = \frac{P(\mathcal{D} \mid \theta) P(\theta)}{P(\mathcal{D})}
+$$
+
+Trong học máy và thống kê suy luận Bayes:
+- $P(\theta)$: **Xác suất tiên nghiệm (Prior)** — niềm tin ban đầu của chúng ta về tham số $\theta$ trước khi quan sát dữ liệu.
+- $P(\mathcal{D} \mid \theta)$: **Độ hợp lý (Likelihood)** — xác suất xuất hiện tập dữ liệu $\mathcal{D}$ nếu tham số thật sự là $\theta$.
+- $P(\theta \mid \mathcal{D})$: **Xác suất hậu nghiệm (Posterior)** — niềm tin được cập nhật về $\theta$ sau khi đã quan sát thấy dữ liệu $\mathcal{D}$.
+- $P(\mathcal{D})$: **Bằng chứng (Evidence)** — hằng số chuẩn hóa đảm bảo tổng xác suất bằng 1.
+
+:::note[Ghi nhớ]
+Công thức vàng của tư duy Bayes: $\text{Posterior} \propto \text{Likelihood} \times \text{Prior}$ (Hậu nghiệm $\propto$ Độ hợp lý $\times$ Tiên nghiệm). Dữ liệu mới quan sát được sẽ liên tục tinh chỉnh và hoàn thiện niềm tin của mô hình.
+:::
+
+---
+
+### 5. Ước Lượng Hợp Lý Cực Đại (Maximum Likelihood Estimation - MLE)
+
+Giả sử ta thu thập được tập dữ liệu gồm $m$ mẫu độc lập $\mathcal{D} = \{x^{(1)}, x^{(2)}, \dots, x^{(m)}\}$. Câu hỏi đặt ra là: **Bộ tham số $\boldsymbol{\theta}$ nào có khả năng cao nhất đã sinh ra tập dữ liệu này?**
+
+Hàm độ hợp lý (**Likelihood function**) là tích xác suất của tất cả các mẫu:
+
+$$
+L(\boldsymbol{\theta}) = \prod_{i=1}^m p(x^{(i)} \mid \boldsymbol{\theta})
+$$
+
+Để tránh việc nhân các số cực nhỏ gây tràn dưới số thực (numerical underflow) và để đơn giản hóa phép lấy đạo hàm, ta lấy logarit tự nhiên để chuyển sang hàm **Log-Likelihood**:
+
+$$
+\ell(\boldsymbol{\theta}) = \ln L(\boldsymbol{\theta}) = \sum_{i=1}^m \ln p(x^{(i)} \mid \boldsymbol{\theta})
+$$
+
+Nghiệm ước lượng hợp lý cực đại là tham số làm cực đại hóa hàm này:
+
+$$
+\hat{\boldsymbol{\theta}}_{\text{MLE}} = \arg\max_{\boldsymbol{\theta}} \sum_{i=1}^m \ln p(x^{(i)} \mid \boldsymbol{\theta})
+$$
+
+#### Nguồn Gốc Toán Học Của MSE và Cross-Entropy
+
+1. **Nguồn gốc hàm mất mát MSE:**
+   Giả sử mô hình dự đoán $\hat{y}^{(i)} = f(\mathbf{x}^{(i)})$ và nhãn thật bị nhiễu bởi phân phối Gaussian: $y^{(i)} \sim \mathcal{N}(\hat{y}^{(i)}, \sigma^2)$.
+   Log-likelihood của tập dữ liệu là:
+   $$
+   \ell = \sum_{i=1}^m \ln \left( \frac{1}{\sigma \sqrt{2\pi}} \exp\left(-\frac{(y^{(i)} - \hat{y}^{(i)})^2}{2\sigma^2}\right) \right) = -m \ln(\sigma \sqrt{2\pi}) - \frac{1}{2\sigma^2} \sum_{i=1}^m (y^{(i)} - \hat{y}^{(i)})^2
+   $$
+   Cực đại hóa $\ell$ tương đương với việc **cực tiểu hóa tổng bình phương sai số** $\sum (y^{(i)} - \hat{y}^{(i)})^2$ — chính là hàm mất mát MSE!
+
+2. **Nguồn gốc hàm mất mát Cross-Entropy:**
+   Giả sử nhãn phân loại nhị phân $y^{(i)} \in \{0, 1\}$ tuân theo phân phối Bernoulli với xác suất dự đoán $\hat{y}^{(i)} = P(Y=1)$.
+   Log-likelihood là:
+   $$
+   \ell = \sum_{i=1}^m \left[ y^{(i)} \ln \hat{y}^{(i)} + (1 - y^{(i)}) \ln(1 - \hat{y}^{(i)}) \right]
+   $$
+   Đổi dấu (cực tiểu hóa $-\ell$) cho ta chính xác công thức **Binary Cross-Entropy Loss**!
+
+### Giới hạn
+
+- **Giả định độc lập (i.i.d):** MLE giả định các mẫu dữ liệu độc lập và cùng phân phối (Independent and Identically Distributed). Với dữ liệu văn bản hay chuỗi thời gian (như giá cổ phiếu), các bước sau phụ thuộc mạnh vào bước trước, đòi hỏi mô hình tự hồi quy phức tạp hơn.
+- **Học vẹt khi dữ liệu ít (Overfitting):** Nếu bạn tung đồng xu 3 lần và cả 3 lần đều ngửa, MLE sẽ kết luận xác suất ngửa là $100\%$ ($\hat{p}_{\text{MLE}} = 1.0$). Lúc này, suy luận Bayes với một phân phối tiên nghiệm hợp lý (MAP) sẽ giúp hạn chế kết luận cực đoan.
+
+## Minh họa
+
+Sơ đồ trực quan dưới đây so sánh cấu trúc phân phối Gaussian và cây quyết định xác suất trong Định lý Bayes:
+
+```text
+1. PHÂN PHỐI CHUẨN GAUSSIAN N(μ, σ²):
+            f(x)
+             ▲          Điểm đỉnh tại x = μ
+             │              ╭───╮
+             │             ╭╯   ╰╮
+             │            ╭╯     ╰╮    Vùng [μ - σ, μ + σ]
+             │          ╭─╯       ╰─╮  chứa khoảng 68.2% dữ liệu!
+             │      ───╯             ╰───
+             └───────────┼────┼────┼──────────► x
+                       μ-σ    μ   μ+σ
+
+2. ĐỊNH LÝ BAYES TRONG CHẨN ĐOÁN (BASE RATE FALLACY):
+    10,000 Người trong cộng đồng
+      ├── 1% Mắc bệnh (100 người) ──► Xét nghiệm đúng 95% ──► 95 Dương tính thật
+      └── 99% Khỏe mạnh (9,900 người) ──► Dương tính giả 5% ─► 495 Dương tính giả
+    ==> Nhóm dương tính có 95 + 495 = 590 người, chỉ có 95 người thực sự có bệnh!
+```
+
+## Ví dụ code
+
+Các ô dưới đây chạy độc lập. Ô đầu tiên lần đầu chạy có thể lâu hơn vài giây vì trình duyệt cần tải thư viện `scipy` và `matplotlib`.
+
+Ô đầu tiên sinh 5000 mẫu ngẫu nhiên từ phân phối Gaussian $\mathcal{N}(2.0, 1.5^2)$, tính kỳ vọng và phương sai thực nghiệm, sau đó vẽ biểu đồ tần suất cùng đường cong mật độ lý thuyết (PDF).
+
+<PythonRunner
+  code={gaussianCode}
+  title="Mô phỏng phân phối Gaussian, tính kỳ vọng và vẽ hàm mật độ PDF"
+  figureAlt={['Biểu đồ histogram phân phối các mẫu chuẩn Gaussian kèm đường cong mật độ xác suất đối xứng hình chuông']}
+/>
+
+Kết quả in ra cho thấy:
+- Kỳ vọng lý thuyết $\mu = 2.0000$, kỳ vọng thực nghiệm tính từ 5000 mẫu ngẫu nhiên đạt $1.9702$.
+- Phương sai lý thuyết $\sigma^2 = 1.5^2 = 2.2500$, phương sai thực nghiệm đạt $2.2471$.
+- Cả hai đại lượng thực nghiệm đều tiệm cận rất sát giá trị lý thuyết, minh chứng cho quy luật số lớn (Law of Large Numbers).
+
+Ô thứ hai giải bài toán chẩn đoán y khoa bằng Định lý Bayes (tính xác suất hậu nghiệm $P(D \mid +)$ với $D$ là biến cố mắc bệnh) và minh họa thuật toán ước lượng hợp lý cực đại MLE cho phân phối Bernoulli.
+
+<PythonRunner code={bayesMleCode} title="Tính xác suất hậu nghiệm Bayes và ước lượng MLE Bernoulli" />
+
+Kết quả in ra cho thấy:
+- Xác suất toàn phần của xét nghiệm dương tính $P(+)$ là $0.0590$ (gồm $0.95\%$ dương tính thật và $4.95\%$ dương tính giả).
+- Xác suất thực sự mắc bệnh khi nhận kết quả dương tính chỉ là $0.1610$ ($16.10\%$). Dù xét nghiệm có độ chính xác $95\%$, căn bệnh quá hiếm khiến số ca dương tính giả áp đảo số ca dương tính thật.
+- Trong chuỗi 10 thử nghiệm Bernoulli có 8 lần thành công, nghiệm MLE $\hat{p}_{\text{MLE}} = 0.8000$.
+- Giá trị Log-Likelihood tại $\hat{p} = 0.8$ đạt $-5.0040$, cao hơn rõ rệt so với mức $-6.9315$ tại giả định cơ sở $p = 0.5$, chứng minh $\hat{p} = 0.8$ là tham số giải thích dữ liệu quan sát tốt nhất.
+
+## Lỗi hay gặp
+
+:::caution[Bẫy tỷ lệ nền (Base Rate Fallacy)]
+Khi đánh giá kết quả từ một mô hình phân loại (hoặc xét nghiệm y tế), bỏ qua xác suất tiền nghiệm (Base Rate / Prior) là sai lầm phổ biến nhất. Một mô hình phát hiện gian lận thẻ tín dụng có độ chính xác $99\%$ nghe rất ấn tượng, nhưng nếu tỉ lệ giao dịch gian lận trong thực tế chỉ là $0.01\%$, thì phần lớn các cảnh báo của mô hình vẫn là báo động giả!
+:::
+
+:::caution[Nhầm lẫn giữa Xác suất (Probability) và Độ hợp lý (Likelihood)]
+Xác suất đo lường khả năng xảy ra của dữ liệu trong tương lai khi các tham số mô hình đã được cố định trước: $P(\mathcal{D} \mid \boldsymbol{\theta})$. Ngược lại, Độ hợp lý (Likelihood) đánh giá mức độ tin cậy của các bộ tham số khác nhau khi dữ liệu thực tế đã được thu thập và cố định: $L(\boldsymbol{\theta} \mid \mathcal{D})$.
+:::
+
+:::caution[Nhầm lẫn giá trị hàm mật độ xác suất $f(x)$ với xác suất $P(X = x)$]
+Với biến ngẫu nhiên liên tục, giá trị hàm mật độ xác suất $f(x)$ tại một điểm hoàn toàn có thể lớn hơn $1.0$ (ví dụ: phân phối đều trên đoạn $[0, 0.2]$ có mật độ $f(x) = 5.0$). Tuy nhiên, tích phân diện tích dưới toàn bộ đường cong thì luôn luôn bằng $1.0$. Giá trị $f(x)$ chỉ biểu thị độ tập trung tương đối của xác suất tại lân cận điểm $x$, không phải xác suất tại điểm đó.
+:::
+
+## Kiểm tra nhanh
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Biến ngẫu nhiên định lượng sự bất định; biến liên tục có xác suất tại một điểm chính xác bằng 0 và được mô tả bởi hàm mật độ PDF.
+- Phân phối chuẩn Gaussian là tâm điểm của thống kê nhờ Định lý giới hạn trung tâm; Bernoulli là mô hình toán học của bài toán phân loại nhị phân.
+- Định lý Bayes cung cấp quy tắc chuẩn xác để cập nhật niềm tin tiên nghiệm dựa trên bằng chứng dữ liệu thực tế.
+- Ước lượng hợp lý cực đại (MLE) là cội nguồn xác suất dẫn thẳng tới các hàm mất mát căn bản trong học máy: MSE từ giả định nhiễu Gaussian và Cross-Entropy từ phân phối Bernoulli.
+
+**Đọc thêm:**
+
+- Joseph K. Blitzstein, Jessica Hwang (2019). [*Introduction to Probability*](https://projects.iq.harvard.edu/stat110/home) (PDF), giáo trình xác suất trực quan và kinh điển của Đại học Harvard.
+- Marc Peter Deisenroth, A. Aldo Faisal, Cheng Soon Ong (2020). [*Mathematics for Machine Learning*](https://mml-book.github.io/) (PDF), Chương 6: Probability and Distributions.
+- David J. C. MacKay (2003). [*Information Theory, Inference, and Learning Algorithms*](http://www.inference.org.uk/itprnn/book.pdf) (PDF), Chương 2 (Probability, Ergodicity, and Information) và Chương 3 (Inference and Maximum Likelihood).
+- Grant Sanderson (3Blue1Brown) (2020). [*Bayes theorem, the geometry of changing beliefs*](https://www.3blue1brown.com/lessons/bayes-theorem), video giải thích hình học về Định lý Bayes và xác suất có điều kiện.
+
+<LessonProgress />
