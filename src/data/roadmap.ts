@@ -273,7 +273,7 @@ export const LESSONS: readonly Lesson[] = [
     id: 'ml/end-to-end-project',
     title: { vi: 'Dự án ML từ đầu đến cuối', en: 'An End-to-End ML Project' },
     prerequisites: ['ml/regularization', 'ml/decision-tree-random-forest', 'ml/data-preprocessing'],
-    status: { vi: 'published', en: 'planned' },
+    status: { vi: 'published', en: 'published' },
   },
 
   // Part 4: Deep Learning (8)

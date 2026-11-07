@@ -1,0 +1,307 @@
+---
+title: An End-to-End ML Project
+description: "Predict diabetes progression after one year, walking through all 8 steps: problem framing, train/test split, EDA, pipeline, cross-validation, tuning, evaluating once on the test set, and monitoring."
+quiz:
+  - question: 'You run `StandardScaler().fit_transform(X)` on all 442 patients before calling `train_test_split`. What is wrong?'
+    options:
+      - 'Nothing is wrong, because scaling does not use the label $y$'
+      - 'The mean and standard deviation are computed including the 89 test patients, leaking test set information into the data preparation step'
+      - 'Incorrect because `StandardScaler` must run after the model, not before'
+      - 'Incorrect because the `sex` column is not allowed to be scaled'
+    answer: 1
+    explanation: 'Data leakage does not need to involve labels: it is enough that the test set contributes to any summary statistic used during training. With `StandardScaler` across 442 samples, the effect is often modest, but steps that learn more aggressively from data—like feature selection based on correlation with $y$—cause severe leakage. The right practice is to split first, then place all preprocessing steps inside a `Pipeline` so they fit only on the training folds.'
+  - question: 'You try 30 model configurations. For each configuration, you fit on the training set, check MAE on the test set, and finally report the minimum test MAE of 38. On new patients, what will MAE most likely be?'
+    options:
+      - 'Around 38, because the test set was never used to fit the model'
+      - 'Lower than 38, because that configuration was chosen carefully'
+      - 'Higher than 38, because 38 is the minimum among 30 noisy estimates, and the test set was used to select the model'
+    answer: 2
+    explanation: 'Every test MAE has a random noise component specific to those 89 patients. Taking the minimum across 30 estimates cherry-picks the favorable random noise, making 38 overly optimistic. The test set was not used to fit weights, but it was used for selection—turning it into a validation set. To choose among 30 configurations, use cross-validation on the training set, and evaluate on the test set only once.'
+  - question: 'You build a model to detect a rare disease occurring in only 2% of patients. Cross-validation yields an accuracy of 0.98. Which step of the workflow helps you realize this number may be meaningless?'
+    options:
+      - 'Step 6: tune hyperparameters further to reach 0.99'
+      - 'Step 3: inspect correlation coefficients between each feature and the label'
+      - 'Step 8: monitor the model after deployment'
+      - 'Step 1: compare against a baseline that always predicts "healthy", which also achieves 0.98, and select a better metric such as recall'
+    answer: 3
+    explanation: 'A baseline `DummyClassifier(strategy="most_frequent")` predicts everyone is healthy, achieving 98% accuracy without identifying a single patient. Thus, 0.98 is no better than a trivial baseline. The right question is "out of the diseased patients, how many did the model detect?", which is recall (along with metrics in Model Evaluation). Further tuning for accuracy simply pushes the model to predict "healthy" even more aggressively.'
+  - question: 'In the third code cell, the cross-validation MAE of the final model is 45.66, while the test MAE is 39.9. What should you do?'
+    options:
+      - 'Report 39.9 with a note: the test set has only 89 patients and per-fold MAE ranges from 40.5 to 50.7, so the error on new patients may be higher than 39.9'
+      - 'Try a few more `alpha` values, keeping whichever yields an even lower test MAE'
+      - 'Conclude that the model is underfitting, because test MAE is lower than cross-validation MAE'
+      - 'Re-split train/test with a different `random_state` until the two numbers are close'
+    answer: 0
+    explanation: 'An 89-patient test set produces a noisy estimate. Here it fell on the fortunate side: altering the split seed swings test MAE between 38 and 51. Tuning `alpha` against the test set or re-splitting until the number looks "nice" uses the test set for selection, rendering the reported number dishonest. Underfitting is diagnosed when training error is high, not when test error happens to be lower than cross-validation error.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import exploreDataCode from '@code/ml/end-to-end-project/explore-data.en.py?raw';
+import compareModelsCode from '@code/ml/end-to-end-project/compare-models.en.py?raw';
+import tuneAndTestCode from '@code/ml/end-to-end-project/tune-and-test.en.py?raw';
+
+## Objectives
+
+After this lesson, you will be able to:
+
+- Walk through all 8 steps of a machine learning project, from problem framing to **deployment**, knowing the concrete output of each step.
+- Choose a metric suited to the task, establish a **baseline** for comparison, and understand why the median serves as the optimal constant baseline for MAE.
+- Implement the complete workflow in scikit-learn: stratified splitting, a `Pipeline` with `ColumnTransformer`, model comparison via cross-validation, hyperparameter tuning with `GridSearchCV`, and a single final test evaluation.
+- Identify three pitfalls that compromise reported results: **data leakage**, peeking repeatedly at the test set, and selecting an inappropriate metric.
+
+## Prerequisites
+
+{/* List pulled from prerequisites in roadmap.ts. Do not hand-edit links. */}
+
+<Prerequisites />
+
+:::tip[Quick Reminder]
+This lesson integrates concepts from across Part 3. **Ridge** is linear regression with an L2 penalty, parameterized by `alpha` in scikit-learn ([Ridge, Lasso, Elastic Net](/en/ml/regularization/)). **Random forest** averages predictions from multiple decision trees ([Decision Trees and Random Forests](/en/ml/decision-tree-random-forest/)). **`Pipeline`** chains data transformers and estimators into a single estimator with `fit` and `predict`, while **`ColumnTransformer`** applies distinct transformations to subsets of features ([Data Preprocessing, Augmentation, and Imbalanced Data](/en/ml/data-preprocessing/)).
+:::
+
+## Intuition
+
+A medical clinic provides records for 442 diabetes patients. Each patient has 10 baseline measurements: age, sex, body mass index (BMI), average blood pressure, and six blood serum measurements. One year later, a quantitative measure of disease progression was recorded. The clinic asks: **for a new patient, can we predict disease progression in advance to identify who needs intensive monitoring?**
+
+This is the standard `load_diabetes` dataset available in scikit-learn, published by Efron et al. in 2004. Here are the first five patients:
+
+| Patient | age | sex | bmi | bp | s1 | s2 | s3 | s4 | s5 | s6 | Progression |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 59 | 2 | 32.1 | 101 | 157 | 93.2 | 38 | 4 | 4.8598 | 87 | 151 |
+| 1 | 48 | 1 | 21.6 | 87 | 183 | 103.2 | 70 | 3 | 3.8918 | 69 | 75 |
+| 2 | 72 | 2 | 30.5 | 93 | 156 | 93.6 | 41 | 4 | 4.6728 | 85 | 141 |
+| 3 | 24 | 1 | 25.3 | 84 | 198 | 131.4 | 40 | 5 | 4.8903 | 89 | 206 |
+| 4 | 50 | 1 | 23.0 | 101 | 192 | 125.4 | 52 | 4 | 4.2905 | 80 | 135 |
+
+`bp` is mean arterial pressure. `s1` through `s6` represent blood serum measurements: total cholesterol, LDL, HDL, total cholesterol / HDL ratio, log of serum triglycerides, and blood sugar level. `sex` is coded as 1 and 2; the original documentation does not specify which code corresponds to male or female.
+
+### The Rushed Approach
+
+With familiar tools in hand, it is tempting to proceed as follows: standardize the entire table, train ten candidate models, evaluate each on a test set, pick the one with the best score, and report that figure. Each step sounds reasonable in isolation. Yet the reported score will be **overly optimistic**: the test set contributed to computing mean and variance during scaling, and it was actively used to select among ten models. When the clinic deploys the model, real-world error will exceed what was promised.
+
+The root issue is not model architecture. It is the **order of operations** and **which data is accessible at each moment**.
+
+### The Disciplined Approach
+
+Experienced ML engineers follow a structured checklist. This lesson follows an 8-step workflow, closely mirroring chapter 2 of Aurélien Géron's textbook (see Further Reading). The guiding principle is simple: **set aside the test set immediately, make all modeling and engineering decisions using only the training set, and open the test set exactly once at the very end**.
+
+The task for this lesson: **predict disease progression after one year from 10 baseline features, reporting an error estimate that the clinic can trust on future patients.**
+
+## Theory
+
+### Step 1: Frame the Problem and Choose a Metric
+
+Before writing code, answer three fundamental questions.
+
+**Supervised or unsupervised? Regression or classification?** We have ground-truth targets, making it supervised learning. The target is a continuous value ranging from 25 to 346, so this is a **regression** problem. If the clinic only needed to know "severe vs. mild progression", the task would become classification, requiring entirely different metrics.
+
+**How will performance be evaluated?** We use **Mean Absolute Error** (MAE):
+
+$$
+\text{MAE} = \frac{1}{m}\sum_{i=1}^{m}\left\lvert y^{(i)} - \hat{y}^{(i)}\right\rvert
+$$
+
+Reason: MAE shares the exact unit of the target. Saying "on average, predictions deviate by 46 points on a scale from 25 to 346" is immediately clear to medical practitioners. MSE penalizes large errors quadratically, making it harder to interpret directly. If a large error is catastrophic compared to several smaller errors, MSE (or RMSE) is preferable. There is no universally "correct" metric: the metric must reflect the actual domain cost of errors.
+
+**What constitutes "good" performance?** An isolated MAE value lacks context. We require a **baseline**: the simplest sensible heuristic that learns nothing complex. For MAE, the optimal constant prediction is the **median** of the training labels. Why the median rather than the mean?
+
+Let $c$ be our constant prediction. Shifting $c$ upward by an infinitesimal amount $\delta$ without crossing any target values reduces error by $\delta$ for every patient whose label is greater than $c$, but adds $\delta$ for every patient whose label is less than $c$. The total change in MAE is:
+
+$$
+\frac{\delta}{m}\Big(\#\{y^{(i)} < c\} - \#\{y^{(i)} > c\}\Big)
+$$
+
+where $\#\{\cdot\}$ denotes the count of matching patients. As long as more points lie above $c$ than below, increasing $c$ decreases MAE. Equilibrium is reached when the counts on both sides balance, which defines the median. For MSE, setting the derivative with respect to $c$ to zero yields the mean. In scikit-learn, this baseline is `DummyRegressor(strategy="median")`. Any model that fails to outperform this baseline has learned nothing of practical value.
+
+### Step 2: Acquire Data, Split Immediately, Put the Test Set Away
+
+As soon as data is loaded, reserve a **test set** (here 20%, or 89 patients) and do not inspect it. Why split before even exploring the data? Because **human intuition acts like an estimator**. If you examine the full dataset and notice "feature `s5` appears strongly predictive", that hypothesis was derived from the test set. A test set remains an unbiased benchmark only if zero decisions were influenced by its contents.
+
+**Stratified split**. Purely random splitting can, by chance, underrepresent severe cases in the test set. In classification, passing targets to `stratify` preserves class ratios. In regression, target categories do not exist naturally, so we create them: bin the continuous target into 5 equal-frequency quantiles (`pd.qcut`), then stratify across these bins. Consequently, the test set contains 18, 18, 18, 17, and 18 patients across the five progression tiers from mild to severe.
+
+### Step 3: Explore Data on the Training Set
+
+**Exploratory Data Analysis** (EDA) investigates distributions and anomalies before modeling: feature ranges, missing or corrupted values, categorical encodings, and correlations with the target. Crucially, all exploration occurs strictly on the **training set**.
+
+Fundamental tools include `describe()` and **correlation coefficients** between each feature and the target. Pearson correlation ranges in $[-1, 1]$, where values further from 0 indicate stronger **linear** association. Two caveats:
+
+- A near-zero correlation does not imply no relationship; it only indicates the absence of a **linear** relationship. A U-shaped relationship yields near-zero correlation.
+- Correlation is not **causation**. This observational dataset contains no clinical interventions. Even though BMI correlates with disease progression, the model cannot infer how much weight loss would slow progression.
+
+EDA also uncovers features requiring dedicated encoding. Here, `sex` takes values 1 and 2: it is a numerically encoded categorical variable, not a continuous measurement.
+
+### Step 4: Prepare Data Using a Pipeline
+
+In this step, data transformations are specified: imputing missing entries, encoding categorical variables, scaling numerical features, and engineering new interactions. Detailed techniques are covered in [Data Preprocessing, Augmentation, and Imbalanced Data](/en/ml/data-preprocessing/). The core requirement is that **every transformation step that learns from data** (such as computing scaling statistics) must be **fitted strictly on training folds**.
+
+The most robust design encapsulates preprocessing and estimation inside a `Pipeline`. For the diabetes data:
+
+- `OneHotEncoder(drop="if_binary")` converts `sex` into a single 0/1 binary feature.
+- `StandardScaler()` standardizes the remaining 9 numerical features. Ridge regression requires this step because its regularization penalty treats all feature weights symmetrically.
+
+When cross-validating the pipeline, scikit-learn refits `StandardScaler` inside **each fold** on the training partition only. The validation fold plays no part in computing mean and variance, preventing data leakage.
+
+### Step 5: Shortlist Models via Cross-Validation
+
+Now we evaluate candidate models. Avoid committing early to a single model. Train several diverse architectures with default or sensible hyperparameters, evaluating them via **cross-validation** on the training set:
+
+1. **Baseline** `DummyRegressor`: establishes the minimum performance floor.
+2. **Regularized linear model**, specifically Ridge: fast, minimal hyperparameters, resistant to overfitting.
+3. **Nonlinear ensemble**, specifically Random Forest: captures feature interactions and nonlinear curves, though requiring larger sample sizes.
+
+Record both the mean **and standard deviation** of metric scores across folds. When two models differ by less than their cross-validation standard deviation, neither can be declared superior with confidence. The output of this stage is a shortlist of two or three promising architectures for further tuning.
+
+### Step 6: Hyperparameter Tuning
+
+Every estimator possesses **hyperparameters** set prior to training: `alpha` in Ridge, or tree depth and ensemble size in Random Forest. **Hyperparameter tuning** searches for optimal configurations via cross-validation, using one of two primary strategies:
+
+- **Grid Search** (`GridSearchCV`): evaluates **all** parameter combinations across a predefined grid. A grid of 6 `alpha` values across 5 folds requires 30 fits. Suitable when tuning one or two parameters.
+- **Random Search** (`RandomizedSearchCV`): samples a fixed budget of configurations (`n_iter`) randomly from defined probability distributions. When tuning many hyperparameters where only a few govern performance, random search finds competitive solutions with significantly fewer evaluations (Bergstra and Bengio, 2012).
+
+Within a pipeline, hyperparameters are referenced via `<step_name>__<param_name>` with double underscores. `make_pipeline` generates lowercase step names from class names, making Ridge's regularization parameter `ridge__alpha`. After search completion, `GridSearchCV` automatically **refits** the winning configuration on the entire training set (`refit=True` by default).
+
+A subtle detail: the cross-validation score of the winning hyperparameter configuration is slightly optimistic, as it represents the maximum of multiple noisy estimates. This selection bias reinforces why an untouched test set remains necessary.
+
+### Step 7: Error Analysis, Then Evaluate on the Test Set Once
+
+Before opening the test set, investigate **where** the model errs. **Error analysis** leverages **out-of-fold predictions**: `cross_val_predict` obtains a prediction for every training patient using a model that never saw that specific individual. Errors can then be grouped across cohorts, such as progression severity. For instance, the model might predict mild cases accurately while underestimating severe cases—the exact group the clinic cares about most. Such insights may warrant revisiting Step 1 (redefining the metric), Step 4 (engineering specific features), or Step 5 (trying different model families). Revisiting earlier stages is fully sound here because the test set remains untouched.
+
+Once the pipeline is finalized, evaluate on the test set **exactly once**. This single number serves as the unbiased estimate of generalization error on new patients. Post-evaluation modifications based on test results invalidate the estimate. If test MAE degrades substantially compared to cross-validation, investigate potential data leakage or train/test distribution shift. Re-evaluating requires fresh, unseen data.
+
+### Step 8: Deployment and Monitoring
+
+Models deliver real-world value only when integrated into serving systems. This section outlines key principles; serving models behind HTTP endpoints is detailed in [Deploying Custom Models](/en/llm/deploy-custom-model/), and containerization is covered in [Docker and Cloud](/en/llm/docker-cloud/).
+
+**Serialize the complete pipeline**, not merely the estimator weights. Preprocessing is an integral part of the model: incoming patient records must be scaled using the training set's exact mean and standard deviation. The standard tool is `joblib`:
+
+```python
+import joblib
+
+joblib.dump(search.best_estimator_, "diabetes-ridge.joblib")  # save
+model = joblib.load("diabetes-ridge.joblib")  # load in serving environment
+```
+
+This snippet assumes an already fitted `search` object as shown in the third code example, intended for execution in a local environment. Note two recommendations from the scikit-learn documentation: `joblib` files can execute arbitrary code upon deserialization, so only load trusted artifacts; and models should be loaded in an environment with the **matching scikit-learn version** used during training, alongside records of training data checksums and cross-validation scores.
+
+**Monitoring.** Environments evolve over time. Clinics upgrade diagnostic equipment, measurement scales shift, or demographic distributions drift: the input distribution diverges from training data. This phenomenon is known as **data drift**. Alternatively, the relationship between features and outcomes can change—such as when a new medication slows progression rates—termed **concept drift**. A minimal monitoring workflow checks incoming input statistics against the training baseline and recalculates MAE once true progression outcomes become available. If error degrades, retrain on fresh data following the complete 8-step cycle.
+
+### Limitations
+
+- **The workflow is iterative, not linear.** Step 7 frequently routes work back to Steps 1, 4, or 5. The only irreversible boundary is opening the test set.
+- **Small sample sizes exhibit variance across splits.** With only 89 test patients, test MAE fluctuates noticeably depending on the random split seed (explored in the third code cell).
+- **Strong predictive correlation does not imply causality** (Step 3).
+- **This overview abstracts certain complex production concerns**: raw data collection and labeling pipelines, patient privacy and HIPAA compliance, demographic fairness auditing, and non-technical stakeholder communication.
+
+## Visualization
+
+The table below summarizes the 8-step methodology. Notice the final column: each stage produces a tangible artifact. If an artifact cannot be clearly stated, the step is incomplete.
+
+| Step | Core Question | Deliverable | In This Lesson |
+|---|---|---|---|
+| 1. Frame Problem | What is predicted, how is it measured, what is acceptable? | Task type, metric, baseline | Regression, MAE, median baseline |
+| 2. Split Data | Is the test set representative? | Isolated train and test sets | 353 train, 89 test, stratified into 5 target bins |
+| 3. Explore (EDA) | What patterns and structures exist in the data? | Feature notes, value ranges, correlation table | `bmi` and `s5` strongest correlations; `sex` identified as categorical |
+| 4. Prepare Data | How should features be transformed? | A `ColumnTransformer` specification | `sex` to 0/1 binary, numerical features standardized |
+| 5. Shortlist Models | Which model families are promising? | Model shortlist, cross-validation scores | Dummy baseline, Ridge, Random Forest |
+| 6. Tune Hyperparameters | What hyperparameter values optimize validation score? | Finalized tuned pipeline | `GridSearchCV` over `alpha` for Ridge |
+| 7. Error Analysis & Test | Where does it fail? What is expected real-world error? | Final test score, error breakdown | Test MAE, error distribution across progression tiers |
+| 8. Deploy & Monitor | How is it served, and when must it be retrained? | Serialized model file, monitoring plan | `joblib` artifact, data drift tracking |
+
+In [Introduction to Machine Learning](/en/ml/ml-overview/), the workflow was introduced simply as split, fit, and score. Here, between "split" and "score" lies an iterative loop of exploration, preprocessing, validation, and error analysis—operating exclusively on training data.
+
+## Code Examples
+
+The three code cells below run independently: each loads and partitions data with identical parameters (`random_state=0`), observing the identical 353 training and 89 test patients. The initial run may take slightly longer while the browser loads pandas and scikit-learn. Data is imported with `scaled=False` to preserve raw units; scikit-learn's default pre-scaled return values would bypass the preprocessing demonstration in Step 4.
+
+### Load, Split, Explore
+
+The first cell covers Steps 2 and 3: stratified partitioning, followed by summary statistics and correlations computed strictly **on the training set**.
+
+<PythonRunner code={exploreDataCode} title="Load, split, and explore data" />
+
+- The training set contains 353 patients; the test set contains 89. From the comment `# From here on, look at the training set only.`, all computations draw solely on `X_train` and `y_train`.
+- Feature scales vary substantially: `s5` standard deviation is 0.5, while `s1` is 34.2. This variance underscores the necessity of standardization prior to Ridge regression.
+- `sex` contains 189 entries coded 1 and 164 coded 2, confirming its categorical structure.
+- The strongest positive correlations with progression are `bmi` (0.57) and `s5` (0.55), followed by `bp` (0.44). `s3` (HDL cholesterol) exhibits negative correlation (-0.38): higher HDL levels align with milder disease progression. `sex` correlation is near zero (0.03), though this alone does not justify dropping the feature.
+- Training targets range from 25 to 346 with a mean of 152.1. An MAE around 45 represents noticeable variance relative to this scale: communicate realistic expectations to healthcare partners.
+
+### Compare Models via Cross-Validation
+
+The second cell covers Steps 4 and 5. `prep` is the `ColumnTransformer` from Step 4, chained to each candidate model using `make_pipeline`. `KFold(n_splits=5, shuffle=True, random_state=0)` partitions the 353 training samples into 5 folds.
+
+<PythonRunner code={compareModelsCode} title="Baseline, Ridge, and Random Forest" />
+
+- **Baseline** (constant median prediction) yields a cross-validation MAE of 65.6.
+- **Ridge** achieves 45.8, approximately a 30% error reduction relative to the baseline, confirming that meaningful predictive patterns have been learned.
+- **Random Forest** records 49.3, **underperforming** Ridge. The 3.5 point gap is comparable to fold standard deviations (3.4 and 3.6), so while Ridge cannot be deemed conclusively superior, Random Forest offers no advantage.
+- The final output line clarifies why: on the training partition itself, Random Forest achieves an MAE of 32.3 compared to 49.3 on validation folds. With 353 samples and 10 features, the tree ensemble partially fits training noise; furthermore, underlying relationships in this dataset are largely linear, allowing the simpler linear model to prevail.
+
+Takeaway: **model complexity does not guarantee superior performance**, and only cross-validation exposes this distinction reliably. Ridge advances as the shortlisted candidate.
+
+### Tune, Analyze Errors, and Evaluate on Test Set
+
+The third cell executes Steps 6 and 7 in sequence: tuning `alpha` via `GridSearchCV`, analyzing out-of-fold residuals, and concluding with a single test set evaluation.
+
+<PythonRunner code={tuneAndTestCode} title="GridSearchCV, error analysis, and test evaluation" />
+
+**Tuning.** `alpha = 10` yields the lowest cross-validation MAE at 45.66. Yet examining the full sweep reveals that from `alpha = 0.1` to `30`, MAE only shifts from 45.95 to 45.66—a difference under 0.3. Only `alpha = 100` degrades noticeably (46.92). Tuning yields modest marginal improvement here. This is common: selecting appropriate feature representations and model architectures routinely outweighs minor hyperparameter adjustments.
+
+**Error Analysis.** The subsequent table segments the 353 training patients into four tiers of true progression, calculating mean residual $\hat{y} - y$ within each tier:
+
+- Mildest cases are **overpredicted** by an average of 44.2 points, while severe cases are **underpredicted** by an average of 52.9 points.
+- The model regresses predictions toward the central mean. The 10 baseline metrics do not fully explain severe progression trajectories, prompting the estimator to predict conservatively toward the population average.
+
+This provides critical clinical context: the model exhibits its **largest errors on the very patient group requiring closest monitoring**. If identifying high-risk cases is paramount, Step 1 should be revisited—framing the problem as binary classification focused on recall, or acquiring richer diagnostic indicators.
+
+**Test Set Evaluation.** Final test MAE is 39.9, which is **lower** than the cross-validation score of 45.66. The model did not become intrinsically superior: these 89 test patients happen to be easier to predict. Per-fold validation MAEs ranged from 40.5 to 50.7, and keeping `alpha = 10` while varying the split `random_state` across 1, 2, 3, and 4 yields test MAEs of 48.8, 45.9, 50.9, and 37.8 respectively. A small test set yields variable estimates. Transparent reporting states: "Test MAE 39.9 on 89 patients; cross-validation indicates an expected error around 46", avoiding selective reporting.
+
+**Three largest test set residuals**, examined strictly for diagnostic understanding rather than post-hoc parameter tweaking:
+
+- Patient 92: true progression 48, predicted 191. BMI 26.8 (near median).
+- Patient 304: true progression 253, predicted 123. BMI 22.8 (low).
+- Patient 382: true progression 132, predicted 253. BMI 32.0 (high).
+
+The latter two patients diverge from the general population pattern where elevated BMI corresponds to severe progression. Because the linear model assigns substantial weight to BMI, it makes large errors on individuals who break this trend—confirming patterns flagged during out-of-fold analysis.
+
+## Common Pitfalls
+
+:::caution[Preprocessing or Feature Selection Prior to Splitting]
+Fitting scalers, imputing missing values, or selecting "top 10 features correlated with $y$" on the **entire** dataset prior to splitting introduces severe data leakage. Information from test samples leaks directly into the model. Selecting features based on global correlation with $y$ is particularly hazardous because it utilizes test labels directly. Leakage can also emerge from domain features: recording a feature created **after** the outcome is known (such as "annual follow-up visits") inflates training metrics but is unavailable during real inference. Remedy: split immediately, wrap all transformers inside a `Pipeline`, and verify whether each feature exists at the exact moment of clinical prediction.
+:::
+
+:::caution[Peeking Repeatedly at the Test Set]
+Iteratively evaluating test scores and tweaking hyperparameters converts the test set into a validation set. After multiple iterations, the reported test metric becomes just as optimistically biased as the training score. Perform all comparisons and tuning via cross-validation on training data (`cross_val_score`, `GridSearchCV`). Open the test set once for the finalized candidate. If subsequent changes are unavoidable, clearly disclose in reporting that test evaluation integrity has been compromised.
+:::
+
+:::caution[Defaulting to Conventional Metrics Uncritically]
+Using accuracy for imbalanced medical diagnosis, MSE when stakeholders evaluate absolute point deviations, or MAE when severe outliers pose catastrophic safety risks: an incorrect loss function misaligns optimization objectives. Select evaluation metrics in Step 1 based on real-world error consequences, always benchmarking against a `DummyRegressor` or `DummyClassifier`. For classification metrics, consult [Model Evaluation: Accuracy, Precision, Recall, F1](/en/ml/classification-metrics/).
+:::
+
+## Quick Check
+
+{/* Questions defined in frontmatter `quiz` field. */}
+
+<Quiz />
+
+## Summary and Further Reading
+
+**Key Takeaways:**
+
+- A disciplined ML project advances through 8 steps: problem framing and metric selection, data splitting, EDA, preprocessing, model shortlisting, hyperparameter tuning, error analysis with single-pass test evaluation, and deployment with monitoring. Each step yields a defined deliverable, and Steps 3 through 7 form an iterative feedback loop.
+- Isolate the test set at the onset (stratifying across target quantiles for regression when appropriate). Formulate all modeling decisions using training data, encapsulate transformers within a `Pipeline`, and tune configurations via cross-validation. Evaluate on the test set exactly once.
+- Metrics must reflect practical error penalties and be benchmarked against simple heuristics. MAE $= \frac{1}{m}\sum_i\lvert y^{(i)} - \hat{y}^{(i)}\rvert$ uses the training median as its optimal constant baseline. On the diabetes dataset, Ridge (cross-validation MAE $\approx 46$) outperforms both the baseline (65.6) and Random Forest (49.3).
+- Persist the entire pipeline rather than standalone model weights, record dependency versions, and monitor for input data drift post-deployment.
+
+**Further Reading:**
+
+- Géron, A. (2022). *Hands-On Machine Learning with Scikit-Learn, Keras, and TensorFlow*, 3rd ed., O'Reilly, Chapter 2: End-to-End Machine Learning Project. Includes the [Chapter 2 Jupyter Notebook](https://github.com/ageron/handson-ml3/blob/main/02_end_to_end_machine_learning_project.ipynb) and the [Machine Learning Project Checklist](https://github.com/ageron/handson-ml3/blob/main/ml-project-checklist.md) (book appendix) on GitHub. Provides a comprehensive walkthrough using California housing data with extensive EDA and feature engineering.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8: Common pitfalls and recommended practices*](https://scikit-learn.org/1.8/common_pitfalls.html). Illustrates data leakage scenarios in out-of-pipeline preprocessing and feature selection, with recommended remedies.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Tuning the hyper-parameters of an estimator](https://scikit-learn.org/1.8/modules/grid_search.html). Comprehensive guide to `GridSearchCV`, `RandomizedSearchCV`, and parameter naming within pipelines.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Model persistence](https://scikit-learn.org/1.8/model_persistence.html). Comparative analysis of `pickle`, `joblib`, `skops`, and ONNX, covering security and versioning considerations.
+- Kaufman, S., Rosset, S., Perlich, C., Stitelman, O. (2012). [*Leakage in Data Mining: Formulation, Detection, and Avoidance*](https://doi.org/10.1145/2382577.2382579). *ACM Transactions on Knowledge Discovery from Data* 6(4). Formal taxonomy of data leakage patterns with competitive data science case studies.
+- Efron, B., Hastie, T., Johnstone, I., Tibshirani, R. (2004). [*Least Angle Regression*](https://doi.org/10.1214/009053604000000067). *The Annals of Statistics* 32(2), 407–499. Seminal paper introducing the diabetes dataset used in this lesson.
+
+<LessonProgress />
