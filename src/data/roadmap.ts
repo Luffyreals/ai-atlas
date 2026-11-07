@@ -254,7 +254,7 @@ export const LESSONS: readonly Lesson[] = [
     id: 'ml/softmax-regression',
     title: { vi: 'Hồi quy Softmax', en: 'Softmax Regression' },
     prerequisites: ['ml/logistic-regression'],
-    status: { vi: 'published', en: 'planned' },
+    status: { vi: 'published', en: 'published' },
   },
   {
     id: 'ml/decision-tree-random-forest',

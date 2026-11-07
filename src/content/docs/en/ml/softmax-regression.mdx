@@ -1,0 +1,376 @@
+---
+title: Softmax Regression
+description: 'Classifying an iris flower into one of three species: why combining binary classifiers is inadequate, the softmax function, cross-entropy, ŷ − y gradient, and piecewise linear decision boundaries.'
+quiz:
+  - question: 'A model outputs three logits $\mathbf{z} = (4, 2, 2)$. What is the softmax probability of the first class closest to?'
+    options: ['$0.50$', '$0.79$', '$0.67$', '$0.95$']
+    answer: 1
+    explanation: 'Only differences between logits matter, so subtracting 4 from each yields $(0, -2, -2)$. The probability of the first class is $1 / (1 + 2e^{-2}) = e^2 / (e^2 + 2) \approx 7.39 / 9.39 \approx 0.79$. The option $0.50$ comes from naively dividing by the linear sum $4 / (4 + 2 + 2)$, which ignores the exponential mapping and fails entirely with negative logits.'
+  - question: 'The ground-truth label for a flower is virginica (the third class). The model currently predicts $\hat{\mathbf{y}} = (0.1, 0.6, 0.3)$. After one step of gradient descent computed on this single sample, how do the logits update?'
+    options:
+      - 'Only the virginica logit changes because only the correct class appears in the sample loss'
+      - 'The versicolor logit increases because it currently has the largest probability'
+      - 'The virginica logit increases; the versicolor logit decreases more than the setosa logit'
+      - 'All three logits decrease by equal amounts'
+    answer: 2
+    explanation: 'The gradient with respect to logits is $\hat{\mathbf{y}} - \mathbf{y} = (0.1, 0.6, -0.7)$. Gradient descent moves in the negative gradient direction: the negative component causes the virginica logit to increase, while the two positive components decrease the other two logits, with versicolor (0.6) penalized more severely than setosa (0.1). Although the loss $-\ln\hat{y}_3$ explicitly contains only the true class probability, $\hat{y}_3$ depends on all logits through the softmax denominator, sending gradients to every logit.'
+  - question: 'You are labeling images where a single photo can simultaneously contain a cat, a dog, and a person. Which output configuration is most appropriate?'
+    options:
+      - 'An independent sigmoid with its own threshold for each label, because labels are not mutually exclusive'
+      - 'A single softmax across the three labels, predicting the label with highest probability'
+      - 'A single softmax across the three labels, selecting all labels with probability above $0.5$'
+    answer: 0
+    explanation: 'Softmax enforces the mutual exclusivity assumption that exactly one class is correct: probabilities sum to 1, so boosting one class forces others down. An image with both a cat and a dog needs high confidence for both simultaneously, which softmax prohibits. Thresholding softmax at 0.5 is even worse: at most one class could ever exceed 0.5. Multi-label classification requires independent sigmoids per label.'
+  - question: 'Softmax regression with $K = 2$ classes has $\mathbf{w}_1 = (2, -1)$, $b_1 = 0.5$ and $\mathbf{w}_2 = (0.5, 1)$, $b_2 = 1$. Which parameters define the equivalent logistic regression model $\sigma(\mathbf{w}^\top\mathbf{x} + b)$ yielding $P(\text{class 1})$?'
+    options:
+      - '$\mathbf{w} = (2.5, 0)$, $b = 1.5$'
+      - '$\mathbf{w} = (2, -1)$, $b = 0.5$'
+      - '$\mathbf{w} = (-1.5, 2)$, $b = 0.5$'
+      - '$\mathbf{w} = (1.5, -2)$, $b = -0.5$'
+    answer: 3
+    explanation: 'For two classes, $P(\text{class 1}) = \sigma(z_1 - z_2)$, where $z_1 - z_2 = (\mathbf{w}_1 - \mathbf{w}_2)^\top\mathbf{x} + (b_1 - b_2)$. Thus $\mathbf{w} = (1.5, -2)$ and $b = -0.5$. Using $\mathbf{w}_1, b_1$ directly ignores class 2 scores. The option $(-1.5, 2)$ represents $\mathbf{w}_2 - \mathbf{w}_1$, which gives the probability for class 2.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import softmaxNumpyCode from '@code/ml/softmax-regression/softmax-numpy.en.py?raw';
+import softmaxGdCode from '@code/ml/softmax-regression/softmax-gd.en.py?raw';
+import boundaryCode from '@code/ml/softmax-regression/boundary.en.py?raw';
+
+## Objectives
+
+After this lesson, you will be able to:
+
+- Understand why combining multiple binary classifiers (one-vs-rest) fails to produce well-formed probabilities, and how softmax regression resolves this natively.
+- Compute the softmax function by hand, explain its reliance on the exponential function, and implement a numerically stable version using the max-subtraction trick.
+- Derive the cross-entropy loss function with one-hot labels, obtain the $\hat{\mathbf{y}} - \mathbf{y}$ gradient, and train the model via gradient descent.
+- Recognize that the decision boundaries of softmax regression are piecewise linear, and know when softmax should not be applied.
+
+## Prerequisites
+
+{/* List pulled dynamically from prerequisites in roadmap.ts */}
+
+<Prerequisites />
+
+:::tip[Quick Reminder]
+[Logistic Regression](/en/ml/logistic-regression/) handles binary classification: computing score $z = \mathbf{w}^\top\mathbf{x} + b$, then applying **sigmoid** $\sigma(z) = 1/(1 + e^{-z})$ to convert scores into probability $\hat{y}$ of class 1. Its loss function is **log loss** (binary cross-entropy) $-\left[y\ln\hat{y} + (1 - y)\ln(1 - \hat{y})\right]$, with weight gradient having the compact form $(\hat{y} - y)\,\mathbf{x}$. This lesson generalizes all three concepts to multiple classes.
+:::
+
+## Intuition
+
+You are examining an iris flower with petal length measuring 4.9 cm and petal width measuring 1.5 cm. Which of the three species does it belong to: *setosa*, *versicolor*, or *virginica*? This is the famous iris dataset, published by statistician Ronald Fisher in 1936: 150 flowers, 50 per species. This lesson focuses on the two petal measurements to enable 2D visualization. The first flower of each species in the dataset appears as follows:
+
+| Species | Petal Length (cm) | Petal Width (cm) |
+|---|---:|---:|
+| setosa | 1.4 | 0.2 |
+| versicolor | 4.7 | 1.4 |
+| virginica | 6.0 | 2.5 |
+
+Your flower lies on the boundary between versicolor and virginica. An informative answer is not merely a single species name, but **three probabilities summing to 1**, such as "64% versicolor, 35% virginica".
+
+### Method 1: Combining Three Binary Classifiers
+
+You already know binary logistic regression. The simplest approach is training three separate models, each answering a yes/no question: "Is it setosa?", "Is it versicolor?", "Is it virginica?". This strategy is known as **one-vs-rest** (OvR). Training these three models with `LogisticRegression` on 105 flowers (70% of data, standardized) and querying them on your flower yields:
+
+| Question | Probability "Yes" |
+|---|---:|
+| Is it setosa? | 0.008 |
+| Is it versicolor? | 0.425 |
+| Is it virginica? | 0.350 |
+| **Sum** | **0.783** |
+
+Two obvious problems emerge:
+
+- **The probabilities do not sum to 1.** Each model trains in isolation with no awareness of the others. Across the full 150-sample dataset, this sum fluctuates between 0.405 and 1.539.
+- **All three models predict "no"**, because none exceeds 0.5. Picking the highest probability still suggests versicolor, but the "is it versicolor?" model faces genuine geometric difficulty: versicolor is sandwiched between the other two species, making it impossible for a single linear boundary to separate it from "the rest".
+
+### Method 2: Scoring Each Class
+
+Instead of three isolated questions, let a **single** model assign a continuous score to every class, then compare these scores simultaneously. Suppose the model scores your flower with three values, called **logits**: setosa $-3.0$, versicolor $1.8$, virginica $1.2$. A higher score indicates a better fit.
+
+How do we convert these scores into valid probabilities? Dividing each score by their linear sum fails: negative scores exist, and the sum $-3.0 + 1.8 + 1.2$ equals exactly 0. Softmax exponentiates each score with $e$ first (ensuring strictly positive numbers), then normalizes by the sum:
+
+| Species | Logit $z_k$ | $e^{z_k}$ | Probability |
+|---|---:|---:|---:|
+| setosa | −3.0 | 0.0498 | 0.0053 |
+| versicolor | 1.8 | 6.0496 | 0.6422 |
+| virginica | 1.2 | 3.3201 | 0.3525 |
+| **Total** | | 9.4195 | **1.0000** |
+
+For instance, $0.6422 = 6.0496 / 9.4195$. The three probabilities sum to 1, preserve the original ranking of the scores, and declare versicolor the winner.
+
+The goal of this lesson is: **assign each class its own weight vector to generate scores, convert those scores into probabilities summing to 1, and learn parameters so that the true class of each sample receives maximum probability.**
+
+## Theory
+
+### Problem Formulation
+
+We have $K$ classes, indexed $k = 1, \dots, K$ (for iris, $K = 3$). Each training instance has $n$ features $\mathbf{x} = [x_1, \dots, x_n]^\top$ and belongs to exactly one of the $K$ classes. This setting is **multiclass classification**: classes are mutually exclusive.
+
+Softmax regression equips **each class $k$ with its own weight vector** $\mathbf{w}_k$ (having $n$ components) and bias term $b_k$. The score for class $k$ is its **logit**:
+
+$$
+z_k = \mathbf{w}_k^\top\mathbf{x} + b_k, \qquad k = 1, \dots, K
+$$
+
+Each logit is a linear model identical to [Linear Regression](/en/ml/linear-regression/), except $K$ models run in parallel on the same input $\mathbf{x}$. For iris with 2 features, the model has $3 \times 2 = 6$ weights and 3 bias terms. Grouping all $K$ logits forms vector $\mathbf{z} = [z_1, \dots, z_K]^\top$.
+
+### The Softmax Function
+
+The **softmax function** maps logit vector $\mathbf{z}$ into probability vector $\hat{\mathbf{y}} = [\hat{y}_1, \dots, \hat{y}_K]^\top$:
+
+$$
+\hat{y}_k = \mathrm{softmax}(\mathbf{z})_k = \frac{e^{z_k}}{\sum_{j=1}^{K} e^{z_j}}
+$$
+
+The numerator is the exponential of the class logit; the denominator sums exponentials across all classes and is identical for every class. We interpret $\hat{y}_k$ as the "probability the model assigns to class $k$". The predicted class is $\operatorname{argmax}_k \hat{y}_k$.
+
+Why use the exponential function? Because it guarantees three essential properties:
+
+1. **Strict positivity.** $e^z > 0$ for all real $z$ (even negative ones), ensuring all probabilities are strictly positive and sum to 1.
+2. **Order preservation.** $e^z$ is strictly monotonically increasing: higher logits yield higher probabilities. The class with the largest logit always receives the largest probability.
+3. **Difference amplification.** Dividing two probabilities cancels their denominators, yielding $e^a / e^c = e^{a - c}$:
+
+$$
+\frac{\hat{y}_i}{\hat{y}_j} = \frac{e^{z_i}}{e^{z_j}} = e^{z_i - z_j}
+$$
+
+A logit difference of 1 translates to an odds ratio of $e \approx 2.72$; a difference of 2 yields $e^2 \approx 7.39$. In our iris example, versicolor leads virginica by 0.6 points, so $0.6422 / 0.3525 \approx e^{0.6} \approx 1.82$.
+
+The name "softmax" reflects that it is a smooth, differentiable approximation of the `argmax` operator: the highest-scoring class captures the bulk of the probability mass, but remaining classes retain non-zero shares that vary smoothly with logits, enabling gradient-based optimization.
+
+### Invariance to Constant Shifts and the Max-Subtraction Trick
+
+The ratio formula reveals that only the **differences** between logits dictate probabilities. Adding an arbitrary scalar $c$ to every logit leaves probabilities unaffected:
+
+$$
+\begin{aligned}
+\mathrm{softmax}(\mathbf{z} + c)_k &= \frac{e^{c}e^{z_k}}{\sum_{j} e^{c}e^{z_j}} \\
+&= \frac{e^{c}e^{z_k}}{e^{c}\sum_{j} e^{z_j}} = \mathrm{softmax}(\mathbf{z})_k
+\end{aligned}
+$$
+
+The second step factors $e^c$ out of the denominator sum and cancels it against the numerator.
+
+This algebraic identity prevents **numerical overflow**. Standard 64-bit floating point numbers top out around $1.8 \times 10^{308}$, meaning $e^z$ overflows whenever $z > 709.78$. If logits are $(997, 1001.8, 1001.2)$, calculating $e^{1001.8}$ returns infinity, and $\infty / \infty$ produces `nan`. The solution: **subtract the maximum logit from all logits before exponentiating**. Logits shift to $(-4.8, 0, -0.6)$, whose maximum exponential is $e^0 = 1$—immune to overflow while preserving exact mathematical probabilities. Every numerical library implements softmax with this shift. The first code example tests both forms.
+
+### For Two Classes, Softmax Reduces to Sigmoid
+
+Setting $K = 2$, divide numerator and denominator of $\hat{y}_1$ by $e^{z_1}$:
+
+$$
+\begin{aligned}
+\hat{y}_1 &= \frac{e^{z_1}}{e^{z_1} + e^{z_2}} \\
+&= \frac{1}{1 + e^{z_2 - z_1}} = \frac{1}{1 + e^{-(z_1 - z_2)}} = \sigma(z_1 - z_2)
+\end{aligned}
+$$
+
+Thus, two-class softmax regression is mathematically identical to binary logistic regression with logit $z = z_1 - z_2 = (\mathbf{w}_1 - \mathbf{w}_2)^\top\mathbf{x} + (b_1 - b_2)$. Hence, logistic regression is simply a special case of softmax regression, which is formally termed **multinomial logistic regression**.
+
+The subtraction also demonstrates parameter redundancy: multiple parameter sets yield identical models. Adding an identical vector to all $\mathbf{w}_k$ leaves all pairwise differences unchanged. Regularization resolves this indeterminacy.
+
+### One-Hot Labels and Cross-Entropy
+
+To compare predicted probabilities $\hat{\mathbf{y}}$ with true labels, encode the target label as a $K$-dimensional binary vector where only the true class index is 1:
+
+| Species | One-Hot Vector $\mathbf{y}$ |
+|---|---|
+| setosa | $(1, 0, 0)$ |
+| versicolor | $(0, 1, 0)$ |
+| virginica | $(0, 0, 1)$ |
+
+Integer labels 0, 1, 2 are avoided during loss computation to prevent implying artificial ordinal rankings or metric distances between categories.
+
+The loss for an individual sample is the **cross-entropy**:
+
+$$
+\ell = -\sum_{k=1}^{K} y_k \ln\hat{y}_k
+$$
+
+Because $\mathbf{y}$ is one-hot, every term with $y_k = 0$ vanishes, isolating the true class $c$:
+
+$$
+\ell = -\ln\hat{y}_c
+$$
+
+The loss is simply **the negative logarithm of the probability assigned to the correct class**. For our versicolor iris: $\ell = -\ln 0.6422 \approx 0.443$. Had it been virginica, $\ell = -\ln 0.3525 \approx 1.043$; had it been setosa, $\ell = -\ln 0.0053 \approx 5.24$. Confident mistakes are penalized heavily. When $K = 2$, this formula collapses exactly to binary log loss.
+
+Across $m$ training samples, the overall loss is the mean:
+
+$$
+\mathcal{L} = \frac{1}{m}\sum_{i=1}^{m}\ell^{(i)} = -\frac{1}{m}\sum_{i=1}^{m}\sum_{k=1}^{K} y^{(i)}_k\ln\hat{y}^{(i)}_k
+$$
+
+Minimizing cross-entropy maximizes the joint likelihood of observing the training data under the model. When all parameters start at zero, softmax assigns uniform probability $1/K$ to every class, resulting in baseline loss $\mathcal{L} = -\ln(1/K) = \ln K$. For $K = 3$, baseline loss is $\ln 3 \approx 1.0986$. Effective training must drive loss below this baseline.
+
+### Gradient: $\hat{\mathbf{y}} - \mathbf{y}$
+
+We require the gradient of $\ell$ with respect to each logit $z_j$.
+
+**Step 1: Express $\ell$ directly in terms of $\mathbf{z}$.** Substituting the softmax definition into $\ell = -\ln\hat{y}_c$, and using $\ln(a/d) = \ln a - \ln d$:
+
+$$
+\ell = -\ln\frac{e^{z_c}}{\sum_{k} e^{z_k}} = -z_c + \ln\sum_{k=1}^{K} e^{z_k}
+$$
+
+**Step 2: Differentiate with respect to $z_j$.** The first term $-z_c$ has derivative $-1$ if $j = c$, and 0 otherwise—which is $-y_j$. The second term differentiates via $\frac{d}{du}\ln u = \frac{1}{u}$ where $u = \sum_k e^{z_k}$:
+
+$$
+\frac{\partial}{\partial z_j}\ln\sum_{k} e^{z_k} = \frac{e^{z_j}}{\sum_{k} e^{z_k}} = \hat{y}_j
+$$
+
+**Step 3: Combine terms.**
+
+$$
+\frac{\partial\ell}{\partial z_j} = \hat{y}_j - y_j, \qquad\text{or in vector form}\qquad \frac{\partial\ell}{\partial\mathbf{z}} = \hat{\mathbf{y}} - \mathbf{y}
+$$
+
+The gradient with respect to logits is simply **predicted probability minus one-hot label**. For our iris flower (true class versicolor): $\hat{\mathbf{y}} - \mathbf{y} = (0.0053, 0.6422 - 1, 0.3525) = (0.0053, -0.3578, 0.3525)$. Gradient descent moves opposite to the gradient, **increasing** the true class logit and **decreasing** incorrect logits proportionally to their overconfidence. The gradient components always sum to zero since probabilities and one-hot vectors each sum to 1.
+
+**Step 4: Propagate to parameters.** Logit $z_j = \mathbf{w}_j^\top\mathbf{x} + b_j$ has derivative $\mathbf{x}$ with respect to $\mathbf{w}_j$, and 1 with respect to $b_j$. By the chain rule:
+
+$$
+\frac{\partial\ell}{\partial\mathbf{w}_j} = \left(\hat{y}_j - y_j\right)\mathbf{x}, \qquad \frac{\partial\ell}{\partial b_j} = \hat{y}_j - y_j
+$$
+
+This reproduces the $(\hat{y} - y)\,\mathbf{x}$ structure from logistic regression across every individual class.
+
+:::note[Key Takeaway]
+Under softmax with cross-entropy, the gradient with respect to logits is cleanly $\hat{\mathbf{y}} - \mathbf{y}$: predictions minus one-hot labels. The gradient with respect to $\mathbf{w}_j$ is its $j$-th component scaled by feature vector $\mathbf{x}$.
+:::
+
+### Training with Gradient Descent
+
+Aggregating across all $m$ training samples using matrix notation where $\mathbf{X}$ is $m \times n$, $\mathbf{W}$ is $n \times K$, and $\mathbf{b}$ is $1 \times K$:
+
+- $\mathbf{Z} = \mathbf{X}\mathbf{W} + \mathbf{1}\mathbf{b}^\top$ is the $m \times K$ logit matrix.
+- $\hat{\mathbf{Y}}$ contains row-wise softmax probabilities, and $\mathbf{Y}$ contains one-hot ground truth labels.
+
+Averaging sample gradients yields:
+
+$$
+\nabla_{\mathbf{W}}\mathcal{L} = \frac{1}{m}\mathbf{X}^\top\left(\hat{\mathbf{Y}} - \mathbf{Y}\right), \qquad \nabla_{\mathbf{b}}\mathcal{L} = \frac{1}{m}\sum_{i=1}^{m}\left(\hat{\mathbf{y}}^{(i)} - y^{(i)}\right)
+$$
+
+The update rules are $\mathbf{W} \leftarrow \mathbf{W} - \eta\nabla_{\mathbf{W}}\mathcal{L}$ and $\mathbf{b} \leftarrow \mathbf{b} - \eta\nabla_{\mathbf{b}}\mathcal{L}$.
+
+Three important training dynamics to note:
+
+- **No closed-form solution exists**, requiring iterative optimization. Fortunately, $\mathcal{L}$ is globally convex in $(\mathbf{W}, \mathbf{b})$, devoid of local minima.
+- **Solutions are non-unique due to shift invariance.** Adding a constant offset to all class weights preserves identical predictions. Regularization (as in [Ridge, Lasso, and Elastic Net](/en/ml/regularization/)) selects the minimum-norm parameter configuration; scikit-learn's `LogisticRegression` enables L2 regularization by default (`C=1.0`).
+- **Linearly separable classes cause weights to diverge.** Setosa is linearly separable from the other two species. Without regularization, the optimizer pushes setosa probabilities ever closer to 1 by inflating weights indefinitely, causing loss to drift downward without converging. The second code cell demonstrates this behavior.
+
+### Decision Boundary
+
+The model predicts the class with the largest probability, which coincides with the class possessing the highest logit. The boundary separating class $k$ and class $j$ occurs where their logits equate:
+
+$$
+z_k = z_j \iff \left(\mathbf{w}_k - \mathbf{w}_j\right)^\top\mathbf{x} + \left(b_k - b_j\right) = 0
+$$
+
+This defines a linear hyperplane in feature space. The decision region for class $k$ is the intersection of half-spaces where its logit dominates, forming a convex polyhedron. Combining regions produces **piecewise linear** decision boundaries meeting at points of threefold logit equality. The third code cell visualizes these boundaries on the iris dataset.
+
+### Softmax in Neural Networks and LLMs
+
+The final layer of nearly all deep classification networks is mathematically identical to softmax regression: preceding hidden layers learn high-level representations, while the output layer computes $K$ logits, applies softmax, and trains via cross-entropy with the $\hat{\mathbf{y}} - \mathbf{y}$ gradient. Large language models operate on the same principle, where $K$ spans the vocabulary size (tens of thousands of tokens). The `temperature` parameter adjusted in text generation APIs scales logits by $1/T$ before softmax, as introduced in [Using the Text API](/en/llm/text-api/). The Visualization section illustrates the impact of scaling logits.
+
+### Limitations
+
+- **Boundaries are strictly piecewise linear.** Non-linear class boundaries require feature transformations or non-linear architectures (e.g., decision trees, neural networks).
+- **Enforces mutual exclusivity.** Multi-label problems where instances belong to multiple categories simultaneously should not use softmax.
+- **Probabilities may be miscalibrated.** Models with identical accuracy can output markedly different probability distributions depending on regularization and optimization duration.
+
+## Visualization
+
+The table below takes the logits of our iris flower, $\mathbf{z} = (-3.0, 1.8, 1.2)$, scales them by factor $c$ (equivalent to temperature $T = 1/c$), and computes softmax probabilities:
+
+| Logits Evaluated | setosa | versicolor | virginica |
+|---|---:|---:|---:|
+| $0 \cdot \mathbf{z} = (0, 0, 0)$ | 0.3333 | 0.3333 | 0.3333 |
+| $0.5\,\mathbf{z}$ | 0.0495 | 0.5460 | 0.4045 |
+| $1 \cdot \mathbf{z}$ (original) | 0.0053 | 0.6422 | 0.3525 |
+| $\mathbf{z} + 5$ | 0.0053 | 0.6422 | 0.3525 |
+| $2\,\mathbf{z}$ | 0.0001 | 0.7685 | 0.2315 |
+| $10\,\mathbf{z}$ | 0.0000 | 0.9975 | 0.0025 |
+
+Observations from top to bottom:
+
+- **Equal logits yield uniform distributions.** The top row reflects the untrained state: $1/3$ per class, with cross-entropy equal to $\ln 3$.
+- **Constant shifts leave outputs identical.** The row $\mathbf{z} + 5$ is identical to the baseline, enabling the max-subtraction trick.
+- **Large scaling sharpens the distribution.** While class rankings never change, scaling by 10 concentrates nearly all probability onto versicolor: softmax approaches a hard `argmax`. Conversely, scaling toward zero flattens the distribution toward uniform uncertainty.
+
+This clarifies why weight inflation increases model overconfidence: doubling weights doubles logits, sharpening probabilities toward 0 and 1 without shifting boundaries.
+
+## Code Examples
+
+The three cells below run independently. The first relies solely on NumPy. The second and third load scikit-learn (and Matplotlib for the third).
+
+The first cell compares naive versus numerically stable softmax on the iris logits, tests large positive shifts (+1000), and validates the $K = 2$ reduction to sigmoid.
+
+<PythonRunner code={softmaxNumpyCode} title="Numerically stable softmax with NumPy" />
+
+- Logits $(-3.0, 1.8, 1.2)$ produce probabilities $(0.0053, 0.6422, 0.3525)$ summing to 1, exactly matching the Intuition section. Adding 5 to all logits yields identical output.
+- Adding 1000 causes naive exponentiation to produce `[nan, nan, nan]` due to floating-point overflow ($e^{1001.8} \to \infty$). The max-subtraction approach computes exact probabilities without issue.
+- The two-class test verifies that $\operatorname{softmax}(1.8, 1.2)_1 = 0.6457$ matches $\sigma(1.8 - 1.2) = \sigma(0.6)$.
+
+The second cell trains softmax regression using batch gradient descent on iris petal dimensions. Data is split into 105 training samples and 45 test samples (`stratify=y`), standardized with `StandardScaler`, and optimized from $\mathbf{W} = \mathbf{0}, \mathbf{b} = \mathbf{0}$ with $\eta = 0.5$ across 1000 epochs, before benchmarking against scikit-learn's `LogisticRegression`.
+
+<PythonRunner code={softmaxGdCode} title="Softmax regression via gradient descent" />
+
+- At epoch 0, loss evaluates to 1.0986 ($\ln 3$), reflecting uniform initial probabilities. Loss falls to 0.4657 at epoch 10, 0.1836 at epoch 100, and 0.0976 at epoch 1000.
+- Loss continues creeping downward even after 1000 epochs: because setosa is linearly separable, unregularized weights inflate indefinitely to drive setosa probabilities arbitrarily close to 1.
+- Both models achieve identical test accuracy: 0.9778 (44 out of 45 test flowers).
+- For the flower measuring 4.9 cm $\times$ 1.5 cm, scikit-learn outputs $(0.006, 0.654, 0.340)$, closely mirroring our intuition example. The unregularized GD implementation outputs 0.771 for versicolor, showing higher confidence due to larger unpenalized weight norms.
+
+The third cell uses a scikit-learn pipeline (`StandardScaler` + `LogisticRegression`) to plot decision boundaries across the 2D feature space and evaluate test performance via confusion matrix and `classification_report`.
+
+<PythonRunner
+  code={boundaryCode}
+  title="Decision boundaries and test set evaluation"
+  figureAlt={['Scatter plot of 105 training iris flowers with petal length (0.5 to 7.5 cm) on x-axis and petal width (0 to 2.8 cm) on y-axis. Feature plane is partitioned into three colored prediction regions separated by two linear boundary segments. Setosa circles cluster in the lower left inside their own region far from other species. Versicolor squares occupy the center and virginica triangles the upper right; their boundary runs through the narrow overlap region with a few points touching or crossing the border.']}
+/>
+
+The visualization highlights piecewise linear decision boundaries: straight segments partition the space into three convex regions. Setosa sits isolated behind a wide boundary margin, whereas the versicolor–virginica boundary threads directly through their overlapping interface.
+
+The test confusion matrix confirms a single misclassification: one virginica flower with slender dimensions (5.6 cm $\times$ 1.4 cm) misclassified as versicolor (assigned 0.593 versicolor vs. 0.405 virginica). The classification report details per-class precision, recall, and F1 alongside macro and weighted averages (matching at 0.978 due to balanced test splits), as covered in [Model Evaluation](/en/ml/classification-metrics/).
+
+## Common Pitfalls
+
+:::caution[Implementing Softmax Without Max-Subtraction]
+Computing `np.exp(z) / np.exp(z).sum()` succeeds on small values but catastrophically emits `nan` once any logit exceeds ~710. This frequently crashes training mid-run as weights grow. Always subtract `z.max()` before exponentiating. When computing log-probabilities $\ln\hat{y}$, avoid taking `np.log` of softmax probabilities directly; utilize numerically stable implementations like `scipy.special.log_softmax`.
+:::
+
+:::caution[Applying Softmax to Multi-Label Problems]
+Softmax enforces mutual exclusivity across classes: probabilities must sum to 1, so increasing confidence in one label inevitably depresses others. For instances possessing multiple concurrent labels (e.g., an article discussing both technology and finance), use independent binary logistic regressions (one sigmoid per label with individual decision thresholds).
+:::
+
+:::caution[Equating Softmax Probabilities to Real-World Confidence]
+In our second code cell, the custom GD model outputted 0.771 for versicolor whereas regularized scikit-learn outputted 0.654 for the exact same sample, despite identical 44/45 classification accuracy. Regularization strength and training duration scale logit magnitudes and shift probability extremes without moving decision boundaries. Always assess calibration on a validation set before using output probabilities as automated operational thresholds.
+:::
+
+## Quick Check
+
+{/* Questions defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and Further Reading
+
+**Key Takeaways:**
+
+- Softmax regression assigns each class a logit $z_k = \mathbf{w}_k^\top\mathbf{x} + b_k$, producing probabilities $\hat{y}_k = e^{z_k}/\sum_j e^{z_j}$. Unlike separate binary models, probabilities strictly sum to 1 while preserving logit ordering.
+- Softmax depends exclusively on logit differences: subtracting the maximum logit prevents overflow without altering probabilities. For $K = 2$, softmax reduces to $\sigma(z_1 - z_2)$, proving logistic regression is a special case.
+- Under one-hot encoding, cross-entropy $-\sum_k y_k\ln\hat{y}_k$ simplifies to $-\ln\hat{y}_{\text{true}}$, initialized at $\ln K$ for untrained models. The logit gradient is $\hat{\mathbf{y}} - \mathbf{y}$, yielding parameter gradients $\nabla_{\mathbf{W}}\mathcal{L} = \frac{1}{m}\mathbf{X}^\top(\hat{\mathbf{Y}} - \mathbf{Y})$ for gradient descent.
+- Decision boundaries are piecewise linear. Softmax forms the standard classification output layer for deep neural networks and large language models, strictly suited for mutually exclusive single-label tasks.
+
+**Further Reading:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Bài 13: Softmax Regression](https://machinelearningcoban.com/2017/02/17/softmax/). Foundational Vietnamese guide from one-vs-rest to softmax, numerical stability, and NumPy implementation.
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. (2023). [*Dive into Deep Learning*, Section 4.1: Softmax Regression](https://d2l.ai/chapter_linear-classification/softmax-regression.html). Comprehensive treatment from maximum likelihood and information-theoretic perspectives.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*, Section 1.1.11.2: Multinomial Case](https://scikit-learn.org/1.8/modules/linear_model.html#multinomial-case). Technical formulation of multinomial logistic regression in scikit-learn.
+- Fisher, R. A. (1936). [*The Use of Multiple Measurements in Taxonomic Problems*](https://doi.org/10.1111/j.1469-1809.1936.tb02137.x). *Annals of Eugenics* 7(2), 179–188. Original paper introducing the iris dataset.
+- Bridle, J. S. (1990). [*Probabilistic Interpretation of Feedforward Classification Network Outputs, with Relationships to Statistical Pattern Recognition*](https://doi.org/10.1007/978-3-642-76153-9_28). In *Neurocomputing*, Springer, 227–236. Landmark paper naming the softmax layer in neural networks.
+
+<LessonProgress />
