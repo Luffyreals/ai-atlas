@@ -1,7 +1,7 @@
 // Helpers shared by the e2e specs (not a spec itself: Playwright only runs *.spec.ts).
 // Expected strings come from the i18n files, the language of a lesson's content from roadmap.ts, so the
 // specs hold while a lesson is vi-only and once it is translated.
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, type Page } from '@playwright/test';
 import type { Lesson, Locale } from '../../src/data/roadmap';
@@ -75,6 +75,20 @@ export async function scrollThrough(
   }
   if (hydrated) await expect(page.locator('astro-island[ssr]')).toHaveCount(0);
   if (networkIdle) await page.waitForLoadState('networkidle');
+}
+
+// --- Pyodide (shared by components.spec.ts and lessons-meta.spec.ts) ---
+
+/** Requests to the Pyodide CDN (src/lib/pyodide/config.ts). */
+export const PYODIDE_URL = /cdn\.jsdelivr\.net\/pyodide/i;
+
+/** /_astro files that start Pyodide: the worker and client.ts (the only chunk that names the worker). */
+export function pyodideChunks(): string[] {
+  const dir = fileURLToPath(new URL('../../dist/_astro/', import.meta.url));
+  const files = readdirSync(dir).filter((file) => file.endsWith('.js'));
+  const workers = files.filter((file) => file.startsWith('worker-'));
+  const clients = files.filter((file) => workers.some((worker) => readFileSync(dir + file, 'utf8').includes(worker)));
+  return [...workers, ...clients];
 }
 
 // --- Contrast (WCAG 2.x), from the colours the browser computed ---

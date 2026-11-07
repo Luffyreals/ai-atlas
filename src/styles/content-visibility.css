@@ -1,0 +1,45 @@
+/*
+ * Rendering work of a long lesson (docs/architecture/launch.md 3.5.2, step E5; decision 67 in docs/decisions.md).
+ * A lesson has 10–12 thousand elements, most of them KaTeX, and every font that arrives makes the browser redo
+ * style and layout for all of them. content-visibility: auto lets it skip the blocks far from the screen until
+ * they come near. Text stays in the page: find in page, links to #headings and screen readers still reach it.
+ *
+ * Every block of the lesson body, except the heading wrappers: they are small, and the target of #links and of
+ * the table of contents stays laid out. Rendered, a block looks the same as without the rule (checked block by
+ * block at 412 and 1280px: same heights and gaps; nothing inside reaches out of its block, so the paint
+ * containment this brings clips nothing).
+ *
+ * contain-intrinsic-size is the height a block is given while skipped: the median of that kind of block at
+ * 375px, so the scroll bar barely moves when blocks are rendered. `auto` then keeps the real height once seen.
+ */
+.sl-markdown-content > :not(.sl-heading-wrapper) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 7rem;
+}
+
+.sl-markdown-content > .katex-display {
+  contain-intrinsic-size: auto 4rem;
+}
+
+.sl-markdown-content > :is(ul, ol, aside) {
+  contain-intrinsic-size: auto 20rem;
+}
+
+.sl-markdown-content > :is(table, figure) {
+  contain-intrinsic-size: auto 32rem;
+}
+
+.sl-markdown-content > :is(.atlas-viz, .atlas-runner) {
+  contain-intrinsic-size: auto 64rem;
+}
+
+.sl-markdown-content > :is(.atlas-quiz, .atlas-local) {
+  contain-intrinsic-size: auto 120rem;
+}
+
+/* Printing lays out the whole lesson anyway. */
+@media print {
+  .sl-markdown-content > :not(.sl-heading-wrapper) {
+    content-visibility: visible;
+  }
+}

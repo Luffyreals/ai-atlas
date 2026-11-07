@@ -8,13 +8,28 @@ import rehypeKatex from 'rehype-katex';
 import starlightLinksValidator from 'starlight-links-validator';
 import enStrings from './src/content/i18n/en.json';
 import viStrings from './src/content/i18n/vi.json';
+import { installedFontsource } from './src/lib/fonts';
 import rehypeKatexA11y from './src/lib/rehype-katex-a11y';
 import { isInSitemap } from './src/lib/seo';
 import { buildSidebar } from './src/lib/sidebar';
+import { resolveSite } from './src/lib/site';
+
+// Barlow through the Fonts API (docs/architecture/launch.md, section 3.4): read from the installed @fontsource
+// packages (pinned versions, no network at build time), with fallback faces sized to Barlow's metrics.
+const SUBSETS: [string, ...string[]] = ['latin', 'latin-ext', 'vietnamese'];
+const fontsource = installedFontsource(SUBSETS);
+const barlow = {
+  provider: fontsource,
+  name: 'Barlow',
+  cssVariable: '--font-barlow',
+  subsets: SUBSETS,
+  fallbacks: ['system-ui'],
+  display: 'swap' as const,
+};
 
 export default defineConfig({
-  // Placeholder until the Cloudflare project name / custom domain is final.
-  site: 'https://ai-atlas-7nb.pages.dev',
+  // SITE_URL at build time (Cloudflare Pages, CI), else https://ai-atlas.pages.dev. See src/lib/site.ts.
+  site: resolveSite(process.env.SITE_URL),
   trailingSlash: 'always',
   redirects: { '/': '/vi/' },
   markdown: {
@@ -31,6 +46,21 @@ export default defineConfig({
       ],
     }),
   },
+  // Same cssVariable, name and provider: Astro merges the first two into one family (400, 600, 400 italic).
+  fonts: [
+    { ...barlow, weights: [400, 600], styles: ['normal'] },
+    { ...barlow, weights: [400], styles: ['italic'] },
+    {
+      provider: fontsource,
+      name: 'Barlow Condensed',
+      cssVariable: '--font-barlow-condensed',
+      weights: [700],
+      styles: ['normal'],
+      subsets: SUBSETS,
+      fallbacks: ['system-ui'],
+      display: 'swap',
+    },
+  ],
   integrations: [
     starlight({
       title: { vi: 'AI Atlas', en: 'AI Atlas' },
@@ -43,21 +73,21 @@ export default defineConfig({
       logo: {
         light: './src/assets/logo-light.svg',
         dark: './src/assets/logo-dark.svg',
-        alt: 'AI Atlas',
+        // Decorative: the link home is named by the "AI Atlas" text right next to it (axe image-redundant-alt).
+        alt: '',
       },
       components: {
         // The homepage is the only page with `hero`; it renders the designed atlas homepage.
         Hero: './src/components/starlight/Hero.astro',
+        // Starlight's head plus the Fonts API faces and preloads, and the scroll-region script.
+        Head: './src/components/starlight/Head.astro',
+        Footer: './src/components/starlight/Footer.astro',
       },
       sidebar: buildSidebar(),
       // Fallback pages: noindex, and no hreflang to a missing translation (decision 30 in docs/decisions.md).
       routeMiddleware: './src/routeData.ts',
       customCss: [
-        // Self-hosted Barlow; unicode-range keeps downloads to the latin + vietnamese subsets in use.
-        '@fontsource/barlow/400.css',
-        '@fontsource/barlow/400-italic.css',
-        '@fontsource/barlow/600.css',
-        '@fontsource/barlow-condensed/700.css',
+        // No @fontsource imports: Barlow loads through the Fonts API (`fonts` above, <Font> in Head.astro).
         'katex/dist/katex.min.css',
         './src/styles/custom.css',
         // Lesson components and the roadmap map: global on purpose (decision 13 in docs/decisions.md), so a
@@ -68,6 +98,8 @@ export default defineConfig({
         './src/components/quiz/quiz.css',
         './src/components/python-runner/python-runner.css',
         './src/styles/local-code.css',
+        // content-visibility: auto for the blocks of a long lesson (docs/architecture/launch.md 3.5.2, E5).
+        './src/styles/content-visibility.css',
         // The one CSS file of every static figure (docs/architecture/viz/figures.md, section 8.2 f). Just before viz.css.
         './src/components/figures/figures.css',
         // The one CSS file of every VIZ (docs/architecture/viz/README.md, section 2.3). Keep it last.

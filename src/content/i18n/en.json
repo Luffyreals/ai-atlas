@@ -346,5 +346,9 @@
   "atlas.vizDiffusion.startNote": "t = 0: no noise yet, the noisy image is the clean image.",
   "atlas.vizDiffusion.midNote": "The squares of the two coefficients always add up to 1: what the image loses, the noise makes up.",
   "atlas.vizDiffusion.endNote": "Image coefficient below {{limit}}: almost pure noise.",
-  "atlas.vizDiffusion.announce": "t = {{t}}: image coefficient {{signal}}, noise coefficient {{noise}}."
+  "atlas.vizDiffusion.announce": "t = {{t}}: image coefficient {{signal}}, noise coefficient {{noise}}.",
+  "atlas.common.codeBlock": "Code block {{n}}",
+  "atlas.footer.contentLicence": "Content licensed under",
+  "atlas.footer.codeLicence": "Code under the MIT license.",
+  "atlas.footer.about": "About"
 }

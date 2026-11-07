@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test --grep-invert @network",
     "test:e2e:network": "playwright test --grep @network --project=desktop",
+    "og:images": "node scripts/make-og-images.mjs",
     "astro": "astro"
   },
   "dependencies": {

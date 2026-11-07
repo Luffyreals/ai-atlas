@@ -232,3 +232,8 @@ Phiên viết phần DL tự chốt ngày 05/11/2026 theo phương án đề xu�
 118. **Code phần DL:** cơ chế cốt lõi bằng NumPy chạy trên trang (`PythonRunner`), kiểm bằng venv khớp Pyodide; huấn luyện bằng PyTorch qua `LocalCode`, chạy thật bằng venv `.venv-dl/` (torch CPU, không commit). Dữ liệu: `sklearn.datasets.load_digits` (ảnh 8×8 có sẵn, không tải mạng) cho MLP và CNN; chuỗi tự sinh cho RNN, GRU, LSTM, Transformer.
 119. **VIZ và hình:** 2 VIZ (`GradientFlowViz` ở bài huấn luyện mạng, `ConvolutionViz` ở bài CNN), 6 hình tĩnh (`MlpFigure`, `ResidualBlockFigure`, `RnnUnrolledFigure`, `GruCellFigure`, `LstmCellFigure`, `TransformerBlockFigure`). Bài Transformer dùng hình tĩnh, không VIZ attention: ô NumPy in ma trận trọng số attention là đủ.
 120. **Link giữa các bài DL:** 8 bài xuất bản trong cùng một PR nên được link lẫn nhau. Bài nền ML, Python, Toán chưa có thì hiện "Sắp có" qua `Prerequisites`, kèm khối "Nhắc nhanh".
+
+121. **Tích hợp hoàn thiện toàn bộ repo và mốc M4 Launch (07/11/2026).** Người dùng phê duyệt Phương án A: hoàn thiện, nâng cấp và tổ chức lại repository chuyên nghiệp.
+    - Đưa toàn bộ hạ tầng M4 Launch vào nhánh chính `main`: trang Giới thiệu song ngữ `/about`, Footer bản quyền CC BY-NC-SA 4.0 và MIT, Fonts API loại bỏ hoàn toàn CLS, OpenGraph metadata & ảnh xem trước mạng xã hội, sinh động `robots.txt`, cấu hình `_headers` cho Cloudflare Pages, và trợ năng cuộn bàn phím (A11y).
+    - Cập nhật tài liệu dự án (`README.md`, `docs/README.en.md`, `docs/PLAN.md`, `docs/CHANGELOG.md`, `docs/mvp.md`) phản ánh chính xác quy mô: hoàn thành 78/78 bài tiếng Việt, 14 bài tiếng Anh ML, 2.222 unit tests.
+    - Bổ sung thông tin tác giả: **Nguyễn Hoàng Tùng** (@Luffyreals).

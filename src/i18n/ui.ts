@@ -1,12 +1,13 @@
 // Single source of truth for custom UI string keys.
 // Adding a string = add the key here + in src/content/i18n/vi.json + en.json.
 export const UI_KEYS = {
-  common: ['comingSoon', 'notTranslated', 'learned', 'needsScript', 'lessonsOn', 'formulaLabel'],
+  common: ['comingSoon', 'notTranslated', 'learned', 'needsScript', 'lessonsOn', 'formulaLabel', 'codeBlock'],
   home: [
     'openMap', 'startLearning', 'startLearningLabel', 'linkRoute', 'linkTerms', 'otherLanguage',
     'otherLanguageName', 'quickLinks', 'previous', 'next',
   ],
   notFound: ['title', 'text', 'homeLink'],
+  footer: ['contentLicence', 'codeLicence', 'about'],
   roadmap: [
     'lessons', 'branchNote', 'routeLabel', 'routeResult', 'showOnMap', 'legendOpen', 'legendSoon',
     'legendNone', 'progressSummary', 'progressTotal', 'legendDone',

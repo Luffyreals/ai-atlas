@@ -50,7 +50,12 @@ test('unknown page returns the bilingual 404', async ({ page }) => {
   expect(response?.status()).toBe(404);
   await expect(page.getByText('Không tìm thấy trang').first()).toBeVisible();
   await expect(page.getByText('Page not found').first()).toBeVisible();
-  await expect(page.locator('p[lang="en"]')).toContainText('does not exist');
+  // The body of the page (the footer note below it has its own vi and en lines: footer.spec.ts).
+  const body = page.locator('.sl-markdown-content');
+  await expect(body.locator('p:not([lang])')).toContainText('không tồn tại');
+  await expect(body.locator('p[lang="en"]')).toContainText('does not exist');
+  await expect(body.locator('a[href="/vi/"]')).toHaveCount(1);
+  await expect(body.locator('a[href="/en/"]')).toHaveCount(1);
 });
 
 test('KaTeX renders inline and display math', async ({ page }) => {

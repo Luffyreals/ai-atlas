@@ -1,8 +1,9 @@
 ---
 // First screen: the atlas title card beside a slowly changing old map plate.
-import { Picture } from 'astro:assets';
+import type { ImageMetadata } from 'astro';
+import { getImage, Picture } from 'astro:assets';
 import { HOME } from '@data/home';
-import { HERO_PLATES } from '@data/home-pictures';
+import { HERO_PLATES, type Picture as PlatePicture } from '@data/home-pictures';
 import { LESSONS, type Locale } from '@data/roadmap';
 import { formatString } from '@i18n/format';
 import { getStrings } from '@i18n/ui';
@@ -28,9 +29,38 @@ const startLabel =
   start &&
   formatString(t.startLearningLabel, { lesson: start.title }) +
     (start.state === 'untranslated' ? ` (${tCommon.notTranslated})` : '');
+
+// Same settings as the <Picture> of the plates below.
+const WIDE = '(min-width: 64rem)';
+const QUALITY = 60;
+const IMAGE_FORMATS = ['avif', 'webp'] as const;
+
+/** srcset of one picture in one format. */
+async function srcset(src: ImageMetadata, widths: number[], format: string) {
+  return (await getImage({ src, widths, format, quality: QUALITY })).srcSet.attribute;
+}
+
+/**
+ * Art direction for a plate with a `narrow` cut (docs/architecture/launch.md, section 3.5.1): below 64rem the
+ * frame is landscape, so phones load the 3:2 cut, not the tall plate mostly hidden by object-fit. From 64rem
+ * the sources are the ones <Picture> gives every plate.
+ */
+async function artDirection(plate: PlatePicture, narrow: ImageMetadata) {
+  const wide = await Promise.all(
+    IMAGE_FORMATS.map(async (format) => ({ format, srcset: await srcset(plate.src, [480, 720, 960, 1280], format) })),
+  );
+  const cut = [480, 720, 960];
+  const small = await Promise.all(IMAGE_FORMATS.map(async (format) => ({ format, srcset: await srcset(narrow, cut, format) })));
+  const fallback = await getImage({ src: narrow, widths: cut, format: 'jpg', quality: QUALITY });
+  return { wide, small, fallback, width: narrow.width, height: narrow.height };
+}
+
+const directed = await Promise.all(
+  HERO_PLATES.map((plate) => (plate.narrow ? artDirection(plate, plate.narrow) : undefined)),
+);
 ---
 
-<section class="hero" aria-labelledby="home-title">
+<section class="hero" aria-labelledby="_top">
   <div class="hero-card">
     <Stripe id="hero-stripe" class="hero-stripe" />
     <div class="hero-body">
@@ -38,7 +68,8 @@ const startLabel =
         <RouteMark class="hero-mark" />
         <span>AI Atlas</span>
       </p>
-      <h1 id="home-title" class="hero-title">{HOME.hero.title[locale]}</h1>
+      {/* id="_top" (Starlight's PAGE_TITLE_ID) is where the skip link goes; tabindex="-1" lets it take the focus. */}
+      <h1 id="_top" class="hero-title" tabindex="-1">{HOME.hero.title[locale]}</h1>
       <p class="hero-lead">{formatString(HOME.hero.lead[locale], { count: LESSONS.length })}</p>
       <div class="hero-actions">
         {
@@ -65,17 +96,40 @@ const startLabel =
           class:list={['hero-plate', { 'is-current': index === 0, 'is-deferred': index > 0 }]}
           aria-hidden={index === 0 ? undefined : 'true'}
         >
-          <Picture
-            src={plate.src}
-            alt={plate.alt[locale]}
-            widths={[480, 720, 960, 1280]}
-            sizes="(min-width: 64rem) 50vw, 100vw"
-            formats={['avif', 'webp']}
-            quality={60}
-            loading={index === 0 ? 'eager' : 'lazy'}
-            fetchpriority={index === 0 ? 'high' : 'auto'}
-            style={`object-position: ${plate.focus ?? '50% 50%'}`}
-          />
+          {directed[index] ? (
+            <picture>
+              {directed[index].wide.map(({ format, srcset }) => (
+                <source media={WIDE} srcset={srcset} type={`image/${format}`} sizes="50vw" />
+              ))}
+              {directed[index].small.map(({ format, srcset }) => (
+                <source srcset={srcset} type={`image/${format}`} sizes="100vw" />
+              ))}
+              <img
+                src={directed[index].fallback.src}
+                srcset={directed[index].fallback.srcSet.attribute}
+                sizes="100vw"
+                alt={plate.alt[locale]}
+                width={directed[index].width}
+                height={directed[index].height}
+                loading={index === 0 ? 'eager' : 'lazy'}
+                fetchpriority={index === 0 ? 'high' : 'auto'}
+                decoding="async"
+                style={`object-position: ${plate.focus ?? '50% 50%'}`}
+              />
+            </picture>
+          ) : (
+            <Picture
+              src={plate.src}
+              alt={plate.alt[locale]}
+              widths={[480, 720, 960, 1280]}
+              sizes="(min-width: 64rem) 50vw, 100vw"
+              formats={[...IMAGE_FORMATS]}
+              quality={QUALITY}
+              loading={index === 0 ? 'eager' : 'lazy'}
+              fetchpriority={index === 0 ? 'high' : 'auto'}
+              style={`object-position: ${plate.focus ?? '50% 50%'}`}
+            />
+          )}
           <figcaption>{plate.caption[locale]}</figcaption>
         </figure>
       ))
@@ -139,6 +193,11 @@ const startLabel =
     max-width: 15ch;
     font-size: var(--step-head);
     line-height: 1.1;
+  }
+
+  /* custom.css sets the tracking of h1#_top (lesson titles); the hero title keeps the homepage's -0.02em. */
+  .hero-title#_top {
+    letter-spacing: -0.02em;
   }
 
   .hero-lead {

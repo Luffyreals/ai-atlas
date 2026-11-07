@@ -1,0 +1,105 @@
+---
+title: About
+description: What AI Atlas is, who makes it, how to use the site, and the licenses for the content and the code.
+prev: false
+next: false
+---
+
+import PictureCredits from '@components/PictureCredits.astro';
+
+## What AI Atlas is
+
+Want to learn AI but not sure where to start? There is plenty of material out there, but it is scattered and comes in no particular order. Many sources put the formulas in front of you before you understand the problem. And most of the good material is only in English.
+
+AI Atlas is a bilingual Vietnamese–English wiki that arranges AI knowledge into a learning path. The path runs from Python through Math, Machine Learning and Deep Learning, then splits into three branches: Natural Language Processing (NLP), Computer Vision and Large Language Models (LLMs). Every lesson tells you which lessons to study first.
+
+The focus is on theory, explained so that it is easy to follow. Every lesson has the same shape: intuition first, then theory (with formulas where needed), then illustrations and code examples.
+
+AI Atlas is free and needs no account.
+
+The site is still being built. The path is mapped from start to finish, and lessons open one by one. On the map, lessons that are not written yet appear faded and cannot be clicked. Lessons are written in Vietnamese first and then translated into English, so some lessons have a Vietnamese version but no English one yet.
+
+## Who makes AI Atlas
+
+AI Atlas is a personal project by Nguyen Hoang Tung (Luffyreals on GitHub), someone who is teaching themselves AI.
+
+When you teach yourself, you have to piece the knowledge together on your own. AI Atlas grew out of arranging those pieces into a map, so that the people who come after get lost a little less.
+
+For now, AI Atlas has no channel for contact or feedback.
+
+## How to use the site
+
+### The learning path
+
+The [home page](/en/) has a map of the whole learning path. Open lessons are in bold and have a link. You can pick a lesson as your destination, and the map shows the lessons you need to go through to get there.
+
+At the top of each lesson is a "Prerequisites" section. It lists the lessons that this one builds on. Prerequisites that are not written yet are labeled "Coming soon". On English pages, lessons that are not translated yet are labeled "Not translated yet" and open the Vietnamese version. If a lesson feels hard, go back to its prerequisites first.
+
+### Run Python code right on the page
+
+Most code examples run right on the page. You don't need to install anything.
+
+- Press **Run** to run the code. Printed output and plots appear just below.
+- On the first run, your browser needs to download Python, about 10 MB. Libraries such as `scikit-learn` or `scipy` are downloaded on top of that, possibly a few dozen MB, so the first run takes a while. After that, your browser usually has them cached. Python is only downloaded when you press Run, never in advance when you open the page.
+- Press **Edit code** to change the code, then run it again and see how the result changes. In the editor, <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (<kbd>Cmd</kbd>+<kbd>Enter</kbd> on a Mac) also runs the code. To go back to how it was, press **Restore original code**.
+- If the code runs for too long, press **Stop**.
+- The libraries `numpy`, `pandas`, `matplotlib`, `scipy` and `scikit-learn` are available on the page.
+
+Some code blocks cannot run on the page, for example because they call an API or fetch web pages, use PyTorch, run a web app, need a database or need a library the page does not have. These blocks are labeled "Run on your machine", and for now they are mostly in the LLM part. Each block says which packages to install and, if any, which environment variables to set. Many come with sample output from a real run. API keys are read from environment variables, so you never have to paste a key into the code.
+
+### Quick check
+
+Near the end of each lesson there are a few multiple-choice questions. Pick an answer and press **Check**: the page tells you right away whether it is correct, along with an explanation. Once you have answered every question, you see how many you got right. To redo a question, press **Try again**.
+
+These questions are there for you to check your own understanding. Your score is not saved anywhere.
+
+### Marking lessons as learned
+
+When you finish a lesson, press the "I have finished this lesson" button at the end of it. Press it again to unmark it.
+
+Learned lessons get a ✓ on the map on the home page, together with a "Learned x/y" line. Marking a lesson in the Vietnamese version also counts it as learned in the English version.
+
+Your progress is stored in your browser's `localStorage`, on your own device. This means:
+
+- If you switch to another browser or device, you won't see your earlier progress.
+- If you clear your browser data, your progress is lost too.
+
+### Language and light/dark mode
+
+At the top of the page there are two selectors: one switches between Vietnamese and English, the other sets the theme to Light, Dark or Auto (following your device's setting). On a phone, both selectors are in the menu on lesson pages.
+
+If a lesson has no English version yet, the English page shows the Vietnamese version, with a notice saying so.
+
+### Privacy
+
+AI Atlas has no accounts and uses no tracking cookies. Your learned lessons, your light/dark choice and the tabs you pick inside lessons (for example, your operating system) are kept only in `localStorage` on your device. The site does not send them anywhere.
+
+Python code runs right in your browser, including code you have edited. The code is not sent to any server. Only when you press Run does your browser download Python (Pyodide) and the libraries from jsDelivr, a content delivery network (CDN). Apart from that download, fonts, images and formulas are all loaded from AI Atlas's own server.
+
+AI Atlas does not currently use any analytics tool.
+
+## Licenses
+
+AI Atlas uses two licenses: one for the content and one for the code.
+
+**Content**, meaning the articles and the original illustrations, is under the <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" rel="license">CC BY-NC-SA 4.0</a> license. You may share and adapt it, as long as you follow three conditions:
+
+- **Attribution (BY):** credit "AI Atlas", with a link to the original lesson and a link to the license. If you changed the content, say so.
+- **NonCommercial (NC):** do not use it for commercial purposes.
+- **ShareAlike (SA):** adapted versions must use the same CC BY-NC-SA 4.0 license.
+
+**Code**, meaning the website's source code and the code examples in the lessons, is under the [MIT](https://opensource.org/license/mit) license, Copyright (c) 2026 Luffyreals. The source repository is not public yet, but you can copy the code examples from the lessons and use them. You may use, modify and share the code, including for commercial purposes, as long as you keep the copyright notice and the license text.
+
+Both the static figures and the pictures drawn by the interactive visualizations are content (CC BY-NC-SA 4.0); the code that draws them is code (MIT).
+
+Images and outside material quoted on the site are not covered by these two licenses. They follow the license stated where they are quoted. The images on the home page are listed in the Picture credits section just below.
+
+## Picture credits
+
+The images on the home page are maps, drawings, book pages and old photographs from Wikimedia Commons. Most of them are in the public domain. Images from the David Rumsey Map Collection are under that collection's [CC BY-NC-SA 3.0](https://creativecommons.org/licenses/by-nc-sa/3.0/) license, not under the AI Atlas license.
+
+<PictureCredits locale="en" />
+
+## Software
+
+AI Atlas is built with [Astro](https://astro.build) and [Starlight](https://starlight.astro.build). The interactive parts use [React](https://react.dev). Math formulas are rendered with [KaTeX](https://katex.org). Python runs on the page thanks to [Pyodide](https://pyodide.org). Search uses [Pagefind](https://pagefind.app). The fonts are [Barlow](https://fonts.google.com/specimen/Barlow) and [Barlow Condensed](https://fonts.google.com/specimen/Barlow+Condensed), under the SIL Open Font License.

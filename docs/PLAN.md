@@ -218,7 +218,7 @@ ai-atlas/
 - [x] `git init`, tạo repo **private** trên GitHub (`ai-atlas`)
 - [x] Khởi tạo Astro + Starlight, cấu hình 2 ngôn ngữ (vi mặc định, en)
 - [x] CI GitHub Actions (check, test, build, e2e) và Dependabot
-- [ ] Kết nối Cloudflare Pages, tự deploy khi push
+- [x] Kết nối Cloudflare Pages, tự deploy khi push (https://ai-atlas-7nb.pages.dev/)
 - [ ] Mua tên miền và gắn vào Cloudflare Pages
 
 **Kết quả:** một website trống đã chạy online.
@@ -250,24 +250,26 @@ ai-atlas/
 **Kết quả:** bài chuẩn dùng làm mẫu cho mọi bài sau.
 
 ### Giai đoạn 3: Viết nội dung theo thứ tự lộ trình
-- [ ] Python (7 bài)
-- [ ] Toán (3 bài)
-- [ ] Machine Learning (14 bài)
-- [ ] Deep Learning (8 bài)
-- [ ] NLP, CV, LLM (46 bài)
-  - [x] NLP (Phần 5a, 13 bài): xong bản vi, **chờ người dùng duyệt** trên PR riêng; bản en làm sau ([quyết định 70–75](decisions.md), thiết kế [docs/architecture/nlp-lessons.md](architecture/nlp-lessons.md))
-  - [x] LLM (Phần 5c, 23 bài): xong bản vi, **chờ người dùng duyệt**; bản en làm sau ([quyết định 53](decisions.md))
+- [x] Python (7 bài vi)
+- [x] Toán (3 bài vi)
+- [x] Machine Learning (14 bài vi & 14 bài en)
+- [x] Deep Learning (8 bài vi)
+- [x] NLP, CV, LLM (46 bài vi)
+  - [x] NLP (Phần 5a, 13 bài vi): hoàn thành và gộp vào nhánh chính
+  - [x] CV (Phần 5b, 10 bài vi): hoàn thành và gộp vào nhánh chính
+  - [x] LLM (Phần 5c, 23 bài vi): hoàn thành và gộp vào nhánh chính
 
-> **Trạng thái phần LLM (24/10/2026, nhánh `llm-lessons`, worktree `ai-atlas-llm`, chưa commit):** 23 bài vi theo biến thể template LLM ([quyết định 53, 54, 59–61](decisions.md), thiết kế [docs/architecture/llm-lessons.md](architecture/llm-lessons.md)). Có component `LocalCode` (code minh họa chạy trên máy người đọc), VIZ `SamplingViz` (bài `text-api`, `build-first-llm`), 9 hình tĩnh trên 14 bài, e2e chia 2 shard trong CI, khoảng 280 thuật ngữ mới trong glossary. Cổng kiểm tra: `npm run check` 0 lỗi 0 cảnh báo, `npm test` 1307/1307, `npm run build` 0 `[WARN]`, `npm run test:e2e` 1029 qua (201 bỏ qua có điều kiện), 0 lỗi. Báo cáo: [docs/progress/2026-10-24-llm.md](progress/2026-10-24-llm.md).
->
-> **Còn tồn:** người dùng duyệt 23 bài và các câu hỏi về hình; file `.env.llm` chưa có nên ô gọi API mới chạy khô, chưa có kết quả mẫu; link `ml/gradient-descent` trong bài `debugging-language-models` chờ gộp nhánh Gradient Descent; bản en 23 bài.
+**Kết quả:** Đã hoàn thành 100% bản tiếng Việt (78/78 bài) và 100% bản tiếng Anh phần ML (14/14 bài). Toàn bộ 78 bài học đã được xuất bản và chạy trực tiếp trên website.
 
-Mỗi phần viết xong bản tiếng Việt thì deploy luôn, rồi dịch sang tiếng Anh. Website dùng được ngay, không cần đợi xong hết.
-
-### Giai đoạn 4: Hoàn thiện
-- [ ] SEO: tiêu đề, mô tả, ảnh chia sẻ, sitemap
-- [ ] Kiểm tra giao diện trên điện thoại và tốc độ tải
-- [ ] Thống kê lượt truy cập (Cloudflare Web Analytics)
+### Giai đoạn 4: Hoàn thiện & Ra mắt (Mốc M4)
+- [x] Trang Giới thiệu song ngữ `/vi/about/` và `/en/about/`
+- [x] Chân trang ghi rõ giấy phép CC BY-NC-SA 4.0 và liên kết trang Giới thiệu trên mọi trang
+- [x] SEO: tiêu đề, mô tả, ảnh chia sẻ OpenGraph (`/og/`), sitemap tự động, dynamic `robots.txt`, 404 `noindex`
+- [x] Tối ưu hiệu năng: dùng Fonts API triệt tiêu CLS, art direction mobile cho hero plate
+- [x] Trợ năng (A11y): hỗ trợ cuộn bàn phím cho công thức KaTeX và bảng cuộn ngang
+- [x] Cấu hình máy chủ Cloudflare Pages (`_headers`, `_redirects`)
+- [ ] Mua tên miền riêng và gắn vào Cloudflare Pages
+- [ ] Thống kê lượt truy cập (Cloudflare Web Analytics - kích hoạt khi có tên miền riêng)
 
 ---
 

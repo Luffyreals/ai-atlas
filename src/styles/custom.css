@@ -34,8 +34,10 @@
   --atlas-ground-ink: #e4e2da;
   --atlas-ground-muted: #b9ae9c;
 
-  --sl-font: 'Barlow', var(--sl-font-system);
-  --atlas-font-display: 'Barlow Condensed', 'Barlow', var(--sl-font-system);
+  /* Fonts API variables (astro.config.ts `fonts`, <Font> in Head.astro): Barlow, then its fallback faces sized
+     to Barlow's metrics, then system-ui. */
+  --sl-font: var(--font-barlow);
+  --atlas-font-display: var(--font-barlow-condensed);
 }
 
 /* Light mode: bone ground, walnut ink. */

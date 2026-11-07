@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type ConsoleMessage, type Locator, type Page } from '@playwright/test';
@@ -6,7 +6,7 @@ import { getLessonsByPart } from '../../src/lib/roadmap';
 import { LESSONS, LOCALES, type Locale } from '../../src/data/roadmap';
 import { pipCommand, readEnvVars } from '../../src/lib/local-code';
 import { codeImports, localCodeTags, type LocalCodeTag } from '../unit/fixtures/local-code-tags';
-import { installContrast, s, scrollThrough, type Contrast } from './helpers';
+import { installContrast, PYODIDE_URL, pyodideChunks, s, scrollThrough, type Contrast } from './helpers';
 import { readSource, WITH_PAGE } from './lesson-pages';
 
 // M1 components on the demo page (docs/architecture/components.md, plan row M1-7). Runs in CI, no network:
@@ -16,20 +16,10 @@ const fill = (template: string, values: Record<string, string | number>) =>
   template.replace(/\{\{(\w+)\}\}/g, (_, name: string) => String(values[name]));
 
 const demo = (locale: Locale) => `/${locale}/dev/components/`;
-const PYODIDE_URL = /cdn\.jsdelivr\.net\/pyodide/i;
 // Demo page: 2 quizzes + 5 runners (hello, plot, error, slow, input), in this order.
 const ISLANDS = 7;
 const RUNNERS = 5;
 const DEMO_LESSON = 'ml/linear-regression';
-
-/** /_astro files that start Pyodide: the worker and client.ts (the only chunk that names the worker). */
-function pyodideChunks(): string[] {
-  const dir = fileURLToPath(new URL('../../dist/_astro/', import.meta.url));
-  const files = readdirSync(dir).filter((file) => file.endsWith('.js'));
-  const workers = files.filter((file) => file.startsWith('worker-'));
-  const clients = files.filter((file) => workers.some((worker) => readFileSync(dir + file, 'utf8').includes(worker)));
-  return [...workers, ...clients];
-}
 
 /** Astro removes `ssr` from an island once it has hydrated; a click before that is lost. */
 async function hydrated(scope: Locator, count = 1): Promise<void> {

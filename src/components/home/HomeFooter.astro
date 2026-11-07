@@ -1,8 +1,9 @@
 ---
 // The close: the back of a postcard, with a stamp, a sign-off, the address block and the imprint.
 import { Picture } from 'astro:assets';
+import PictureCredits from '@components/PictureCredits.astro';
 import { CC_LICENCE_URL, HOME } from '@data/home';
-import { ALL_PICTURES, STAMP_PICTURE } from '@data/home-pictures';
+import { STAMP_PICTURE } from '@data/home-pictures';
 import { LESSONS, type Locale } from '@data/roadmap';
 import { formatString } from '@i18n/format';
 import { getStrings } from '@i18n/ui';
@@ -15,7 +16,6 @@ const { locale } = Astro.props;
 const { footer } = HOME;
 const t = getStrings(Astro.locals.t, 'home');
 const otherLocale: Locale = locale === 'vi' ? 'en' : 'vi';
-const credits = [...new Map(ALL_PICTURES.map((picture) => [picture.credit.source, picture.credit])).values()];
 ---
 
 <footer class="postcard-wrap" aria-labelledby="postcard-title">
@@ -47,6 +47,7 @@ const credits = [...new Map(ALL_PICTURES.map((picture) => [picture.credit.source
           <li><a href="#map">{formatString(footer.linkMap[locale], { count: LESSONS.length })}</a></li>
           <li><a href="#terms">{footer.linkTerms[locale]}</a></li>
           <li><a href={CC_LICENCE_URL[locale]} rel="license">{footer.linkLicence[locale]}</a></li>
+          <li><a href={`/${locale}/about/`}>{footer.linkAbout[locale]}</a></li>
           <li>
             <a href={`/${otherLocale}/`} hreflang={otherLocale} lang={otherLocale} title={t.otherLanguageName}>
               {t.otherLanguage}
@@ -60,24 +61,7 @@ const credits = [...new Map(ALL_PICTURES.map((picture) => [picture.credit.source
 
   <details class="credits">
     <summary>{footer.creditsTitle[locale]}</summary>
-    <ul>
-      {
-        credits.map((credit) => (
-          <li>
-            <a href={credit.source} lang="en">
-              {credit.title}
-            </a>
-            {' · '}
-            {formatString(footer.creditLine[locale], {
-              creator: credit.creator[locale],
-              year: credit.year[locale],
-              licence: credit.licence[locale],
-              via: credit.via[locale],
-            })}
-          </li>
-        ))
-      }
-    </ul>
+    <PictureCredits locale={locale} class="credits-list" />
   </details>
 </footer>
 
@@ -191,16 +175,12 @@ const credits = [...new Map(ALL_PICTURES.map((picture) => [picture.credit.source
     color: var(--atlas-ground-ink);
   }
 
-  .credits ul {
-    display: grid;
-    max-width: 75ch;
-    gap: 6px;
+  /* The list itself is PictureCredits; scoped styles do not reach into it, hence :global. */
+  .credits :global(.credits-list) {
     margin: 12px 0 0;
-    padding: 0;
-    list-style: none;
   }
 
-  .credits a {
+  .credits :global(.credits-list a) {
     color: var(--atlas-ground-ink);
   }
 

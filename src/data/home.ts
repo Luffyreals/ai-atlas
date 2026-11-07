@@ -199,6 +199,7 @@ export const HOME = {
     linkMap: { vi: 'Bản đồ {{count}} bài', en: 'The {{count}}-lesson map' },
     linkTerms: { vi: 'Một ý, hai cái tên', en: 'One idea, two names' },
     linkLicence: { vi: 'Giấy phép nội dung', en: 'Content license' },
+    linkAbout: { vi: 'Giới thiệu', en: 'About' },
     imprint: {
       vi: '© 2026 AI Atlas · Nội dung CC BY-NC-SA 4.0 · Mã nguồn MIT',
       en: '© 2026 AI Atlas · Content CC BY-NC-SA 4.0 · Code MIT',
@@ -212,7 +213,9 @@ export const HOME = {
   },
 } as const;
 
+export const CC_LICENCE_NAME = 'CC BY-NC-SA 4.0';
+
 export const CC_LICENCE_URL: Localized = {
-  vi: 'https://creativecommons.org/licenses/by-nc-sa/4.0/deed.vi',
+  vi: 'https://creativecommons.org/licenses/by-nc-sa/4.0/',
   en: 'https://creativecommons.org/licenses/by-nc-sa/4.0/',
 };

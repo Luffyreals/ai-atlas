@@ -3,7 +3,7 @@ import { LESSONS, LOCALES, PARTS, type Lesson, type Locale } from '../../src/dat
 import { getPartIdOf, hasPage, isTranslated, requireLesson } from '../../src/lib/roadmap';
 import { lessonShape, prose, splitMdx } from '../unit/fixtures/lesson-shape';
 import { localCodeTags } from '../unit/fixtures/local-code-tags';
-import { contentLangAttr, contentLocale, s, showPreferences } from './helpers';
+import { contentLangAttr, contentLocale, PYODIDE_URL, pyodideChunks, s, scrollThrough, showPreferences } from './helpers';
 import { pathOf, readSource, WITH_PAGE } from './lesson-pages';
 
 // Lesson tests that do not depend on the viewport: meta tags, sitemap, sidebar and Previous/Next, KaTeX,
@@ -345,4 +345,37 @@ for (const lesson of WITH_PAGE) {
       });
     });
   }
+}
+
+// docs/architecture/launch.md, section 8 item 4: on every lesson that has a PythonRunner, opening the page and
+// scrolling through it (so every island hydrates) sends no request to Pyodide: it loads on the first Run only.
+const WITH_RUNNER: [Locale, Lesson][] = WITH_PAGE.flatMap((lesson) =>
+  LOCALES.filter((locale) => isTranslated(lesson, locale))
+    .filter((locale) => /<PythonRunner\b/.test(prose(splitMdx(readSource(locale, lesson.id)).body)))
+    .map((locale) => [locale, lesson] as [Locale, Lesson]),
+);
+
+test('some lesson has a PythonRunner (the test below is not empty)', () => {
+  expect(WITH_RUNNER.length).toBeGreaterThan(0);
+});
+
+for (const [locale, lesson] of WITH_RUNNER) {
+  const path = pathOf(locale, lesson.id);
+  test(`${path}: opening and scrolling the page loads no Pyodide (CDN, worker or client chunk)`, async ({ page }) => {
+    test.slow(); // scrolls a long page and waits for the network
+    const urls: string[] = [];
+    page.on('request', (request) => urls.push(request.url()));
+    page.on('worker', (worker) => urls.push(`worker: ${worker.url()}`));
+    await page.goto(path);
+    await scrollThrough(page, { hydrated: true, networkIdle: true });
+
+    const chunks = pyodideChunks();
+    expect(chunks.length, 'worker and client.ts chunks in dist/_astro').toBeGreaterThanOrEqual(2);
+    expect(urls.filter((url) => PYODIDE_URL.test(url) || /pyodide/i.test(url))).toEqual([]);
+    expect(urls.filter((url) => chunks.some((chunk) => url.endsWith(`/_astro/${chunk}`)))).toEqual([]);
+    expect(urls.filter((url) => url.startsWith('worker:'))).toEqual([]);
+    // Control: the runner islands did load, so the page was really exercised.
+    await expect(page.locator('.atlas-runner').first()).toBeVisible();
+    expect(urls.some((url) => /PythonRunnerIsland\.[\w-]+\.js$/.test(url))).toBe(true);
+  });
 }

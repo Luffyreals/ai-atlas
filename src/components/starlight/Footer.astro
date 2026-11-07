@@ -1,0 +1,67 @@
+---
+// Starlight Footer override (docs/architecture/launch.md, sections 3.2 and 5.4): Starlight's own footer
+// (edit link, prev/next), then one line with the licences and a link to About on every page but the
+// homepage, whose HomeFooter already carries both.
+// The line follows the page's UI language. On a fallback page (/en/ showing vi text inside <main lang="vi">)
+// the lang attribute keeps the English line read in English. The 404 page is bilingual, so it gets both.
+import Default from '@astrojs/starlight/components/Footer.astro';
+import { CC_LICENCE_NAME, CC_LICENCE_URL } from '@data/home';
+import type { Locale } from '@data/roadmap';
+import { getStrings } from '@i18n/ui';
+
+const route = Astro.locals.starlightRoute;
+const isHome = Boolean(route.entry.data.hero);
+const locales: Locale[] = route.id === '404' ? ['vi', 'en'] : [route.lang === 'en' ? 'en' : 'vi'];
+---
+
+<Default />
+{
+  !isHome && (
+    <div class="atlas-site-note">
+      {locales.map((locale) => {
+        const t = getStrings(Astro.locals.t, 'footer', { lng: locale });
+        return (
+          <p lang={locale}>
+            {/* One line of markup: a line break before "." would render as a space. */}
+            <span>{t.contentLicence} <a href={CC_LICENCE_URL[locale]} rel="license">{CC_LICENCE_NAME}</a>. {t.codeLicence}</span>
+            <a class="about" href={`/${locale}/about/`}>
+              {t.about}
+            </a>
+          </p>
+        );
+      })}
+    </div>
+  )
+}
+
+<style>
+  .atlas-site-note {
+    display: grid;
+    gap: 0.5rem;
+    margin-top: 2rem;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+  }
+
+  .atlas-site-note p {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem 1.5rem;
+    margin: 0;
+  }
+
+  .atlas-site-note a {
+    color: var(--sl-color-text-accent);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  /* Stands alone, so it needs a 24px tall target (WCAG 2.5.8); the licence link sits in a sentence. */
+  .atlas-site-note .about {
+    display: inline-block;
+    min-height: 24px;
+    padding-block: 0.25rem;
+  }
+</style>

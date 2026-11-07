@@ -5,7 +5,17 @@ import type { StarlightRouteData } from '@astrojs/starlight/route-data';
 import { describe, expect, it } from 'vitest';
 import { LESSONS } from '../../../src/data/roadmap';
 import { hasPage, isTranslated } from '../../../src/lib/roadmap';
-import { fallbackSearchEntry, fallbackSeoHead, isInSitemap, type FallbackSeoRoute } from '../../../src/lib/seo';
+import { OG_IMAGE, OG_LOCALE } from '../../../src/data/og';
+import {
+  contentLang,
+  fallbackSearchEntry,
+  fallbackSeoHead,
+  isInSitemap,
+  notFoundHead,
+  robotsTxt,
+  socialHead,
+  type FallbackSeoRoute,
+} from '../../../src/lib/seo';
 
 type Head = StarlightRouteData['head'];
 
@@ -149,5 +159,198 @@ describe('fallbackSearchEntry', () => {
     const given = entry(true);
     fallbackSearchEntry(given, { isFallback: true });
     expect(given.data.pagefind).toBe(true);
+  });
+});
+
+// --- M4: share tags, the 404 page, robots.txt (docs/architecture/launch.md, sections 3.3.2–3.3.4 and 8) ---
+
+/** starlightHead() plus the share tags Starlight's getHead() puts in. */
+function starlightShareHead(pageId: string, locale: 'vi' | 'en'): Head {
+  return [
+    ...starlightHead(pageId, locale),
+    { tag: 'meta', attrs: { property: 'og:title', content: 'Page' } },
+    { tag: 'meta', attrs: { property: 'og:type', content: 'article' } },
+    { tag: 'meta', attrs: { property: 'og:url', content: url(pageId ? `/${locale}/${pageId}/` : `/${locale}/`) } },
+    { tag: 'meta', attrs: { property: 'og:locale', content: locale } },
+    { tag: 'meta', attrs: { property: 'og:site_name', content: 'AI Atlas' } },
+    { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
+  ];
+}
+
+const SITE_URL = new URL(SITE);
+const metaOf = (head: Head, key: 'property' | 'name', value: string) =>
+  head.filter(({ tag, attrs }) => tag === 'meta' && attrs?.[key] === value).map(({ attrs }) => attrs?.content);
+
+describe('contentLang', () => {
+  it('is the language of the text: entryMeta.lang', () => {
+    expect(contentLang({ entryMeta: { lang: 'vi' } } as never)).toBe('vi');
+    expect(contentLang({ entryMeta: { lang: 'en' } } as never)).toBe('en');
+  });
+
+  it('a fallback page under /en/ shows the vi file, so it is vi', () => {
+    // Starlight gives a fallback page the entryMeta of the default locale's file.
+    expect(contentLang({ entryMeta: { lang: 'vi', locale: undefined } } as never)).toBe('vi');
+  });
+
+  it('anything that is not en counts as vi (the default locale)', () => {
+    expect(contentLang({ entryMeta: { lang: 'vi-VN' } } as never)).toBe('vi');
+  });
+});
+
+describe('socialHead', () => {
+  it('og:locale becomes vi_VN / en_US, from the language of the text', () => {
+    for (const lang of ['vi', 'en'] as const) {
+      const head = socialHead(starlightShareHead('ml/linear-regression', lang), { site: SITE_URL, lang, isHome: false });
+      expect(metaOf(head, 'property', 'og:locale')).toEqual([OG_LOCALE[lang]]);
+    }
+    expect(OG_LOCALE).toEqual({ vi: 'vi_VN', en: 'en_US' });
+  });
+
+  it('og:locale:alternate only for the other language that the page still names in hreflang', () => {
+    const both = socialHead(starlightShareHead('ml/linear-regression', 'vi'), { site: SITE_URL, lang: 'vi', isHome: false });
+    expect(metaOf(both, 'property', 'og:locale:alternate')).toEqual(['en_US']);
+    const en = socialHead(starlightShareHead('ml/linear-regression', 'en'), { site: SITE_URL, lang: 'en', isHome: false });
+    expect(metaOf(en, 'property', 'og:locale:alternate')).toEqual(['vi_VN']);
+
+    // A vi-only lesson, after fallbackSeoHead: no hreflang="en", so no en_US alternate, on either page.
+    expect(VI_ONLY.length, 'some lesson is vi only').toBeGreaterThan(0);
+    for (const lesson of VI_ONLY) {
+      const vi = fallbackSeoHead(starlightShareHead(lesson.id, 'vi'), { id: `vi/${lesson.id}`, lang: 'vi' });
+      const viShared = socialHead(vi, { site: SITE_URL, lang: 'vi', isHome: false });
+      expect(metaOf(viShared, 'property', 'og:locale:alternate'), lesson.id).toEqual([]);
+      const fallback = fallbackSeoHead(starlightShareHead(lesson.id, 'en'), {
+        id: `en/${lesson.id}`,
+        lang: 'en',
+        isFallback: true,
+      });
+      const shared = socialHead(fallback, { site: SITE_URL, lang: 'vi', isHome: false });
+      expect(metaOf(shared, 'property', 'og:locale'), lesson.id).toEqual(['vi_VN']);
+      expect(metaOf(shared, 'property', 'og:locale:alternate'), lesson.id).toEqual([]);
+    }
+  });
+
+  it('x-default alone does not count as a language', () => {
+    const head: Head = [
+      { tag: 'link', attrs: { rel: 'alternate', hreflang: 'x-default', href: url('/vi/') } },
+      { tag: 'meta', attrs: { property: 'og:locale', content: 'vi' } },
+    ];
+    const shared = socialHead(head, { site: SITE_URL, lang: 'vi', isHome: false });
+    expect(metaOf(shared, 'property', 'og:locale:alternate')).toEqual([]);
+  });
+
+  it('og:image is absolute on `site`, with type, width, height and alt; twitter:image is the same URL', () => {
+    for (const lang of ['vi', 'en'] as const) {
+      const head = socialHead(starlightShareHead('about', lang), { site: SITE_URL, lang, isHome: false });
+      const image = `${SITE}${OG_IMAGE.path[lang]}`;
+      expect(metaOf(head, 'property', 'og:image')).toEqual([image]);
+      expect(metaOf(head, 'property', 'og:image:type')).toEqual(['image/png']);
+      expect(metaOf(head, 'property', 'og:image:width')).toEqual(['1200']);
+      expect(metaOf(head, 'property', 'og:image:height')).toEqual(['630']);
+      expect(metaOf(head, 'property', 'og:image:alt')).toEqual([OG_IMAGE.alt[lang]]);
+      expect(metaOf(head, 'name', 'twitter:image')).toEqual([image]);
+      expect(metaOf(head, 'name', 'twitter:image:alt')).toEqual([OG_IMAGE.alt[lang]]);
+      // Starlight's card type stays.
+      expect(metaOf(head, 'name', 'twitter:card')).toEqual(['summary_large_image']);
+    }
+  });
+
+  it('og:image follows `site` (SITE_URL), with no double slash', () => {
+    const head = socialHead(starlightShareHead('', 'en'), { site: new URL('https://example.org'), lang: 'en', isHome: true });
+    expect(metaOf(head, 'property', 'og:image')).toEqual(['https://example.org/og/ai-atlas-en.png']);
+    const local = socialHead(starlightShareHead('', 'vi'), { site: new URL('http://localhost:4321/'), lang: 'vi', isHome: true });
+    expect(metaOf(local, 'property', 'og:image')).toEqual(['http://localhost:4321/og/ai-atlas-vi.png']);
+  });
+
+  it('a page with its own og:image (frontmatter head) keeps it, and gets no second one', () => {
+    const own: Head[number] = { tag: 'meta', attrs: { property: 'og:image', content: 'https://example.org/own.png' } };
+    const head = socialHead([...starlightShareHead('ml/linear-regression', 'vi'), own], {
+      site: SITE_URL,
+      lang: 'vi',
+      isHome: false,
+    });
+    expect(metaOf(head, 'property', 'og:image')).toEqual(['https://example.org/own.png']);
+    expect(metaOf(head, 'name', 'twitter:image')).toEqual([]);
+  });
+
+  it('og:type: website on the homepage only', () => {
+    const home = socialHead(starlightShareHead('', 'vi'), { site: SITE_URL, lang: 'vi', isHome: true });
+    expect(metaOf(home, 'property', 'og:type')).toEqual(['website']);
+    const lesson = socialHead(starlightShareHead('ml/linear-regression', 'vi'), { site: SITE_URL, lang: 'vi', isHome: false });
+    expect(metaOf(lesson, 'property', 'og:type')).toEqual(['article']);
+  });
+
+  it('keeps every other tag in place, and does not change the head it is given', () => {
+    const before = starlightShareHead('ml/linear-regression', 'vi');
+    const copy = structuredClone(before);
+    const head = socialHead(before, { site: SITE_URL, lang: 'vi', isHome: false });
+    expect(before).toEqual(copy);
+    const rest = (h: Head) => h.filter(({ attrs }) => !['og:locale', 'og:type'].includes(String(attrs?.property)));
+    expect(rest(head).slice(0, rest(before).length)).toEqual(rest(before));
+  });
+});
+
+describe('notFoundHead', () => {
+  it('on the 404 page: noindex, and no canonical, og:url or hreflang', () => {
+    const head = notFoundHead(starlightShareHead('404', 'vi'), { id: '404' });
+    expect(head.filter(({ attrs }) => attrs?.rel === 'canonical')).toEqual([]);
+    expect(metaOf(head, 'property', 'og:url')).toEqual([]);
+    expect(hreflangs(head)).toEqual([]);
+    expect(robots(head)).toEqual([{ tag: 'meta', attrs: { name: 'robots', content: 'noindex' } }]);
+    // The rest stays: title, sitemap link, og:title.
+    expect(head.some(({ tag }) => tag === 'title')).toBe(true);
+    expect(head.some(({ attrs }) => attrs?.rel === 'sitemap')).toBe(true);
+    expect(metaOf(head, 'property', 'og:title')).toEqual(['Page']);
+  });
+
+  it('on the 404 page, after socialHead: og:locale:alternate goes (no translation exists), og:locale stays', () => {
+    const shared = socialHead(starlightShareHead('404', 'vi'), { site: SITE_URL, lang: 'vi', isHome: false });
+    expect(metaOf(shared, 'property', 'og:locale:alternate'), 'precondition: socialHead added one').toEqual(['en_US']);
+    const head = notFoundHead(shared, { id: '404' });
+    expect(metaOf(head, 'property', 'og:locale:alternate')).toEqual([]);
+    expect(metaOf(head, 'property', 'og:locale')).toEqual(['vi_VN']);
+    // The share picture stays too.
+    expect(metaOf(head, 'property', 'og:image')).toEqual([`${SITE}${OG_IMAGE.path.vi}`]);
+  });
+
+  it('any other page id keeps its og:locale:alternate', () => {
+    const shared = socialHead(starlightShareHead('ml/linear-regression', 'vi'), { site: SITE_URL, lang: 'vi', isHome: false });
+    expect(metaOf(notFoundHead(shared, { id: 'vi/ml/linear-regression' }), 'property', 'og:locale:alternate')).toEqual([
+      'en_US',
+    ]);
+  });
+
+  it('any other page id gets back the same head', () => {
+    for (const id of ['vi/404', 'en/404', 'vi', 'vi/ml/linear-regression', 'en/about', '404/x', 'x404']) {
+      const before = starlightShareHead('ml/linear-regression', 'vi');
+      expect(notFoundHead(before, { id }), id).toBe(before);
+    }
+  });
+
+  it('adds no second robots tag', () => {
+    const own = { tag: 'meta', attrs: { name: 'robots', content: 'noindex, nofollow' } } as const;
+    const head = notFoundHead([...starlightShareHead('404', 'vi'), own], { id: '404' });
+    expect(robots(head)).toEqual([own]);
+  });
+
+  it('does not change the head it is given', () => {
+    const before = starlightShareHead('404', 'vi');
+    const copy = structuredClone(before);
+    notFoundHead(before, { id: '404' });
+    expect(before).toEqual(copy);
+  });
+});
+
+describe('robotsTxt', () => {
+  it('allows everything and names the sitemap index on `site`', () => {
+    expect(robotsTxt(SITE_URL)).toBe(`User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap-index.xml\n`);
+  });
+
+  it('follows `site`, with or without a trailing slash', () => {
+    expect(robotsTxt(new URL('https://example.org'))).toContain('Sitemap: https://example.org/sitemap-index.xml\n');
+    expect(robotsTxt(new URL('https://example.org/'))).toContain('Sitemap: https://example.org/sitemap-index.xml\n');
+  });
+
+  it('disallows nothing: dev/, fallback and 404 pages carry noindex, which a blocked crawler could not read', () => {
+    expect(robotsTxt(SITE_URL)).not.toMatch(/^Disallow/m);
   });
 });

@@ -4,6 +4,24 @@ Mọi thay đổi đáng chú ý của AI Atlas được ghi ở đây. Mỗi m�
 
 ## [Chưa phát hành]
 
+### Thêm mới & Nâng cấp (Mốc M4 - Ra mắt & Hoàn thiện toàn diện)
+
+- **Hạ tầng M4 Launch & Tối ưu hóa:**
+  - Trang Giới thiệu song ngữ `/vi/about/` và `/en/about/`, hiển thị thông tin dự án và tác giả Nguyễn Hoàng Tùng.
+  - Chân trang (`Footer.astro`) ghi rõ giấy phép kép (nội dung CC BY-NC-SA 4.0 và mã nguồn MIT) và liên kết Giới thiệu trên mọi trang.
+  - Tối ưu Font qua Astro Fonts API: tải Barlow và Barlow Condensed nội bộ, tính toán font fallback loại bỏ hoàn toàn hiện tượng giật giao diện (CLS = 0).
+  - Tối ưu LCP trên thiết bị di động: bổ sung art direction cho ảnh bản đồ cổ ở hero (`plate-taberd-wide.jpg`).
+  - Hệ thống thẻ chia sẻ mạng xã hội (OpenGraph / Twitter cards) tự động: ảnh xem trước `/og/ai-atlas-vi.png` và `/og/ai-atlas-en.png`, `og:locale` chuẩn hóa (`vi_VN` / `en_US`).
+  - Sinh động `robots.txt` (`src/pages/robots.txt.ts`) gắn link sitemap tự động.
+  - Thiết lập bảo mật và cache Cloudflare Pages qua file `public/_headers`.
+  - Hỗ trợ trợ năng (A11y): tự động thêm điều hướng bàn phím (`tabindex="0"`) cho các khối công thức KaTeX và bảng dữ liệu cuộn ngang (`scroll-regions.ts`).
+
+- **Nội dung hoàn thành:**
+  - Hoàn thành xuất bản trọn vẹn 100% bản tiếng Việt cho toàn bộ 78 bài học thuộc 5 phần (Python, Toán, ML, DL, NLP, CV, LLM).
+  - Hoàn thành xuất bản 100% bản tiếng Anh cho toàn bộ 14 bài học thuộc phần Machine Learning.
+  - Nâng cấp bộ test tự động lên 2.222 unit tests (Vitest) và bộ e2e Playwright toàn diện.
+
+
 ### Thêm mới
 
 - Phần LLM, Phần 5c, bản tiếng Việt, nhánh `llm-lessons` (quyết định 53, 54, 59–61 trong [docs/mvp.md](mvp.md), [báo cáo](progress/2026-10-24-llm.md), [thiết kế](architecture/llm-lessons.md)). Chưa commit, bản en làm sau:

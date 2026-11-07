@@ -1,0 +1,31 @@
+---
+// Starlight Head override (docs/architecture/launch.md, section 5.3): Starlight's own head unchanged, then the
+// Fonts API faces (Barlow and its metric-matched fallbacks) with a preload chosen by the language of the text.
+// Only Barlow 400 upright is preloaded: the first paint of a lesson is body text. A vi page needs three
+// subsets for its letters, an en page only latin. A fallback page under /en/ shows vi text, so it reads
+// entryMeta.lang, not the URL's locale.
+import Default from '@astrojs/starlight/components/Head.astro';
+import { Font } from 'astro:assets';
+import { contentLang } from '@lib/seo';
+
+const BODY = { weight: '400', style: 'normal' } as const;
+const PRELOAD = {
+  vi: [
+    { ...BODY, subset: 'latin' },
+    { ...BODY, subset: 'latin-ext' },
+    { ...BODY, subset: 'vietnamese' },
+  ],
+  en: [{ ...BODY, subset: 'latin' }],
+};
+const lang = contentLang(Astro.locals.starlightRoute);
+// Name template for Expressive Code's scrolling <pre>, read by scroll-regions.ts (language of the text, like the code).
+const codeBlockLabel = Astro.locals.t('atlas.common.codeBlock', { lng: lang });
+---
+
+<Default />
+<Font cssVariable="--font-barlow" preload={PRELOAD[lang]} />
+<Font cssVariable="--font-barlow-condensed" />
+<meta name="atlas-code-block" content={codeBlockLabel} />
+<script>
+  import '../../scripts/scroll-regions';
+</script>

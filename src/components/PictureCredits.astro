@@ -1,0 +1,63 @@
+---
+// One line per picture source used on the homepage (docs/architecture/launch.md, section 5.6). Shared by
+// HomeFooter (inside its <details>) and the About page. Colours come from the caller: pass `class` and
+// style `.your-class a` with :global(), since scoped styles do not cross into a child component.
+import { HOME } from '@data/home';
+import { ALL_PICTURES, type Credit } from '@data/home-pictures';
+import type { Locale } from '@data/roadmap';
+import { formatString } from '@i18n/format';
+
+interface Props {
+  locale: Locale;
+  class?: string;
+}
+
+const { locale, class: className } = Astro.props;
+// Several pictures can share one source: list each source once. Titles stay in their original language.
+const credits = [...new Map(ALL_PICTURES.map((picture) => [picture.credit.source, picture.credit])).values()];
+
+/** The credit line around its licence name, so the name can become a link to the licence (credit.licenceUrl). */
+function creditLine(credit: Credit): { before: string; after: string } {
+  const line = formatString(HOME.footer.creditLine[locale], {
+    creator: credit.creator[locale],
+    year: credit.year[locale],
+    via: credit.via[locale],
+  });
+  const [before = '', after = ''] = line.split('{{licence}}');
+  return { before, after };
+}
+---
+
+<ul class:list={['picture-credits', className]}>
+  {
+    credits.map((credit) => {
+      const { before, after } = creditLine(credit);
+      return (
+        <li>
+          <a href={credit.source} lang="en">
+            {credit.title}
+          </a>
+          {' · '}
+          {before}
+          {credit.licenceUrl ? <a href={credit.licenceUrl}>{credit.licence[locale]}</a> : credit.licence[locale]}
+          {after}
+        </li>
+      );
+    })
+  }
+</ul>
+
+<style>
+  .picture-credits {
+    display: grid;
+    max-width: 75ch;
+    gap: 6px;
+    padding: 0;
+    list-style: none;
+  }
+
+  .picture-credits li {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+</style>

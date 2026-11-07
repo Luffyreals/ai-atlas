@@ -363,9 +363,121 @@ for (const lesson of WITH_PAGE) {
         }));
         expect(scrollWidth).toBeLessThanOrEqual(innerWidth);
       });
+
+      // docs/architecture/launch.md 3.6.1 and section 8 item 6 (src/scripts/scroll-regions.ts).
+      test('at 375px, a formula or table that scrolls sideways is a Tab stop (tabindex="0"); one that fits is not', async ({
+        page,
+      }) => {
+        test.skip(!isNarrow(page), 'mobile project (375px) only');
+        await page.goto(path);
+        await page.evaluate(() => document.fonts.ready);
+        // The script batches its work (ResizeObserver, then 100 ms, then idle time): poll until it is done.
+        await expect
+          .poll(() => page.locator(SCROLL_BOXES).evaluateAll(scrollBoxMismatches), { timeout: 10_000 })
+          .toEqual([]);
+        const boxes = await page.locator(SCROLL_BOXES).evaluateAll((items) =>
+          items.map((el) => ({ scrolls: el.scrollWidth > el.clientWidth + 1, tabindex: el.getAttribute('tabindex') })),
+        );
+        test.info().annotations.push({
+          type: 'scroll boxes',
+          description: `${boxes.length} formulas and tables, ${boxes.filter((box) => box.scrolls).length} scroll sideways`,
+        });
+
+        // One that scrolls: Tab reaches it from the element before, and ArrowRight scrolls it.
+        const index = boxes.findIndex((box) => box.scrolls);
+        if (index < 0) return;
+        const box = page.locator(SCROLL_BOXES).nth(index);
+        await box.evaluate((el) => {
+          const before = document.createElement('button');
+          before.id = 'atlas-before-box';
+          before.textContent = 'before';
+          el.before(before);
+          before.focus();
+        });
+        await page.keyboard.press('Tab');
+        await expect(box).toBeFocused();
+        const start = await box.evaluate((el) => el.scrollLeft);
+        await page.keyboard.press('ArrowRight');
+        await page.keyboard.press('ArrowRight');
+        await expect.poll(() => box.evaluate((el) => el.scrollLeft)).toBeGreaterThan(start);
+      });
+
+      // docs/architecture/launch.md 3.6.3: Expressive Code gives a <pre> that scrolls role="region"; the script
+      // names it "Khối code n" / "Code block n" (language of the text) and drops the name when the role goes.
+      test('at 375px, every code block that is a region has a unique name "Code block n"; the others have none', async ({
+        page,
+      }) => {
+        test.skip(!isNarrow(page), 'mobile project (375px) only');
+        await page.goto(path);
+        const template = s(textLocale, 'common.codeBlock');
+        await expect
+          .poll(() => page.locator('.expressive-code pre').evaluateAll(codeLabelMismatches, template), { timeout: 10_000 })
+          .toEqual([]);
+        const labels = await page
+          .locator('.expressive-code pre[role="region"]')
+          .evaluateAll((items) => items.map((el) => el.getAttribute('aria-label')));
+        expect(new Set(labels).size, 'names are unique (axe landmark-unique)').toBe(labels.length);
+        test.info().annotations.push({ type: 'code regions', description: `${labels.length}: ${labels.join(', ')}` });
+      });
     });
   }
 }
+
+const SCROLL_BOXES = '.sl-markdown-content .katex-display, .sl-markdown-content table';
+
+/** Runs in the page: boxes whose tabindex does not match whether they scroll sideways. */
+function scrollBoxMismatches(items: Element[]): string[] {
+  return items.flatMap((el, i) => {
+    const scrolls = el.scrollWidth > el.clientWidth + 1;
+    const tabindex = el.getAttribute('tabindex');
+    const ok = scrolls ? tabindex === '0' : tabindex === null;
+    return ok ? [] : [`${i} ${el.tagName.toLowerCase()}.${el.className}: scrolls=${scrolls} tabindex=${tabindex}`];
+  });
+}
+
+/**
+ * Runs in the page: code blocks whose role or name is not settled yet or wrong. Expressive Code makes a <pre>
+ * that scrolls sideways a region (after 250 ms and idle time), so waiting for "scrolls ⇔ region" first keeps
+ * the check from passing before EC has run. n counts every .expressive-code pre, as scroll-regions.ts does.
+ */
+function codeLabelMismatches(items: Element[], template: string): string[] {
+  return items.flatMap((el, i) => {
+    const scrolls = el.scrollWidth > el.clientWidth;
+    const region = el.getAttribute('role') === 'region';
+    const label = el.getAttribute('aria-label');
+    const expected = region ? template.replace('{{n}}', String(i + 1)) : null;
+    return label === expected && scrolls === region
+      ? []
+      : [`pre ${i + 1}: scrolls=${scrolls} role=${el.getAttribute('role')} aria-label=${label}`];
+  });
+}
+
+test('at 375px the sample lesson has a code block that scrolls, so the label test above is not empty', async ({ page }) => {
+  test.skip(!isNarrow(page), 'mobile project (375px) only');
+  await page.goto(pathOf('vi', 'ml/linear-regression'));
+  await expect
+    .poll(() => page.locator('.expressive-code pre[role="region"]').count(), { timeout: 10_000 })
+    .toBeGreaterThan(0);
+  await expect(page.locator('.expressive-code pre[role="region"]').first()).toHaveAttribute(
+    'aria-label',
+    /^Khối code \d+$/,
+  );
+});
+
+test('at 375px, a code block name goes when Expressive Code drops role="region" (box fits again)', async ({ page }) => {
+  test.skip(!isNarrow(page), 'mobile project (375px) only');
+  await page.goto(pathOf('vi', 'ml/linear-regression'));
+  const region = page.locator('.expressive-code pre[role="region"]').first();
+  await expect(region).toHaveAttribute('aria-label', /^Khối code \d+$/, { timeout: 10_000 });
+  const handle = await region.elementHandle();
+  // Wrap the code lines: the box fits and grows taller, EC's ResizeObserver drops the role, then the name goes.
+  await page.addStyleTag({
+    content: '.expressive-code pre * { white-space: pre-wrap !important; word-break: break-all !important; }',
+  });
+  await expect
+    .poll(() => handle!.evaluate((el) => [el.getAttribute('role'), el.getAttribute('aria-label')]), { timeout: 10_000 })
+    .toEqual([null, null]);
+});
 
 // A display formula far wider than a 375px column, made by the site's own Markdown steps (remark-math,
 // rehype-katex, then rehype-katex-a11y with the labels of the i18n files, as in astro.config.ts) and put
@@ -413,5 +525,57 @@ for (const locale of LOCALES) {
     expect(await axNames(page, selector)).toEqual([
       { role: 'group', name: formatString(s(locale, 'common.formulaLabel'), { tex: WIDE_TEX }), ignored: false },
     ]);
+
+    // Added after load: scroll-regions.ts sees it (MutationObserver) and makes it a Tab stop
+    // (docs/architecture/launch.md 3.6.1, section 8 item 6).
+    const formula = page.locator(selector);
+    await expect(formula).toHaveAttribute('tabindex', '0', { timeout: 10_000 });
+    await expect(formula).toHaveAttribute('data-atlas-scroll', '');
+    await page.locator('#atlas-wide-formula').evaluate((box) => {
+      const before = document.createElement('button');
+      before.textContent = 'before';
+      box.prepend(before);
+      before.focus();
+    });
+    await page.keyboard.press('Tab');
+    await expect(formula).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(() => formula.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+
+    // Once it fits (a wider column), the script takes its tabindex back.
+    await formula.evaluate((el) => {
+      (el as HTMLElement).style.fontSize = '2px';
+    });
+    await expect(formula).not.toHaveAttribute('tabindex', /.*/, { timeout: 10_000 });
+    await expect(formula).not.toHaveAttribute('data-atlas-scroll', /.*/);
   });
 }
+
+// The content of a box can get wider while the box keeps its size: the KaTeX fonts arriving late (KaTeX sets
+// heights in em, so only the width changes), the body font swapping in. A ResizeObserver on the box alone never
+// hears of it, and the formula stays out of the Tab order (seen in the full e2e run, 30/10/2026: the per-lesson
+// test above failed on 4 pages under load). Here the content is widened by hand, the box height kept.
+test('at 375px, a formula whose content gets wider (box size unchanged) still becomes a Tab stop', async ({ page }) => {
+  test.skip(!isNarrow(page), 'mobile project (375px) only');
+  await page.goto(pathOf('vi', 'ml/linear-regression'));
+  await page.evaluate(() => document.fonts.ready);
+  await expect
+    .poll(() => page.locator(SCROLL_BOXES).evaluateAll(scrollBoxMismatches), { timeout: 10_000 })
+    .toEqual([]);
+  const index = await page.locator('.sl-markdown-content .katex-display').evaluateAll((items) =>
+    items.findIndex((el) => el.scrollWidth <= el.clientWidth && el.getBoundingClientRect().height > 0),
+  );
+  expect(index, 'a display formula that fits').toBeGreaterThanOrEqual(0);
+  const formula = page.locator('.sl-markdown-content .katex-display').nth(index);
+  const before = await formula.evaluate((el) => el.getBoundingClientRect().height);
+  await formula.evaluate((el) => {
+    (el.querySelector('.katex') as HTMLElement).style.paddingRight = '600px';
+  });
+  const after = await formula.evaluate((el) => ({
+    height: el.getBoundingClientRect().height,
+    scrolls: el.scrollWidth > el.clientWidth + 1,
+  }));
+  expect(after).toEqual({ height: before, scrolls: true });
+  await expect(formula).toHaveAttribute('tabindex', '0', { timeout: 5_000 });
+});

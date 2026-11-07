@@ -125,6 +125,49 @@ describe('homepage pictures', () => {
     const sources = ALL_PICTURES.map((picture) => picture.credit.source);
     expect(new Set(sources).size).toBe(sources.length);
   });
+
+  // M4 (docs/architecture/launch.md 3.1, decision 66): a CC licence requires its URI next to the credit.
+  it('a credit under a Creative Commons licence links its https creativecommons.org deed, in both languages', () => {
+    const cc = ALL_PICTURES.filter(({ credit }) => credit.licence.en.startsWith('CC ') || credit.licence.vi.startsWith('CC '));
+    expect(cc.length, 'the two David Rumsey pictures').toBeGreaterThanOrEqual(2);
+    for (const { credit } of cc) {
+      expect(credit.licence.vi, credit.title).toBe(credit.licence.en);
+      expect(credit.licenceUrl, credit.title).toMatch(/^https:\/\/creativecommons\.org\/licenses\/[a-z-]+\/\d\.\d\/$/);
+      // The URL names the same licence as the text: "CC BY-NC-SA 3.0" → /licenses/by-nc-sa/3.0/.
+      const [, kind, version] = /^CC ([A-Z-]+) (\d\.\d)$/.exec(credit.licence.en) ?? [];
+      expect(kind, credit.licence.en).toBeDefined();
+      expect(credit.licenceUrl).toBe(`https://creativecommons.org/licenses/${kind!.toLowerCase()}/${version}/`);
+    }
+  });
+
+  it('a public domain credit has no licence link (no single deed to point to)', () => {
+    for (const { credit } of ALL_PICTURES) {
+      if (credit.licence.en === 'Public domain') expect(credit.licenceUrl, credit.title).toBeUndefined();
+    }
+  });
+
+  it('the site licence uses the canonical CC URI in both languages (no deed.vi, decision 66)', () => {
+    for (const locale of ['vi', 'en'] as const) {
+      expect(CC_LICENCE_URL[locale]).toBe('https://creativecommons.org/licenses/by-nc-sa/4.0/');
+    }
+  });
+
+  it('only the first hero plate has a narrow cut: 3:2 (±0.01), same credit, from its own file', () => {
+    const withNarrow = ALL_PICTURES.filter((picture) => picture.narrow);
+    expect(withNarrow).toEqual([HERO_PLATES[0]]);
+    const plate = HERO_PLATES[0]!;
+    const narrow = plate.narrow!;
+    expect(narrow.width / narrow.height).toBeGreaterThan(1.49);
+    expect(narrow.width / narrow.height).toBeLessThan(1.51);
+    // The cut is landscape, the original portrait, and the cut is no wider than its source.
+    expect(plate.src.height).toBeGreaterThan(plate.src.width);
+    expect(narrow.width).toBeLessThanOrEqual(plate.src.width);
+    expect(narrow.src).toMatch(/plate-taberd-wide/);
+    expect(narrow.src).not.toBe(plate.src.src);
+    // Same work, one credit line: the narrow cut is not a picture of its own in ALL_PICTURES.
+    expect(ALL_PICTURES.filter((picture) => picture.credit === plate.credit)).toHaveLength(1);
+    expect(plate.focus).toBe('50% 30%');
+  });
 });
 
 // docs/glossary.md: | Tiếng Việt | Tiếng Anh | Cách dùng |

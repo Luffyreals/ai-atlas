@@ -1,0 +1,105 @@
+---
+title: Giới thiệu
+description: AI Atlas là gì, ai làm, cách dùng trang, giấy phép cho nội dung và mã nguồn.
+prev: false
+next: false
+---
+
+import PictureCredits from '@components/PictureCredits.astro';
+
+## AI Atlas là gì
+
+Bạn muốn học AI nhưng không biết bắt đầu từ đâu? Tài liệu thì nhiều, nhưng nằm rải rác, không theo thứ tự. Nhiều nơi đưa công thức ra trước khi bạn kịp hiểu vấn đề. Và phần lớn tài liệu tốt chỉ có tiếng Anh.
+
+AI Atlas là một wiki song ngữ Việt – Anh, sắp xếp kiến thức AI thành một lộ trình học. Lộ trình đi từ Python, qua Toán, Học máy (machine learning), Học sâu (deep learning), rồi rẽ ba nhánh: Xử lý ngôn ngữ tự nhiên (NLP), Thị giác máy tính (computer vision) và Mô hình ngôn ngữ lớn (LLM). Mỗi bài cho bạn biết cần học bài nào trước.
+
+Trọng tâm là lý thuyết, giải thích sao cho dễ hiểu. Mọi bài theo cùng một khung: trực giác trước, rồi lý thuyết (có công thức khi cần), rồi minh họa và code ví dụ.
+
+AI Atlas miễn phí và không cần tài khoản.
+
+Trang vẫn đang được xây. Lộ trình đã đủ khung từ đầu đến cuối, còn bài thì mở dần. Trên bản đồ, bài nào chưa viết sẽ hiện chữ nhạt và chưa bấm vào được. Bài được viết bằng tiếng Việt trước, rồi mới dịch sang tiếng Anh, nên có bài đã có bản tiếng Việt mà chưa có bản tiếng Anh.
+
+## Ai làm AI Atlas
+
+AI Atlas là dự án cá nhân của Nguyễn Hoàng Tùng (Luffyreals trên GitHub), một người đang tự học AI.
+
+Khi tự học, bạn phải tự ghép từng mảnh kiến thức lại với nhau. AI Atlas ra đời từ việc sắp xếp lại những mảnh đó thành một tấm bản đồ, để người đi sau đỡ lạc đường hơn.
+
+Hiện AI Atlas chưa có kênh liên hệ hay góp ý.
+
+## Cách dùng trang
+
+### Lộ trình
+
+[Trang chủ](/vi/) có tấm bản đồ toàn bộ lộ trình. Bài đã mở in đậm và có link. Bạn có thể chọn một bài làm điểm đến, bản đồ sẽ chỉ ra những bài cần đi qua để tới đó.
+
+Ở đầu mỗi bài có mục "Cần biết trước". Mục này liệt kê các bài nền tảng của bài đó. Bài nền tảng nào chưa viết thì có nhãn "Sắp có". Trên trang tiếng Anh, bài chưa dịch có nhãn "Not translated yet" và mở bản tiếng Việt. Nếu đọc thấy khó, bạn quay lại các bài nền tảng trước.
+
+### Chạy code Python ngay trên trang
+
+Phần lớn code ví dụ chạy được ngay trên trang. Bạn không cần cài gì.
+
+- Bấm **Chạy** để chạy code. Kết quả in ra và biểu đồ hiện ngay bên dưới.
+- Lần chạy đầu, trình duyệt cần tải Python, khoảng 10 MB. Các thư viện như `scikit-learn` hay `scipy` tải thêm, có thể vài chục MB, nên lần đầu hơi lâu. Những lần sau, trình duyệt thường đã lưu sẵn. Python chỉ được tải khi bạn bấm Chạy, không tải sẵn khi mở trang.
+- Bấm **Sửa code** để thay đổi code, rồi chạy lại xem kết quả khác đi thế nào. Trong ô sửa, <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (trên Mac là <kbd>Cmd</kbd>+<kbd>Enter</kbd>) cũng chạy code. Muốn quay về như cũ, bạn bấm **Khôi phục code gốc**.
+- Code chạy quá lâu thì bấm **Dừng**.
+- Trên trang có sẵn các thư viện `numpy`, `pandas`, `matplotlib`, `scipy` và `scikit-learn`.
+
+Có những khối code không chạy trên trang được, ví dụ vì chúng gọi API hay tải trang web, dùng PyTorch, chạy một ứng dụng web, cần cơ sở dữ liệu hoặc cần thư viện không có trên trang. Các khối này có nhãn "Chạy trên máy bạn", hiện chủ yếu ở phần LLM. Mỗi khối ghi rõ cần cài gói nào, và cần đặt biến môi trường (environment variable) nào nếu có. Nhiều khối kèm kết quả mẫu, lấy từ một lần chạy thật. API key được đọc từ biến môi trường, nên bạn không phải dán key vào code.
+
+### Kiểm tra nhanh
+
+Gần cuối mỗi bài có vài câu trắc nghiệm. Bạn chọn đáp án rồi bấm **Kiểm tra**: trang cho biết ngay đúng hay sai, kèm lời giải thích. Làm hết các câu thì bạn thấy tổng số câu đúng. Muốn làm lại câu nào thì bấm **Làm lại**.
+
+Các câu này để bạn tự kiểm tra mình đã hiểu chưa. Điểm không được lưu ở đâu cả.
+
+### Đánh dấu đã học
+
+Học xong một bài, bạn bấm nút "Tôi đã học xong bài này" ở cuối bài. Bấm lần nữa để bỏ đánh dấu.
+
+Bài đã học có dấu ✓ trên bản đồ ở trang chủ, kèm dòng "Đã học x/y". Đánh dấu ở bản tiếng Việt thì bản tiếng Anh cũng tính là đã học.
+
+Tiến độ được lưu trong `localStorage` của trình duyệt, ngay trên máy bạn. Vì vậy:
+
+- Đổi sang trình duyệt hay máy khác thì bạn sẽ không thấy tiến độ cũ.
+- Xóa dữ liệu trình duyệt thì tiến độ cũng mất.
+
+### Đổi ngôn ngữ và sáng/tối
+
+Ở đầu trang có hai ô chọn: một ô đổi giữa tiếng Việt và tiếng Anh, một ô chọn giao diện Sáng, Tối hoặc Tự động (theo cài đặt của máy). Trên điện thoại, hai ô này nằm trong menu ở các trang bài.
+
+Nếu một bài chưa có bản tiếng Anh, trang tiếng Anh sẽ hiện bản tiếng Việt, kèm một dòng thông báo.
+
+### Quyền riêng tư
+
+AI Atlas không có tài khoản và không dùng cookie theo dõi. Bài đã học, lựa chọn sáng/tối và tab bạn chọn trong bài (ví dụ hệ điều hành) chỉ nằm trong `localStorage` trên máy bạn, trang không gửi chúng đi đâu.
+
+Code Python chạy ngay trong trình duyệt của bạn, kể cả code bạn đã sửa. Code không được gửi lên máy chủ nào. Chỉ khi bạn bấm Chạy, trình duyệt mới tải Python (Pyodide) và các thư viện từ jsDelivr, một mạng phân phối nội dung (CDN). Ngoài lần tải đó, font, ảnh và công thức đều tải từ chính máy chủ của AI Atlas.
+
+Hiện AI Atlas chưa dùng công cụ thống kê truy cập nào.
+
+## Giấy phép
+
+AI Atlas dùng hai giấy phép: một cho nội dung, một cho code.
+
+**Nội dung** gồm bài viết và hình minh họa tự vẽ, theo giấy phép <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" rel="license">CC BY-NC-SA 4.0</a>. Bạn được chia sẻ và chỉnh sửa, miễn là tuân theo ba điều kiện:
+
+- **Ghi nguồn (BY):** ghi "AI Atlas", kèm link tới bài gốc và link tới giấy phép. Nếu đã sửa nội dung thì nói rõ là đã sửa.
+- **Phi thương mại (NC):** không dùng cho mục đích thương mại.
+- **Chia sẻ tương tự (SA):** bản chỉnh sửa phải dùng cùng giấy phép CC BY-NC-SA 4.0.
+
+**Code** gồm mã nguồn website và code ví dụ trong bài, theo giấy phép [MIT](https://opensource.org/license/mit), Copyright (c) 2026 Luffyreals. Kho mã nguồn hiện chưa công khai, nhưng code ví dụ trong bài thì bạn chép về dùng được. Bạn được dùng, sửa và chia sẻ code, kể cả cho mục đích thương mại, miễn là giữ lại dòng bản quyền và nội dung giấy phép.
+
+Với hình minh họa, cả hình tĩnh lẫn hình do minh họa tương tác vẽ ra đều là nội dung (CC BY-NC-SA 4.0), còn code vẽ ra chúng là code (MIT).
+
+Ảnh và tài liệu bên ngoài được trích trên trang không thuộc hai giấy phép trên. Chúng theo giấy phép ghi tại chỗ trích. Ảnh trang chủ được liệt kê ở mục Nguồn ảnh ngay dưới đây.
+
+## Nguồn ảnh
+
+Ảnh trên trang chủ là bản đồ, hình vẽ, trang sách và ảnh cũ, lấy từ Wikimedia Commons. Phần lớn thuộc phạm vi công cộng (public domain). Ảnh từ David Rumsey Map Collection theo giấy phép [CC BY-NC-SA 3.0](https://creativecommons.org/licenses/by-nc-sa/3.0/) của nơi lưu giữ, không theo giấy phép của AI Atlas.
+
+<PictureCredits locale="vi" />
+
+## Phần mềm
+
+AI Atlas được xây bằng [Astro](https://astro.build) và [Starlight](https://starlight.astro.build). Phần tương tác dùng [React](https://react.dev). Công thức toán hiển thị bằng [KaTeX](https://katex.org). Python chạy trên trang nhờ [Pyodide](https://pyodide.org). Ô tìm kiếm dùng [Pagefind](https://pagefind.app). Font chữ là [Barlow](https://fonts.google.com/specimen/Barlow) và [Barlow Condensed](https://fonts.google.com/specimen/Barlow+Condensed), theo giấy phép SIL Open Font License.

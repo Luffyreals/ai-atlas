@@ -4,7 +4,8 @@
 // alternate. It is also out of the Pagefind search index (decision 33). All of this lifts by itself once the file exists and roadmap.ts says status.en = 'published'.
 // Loaded by astro.config.ts: relative imports only, never `astro:*` (the type import below is erased).
 import type { StarlightRouteData } from '@astrojs/starlight/route-data';
-import { LOCALES } from '../data/roadmap';
+import { OG_IMAGE, OG_LOCALE } from '../data/og';
+import { LOCALES, type Locale } from '../data/roadmap';
 import { getLesson, getRouteLessonId, isTranslated } from './roadmap';
 
 type Head = StarlightRouteData['head'];
@@ -59,4 +60,83 @@ type Entry = StarlightRouteData['entry'];
 export function fallbackSearchEntry(entry: Entry, route: Pick<StarlightRouteData, 'isFallback'>): Entry {
   if (route.isFallback !== true || entry.data.pagefind === false) return entry;
   return { ...entry, data: { ...entry.data, pagefind: false } };
+}
+
+// Share tags, the 404 page and robots.txt (docs/architecture/launch.md, section 3.3).
+
+/** The language of the text on the page: entryMeta.lang ('vi' on a fallback page under /en/). */
+export function contentLang(route: Pick<StarlightRouteData, 'entryMeta'>): Locale {
+  return route.entryMeta.lang === 'en' ? 'en' : 'vi';
+}
+
+const isMeta = (key: 'name' | 'property', value: string) => (item: Head[number]) =>
+  item.tag === 'meta' && item.attrs?.[key] === value;
+const isHreflang = ({ tag, attrs }: Head[number]) =>
+  tag === 'link' && attrs?.rel === 'alternate' && typeof attrs.hreflang === 'string';
+
+/**
+ * Starlight's share tags made right for this site, after fallbackSeoHead:
+ * - og:locale as vi_VN/en_US, from the language of the text, and og:locale:alternate for each other language
+ *   the page still names as an hreflang alternate (so an untranslated lesson does not advertise en);
+ * - og:image (absolute, with type, size and alt) and twitter:image, the card of the text's language, unless
+ *   the page sets its own og:image in its frontmatter `head`;
+ * - og:type website on the homepage (Starlight says article everywhere).
+ */
+export function socialHead(head: Head, options: { site: URL; lang: Locale; isHome: boolean }): Head {
+  const { site, lang, isHome } = options;
+  const result: Head = head.map((item) => {
+    if (isMeta('property', 'og:locale')(item)) return { ...item, attrs: { ...item.attrs, content: OG_LOCALE[lang] } };
+    if (isHome && isMeta('property', 'og:type')(item)) return { ...item, attrs: { ...item.attrs, content: 'website' } };
+    return item;
+  });
+
+  const named = new Set(head.filter(isHreflang).map(({ attrs }) => attrs?.hreflang));
+  for (const other of LOCALES) {
+    if (other !== lang && named.has(other)) {
+      result.push({ tag: 'meta', attrs: { property: 'og:locale:alternate', content: OG_LOCALE[other] } });
+    }
+  }
+
+  if (!head.some(isMeta('property', 'og:image'))) {
+    const image = new URL(OG_IMAGE.path[lang], site).href;
+    const alt = OG_IMAGE.alt[lang];
+    result.push(
+      { tag: 'meta', attrs: { property: 'og:image', content: image } },
+      { tag: 'meta', attrs: { property: 'og:image:type', content: OG_IMAGE.type } },
+      { tag: 'meta', attrs: { property: 'og:image:width', content: String(OG_IMAGE.width) } },
+      { tag: 'meta', attrs: { property: 'og:image:height', content: String(OG_IMAGE.height) } },
+      { tag: 'meta', attrs: { property: 'og:image:alt', content: alt } },
+      { tag: 'meta', attrs: { name: 'twitter:image', content: image } },
+      { tag: 'meta', attrs: { name: 'twitter:image:alt', content: alt } },
+    );
+  }
+  return result;
+}
+
+/**
+ * On the 404 page only (Starlight id '404'): noindex, and no canonical, og:url, og:locale:alternate or hreflang, which all name
+ * pages that do not exist (/404/, /vi/404/, /en/404/). Cloudflare Pages serves it with status 404, but
+ * /404.html opened directly answers 200.
+ */
+export function notFoundHead(head: Head, route: Pick<StarlightRouteData, 'id'>): Head {
+  if (route.id !== '404') return head;
+  const isCanonical = ({ tag, attrs }: Head[number]) => tag === 'link' && attrs?.rel === 'canonical';
+  // og:locale:alternate too: like hreflang, it names a translation the 404 page does not have.
+  const kept = head.filter(
+    (item) =>
+      !isCanonical(item) &&
+      !isMeta('property', 'og:url')(item) &&
+      !isMeta('property', 'og:locale:alternate')(item) &&
+      !isHreflang(item),
+  );
+  if (kept.some(isMeta('name', 'robots'))) return kept;
+  return [...kept, { tag: 'meta', attrs: { name: 'robots', content: 'noindex' } }];
+}
+
+/**
+ * dist/robots.txt (src/pages/robots.txt.ts). Nothing is disallowed: dev/, fallback and 404 pages carry
+ * noindex, which a crawler blocked by robots.txt could not read.
+ */
+export function robotsTxt(site: URL): string {
+  return `User-agent: *\nAllow: /\n\nSitemap: ${new URL('/sitemap-index.xml', site).href}\n`;
 }

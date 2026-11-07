@@ -4,6 +4,7 @@ import type { ImageMetadata } from 'astro';
 import type { Localized, PartId } from './roadmap';
 
 import plateTaberd from '../assets/home/plate-taberd.jpg';
+import plateTaberdWide from '../assets/home/plate-taberd-wide.jpg';
 import plateMercator from '../assets/home/plate-mercator.jpg';
 import plateNamKy from '../assets/home/plate-namky.jpg';
 import partPython from '../assets/home/part-python-lovelace.jpg';
@@ -23,6 +24,7 @@ export interface Credit {
   creator: Localized;
   year: Localized;
   licence: Localized;
+  licenceUrl?: string;
   /** Where the file comes from, as shown in the credit line. */
   via: Localized;
   source: string;
@@ -34,6 +36,7 @@ export interface Picture {
   caption: Localized;
   /** CSS object-position used when the picture is cropped. */
   focus?: string;
+  narrow?: ImageMetadata;
   credit: Credit;
 }
 
@@ -42,12 +45,14 @@ const PUBLIC_DOMAIN: Localized = { vi: 'Phạm vi công cộng', en: 'Public dom
 const COMMONS = same('Wikimedia Commons');
 // Scans from the David Rumsey Map Collection carry CC BY-NC-SA 3.0 and a required attribution.
 const RUMSEY_LICENCE = same('CC BY-NC-SA 3.0');
+const RUMSEY_LICENCE_URL = 'https://creativecommons.org/licenses/by-nc-sa/3.0/';
 const RUMSEY = same('David Rumsey Map Collection, David Rumsey Map Center, Stanford Libraries; Wikimedia Commons');
 
 export const HERO_PLATES: Picture[] = [
   {
     src: plateTaberd,
     focus: '50% 30%',
+    narrow: plateTaberdWide,
     alt: {
       vi: 'Bản đồ An Nam đại quốc họa đồ năm 1838, tên bản đồ in bằng cả chữ Hán và chữ Latin.',
       en: 'The 1838 map An Nam dai quoc hoa do, its title printed in both Chinese characters and Latin script.',
@@ -184,7 +189,7 @@ export const LESSON_PICTURE: Picture = {
   focus: '50% 45%',
   alt: { vi: 'Một cuốn atlas cổ mở ra ở trang bản đồ Đông Ấn.', en: 'An old atlas open at a map of the East Indies.' },
   caption: { vi: 'Tabula Indiae Orientalis, Frederick de Wit, khoảng 1682.', en: 'Tabula Indiae Orientalis, Frederick de Wit, c. 1682.' },
-  credit: { title: 'Tabula Indiae Orientalis', creator: same('Frederick de Wit'), year: { vi: 'khoảng 1682', en: 'c. 1682' }, licence: RUMSEY_LICENCE, via: RUMSEY, source: 'https://commons.wikimedia.org/wiki/File:Tabula_Indiae_Orientalis._(IA_dr_tabula-indiae-orientalis-12220073).jpg' },
+  credit: { title: 'Tabula Indiae Orientalis', creator: same('Frederick de Wit'), year: { vi: 'khoảng 1682', en: 'c. 1682' }, licence: RUMSEY_LICENCE, licenceUrl: RUMSEY_LICENCE_URL, via: RUMSEY, source: 'https://commons.wikimedia.org/wiki/File:Tabula_Indiae_Orientalis._(IA_dr_tabula-indiae-orientalis-12220073).jpg' },
 };
 
 export const TERMS_PICTURE: Picture = {
@@ -206,7 +211,7 @@ export const STAMP_PICTURE: Picture = {
   src: stampMercator,
   alt: { vi: 'Trang bìa cuốn Historia Mundi, or Mercator’s Atlas.', en: 'Title page of Historia Mundi, or Mercator’s Atlas.' },
   caption: { vi: 'Historia Mundi, or Mercator’s Atlas, London, 1635.', en: 'Historia Mundi, or Mercator’s Atlas, London, 1635.' },
-  credit: { title: 'Historia mundi, or Mercator’s atlas (title page)', creator: same('Gerardus Mercator, Jodocus Hondius'), year: same('1635'), licence: RUMSEY_LICENCE, via: RUMSEY, source: 'https://commons.wikimedia.org/wiki/File:(Title_Page_to)_Historia_mundi_-_or_Mercator%27s_atlas._Containing_his_cosmographicall_description_of_the_fabricke_and_figure_of_(IA_dr_title-page-to-historia-mundi-or-mercators-atlas-containing-his-cosmog-11248004).jpg' },
+  credit: { title: 'Historia mundi, or Mercator’s atlas (title page)', creator: same('Gerardus Mercator, Jodocus Hondius'), year: same('1635'), licence: RUMSEY_LICENCE, licenceUrl: RUMSEY_LICENCE_URL, via: RUMSEY, source: 'https://commons.wikimedia.org/wiki/File:(Title_Page_to)_Historia_mundi_-_or_Mercator%27s_atlas._Containing_his_cosmographicall_description_of_the_fabricke_and_figure_of_(IA_dr_title-page-to-historia-mundi-or-mercators-atlas-containing-his-cosmog-11248004).jpg' },
 };
 
 export const ALL_PICTURES: Picture[] = [

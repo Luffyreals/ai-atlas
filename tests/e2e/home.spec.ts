@@ -223,13 +223,16 @@ test('/vi/ loads no React and no Pyodide', async ({ page }) => {
   await expect(page.locator('astro-island')).toHaveCount(0);
 });
 
-test('every <img> on /vi/ has alt text, except the decorative lesson background', async ({ page }) => {
+test('every <img> on /vi/ has alt text, except the decorative lesson background and the header logo', async ({ page }) => {
   await page.goto('/vi/');
+  // Decorative on purpose: the lesson background (aria-hidden), and the logo, whose link is named by the
+  // "AI Atlas" text next to it (logo.alt '' in astro.config.ts, docs/architecture/launch.md 3.6.2).
   const images = await page.locator('img').evaluateAll((items) =>
     items.map((img) => ({
       src: img.getAttribute('src'),
       alt: img.getAttribute('alt'),
-      decorative: img.closest('.lesson-photo[aria-hidden="true"]') !== null,
+      decorative:
+        img.closest('.lesson-photo[aria-hidden="true"]') !== null || img.closest('header a.site-title') !== null,
     })),
   );
   expect(images.length).toBeGreaterThan(10);
@@ -238,7 +241,9 @@ test('every <img> on /vi/ has alt text, except the decorative lesson background'
     if (image.decorative) expect(image.alt, image.src ?? '').toBe('');
     else expect(image.alt!.trim(), `empty alt: ${image.src}`).not.toBe('');
   }
-  expect(images.filter((image) => image.alt === '')).toHaveLength(1);
+  // One lesson background, two logo files (light and dark): nothing else may have an empty alt.
+  expect(images.filter((image) => image.alt === '')).toHaveLength(3);
+  expect(images.filter((image) => image.decorative)).toHaveLength(3);
 });
 
 test.describe('hero plates', () => {
@@ -272,7 +277,65 @@ test.describe('hero plates', () => {
       await expect(page.locator('[data-crossfade] > figure.is-deferred')).toHaveCount(2);
     }
   });
+
+  // Decision 66, docs/architecture/launch.md 3.5.1: below 64rem the first plate is the 3:2 cut
+  // (plate-taberd-wide.jpg), at most 960px wide; on wide screens it stays the portrait original.
+  test('the first plate: the 3:2 cut on a narrow screen, the portrait original on a wide one', async ({ page }) => {
+    await page.goto('/vi/');
+    const img = page.locator('[data-crossfade] > figure').first().locator('img');
+    await expect
+      .poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0), { timeout: 15_000 })
+      .toBe(true);
+    const picked = await img.evaluate((el: HTMLImageElement) => ({
+      src: el.currentSrc,
+      width: el.naturalWidth,
+      height: el.naturalHeight,
+      fetchpriority: el.getAttribute('fetchpriority'),
+      loading: el.getAttribute('loading'),
+    }));
+    expect(picked.fetchpriority).toBe('high');
+    expect(picked.loading).toBe('eager');
+    const ratio = picked.width / picked.height;
+    if (isNarrow(page)) {
+      expect(picked.src).toContain('plate-taberd-wide');
+      expect(ratio, `${picked.width}×${picked.height}`).toBeGreaterThan(1.45);
+      expect(ratio, `${picked.width}×${picked.height}`).toBeLessThan(1.55);
+      expect(picked.width).toBeLessThanOrEqual(960);
+    } else {
+      expect(page.viewportSize()?.width ?? 0).toBeGreaterThanOrEqual(1024);
+      expect(picked.src).toMatch(/plate-taberd\./);
+      expect(picked.src).not.toContain('plate-taberd-wide');
+      expect(ratio, `${picked.width}×${picked.height}`).toBeLessThan(1);
+    }
+  });
 });
+
+// docs/architecture/launch.md 3.6.2: the homepage h1 is #_top, the target of Starlight's skip link.
+for (const locale of LOCALES) {
+  test(`/${locale}/: the skip link is the first Tab stop and moves focus to the h1`, async ({ page }) => {
+    await page.goto(`/${locale}/`);
+    const h1 = page.locator('h1');
+    await expect(h1).toHaveCount(1);
+    await expect(h1).toHaveAttribute('id', '_top');
+    await expect(page.locator('#_top')).toHaveCount(1);
+
+    await page.keyboard.press('Tab');
+    const skip = page.locator('a.sl-skip-link');
+    await expect(skip).toBeFocused();
+    await expect(skip).toHaveAttribute('href', '#_top');
+    await page.keyboard.press('Enter');
+    await expect(h1).toBeFocused();
+    await expect(page).toHaveURL(new RegExp(`/${locale}/#_top$`));
+    // Tab goes on from the title, not back to the top of the page.
+    await page.keyboard.press('Tab');
+    const next = await page.evaluate(() => {
+      const active = document.activeElement;
+      const title = document.getElementById('_top');
+      return !!active && !!title && !!(title.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+    expect(next).toBe(true);
+  });
+}
 
 test.describe('homepage CSS does not leak into other pages', () => {
   test('/vi/dev/components/ keeps its title and content padding', async ({ page }) => {

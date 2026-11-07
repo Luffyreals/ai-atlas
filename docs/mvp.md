@@ -2,6 +2,8 @@
 
 > Bản MVP (Minimum Viable Product) là phiên bản nhỏ nhất **đáng để công khai**. Nó chứng minh cả quy trình (viết bài → minh họa → dịch → deploy) chạy trơn tru, và người học đã dùng được thật.
 >
+> **Cập nhật tiến độ:** Toàn bộ các mốc M0–M4 của MVP đã hoàn thành vượt mức cam kết. Dự án hiện đã phát hành 100% bản tiếng Việt (78/78 bài), 100% bản tiếng Anh phần ML (14 bài), trang Giới thiệu song ngữ, hạ tầng SEO OpenGraph và triển khai Cloudflare Pages tại https://ai-atlas-7nb.pages.dev/.
+>
 > Tài liệu này là **spec sản phẩm**: làm gì, cho ai, khi nào là xong. Thiết kế kỹ thuật chi tiết nằm ở [docs/architecture/](architecture/).
 
 ## 1. Mục tiêu
