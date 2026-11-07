@@ -55,6 +55,7 @@
 }
 
 .atlas-quiz-option {
+  min-width: 0;
   display: flex;
   align-items: flex-start;
   gap: 12px;
@@ -132,6 +133,11 @@
   overflow-y: hidden;
   margin-block: -6px;
   padding-block: 6px;
+}
+
+.atlas-quiz-option-text code {
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .atlas-quiz-mark {

@@ -1,0 +1,339 @@
+---
+title: Overfitting and Underfitting
+description: Fit polynomials of degree 1, 3, and 15 to the same 16 points. Why training MSE monotonically decreases while test MSE follows a U-curve, bias–variance trade-off, and cross-validation.
+quiz:
+  - question: 'A model has a training MSE of $0.002$ but a test MSE of $2.5$. Which approach is least likely to help?'
+    options:
+      - 'Collecting more training examples'
+      - 'Lowering the polynomial degree'
+      - 'Increasing the polynomial degree to make the model more flexible'
+      - 'Selecting the degree using cross-validation instead of guessing'
+    answer: 2
+    explanation: 'A tiny training MSE paired with a much larger test MSE is the hallmark of overfitting: the model is already excessively flexible. Increasing the degree makes it even more flexible, driving training MSE even lower while typically degrading test MSE further. The other three choices directly combat overfitting: adding data, reducing capacity, or tuning capacity on held-out data.'
+  - question: 'You fit polynomials of degrees 1 through 12 to 25 training points, and select the degree with the smallest training MSE. Which degree will you pick?'
+    options:
+      - 'Degree 12, because training MSE never increases as degree increases'
+      - 'The degree at the bottom of the U-curve, because that represents the optimal model'
+      - 'Degree 1, because the simplest model makes the fewest mistakes'
+      - 'It cannot be predicted beforehand, because it depends entirely on the data'
+    answer: 0
+    explanation: 'Every polynomial of degree $d$ is also a polynomial of degree $d + 1$ with $w_{d+1} = 0$. Higher degrees search over a strictly larger hypothesis space, so their minimum training MSE cannot exceed that of lower degrees. The U-shaped curve belongs to test MSE, not training MSE. Consequently, training MSE cannot be used for model selection.'
+  - question: 'Five researchers each draw 16 distinct training points generated from the same noisy sine curve (each with different random noise). Everyone fits a straight line and a degree-12 polynomial. Comparing the five models of each type, what do you observe?'
+    options:
+      - 'The five straight lines differ wildly, while the five degree-12 curves virtually overlap'
+      - 'Both model families produce nearly identical curves, because data comes from the same underlying function'
+      - 'Both model families vary dramatically, because the noise realizations are different'
+      - 'The five straight lines are very similar but consistently miss the wave shape; the five degree-12 curves capture the wave but fluctuate wildly from one another, especially near boundaries'
+    answer: 3
+    explanation: 'The straight line has high bias but low variance: varying the training samples slightly shifts the line very little (low variance), but it fundamentally cannot curve to follow the wave (high bias). The degree-12 polynomial exhibits the opposite profile (low bias, high variance): it is expressive enough to fit the wave, but also conforms to the unique noise of each dataset, resulting in wildly differing curves across splits.'
+  - question: 'Cross-validation using `scoring=''neg_mean_squared_error''` yields average scores: degree 2 is $-0.25$, degree 5 is $-0.04$, and degree 9 is $-3.1$. Which degree should you choose?'
+    options:
+      - 'Degree 9, because $-3.1$ is the lowest numerical value'
+      - 'Degree 5, because the score closest to 0 corresponds to the smallest MSE'
+      - 'Degree 2, because it is the lowest polynomial degree'
+      - 'None can be chosen, because negative scores indicate that all three models perform terribly'
+    answer: 1
+    explanation: 'Scores represent negated MSE values, meaning the true MSE for degrees 2, 5, and 9 are $0.25$, $0.04$, and $3.1$, respectively. Degree 5 achieves the lowest cross-validation MSE. Selecting the smallest number while forgetting the negative sign picks the worst model. Negation is purely scikit-learn convention ("greater is better") and does not imply defective models.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import DatasetTable from '@components/DatasetTable.astro';
+import PolyFitViz from '@components/viz/PolyFitViz.astro';
+import threeDegreesCode from '@code/ml/overfitting-underfitting/three-degrees.en.py?raw';
+import errorByDegreeCode from '@code/ml/overfitting-underfitting/error-by-degree.en.py?raw';
+import crossValidationCode from '@code/ml/overfitting-underfitting/cross-validation.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Identify underfitting and overfitting using just two metrics: training MSE and test MSE.
+- Understand why polynomial regression is still linear regression, and how the polynomial degree determines model capacity.
+- Explain the U-shaped error curve through the intuitive lens of the bias–variance trade-off.
+- Select the optimal degree using cross-validation with `cross_val_score`, and know which direction to adjust your model when diagnostic errors occur.
+
+## Prerequisites
+
+{/* The list comes from the lesson's prerequisites in roadmap.ts. Do not write the links by hand. */}
+
+<Prerequisites />
+
+:::tip[Quick reminder]
+This lesson builds on the evaluation protocol introduced in [Introduction to Machine Learning](/en/ml/ml-overview/): models fit parameters strictly on the **training set**, and are subsequently evaluated on a held-out **test set** that was never seen during fitting. Error on the test set serves as an empirical estimate of **generalization** performance on fresh, unseen data.
+:::
+
+## Intuition
+
+Three students—Alice, Bob, and Carol—are given 16 data points plotted on grid paper. Their task: draw a curve capturing the underlying trend of the points, so they can later predict $y$ at new, unobserved $x$ locations.
+
+- Alice uses a ruler and draws a single **straight line** slicing through the cloud of points.
+- Bob sketches a **smooth wave**: ascending once, descending once, passing close to the points without forcing contact with every single one.
+- Carol is the most meticulous: her curve **threads exactly through all 16 points**, with zero residual error on any of them.
+
+If graded strictly on those 16 points, Carol earns a perfect score. But the real goal is predicting **new points**. Who will generalize best?
+
+### Ground-truth data with known noise
+
+In real-world applications, you never know the true data-generating process underlying your observations. In this synthetic experiment, we deliberately design it. The points are generated from the sinusoidal function $y = \sin(2\pi x)$ for $x \in [0, 1]$, with random Gaussian **noise** added. The smooth sine wave is the ground truth. The noise represents random fluctuations that no deterministic pattern can foresee.
+
+There are 24 points in total. Sorted by ascending $x$, every third point is allocated to the test set: 16 training points, 8 test points. While our introductory lesson used random splitting, here points are interleaved so that test points sit evenly between training samples. This ensures observed discrepancies reflect capacity rather than **extrapolation** failures (detailed in [Linear Regression](/en/ml/linear-regression/)).
+
+<details>
+<summary>View the 24-point dataset</summary>
+
+<DatasetTable dataset="sine-train" />
+
+<DatasetTable dataset="sine-test" />
+
+</details>
+
+### Three curves, three outcomes
+
+Alice's straight line, Bob's smooth curve, and Carol's interpolating polynomial represent polynomials of degree 1, 3, and 15, all fitted to the 16 training points. Our first code cell plots them. Performance is quantified using MSE:
+
+| Curve | Degree | Train MSE | Test MSE |
+|---|---:|---:|---:|
+| Alice: straight line | 1 | 0.1663 | 0.2732 |
+| Bob: smooth curve | 3 | 0.0377 | 0.0754 |
+| Carol: interpolates every point | 15 | 0.0000 | ~133 |
+
+- **Alice** incurs substantial error on both sets. The straight line is too rigid to follow the sinusoidal curve. This is **underfitting**: the model lacks sufficient capacity to represent the underlying pattern.
+- **Carol** achieves zero training error, but explodes into catastrophic errors on the test set. To touch all 16 points, her curve fits the random noise, creating wild oscillations between data points. This is **overfitting**: the model memorizes incidental idiosyncrasies of the training sample.
+- **Bob** achieves the lowest test MSE. His curve has enough capacity to capture the underlying wave, but not enough flexibility to chase individual noise fluctuations.
+
+The core challenge of this lesson is: **tuning model capacity to capture genuine underlying structure without fitting noise, when all you have is empirical data.**
+
+## Theory
+
+### Polynomial regression
+
+A polynomial model of **degree** $d$ generates predictions according to:
+
+$$
+\hat{y} = w_1x + w_2x^2 + \dots + w_dx^d + b
+$$
+
+- $x$ is the scalar input, and $\hat{y}$ is the predicted scalar output.
+- $d$ represents the polynomial degree (highest exponent). Degree 1 yields a straight line $\hat{y} = w_1x + b$. Degree 3 introduces $x^2$ and $x^3$.
+- $w_1, \dots, w_d$ are learned weights, and $b$ is the intercept term, giving $d + 1$ total parameters.
+
+At first glance, this defines a non-linear curve rather than linear regression. However, consider each power of $x$ as an engineered feature: $x_1 = x$, $x_2 = x^2$, ..., $x_d = x^d$. The equation can be rewritten as:
+
+$$
+\hat{y} = w_1x_1 + w_2x_2 + \dots + w_dx_d + b = \mathbf{w}^\top\mathbf{x} + b
+$$
+
+where $\mathbf{x} = [x, x^2, \dots, x^d]^\top$. This is standard multiple linear regression with $n = d$ features, derived from a single original input $x$.
+
+The model is curved with respect to input $x$, but strictly **linear with respect to parameters** $\mathbf{w}$ and $b$, as noted in our [Linear Regression](/en/ml/linear-regression/) lesson. The design matrix has row $i$ formatted as $\left[\,x^{(i)}, \left(x^{(i)}\right)^2, \dots, \left(x^{(i)}\right)^d, 1\,\right]$, and the optimal parameters are solved via ordinary least squares.
+
+**Degree 15 on 16 points.** A degree-15 polynomial possesses $15 + 1 = 16$ free parameters, matching the exact number of training points. Demanding that the curve touch all 16 points yields a system of 16 linear equations with 16 unknowns. When all $x^{(i)}$ coordinates are distinct, this Vandermonde system has a unique exact solution, allowing Carol's curve to interpolate every point and drive training MSE to zero. Beyond degree 15, parameters outnumber observations, producing infinitely many solutions (see "When is the solution non-unique?" in [Linear Regression](/en/ml/linear-regression/)). Hence, our study caps at degree 15.
+
+### Training MSE and test MSE
+
+The model is fitted exclusively on the training set containing $m_{\text{train}} = 16$ instances. Subsequently, identical MSE formulations are evaluated across the two disjoint subsets:
+
+$$
+\begin{aligned}
+\mathcal{L}_{\text{train}} &= \frac{1}{m_{\text{train}}}\sum_{i \in \text{train}}\left(\hat{y}^{(i)} - y^{(i)}\right)^2 \\
+\mathcal{L}_{\text{test}} &= \frac{1}{m_{\text{test}}}\sum_{i \in \text{test}}\left(\hat{y}^{(i)} - y^{(i)}\right)^2
+\end{aligned}
+$$
+
+The first line measures in-sample training error over the 16 fitted points. The second measures out-of-sample test error over $m_{\text{test}} = 8$ held-out points. While numerical optimization minimizes $\mathcal{L}_{\text{train}}$, your actual engineering goal is minimizing $\mathcal{L}_{\text{test}}$.
+
+### Why training MSE never increases with degree
+
+Consider any arbitrary polynomial of degree $d$. By appending the term $w_{d+1}x^{d+1}$ with $w_{d+1} = 0$, you form a degree-$(d + 1)$ polynomial that outputs **identical** predictions everywhere. Thus, every function representable by degree $d$ is contained within the hypothesis space of degree $d + 1$, which also contains richer curves.
+
+Fitting a degree-$(d + 1)$ polynomial minimizes training MSE over this strictly larger search space. Because the best degree-$d$ solution is a valid candidate within this space, the optimal degree-$(d + 1)$ solution can only match or improve training loss:
+
+$$
+\mathcal{L}_{\text{train}}(d + 1) \le \mathcal{L}_{\text{train}}(d)
+$$
+
+Test MSE enjoys **no such guarantee**, because test instances never participate in parameter estimation. This asymmetry lies at the heart of learning theory.
+
+### The error curve vs degree
+
+Fitting degrees 1 through 15 sequentially and tracing MSE against degree reveals two starkly divergent trajectories (cell 2 computes all 15 degrees):
+
+| Degree $d$ | Train MSE | Test MSE |
+|---:|---:|---:|
+| 1 | 0.1663 | 0.2732 |
+| 2 | 0.1624 | 0.2766 |
+| 3 | 0.0377 | 0.0754 |
+| 5 | 0.0301 | 0.0969 |
+| 8 | 0.0216 | 0.1215 |
+| 10 | 0.0189 | 0.3286 |
+| 12 | 0.0013 | 3.5439 |
+| 15 | 0.0000 | ~133 |
+
+- **Training MSE** monotonically drops across all steps, exactly as mathematically proven.
+- **Test MSE** rises slightly at degree 2, plunges to its global minimum at degree 3, climbs steadily through moderate degrees, and surges exponentially past degree 10. Plotted visually, it forms a characteristic **U-shaped curve**.
+
+Degree 2 barely improves over degree 1. The sine wave is point-symmetric about $(0.5, 0)$: its left half is the inverted reflection of its right half. A quadratic parabola $x^2$ possesses axial symmetry, offering no leverage for S-shaped waves. Only when cubic term $x^3$ is included can the curve reproduce the inflection of the wave.
+
+This yields two formal qualitative operational definitions:
+
+- **Underfitting**: the model is overly constrained. Training MSE is high, and test MSE is similarly high. This occupies the region to the left of the U-curve minimum.
+- **Overfitting**: the model possesses excessive capacity. Training MSE is low, but test MSE is substantially higher than optimal. This occupies the region to the right of the U-curve minimum.
+
+### Bias and variance
+
+Note that "bias" here does **not** refer to the intercept parameter $b$. In statistical learning theory, it denotes the mathematical **bias** of an estimator.
+
+Imagine repeating this experiment across hundreds of independent datasets: each draw takes 16 new points from $\sin(2\pi x)$ with fresh random noise, fitting the same polynomial degree each time. Generalization error decomposes into three fundamental sources:
+
+- **Bias**: systematic approximation error arising because the hypothesis class cannot represent the underlying function. No matter how many samples you collect, a straight line cannot bend: it consistently underestimates wave peaks and overestimates wave troughs.
+- **Variance**: the sensitivity of the fitted function to fluctuations in the specific training dataset. A straight line barely changes across datasets. A high-degree polynomial contorts to fit the idiosyncratic noise of each sample, yielding wildly different curves from split to split, especially near domain boundaries.
+- **Irreducible noise**: the stochastic variance inherent in data generation that no model can anticipate.
+
+Increasing capacity reduces bias because the hypothesis class encompasses functions closer to ground truth. However, variance escalates as additional degrees of freedom fit sample-specific noise. Low degrees are dominated by bias (underfitting); high degrees are dominated by variance (overfitting). The bottom of the U-curve marks the optimal trade-off.
+
+Noise also illustrates why training error is deceptive. Even the true sine curve exhibits an empirical MSE around 0.06 on our 16 noisy training points. Any fitted model inevitably absorbs some noise to achieve lower loss: degree 3 achieves a training MSE of 0.0377. Degree 15 absorbs all noise, driving training loss to 0.0000. Because memorized noise offers zero predictive power on fresh draws, it reveals itself as catastrophic test error.
+
+:::note[Takeaway]
+Increasing polynomial capacity ensures training MSE never increases, while test MSE follows a U-shaped trajectory. The left flank is underfitting (high bias); the right flank is overfitting (high variance). The optimal capacity sits at the minimum of the **test MSE** U-curve, never at the minimum of training MSE.
+:::
+
+### Diagnosis and remedies
+
+To diagnose model behavior, compare in-sample training error against performance on held-out validation data. "High" and "low" are interpreted relative to achievable benchmarks: the estimated noise floor or state-of-the-art baselines for that domain.
+
+| Train MSE | Held-out MSE | Diagnosis | Recommended action |
+|---|---|---|---|
+| High | High, close to train MSE | Underfitting | Increase capacity: higher degree, more features |
+| Low | Much higher than train MSE | Overfitting | Collect more data, reduce capacity, regularize |
+| Low | Low, close to train MSE | Well-fitted | Maintain configuration |
+
+Three primary remedies for overfitting:
+
+- **Add training data.** With 16 points, a degree-15 polynomial easily interpolates every sample. Given 1 000 points, it cannot contort through individual noise fluctuations. Additional data must reflect the true distribution, rather than duplicates of existing data.
+- **Reduce model capacity.** Lower polynomial degree or prune uninformative features.
+- **Regularization.** Retain higher degrees, but augment the loss function with a penalty against excessive weight magnitudes. To interpolate points, our degree-15 polynomial requires coefficients in the billions. Penalizing large weights constrains the curve to smooth trajectories, as explored in Ridge, Lasso, and Elastic Net.
+
+### Selecting the degree: validation set and cross-validation
+
+The naive strategy is selecting the degree that minimizes test MSE. However, this constitutes data leakage: the selected hyperparameter overfits those specific 8 test samples, producing overly optimistic test metrics. Polynomial degree is a **hyperparameter**: a configuration set prior to optimization, not a parameter learned via least squares. Hyperparameters must be tuned **without touching the final test set**.
+
+One approach holds out a subset of training data as a **validation set**: fit on remaining points, evaluate on validation points, and choose the top-performing degree. But our training set contains only 16 points. Reserving 4 points leaves just 12 for fitting, and small validation splits produce noisy, high-variance estimates.
+
+**Cross-validation** utilizes data far more efficiently. In $k$-**fold cross-validation**:
+
+1. Partition the training set into $k$ equal-sized subsets (folds).
+2. For iteration $j \in \{1, \dots, k\}$: fit the model on the remaining $k - 1$ folds, and calculate MSE on held-out fold $j$, denoted as $\mathcal{L}_j$.
+3. Compute the arithmetic mean of the $k$ evaluation scores:
+
+$$
+\text{CV} = \frac{1}{k}\sum_{j=1}^{k}\mathcal{L}_j
+$$
+
+Every training point serves as a validation target exactly once. Repeat this process for each candidate degree, select the degree minimizing CV loss, **re-fit that winning degree on the entire 16-point training set**, and evaluate **exactly once** on the held-out test set.
+
+### Limitations
+
+- **Low-dimensional visualization.** Here, 1D curves allow direct visual inspection of overfitting oscillations. In multidimensional spaces with dozens of features, direct visualization is impossible, forcing reliance on numerical diagnostic metrics.
+- **Degree is merely one tuning knob.** Different model classes possess different capacity knobs: neighbor count in KNN, tree depth in decision trees, layer width and count in neural networks. The characteristic U-curve persists, differing only along the horizontal axis.
+- **Cross-validation still exhibits variance on tiny samples.** Re-seeding fold splits can shift the selected degree (demonstrated in our third code cell).
+- **Validation cannot compensate for biased data.** If training data is unrepresentative of real-world operating conditions, the model will generalize poorly in production regardless of stellar cross-validation scores.
+
+## Illustration
+
+Experiment with polynomial capacity yourself. The interactive visualization displays the 16 training points (solid dots) and 8 test points (open circles), alongside the polynomial curve fitted to the training set. The slider adjusts degree $d$ from 1 to 15. The lower panel reports empirical MSE values and displays a miniature dual-curve plot of training and test error against degree. Clicking **Show true function** reveals the noiseless sine curve. Observe:
+
+1. At $d = 1$: a rigid straight line, train MSE 0.1663, test MSE 0.2732. The badge indicates underfitting.
+2. Advance to $d = 3$: the curve smoothly follows the wave, test MSE drops to 0.0754 (the lowest across all 15 degrees). The badge confirms optimal fit (✓).
+3. Advance to $d = 8$ and $d = 9$: train MSE continues decreasing (0.0216, then 0.0206), but test MSE climbs (0.1215, then 0.1656). At degree 9, the left tail plunges off the canvas.
+4. Advance to $d = 15$: the curve hits every solid dot, train MSE is 0.0000, but test MSE explodes to 133.20. Past degree 10, test error scales off the chart. Toggle the true function to witness how drastically the degree-15 curve deviates from reality.
+
+Visual status badges follow a heuristic threshold: compared to degree 3, training MSE more than doubled indicates underfitting; test MSE more than doubled indicates overfitting. This provides pedagogical intuition: degree 8 is still categorized as acceptable, despite visible edge oscillations.
+
+{/* VIZ: optimal degree minimizes test MSE; too low is underfitting, too high is overfitting. */}
+<PolyFitViz />
+
+## Code examples
+
+The three code cells below execute independently; each contains a self-contained copy of the 24 points. The initial run takes a moment as scikit-learn initializes in WebAssembly.
+
+The first cell fits Alice's, Bob's, and Carol's models, reports empirical MSE metrics, and plots the resulting curves. `make_pipeline` chains two estimators: `PolynomialFeatures` transforms scalar $x$ into polynomial terms $x, x^2, \dots, x^d$, and `LinearRegression` fits weights to those features. Setting `include_bias=False` prevents duplicating the column of ones, as `LinearRegression` already manages intercept $b$. The syntax `x_train[:, None]` reshapes 1D arrays into 2D matrices.
+
+<PythonRunner
+  code={threeDegreesCode}
+  title="Fitting degrees 1, 3, and 15"
+  figureAlt={['Scatter plot of 16 training points (black dots) and 8 test points (open circles) forming a sinusoidal cycle, alongside three fitted curves. Degree 1 is a downward-sloping dotted line. Degree 3 is a smooth wave peaking near x = 0.2 and bottoming near x = 0.78. Degree 15 is a dashed curve interpolating every black dot with wild oscillations between points and explosive divergence near boundaries.']}
+/>
+
+The console outputs match our table in the Intuition section. The plot highlights three distinct structural behaviors:
+
+- The degree-1 line captures only the general downward slope, failing to represent wave crests and troughs.
+- The degree-3 curve tracks both solid dots and open circles closely.
+- The degree-15 curve hits every black dot, including $(0.77, -0.28)$, which was pushed farthest by noise (true sine is $-0.99$). Degree 3 hovers near $-0.79$, resisting noise pull.
+- Between the first two training points ($x = 0.03$ and $x = 0.12$), the degree-15 curve spikes upward, right where test point $x = 0.06$ is located. It predicts over 30, whereas true $y$ is 0.33. This single discrepancy accounts for the majority of the 133 test MSE.
+
+The second cell systematically fits degrees 1 through 15 and traces the dual error curves.
+
+<PythonRunner
+  code={errorByDegreeCode}
+  title="Train MSE and test MSE across polynomial degrees"
+  figureAlt={['Line plot of MSE against polynomial degree from 1 to 15, vertical axis scaled from 0 to 0.4. Training MSE (solid line, solid dots) declines monotonically from 0.17 toward zero. Test MSE (dashed line, open circles) drops sharply from 0.27 to 0.075 at degree 3, rises gradually to degree 8, and explodes off-chart past degree 10, forming a U-shape.']}
+/>
+
+Training MSE declines at every step, dropping from 0.1663 to 0.0000, confirming our mathematical proof. Test MSE reaches its global minimum at degree 3 (0.0754), rises gently to 0.1215 at degree 8, and explodes: 0.3286 at degree 10, reaching 3.5439 at degree 12. The vertical axis is clamped at 0.4 to clearly highlight the U-curve minimum.
+
+At degrees 14 and 15, coefficient magnitudes reach astronomical values, causing minor variations in trailing decimals across platforms. Read them as "~30" and "~133".
+
+The third cell selects the optimal degree via cross-validation, using strictly the 16 training samples. `KFold(n_splits=4, shuffle=True, random_state=0)` shuffles and divides the 16 points into 4 folds (4 points each). Because each fit trains on only 12 instances, we evaluate candidate degrees 1 through 10.
+
+<PythonRunner code={crossValidationCode} title="Selecting degree via cross-validation" />
+
+`cross_val_score` outputs an array of 4 evaluation scores, one per validation fold. By scikit-learn convention ("greater is better"), loss metrics are negated: `neg_mean_squared_error`. The code negates the mean (`-scores.mean()`) to recover true cross-validation MSE.
+
+- Cross-validation MSE reaches its minimum at degree 3 (~0.0784). This correctly identifies the optimal degree at the bottom of the test U-curve without inspecting test data.
+- Past degree 7, cross-validation MSE rises rapidly, reaching 830.2741 at degree 10. Fitting 11 parameters to 12 instances forces interpolation, causing wild oscillations across held-out folds.
+
+Finally, the script re-fits degree 3 across all 16 training points and evaluates once on the test set: test MSE is 0.0754, matching our second cell. This evaluation is unbiased because the test set was never accessed during model selection.
+
+Notice how split configuration influences outcomes. Switching to `KFold(n_splits=5, shuffle=True, random_state=0)` retains degree 3 as the winner. Switching to `LeaveOneOut()` (16 folds, 1 sample each) selects degree 4: cross-validation MSE is 0.0774 versus 0.0793 for degree 3. On small datasets, minor numerical margins should not be over-interpreted.
+
+## Common pitfalls
+
+:::caution[Selecting model by training MSE]
+Training MSE monotonically decreases as capacity grows, so selecting models by in-sample error invariably chooses maximal complexity. In our second cell, this approach picks degree 15: training MSE is 0.0000, while test MSE exceeds 133. Training error only measures memorization capacity. Always tune hyperparameters via validation splits or cross-validation, reserving test data strictly for final reporting.
+:::
+
+:::caution[Forgetting the negative sign in neg_mean_squared_error]
+When invoking `cross_val_score` with `scoring='neg_mean_squared_error'`, scikit-learn returns negated error values. Selecting the degree with the **lowest** numerical score accidentally selects the **worst** model: in our third cell, that selects degree 10 with a cross-validation MSE of 830.2741. Either invert the sign (`-scores.mean()`) and minimize, or keep original values and maximize.
+:::
+
+:::caution[Applying the wrong remedy]
+Underfitting and overfitting require diametrically opposed solutions. Underfitting requires increasing model capacity. Gathering more data will not resolve underfitting: a straight line remains straight regardless of sample size. Overfitting requires adding training data, reducing model capacity, or applying regularization. Increasing capacity further only exacerbates overfitting. Always compare training loss against validation loss to diagnose which side of the U-curve your model occupies before modifying your pipeline.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Polynomial regression $\hat{y} = w_1x + w_2x^2 + \dots + w_dx^d + b$ operates as linear regression over engineered feature terms $x, x^2, \dots, x^d$: linear in parameters, solved via ordinary least squares. Degree $d$ dictates model capacity.
+- Increasing capacity ensures training MSE never increases, while test MSE follows a U-shaped trajectory. Underfitting: both errors remain high. Overfitting: training error is negligible while test error diverges.
+- Low capacity suffers from high bias: the hypothesis class is too rigid to capture underlying patterns. High capacity suffers from high variance: curves fluctuate wildly to accommodate sample noise. Bias and variance are distinct from intercept $b$.
+- Polynomial degree is a hyperparameter. Tune it via validation splits or cross-validation (`cross_val_score`, handling `neg_mean_squared_error` signs appropriately), re-fit the winning candidate on the combined training set, and evaluate once on held-out test data. Mitigate overfitting via data collection, capacity reduction, or regularization. Mitigate underfitting by increasing capacity.
+
+**Further reading:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Lesson 15: Overfitting](https://machinelearningcoban.com/2017/03/04/overfitting/). Excellent Vietnamese treatment using polynomial regression to illustrate validation sets, cross-validation, and regularization concepts.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8: Underfitting vs. Overfitting*](https://scikit-learn.org/1.8/auto_examples/model_selection/plot_underfitting_overfitting.html). Official demonstration using `PolynomialFeatures` and `cross_val_score` against a cosine benchmark.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Cross-validation](https://scikit-learn.org/1.8/modules/cross_validation.html), section 3.1: comprehensive guide on `cross_val_score`, `KFold`, `LeaveOneOut`, and validation methodologies.
+- James, G., Witten, D., Hastie, T., Tibshirani, R. (2013). [*An Introduction to Statistical Learning*](https://www.statlearning.com/) (1st ed.). Section 2.2: measuring model accuracy and the bias–variance trade-off. Chapter 5: resampling and cross-validation techniques.
+- Bishop, C. M. (2006). [*Pattern Recognition and Machine Learning*](https://www.microsoft.com/en-us/research/publication/pattern-recognition-machine-learning/), Springer. Section 1.1: polynomial curve fitting on noisy $\sin(2\pi x)$ observations, the foundational inspiration for this lesson's case study.
+
+<LessonProgress />

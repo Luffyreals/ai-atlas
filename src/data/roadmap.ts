@@ -193,7 +193,7 @@ export const LESSONS: readonly Lesson[] = [
     id: 'ml/ml-overview',
     title: { vi: 'Tổng quan về Học máy', en: 'Introduction to Machine Learning' },
     prerequisites: ['python/numpy-pandas'],
-    status: { vi: 'published', en: 'planned' },
+    status: { vi: 'published', en: 'published' },
   },
   {
     id: 'ml/linear-regression',
@@ -205,13 +205,13 @@ export const LESSONS: readonly Lesson[] = [
     id: 'ml/overfitting-underfitting',
     title: { vi: 'Overfitting và Underfitting', en: 'Overfitting and Underfitting' },
     prerequisites: ['ml/linear-regression'],
-    status: { vi: 'published', en: 'planned' },
+    status: { vi: 'published', en: 'published' },
   },
   {
     id: 'ml/regularization',
     title: { vi: 'Ridge, Lasso, Elastic Net', en: 'Ridge, Lasso, and Elastic Net' },
     prerequisites: ['ml/overfitting-underfitting'],
-    status: { vi: 'published', en: 'planned' },
+    status: { vi: 'published', en: 'published' },
   },
   {
     id: 'ml/gradient-descent',

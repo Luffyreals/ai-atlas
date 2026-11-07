@@ -1,0 +1,262 @@
+---
+title: Introduction to Machine Learning
+description: Let the machine learn apartment rent from examples instead of hand-coded rules. Three families of machine learning, regression vs classification, the training workflow, train/test split, and generalization.
+quiz:
+  - question: 'A bank wants to predict whether a customer will repay a loan on time, based on their income, age, and loan amount. What type of machine learning problem is this?'
+    options:
+      - 'Regression, because income and loan amount are numbers'
+      - 'Classification, because the label has only two outcomes: on time or not'
+      - 'Unsupervised learning, because you do not know beforehand which customers will repay'
+      - 'Reinforcement learning, because the interest earned is a reward'
+    answer: 1
+    explanation: 'Regression or classification depends on the label $y$, not on the features. The label here is one of two classes, so it is classification even though all features are numerical. Past customer records indicate who paid on time, meaning labels exist, so this is supervised learning.'
+  - question: 'Two models predict apartment rent. Model A: train MSE $0.0$, test MSE $3.5$. Model B: train MSE $0.4$, test MSE $0.6$. Which model should you use for new apartments?'
+    options:
+      - 'A, because a train MSE of 0 means it makes zero mistakes'
+      - 'Neither can be chosen, because each model wins on one split'
+      - 'B, because test MSE estimates how well the model predicts unseen apartments'
+      - 'A, after combining the test set into training to bring test MSE to 0'
+    answer: 2
+    explanation: 'Test MSE estimates error on unseen data. A train MSE of 0 only shows that A memorized the training examples, like the lookup model in the second code cell. Merging the test set into training eliminates the only way to evaluate on new data.'
+  - question: 'A store has the purchase history of 10 000 customers, with no column indicating which customer segment they belong to. They want to group customers with similar shopping patterns. Which family of machine learning is this?'
+    options:
+      - 'Unsupervised learning, specifically clustering'
+      - 'Supervised learning, specifically classification, because the output consists of groups'
+      - 'Supervised learning, specifically regression, because total spending is a number'
+      - 'Reinforcement learning, because the store wants to increase revenue'
+    answer: 0
+    explanation: 'There are no labels providing ground truth, so the algorithm must discover groups of similar customers on its own: that is clustering. Classification also outputs categories, but requires pre-labeled examples to train on.'
+  - question: 'You evaluate 50 different models. Each time, you inspect the test MSE, pick the model with the lowest test error, and report that figure. How reliable is this reported number?'
+    options:
+      - 'Reliable, because it is measured on the test set rather than the training set'
+      - 'More reliable, because it is the best result out of 50 attempts'
+      - 'Accurate, as long as `random_state` was set'
+      - 'Likely overly optimistic, because the test set was used to select the model'
+    answer: 3
+    explanation: 'Using the test set for model selection indirectly trains on it: the winning model might simply fit these specific test samples by chance, leading to an overly optimistic estimate. Use a validation set for selection, and reserve the test set strictly for final reporting. Setting `random_state` only ensures reproducibility.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import DatasetTable from '@components/DatasetTable.astro';
+import MlFamiliesFigure from '@components/figures/MlFamiliesFigure.astro';
+import MlWorkflowFigure from '@components/figures/MlWorkflowFigure.astro';
+import fitPredictCode from '@code/ml/ml-overview/fit-predict.en.py?raw';
+import trainTestSplitCode from '@code/ml/ml-overview/train-test-split.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Understand what machine learning is: algorithms discover underlying rules from examples, rather than following hand-coded rules written by human programmers.
+- Distinguish between the three main families: supervised learning, unsupervised learning, and reinforcement learning. Within supervised learning, differentiate regression from classification based on the nature of the label.
+- Read and interpret the common mathematical notation used throughout the Machine Learning track: $\mathbf{x}$, $y$, $\hat{y} = f(\mathbf{x})$, $m$, $n$, and $\mathcal{L}$.
+- Execute a complete training and evaluation pipeline using scikit-learn, and explain why splitting data into a training set and a test set is essential for measuring generalization.
+
+## Prerequisites
+
+{/* The list comes from the lesson's prerequisites in roadmap.ts. Do not write the links by hand. */}
+
+<Prerequisites />
+
+:::tip[Quick reminder]
+A **NumPy array** is a sequence of elements sharing the same data type, enabling fast vectorized computations across entire collections. `area.reshape(-1, 1)` turns a 1D sequence of 10 values into a 2D table of 10 rows and 1 column (`-1` automatically calculates the number of rows). `X[:, 0]` extracts the first column of matrix `X` as a flat 1D sequence.
+:::
+
+## Intuition
+
+You are searching for an apartment to rent. You survey rental prices of 10 apartments in your target neighborhood and summarize them in the table below. This dataset is used throughout this lesson.
+
+<DatasetTable dataset="apartments" />
+
+### Hand-coded rules vs learning from examples
+
+The first approach is **hand-crafting deterministic rules**, such as estimating "each square meter costs around 200 000 VND". However, this 200 000 VND rate is an educated guess. To account for location, floor level, and interior furnishings, you would have to manually devise additional rules for every nuance, and adjust them by hand whenever market prices shift.
+
+The second approach is **feeding examples to the machine**: provide the 10 apartments, each with its actual floor area and verified rent. The machine discovers the underlying pattern mapping area to price on its own, and then applies that learned pattern to predict the rent of a new 65 m² unit. When new market listings become available, you simply re-train the algorithm on the updated dataset. That is the core philosophy of **machine learning**. Tom Mitchell's foundational textbook *Machine Learning* (1997) defines the discipline as the study of computer algorithms that improve automatically through experience. Here, "experience" is your data.
+
+Machine learning is already embedded in everyday technology: movie recommendations, email spam filters, facial recognition in photos, and language translation. These are all tasks where hand-crafting explicit rule sets is nearly impossible, but abundant training examples exist.
+
+### Memorizing is not learning
+
+Suppose a machine finishes its training run. How can you verify that it truly learned? If a student practices a single math exam until they memorize every single answer by heart, scoring 10/10 on that identical exam does not prove mathematical understanding. To assess true proficiency, you must present a **fresh exam with unseen problems**.
+
+The same holds true for computer models. A model could achieve zero error across all 10 surveyed apartments simply by storing their prices in a lookup table. Yet you already know the rent for those 10 apartments. What you actually need is accurate predictions for the upcoming 65 m² apartment that the model has never encountered before.
+
+The core question of this lesson is: **how does a machine extract patterns from examples, and how can we verify that these learned patterns hold true on unseen data.**
+
+## Theory
+
+### Three families of machine learning
+
+Machine learning is a subfield of artificial intelligence (AI), and deep learning is in turn a specialized subfield of machine learning: three concentric concepts, rather than separate disciplines. Machine learning itself is commonly categorized by the **learning signal available to the algorithm**:
+
+- **Supervised learning**. Every example contains both input features and the corresponding ground-truth answer, called a **label**, as shown in the apartment dataset: the input feature is floor area, and the label is monthly rent. The model learns the mapping from inputs to labels. "Supervised" denotes guidance by known target labels, not active human supervision.
+- **Unsupervised learning**. The dataset consists solely of input features without target labels. The algorithm uncovers latent structure on its own, such as **clustering**: grouping customer profiles with similar shopping patterns without predefined category lists.
+- **Reinforcement learning**. An **agent** interacts with an external **environment**, receives scalar feedback in the form of positive or negative **rewards**, and learns a decision policy that maximizes cumulative reward over time, similar to an algorithm learning to play a video game. Advanced AI systems such as AlphaGo combine both supervised and reinforcement learning techniques.
+
+The figure below summarizes the three primary families. Notice the second row of each card: the fundamental distinction lies in what signal the machine learns from.
+
+{/* FIG: machine learning divides into three families based on learning signal: labels, no labels, rewards. */}
+<MlFamiliesFigure />
+
+There is also **semi-supervised learning**: only a small subset of the training corpus is labeled, which is common when annotation is expensive, such as medical scans requiring expert radiologist review. The remainder of this lesson focuses on supervised learning.
+
+### Notation in supervised learning
+
+These mathematical conventions apply across the entire Machine Learning section.
+
+Each individual data record is called a **sample** (or instance). A sample has measurable attributes called **features**, which represent the variables fed into the model, such as floor area, number of bedrooms, and building floor. The features of a single sample form a column vector $\mathbf{x}$:
+
+$$
+\mathbf{x} = [x_1, x_2, \dots, x_n]^\top
+$$
+
+- $n$ denotes the **number of features**. $x_j$ represents feature $j$.
+- $y$ is the ground-truth **label** for that sample.
+- $m$ is the total **number of samples**. The $i$-th sample is denoted as $\left(\mathbf{x}^{(i)}, y^{(i)}\right)$. The superscript $(i)$ indexes sample $i$, rather than an algebraic exponent.
+
+In our apartment dataset, $m = 10$ and $n = 1$: each unit is described by a single feature, its floor area. The first apartment has $\mathbf{x}^{(1)} = [25]$ and $y^{(1)} = 6.7$. Different textbooks may adopt alternative notation, such as using $N$ for sample count.
+
+A **model** is a parameterized mathematical function $f$ that maps inputs to predictions:
+
+$$
+\hat{y} = f(\mathbf{x})
+$$
+
+$\hat{y}$ (pronounced "y-hat") represents the **predicted value**, distinguished from the ground-truth target $y$.
+
+The prediction error of $f$ is quantified by a **loss function**, denoted as $\mathcal{L}$: a scalar measure computed over pairs of predictions $\hat{y}^{(i)}$ and actual targets $y^{(i)}$, where larger discrepancies produce higher loss values. For regression tasks, the standard metric is the **mean squared error** (MSE): the arithmetic mean of squared prediction errors. The [Linear Regression](/en/ml/linear-regression/) lesson explains why squaring is standard practice.
+
+**Training** is the algorithmic process of selecting an optimal function $f$, from a chosen hypothesis class, such that the loss $\mathcal{L}$ over observed data is minimized. The hypothesis class may be the set of all straight lines, or a much richer family of non-linear functions. The internal values adjusted during training to configure $f$ are known as model **parameters**. Note that some algorithms operate differently: the `fit` method of K-Nearest Neighbors (KNN) in the code section simply stores the training instances, performing local nearest-neighbor lookups only at prediction time.
+
+:::note[Takeaway]
+Supervised learning: given $m$ samples $\left(\mathbf{x}^{(i)}, y^{(i)}\right)$, each with $n$ features, determine a mapping function $f$ such that predictions $\hat{y} = f(\mathbf{x})$ approximate target values $y$, with goodness of fit quantified by a loss function $\mathcal{L}$.
+:::
+
+### Regression and classification
+
+Supervised learning encompasses two primary problem paradigms, distinguished by the **data type of the target label** $y$:
+
+- **Regression**: the target label is a continuous numerical quantity that can take infinitely many real values. Examples include predicting apartment rents, tomorrow's temperature, or next quarter's revenue.
+- **Classification**: the target label is a discrete categorical outcome from a predefined set of classes. Examples include detecting spam vs non-spam, identifying a photo as a dog or cat, or predicting loan default vs timely repayment. While class labels are often encoded numerically (such as 0 and 1), these integers serve purely as category identifiers rather than continuous measurements, preserving the classification nature of the problem.
+
+The same apartment dataset can frame both tasks: predicting exact rental price in million VND is regression, whereas grouping rents into categorical bins such as "expensive" (10 million VND or higher) versus "affordable" turns the problem into binary classification, despite identical input features. The first code example implements this exact comparison.
+
+### The workflow: data, training, evaluation
+
+A standard supervised learning project follows a structured sequence of stages:
+
+1. **Collect labeled data**, such as 10 apartment records with confirmed rents.
+2. **Partition the data immediately**, using random sampling, into a **training set** for model learning and a held-out **test set** for final evaluation.
+3. **Train exclusively on the training set.** The model must never observe any test samples during fitting.
+4. **Evaluate on the test set**: compare predictions against ground-truth targets using an objective metric such as MSE.
+5. **Deploy the model** on newly incoming production data, provided performance benchmarks are satisfied.
+
+The test set functions as the "unseen exam" introduced in our intuitive thought experiment.
+
+### Generalization
+
+**Generalization** is a model's ability to perform accurately on new, previously unseen inputs that were not part of the training distribution. This represents the ultimate objective of machine learning. In-sample training error is almost always **optimistic**, because model parameters were directly optimized to minimize loss on those specific samples. A sufficiently flexible model can easily drive training error to zero by brute-force memorization, while failing catastrophically on fresh inputs. Because the test set is held out during training, test error provides an **unbiased estimate** of out-of-sample performance.
+
+When a model exhibits very low training error but substantially higher test error, it has learned spurious statistical noise and accidental idiosyncrasies specific to the training set. This failure mode is called **overfitting**, which is thoroughly analyzed in our dedicated Overfitting and Underfitting lesson.
+
+A rigorous test set must be sufficiently large, representative of production deployment conditions, and completely isolated from the training distribution.
+
+### Limitations
+
+- **Small test sets produce high-variance performance estimates.** With only 10 total apartment samples, holding out 30% leaves just 3 test units (as shown in our second code cell).
+- **Test sets suffer wear and tear when reused repeatedly** for hyperparameter tuning or architectural modifications (addressed in our Common Pitfalls section). Mitigating this requires a separate **validation set**, introduced in subsequent lessons.
+- **Models can only learn from the data distribution they observe.** If training data is biased or unrepresentative, both model predictions and evaluation scores will be skewed. Extrapolating beyond observed feature boundaries frequently results in erroneous predictions, as detailed in the [Linear Regression](/en/ml/linear-regression/) lesson.
+
+## Illustration
+
+The diagram below illustrates the supervised learning workflow using our apartment rental dataset, mirroring the implementation in our second code cell. Observe the held-out test split: its single outgoing connector routes directly into final evaluation, bypassing model training entirely.
+
+{/* FIG: the test set is separated upfront and used strictly for evaluation, never entering training. */}
+<MlWorkflowFigure />
+
+With `random_state=4`, the second code cell allocates 3 apartments (42, 75, and 48 m²) to the test set, reserving the remaining 7 apartments for training.
+
+## Code examples
+
+The two code cells below run independently in your browser; you can execute either first. The initial run takes a moment as the browser runtime loads the scikit-learn WebAssembly package.
+
+The first cell treats algorithms as standardized components via two uniform operations: `fit` to learn parameters, and `predict` to generate outputs. It solves both paradigms on the same apartment table: predicting rental value via regression, followed by classifying units into affordable or expensive categories.
+
+<PythonRunner code={fitPredictCode} title="fit and predict: regression and classification" />
+
+The regression model predicts 8.82 million VND for a 40 m² apartment and 13.06 million VND for a 65 m² unit. The classification model labels the 40 m² unit as `cheap` (affordable) and the 65 m² unit as `expensive`. Classification here uses K-Nearest Neighbors (KNN): it queries the 3 nearest apartments by floor area and applies majority voting. For 40 m², the three nearest neighbors are 42, 36, and 48 m², all belonging to the affordable class.
+
+Despite fundamentally different internal mechanics, both estimators expose identical interfaces: instantiate the estimator, invoke `fit(X, y)`, and call `predict`. Nearly all scikit-learn models adhere to this design pattern. Because feature matrix `X` must be two-dimensional ($m$ rows by $n$ columns), single features require `.reshape(-1, 1)`. Switching to classification requires modifying only the **target vector** `y`, leaving input `X` unchanged. The Linear Regression lesson unpacks the mathematics inside `LinearRegression`.
+
+The second cell executes the complete workflow outlined in our illustration. `train_test_split` holds out 30% of records for testing, while `random_state` fixes the random seed to guarantee reproducible splits. It benchmarks `LinearRegression` against a non-parametric memorization baseline: predicting rental price by looking up the nearest training neighbor's exact price (`KNeighborsRegressor(n_neighbors=1)`). Finally, it examines performance across two alternate splits.
+
+<PythonRunner code={trainTestSplitCode} title="Train/test split and evaluation" />
+
+Performance under the primary split from our illustration (test set containing the 42, 75, and 48 m² apartments):
+
+| Model | Train MSE | Test MSE |
+|---|---:|---:|
+| Linear Regression | 0.2190 | 1.0007 |
+| 1-NN Memorization | 0.0000 | 2.6267 |
+
+Judged solely by training error, the 1-NN memorization baseline appears flawless: its train MSE is exactly 0.0000, since the nearest neighbor of any training sample is itself. Yet on the 3 unseen test apartments, its MSE is approximately 2.6 times higher than the linear model. It blindly memorizes the individual idiosyncrasies of neighbor samples (such as floor level or furnishings). Almost the entire test error stems from the 48 m² unit: its nearest training neighbor is a 55 m² unit costing 12.2 million VND, whereas the true rent is only 9.4 million VND. The linear model, by contrast, captures the overarching trend that larger floor area generally commands higher rent.
+
+Now consider the final comparison across different random splits. This highlights a critical lesson in machine learning evaluation:
+
+| Split seed | Test apartments (m²) | Linear Regression Test MSE | 1-NN Memorization Test MSE |
+|---|---|---:|---:|
+| `random_state=4` | 42, 75, 48 | 1.0007 | 2.6267 |
+| `random_state=8` | 75, 60, 85 | 0.6799 | 2.4567 |
+| `random_state=2` | 48, 30, 55 | 0.7327 | 0.1467 |
+
+Using identical models and identical datasets, merely altering which 3 apartments land in the test set causes the linear model's test MSE to swing between 0.68 and 1.00, while the memorization model drops from 2.63 all the way down to 0.15. Under `random_state=2`, the memorization model actually **outperforms** linear regression, because the nearest training neighbors happen to differ in rent by only 0.2 to 0.6 million VND. Because test MSE averages just three error terms here, a single fortunate or unfortunate sample heavily shifts the score.
+
+Consequently, with only 10 samples, a single train/test split is **insufficient** to draw definitive conclusions about model superiority. Real-world machine learning applications typically involve hundreds of thousands or millions of samples, providing sufficiently large test sets for stable error estimation. When working with small datasets, practitioners utilize cross-validation (repeating splits multiple times and averaging results), covered in upcoming lessons.
+
+## Common pitfalls
+
+:::caution[Evaluating a model on the data it was trained on]
+In our second code cell, the 1-NN baseline achieves a train MSE of 0.0000, yet its test MSE on unseen apartments is 2.6 times higher than linear regression. In-sample training score only reflects how thoroughly an algorithm memorized historical inputs. Always partition a test set **prior to** model fitting, and assess predictive quality based on held-out test metrics.
+:::
+
+:::caution[Letting test data leak into training]
+A test set provides an honest evaluation only when the model has never encountered it during development. Two subtle issues frequently compromise this boundary:
+
+- **Duplicate samples.** An identical apartment record appears twice in the raw data, landing once in training and once in testing. The model correctly predicts the test instance simply by recalling the duplicate training instance.
+- **Selecting models using the test set.** Testing a configuration, examining test error, tweaking hyperparameters, and repeating the cycle. After multiple iterations, the chosen model inevitably overfits the nuances of those specific test samples, resulting in overly optimistic evaluation scores. Always conduct model selection and hyperparameter tuning on an independent validation set, reserving the test set exclusively for final verification.
+
+These flaws are categorized as **data leakage**. The standard defense: partition the test set immediately upon data ingestion, and treat it as non-existent until final evaluation.
+:::
+
+:::caution[Guessing problem type from the algorithm's name]
+Logistic regression contains the word "regression" in its name, yet is fundamentally a **classification** model. Conversely, algorithms like K-Nearest Neighbors natively handle both tasks (`KNeighborsClassifier` and `KNeighborsRegressor`). Always inspect target variable $y$: if it represents a continuous measurement (price, temperature), the problem is regression; if it represents discrete categories, even if encoded as 0 and 1, the problem is classification.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Machine learning enables computers to extract predictive rules directly from data examples. The three primary paradigms are supervised learning (learning from ground-truth labels), unsupervised learning (discovering intrinsic structure), and reinforcement learning (learning from sequential rewards).
+- Supervised learning maps $m$ samples $\left(\mathbf{x}^{(i)}, y^{(i)}\right)$ with $n$ input features to predictions $\hat{y} = f(\mathbf{x})$ that minimize a loss function $\mathcal{L}$. Target variables representing continuous measurements define regression; categorical targets define classification.
+- Standard machine learning workflow: hold out a test set upfront, fit parameters strictly on the training set, and evaluate out-of-sample performance on the test set. In scikit-learn, this maps directly to `train_test_split`, `fit`, and `predict`.
+- The primary goal of learning is generalization. Training scores are inherently optimistic; memorization baselines can achieve perfect training accuracy while performing poorly on new inputs. Small test sets introduce high variance in error estimation.
+
+**Further reading:**
+
+- Vũ Hữu Tiệp (2016). [*Machine Learning cơ bản*, Lesson 2: Categorization of Machine Learning Algorithms](https://machinelearningcoban.com/2016/12/27/categories/). Comprehensive introductory overview in Vietnamese with intuitive examples for each learning paradigm.
+- Google (updated 2025). [*Machine Learning Crash Course*: Dividing the original dataset](https://developers.google.com/machine-learning/crash-course/overfitting/dividing-datasets), Datasets, generalization, and overfitting section. Practical rationale for partitioning train, validation, and test sets.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Cross-validation](https://scikit-learn.org/1.8/modules/cross_validation.html), section 3.1: why models should never be evaluated on training data. See also documentation for [`train_test_split`](https://scikit-learn.org/1.8/modules/generated/sklearn.model_selection.train_test_split.html).
+- Mitchell, T. M. (1997). [*Machine Learning*](https://www.cs.cmu.edu/~tom/mlbook.html), McGraw-Hill. Seminal textbook providing the foundational operational definition of machine learning referenced in our Intuition section.
+- Samuel, A. L. (1959). [*Some Studies in Machine Learning Using the Game of Checkers*](https://doi.org/10.1147/rd.33.0210), IBM Journal of Research and Development 3(3). Historic landmark paper demonstrating self-improving computer learning through board game evaluation.
+
+<LessonProgress />

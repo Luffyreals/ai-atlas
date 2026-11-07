@@ -1,0 +1,354 @@
+---
+title: Ridge, Lasso, and Elastic Net
+description: Degree-15 polynomials overfit due to gargantuan coefficients. Ridge (L2) and Lasso (L1) penalize large weights. Why L1 produces exact zeros, feature standardization, and tuning λ via cross-validation.
+quiz:
+  - question: 'You fit Ridge on two features: length measured in meters and weight in kilograms, without standardization. A colleague converts the length column to centimeters and re-fits with the same $\lambda$. What happens?'
+    options:
+      - 'Nothing changes, because predictions are invariant to measurement units'
+      - 'The length coefficient shrinks by a factor of 100 and is penalized far less, altering the fitted model'
+      - 'The length coefficient grows 100 times larger and is penalized much more heavily'
+      - 'Only the intercept term $b$ changes'
+    answer: 1
+    explanation: 'Scaling feature values by 100 means that matching the original prediction requires a coefficient 100 times smaller, reducing the penalty $\lambda w^2$ by a factor of 10 000. Because the penalty balance shifted, the optimal solution changes. Unpenalized least squares is scale-invariant, but regularized least squares is not. Standardizing features before applying regularization removes this unit dependence.'
+  - question: 'For a single standardized feature, ordinary least squares gives $c = -0.5$. With Lasso, the objective function is $(w - c)^2 + \lambda\lvert w\rvert$ (ignoring additive constants). For $\lambda = 0.6$, what is the optimal $w$?'
+    options: ['$0$', '$-0.3125$', '$0.1$', '$-0.2$']
+    answer: 3
+    explanation: 'The threshold is $\lambda/2 = 0.3$. Because $\lvert c\rvert = 0.5$ exceeds this threshold, $w$ does not collapse to 0: Lasso shrinks $c$ toward 0 by an offset of $0.3$, yielding $w = -0.5 + 0.3 = -0.2$. The value $-0.3125$ is the Ridge solution $c/(1 + \lambda)$. The value $0.1$ results from forgetting to halve $\lambda$ and overshooting zero. Lasso sets $w = 0$ strictly when $\lvert c\rvert \le \lambda/2$.'
+  - question: 'Given $m = 50$ training instances and $\lambda = 0.02$, you wish to fit Ridge with objective $\mathcal{L} + \lambda\lVert\mathbf{w}\rVert_2^2$ and Lasso with $\mathcal{L} + \lambda\lVert\mathbf{w}\rVert_1$, where $\mathcal{L}$ is MSE (divided by $m$). How should this be written in scikit-learn?'
+    options:
+      - '`Ridge(alpha=1.0)` and `Lasso(alpha=0.01)`'
+      - '`Ridge(alpha=0.02)` and `Lasso(alpha=0.02)`'
+      - '`Ridge(alpha=0.01)` and `Lasso(alpha=1.0)`'
+      - '`Ridge(alpha=0.0004)` and `Lasso(alpha=0.01)`'
+    answer: 0
+    explanation: '`Ridge` in scikit-learn optimizes the sum of squared residuals without dividing by $m$, so `alpha` $= m\lambda = 50 \cdot 0.02 = 1.0$. `Lasso` applies a $\frac{1}{2m}$ factor before the sum of squares (half MSE), meaning `alpha` $= \lambda/2 = 0.01$. Passing $\lambda$ directly into both constructors (option 2) is a frequent mistake: Ridge would receive a penalty 50 times too weak.'
+  - question: 'Cross-validation on the training set selects $\lambda = 1$. Subsequently, you test various values on the test set and discover that $\lambda = 0.01$ achieves a lower test MSE. What should you do?'
+    options:
+      - 'Switch to $\lambda = 0.01$ and report its test MSE, because the test set represents real data'
+      - 'Average the two penalty values, setting $\lambda \approx 0.5$'
+      - 'Retain $\lambda = 1$ and report its test MSE; the optimal value on the test set serves purely as diagnostic context'
+      - 'Choose the $\lambda$ value that yields the lowest training MSE'
+    answer: 2
+    explanation: 'Selecting $\lambda$ based on test set scores allows test data to contaminate hyperparameter tuning, producing an overly optimistic estimate that fails to represent genuine generalization. Cross-validation may yield more conservative regularizers than the post-hoc empirical optimum on test data (as shown in code cell 3), but it represents the only honest protocol. Training MSE always minimizes at the smallest $\lambda$, so it cannot guide tuning.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import DatasetTable from '@components/DatasetTable.astro';
+import RegularizationGeometryFigure from '@components/figures/RegularizationGeometryFigure.astro';
+import RegularizationViz from '@components/viz/RegularizationViz.astro';
+import ridgeCode from '@code/ml/regularization/ridge.en.py?raw';
+import lassoCode from '@code/ml/regularization/lasso.en.py?raw';
+import chooseLambdaCode from '@code/ml/regularization/choose-lambda.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Understand regularization as augmenting the loss function with a penalty term against large weights, and explain why this tames overfitting in high-capacity models.
+- Derive the closed-form analytical solution for Ridge regression directly from the regularized normal equation.
+- Explain why Lasso forces coefficients to become exactly 0 while Ridge only shrinks them, through both single-variable calculus and geometric level curves.
+- Implement Ridge, Lasso, and Elastic Net pipelines in scikit-learn with feature standardization, convert theoretical $\lambda$ to package `alpha` parameters, and select optimal regularization strengths via cross-validation.
+
+## Prerequisites
+
+{/* The list comes from the lesson's prerequisites in roadmap.ts. Do not write the links by hand. */}
+
+<Prerequisites />
+
+:::tip[Quick reminder]
+This lesson revisits two foundational concepts. First, the **normal equation** $\mathbf{X}^\top\mathbf{X}\boldsymbol{\theta} = \mathbf{X}^\top\mathbf{y}$ from [Linear Regression](/en/ml/linear-regression/): setting the gradient of MSE to zero expressed in matrix form. Second, the **degree-15 polynomial** from [Overfitting and Underfitting](/en/ml/overfitting-underfitting/), fitted to 16 noisy sinusoidal points: zero training MSE, but an explosive test MSE around 133, compared to a well-tempered degree-3 model scoring 0.0754.
+:::
+
+## Intuition
+
+Recall Carol from our previous lesson: her degree-15 polynomial passed through all 16 training points, but oscillated wildly between observations. Our earlier fix was lowering the degree to 3. This lesson explores the promised alternative: **keep degree 15**, but restrain the curve from contorting arbitrarily.
+
+The degree-15 curve achieved its violent contortions through coefficients scaling into the tens of billions, alternating in sign: one power term pulls the curve upward furiously, and an adjacent term pulls downward with nearly equal force. At the 16 training coordinates, these massive opposing forces cancel out almost perfectly; between training points, the slightest mismatch catapults the curve off the charts. Bob's smooth degree-3 wave required no such extreme coefficients. In short: **astronomical coefficients are the primary symptom of overfitting**.
+
+Imagine charging a progressive tax on every coefficient proportional to its magnitude. The learning algorithm must balance two competing objectives: fitting training points closely (low MSE) while keeping coefficient taxes low (small weights). Spending large coefficient budgets to chase a stray noise particle is no longer economically viable. Two practical questions remain:
+
+- **How heavy should the tax be?** Too lenient, and the model still overfits. Too punitive, and coefficients are crushed toward zero, collapsing the curve into a flat horizontal line (underfitting). The penalty rate is hyperparameter $\lambda$.
+- **How should the tax be structured?** Proportional to squared coefficients (Ridge) or absolute values (Lasso). Crucially, Lasso drives many coefficients to **exactly zero**, whereas Ridge does not.
+
+We use the same 24 points from the previous lesson: 16 training points for fitting, 8 test points for evaluation.
+
+<details>
+<summary>View the 24-point dataset</summary>
+
+<DatasetTable dataset="sine-train" />
+
+<DatasetTable dataset="sine-test" />
+
+</details>
+
+The mission of this lesson is: **retain the degree-15 polynomial, augment MSE with a penalty on large weights, and tune penalty strength empirically so the curve relaxes into a smooth function that accurately predicts new inputs.**
+
+## Theory
+
+### The penalized objective function
+
+The underlying model remains a degree-15 polynomial, structured as linear regression over $n = 15$ engineered features: $\hat{y} = \mathbf{w}^\top\mathbf{x} + b$. The empirical loss $\mathcal{L}$ remains MSE over $m = 16$ training instances. **Regularization** replaces minimizing $\mathcal{L}$ with minimizing a joint **objective function** $J$, combining data fidelity with a complexity penalty:
+
+$$
+\begin{aligned}
+\text{Ridge:}\quad J(\mathbf{w}, b) &= \mathcal{L}(\mathbf{w}, b) + \lambda\lVert\mathbf{w}\rVert_2^2 \\
+\text{Lasso:}\quad J(\mathbf{w}, b) &= \mathcal{L}(\mathbf{w}, b) + \lambda\lVert\mathbf{w}\rVert_1
+\end{aligned}
+$$
+
+- $\lambda \ge 0$ is the **penalty strength** hyperparameter. Setting $\lambda = 0$ recovers ordinary least squares (Carol's interpolating curve).
+- $\lVert\mathbf{w}\rVert_2^2 = w_1^2 + \dots + w_n^2$ is the squared **L2 norm** (squared Euclidean length). $\lVert\mathbf{w}\rVert_1 = \lvert w_1\rvert + \dots + \lvert w_n\rvert$ is the **L1 norm** (Manhattan length). Hence, Ridge is L2 regularization, and Lasso is L1 regularization.
+- **The intercept $b$ is never penalized.** The intercept merely translates the entire curve vertically without altering curvature. Penalizing $b$ artificially drags predictions toward $y = 0$.
+
+Ridge was formulated by Hoerl and Kennard (1970). Lasso was introduced by Robert Tibshirani (1996), standing for "least absolute shrinkage and selection operator": it simultaneously performs parameter **shrinkage** and feature **selection**.
+
+### Standardizing features before penalization
+
+The penalty applies uniform weight to all $w_j$, but the scale of $w_j$ inversely depends on the measurement unit of feature $x_j$. If $x_j$ is converted from meters to centimeters, its values grow by 100, forcing $w_j$ to shrink by 100 to maintain identical predictions, which reduces penalty $\lambda w_j^2$ by 10 000. Changing arbitrary units alters the resulting mathematical fit.
+
+The standard solution is **feature standardization**: $z_j = (x_j - \mu_j)/\sigma_j$, where $\mu_j$ and $\sigma_j$ are the sample mean and standard deviation estimated **on training data** (`StandardScaler`). Standardized features have mean 0 and variance 1, ensuring equitable penalization. In polynomial models, $z_k = (x^k - \mu_k)/\sigma_k$, and $w_k$ corresponds to standardized term $z_k$.
+
+### Ridge: closed-form solution
+
+Let $\mathbf{X}$ denote the $m \times n$ matrix where row $i$, column $k$ holds $z^{(i)}_k$. Unlike unpenalized regression, $\mathbf{X}$ **omits** the intercept column of ones, because $b$ is solved independently. Because each column is zero-centered, column sums vanish: $\mathbf{X}^\top\mathbf{1} = \mathbf{0}$, where $\mathbf{1}$ is the vector of ones. The Ridge objective is:
+
+$$
+J(\mathbf{w}, b) = \frac{1}{m}\left\lVert\mathbf{X}\mathbf{w} + b\mathbf{1} - \mathbf{y}\right\rVert^2 + \lambda\lVert\mathbf{w}\rVert_2^2
+$$
+
+**Step 1: solve for $b$.** The penalty excludes $b$, so the partial derivative with respect to $b$ matches standard regression: $\frac{2}{m}\sum_{i}\left(\hat{y}^{(i)} - y^{(i)}\right)$. Setting this to zero and substituting $\hat{y}^{(i)} = \sum_{k} w_k z^{(i)}_k + b$:
+
+$$
+\sum_{k} w_k \underbrace{\sum_{i} z^{(i)}_k}_{=\,0} + mb = \sum_{i} y^{(i)}
+\quad\Longrightarrow\quad b = \bar{y}
+$$
+
+Because every standardized column sums to zero, $b$ strictly equals the training sample mean $\bar{y}$, **regardless of** $\lambda$.
+
+**Step 2: substitute $b = \bar{y}$.** Define centered labels $\mathbf{y}_c = \mathbf{y} - \bar{y}\mathbf{1}$. Then $\mathbf{X}\mathbf{w} + \bar{y}\mathbf{1} - \mathbf{y} = \mathbf{X}\mathbf{w} - \mathbf{y}_c$, isolating $\mathbf{w}$:
+
+$$
+J(\mathbf{w}) = \frac{1}{m}\left\lVert\mathbf{X}\mathbf{w} - \mathbf{y}_c\right\rVert^2 + \lambda\left(w_1^2 + \dots + w_n^2\right)
+$$
+
+**Step 3: compute gradient with respect to $\mathbf{w}$ and set to zero.** As in ordinary least squares, the gradient of the MSE term is $\frac{2}{m}\mathbf{X}^\top(\mathbf{X}\mathbf{w} - \mathbf{y}_c)$. The gradient of $\lambda w_j^2$ is $2\lambda w_j$, assembling into vector $2\lambda\mathbf{w}$:
+
+$$
+\frac{2}{m}\mathbf{X}^\top\left(\mathbf{X}\mathbf{w} - \mathbf{y}_c\right) + 2\lambda\mathbf{w} = \mathbf{0}
+$$
+
+**Step 4: isolate parameter vector $\mathbf{w}$.**
+
+$$
+\begin{aligned}
+\mathbf{X}^\top\mathbf{X}\mathbf{w} - \mathbf{X}^\top\mathbf{y}_c + m\lambda\mathbf{w} &= \mathbf{0} \\
+\mathbf{X}^\top\mathbf{X}\mathbf{w} + m\lambda\mathbf{I}\mathbf{w} &= \mathbf{X}^\top\mathbf{y}_c \\
+\left(\mathbf{X}^\top\mathbf{X} + m\lambda\mathbf{I}\right)\mathbf{w} &= \mathbf{X}^\top\mathbf{y}_c
+\end{aligned}
+$$
+
+Multiply through by $\frac{m}{2}$ and expand. Factor $\mathbf{w} = \mathbf{I}\mathbf{w}$, where $\mathbf{I}$ is the $n \times n$ identity matrix. Finally, $\mathbf{X}^\top\mathbf{y}_c = \mathbf{X}^\top\mathbf{y} - \bar{y}\,\mathbf{X}^\top\mathbf{1} = \mathbf{X}^\top\mathbf{y}$, yielding:
+
+$$
+\left(\mathbf{X}^\top\mathbf{X} + m\lambda\mathbf{I}\right)\mathbf{w} = \mathbf{X}^\top\mathbf{y}, \qquad b = \bar{y}
+$$
+
+Compared to the standard normal equation, this simply adds $m\lambda$ along the diagonal. This modest diagonal boost changes everything:
+
+- **Always invertible for $\lambda > 0$.** For any non-zero vector $\mathbf{v}$, $\mathbf{v}^\top\left(\mathbf{X}^\top\mathbf{X} + m\lambda\mathbf{I}\right)\mathbf{v} = \lVert\mathbf{X}\mathbf{v}\rVert^2 + m\lambda\lVert\mathbf{v}\rVert^2 > 0$, guaranteeing positive definiteness and unique invertibility, even under severe collinearity or when features outnumber samples ($n > m$).
+- **Translating to code.** Scikit-learn's `Ridge` minimizes unscaled residual sum of squares $\lVert\mathbf{y} - \mathbf{X}\mathbf{w}\rVert^2 + \alpha\lVert\mathbf{w}\rVert_2^2$, which equals $m \cdot J$ when setting $\alpha = m\lambda$. Hence, our implementation sets `Ridge(alpha=m * lam)`.
+
+:::note[Takeaway]
+Ridge on standardized features yields $\left(\mathbf{X}^\top\mathbf{X} + m\lambda\mathbf{I}\right)\mathbf{w} = \mathbf{X}^\top\mathbf{y}$ with $b = \bar{y}$. This regularized normal equation adds $m\lambda$ along the main diagonal, guaranteeing a unique closed-form solution for any $\lambda > 0$.
+:::
+
+### Why coefficients shrink: the 1D case
+
+Consider a single standardized feature $z$, satisfying $\frac{1}{m}\sum_i \left(z^{(i)}\right)^2 = 1$. Let $c = \frac{1}{m}\sum_i z^{(i)}y^{(i)}_c$ and $s = \frac{1}{m}\sum_i\left(y^{(i)}_c\right)^2$. Expanding MSE in terms of $w$:
+
+$$
+\begin{aligned}
+\frac{1}{m}\sum_{i}\left(wz^{(i)} - y^{(i)}_c\right)^2
+&= w^2\cdot\frac{1}{m}\sum_i\left(z^{(i)}\right)^2 - 2w\cdot\frac{1}{m}\sum_i z^{(i)}y^{(i)}_c + s \\
+&= w^2 - 2wc + s \\
+&= (w - c)^2 + s - c^2
+\end{aligned}
+$$
+
+Because $s - c^2$ is independent of $w$, MSE forms a parabola centered at $c$, which represents the unpenalized least-squares solution.
+
+Under Ridge regularization, we minimize $(w - c)^2 + \lambda w^2$. Setting the derivative to zero:
+
+$$
+2(w - c) + 2\lambda w = 0 \quad\Longrightarrow\quad w = \frac{c}{1 + \lambda}
+$$
+
+Ridge **divides** $c$ by factor $1 + \lambda > 1$: the weight scales down smoothly while preserving its original sign, but never reaches absolute zero unless $c = 0$.
+
+In multidimensional problems, Ridge shrinks most aggressively along directions where empirical data provides the least evidentiary support. Collinear polynomial features (such as $z_{14}$ and $z_{15}$ having correlation 0.9996) allow opposing weights to explode with negligible effect on MSE. Even a minuscule penalty squashes these unstable directions.
+
+### Why Lasso produces exact zeros
+
+**Single-variable calculus.** Under Lasso, we minimize $(w - c)^2 + \lambda\lvert w\rvert$. Because absolute value $\lvert w\rvert$ is non-differentiable at zero, we evaluate piecewise:
+
+- **$w > 0$**: derivative is $2(w - c) + \lambda$, vanishing at $w = c - \frac{\lambda}{2}$, valid strictly when $c > \frac{\lambda}{2}$.
+- **$w < 0$**: derivative is $2(w - c) - \lambda$, vanishing at $w = c + \frac{\lambda}{2}$, valid strictly when $c < -\frac{\lambda}{2}$.
+- **When $\lvert c\rvert \le \frac{\lambda}{2}$**: the right derivative $2w + (\lambda - 2c)$ is strictly positive for $w > 0$, while the left derivative $2w - (\lambda + 2c)$ is strictly negative for $w < 0$. The objective increases in both directions away from zero, achieving its global minimum at **$w = 0$**.
+
+$$
+w =
+\begin{cases}
+c - \frac{\lambda}{2}, & c > \frac{\lambda}{2} \\
+0, & \lvert c\rvert \le \frac{\lambda}{2} \\
+c + \frac{\lambda}{2}, & c < -\frac{\lambda}{2}
+\end{cases}
+$$
+
+Lasso **subtracts** a constant threshold offset $\frac{\lambda}{2}$ from magnitude $\lvert c\rvert$ and clamps at zero—an operation called soft-thresholding. Comparing both methods for $c = 0.3$:
+
+| $\lambda$ | Ridge: $c/(1 + \lambda)$ | Lasso |
+|---:|---:|---:|
+| 0.2 | 0.25 | 0.2 |
+| 0.4 | 0.2143 | 0.1 |
+| 1 | 0.15 | 0 |
+
+The root difference lies in the **slope of the penalty near the origin**. The Ridge penalty $\lambda w^2$ has derivative $2\lambda w$, which flattens to zero as $w \to 0$; even the weakest empirical signal pulls $w$ away from zero. The Lasso penalty $\lambda\lvert w\rvert$ maintains a constant slope of $\lambda$ all the way to the origin: data evidence ($2\lvert c\rvert$) must overcome threshold $\lambda$ for $w$ to escape zero.
+
+**Geometric intuition.** It can be shown that each $\lambda$ maps to a constraint budget $t$ framing an equivalent problem: **minimize MSE subject to weight budget $\lVert\mathbf{w}\rVert \le t$**. In 2D parameter space, the Ridge constraint region $w_1^2 + w_2^2 \le t$ is a smooth **circle**; the Lasso constraint $\lvert w_1\rvert + \lvert w_2\rvert \le t$ is a rotated square (**diamond**) with sharp vertices anchored on coordinate axes. Contours of MSE form concentric ellipses centered at the unconstrained minimum. Expanding ellipses contact the constraint boundary at the constrained optimum.
+
+Because circles lack protruding corners, contact typically occurs along smooth arcs where both parameters remain non-zero. The diamond possesses sharp vertices along coordinate axes, making it highly probable for expanding ellipses to touch a vertex first, setting one weight exactly to zero. In 15 dimensions, the L1 cross-polytope has many vertices and low-dimensional facets, zeroing out numerous features simultaneously and producing **sparse models**.
+
+{/* FIG: level ellipses contact the circle where both weights are non-zero, but hit the diamond at a vertex on the axis. */}
+<RegularizationGeometryFigure />
+
+Lasso lacks an analytical closed-form solution. Scikit-learn optimizes Lasso via coordinate descent: cycling through coefficients sequentially, applying 1D soft-thresholding at each update.
+
+### Elastic Net
+
+Elastic Net (Zou and Hastie, 2005) combines both penalty structures:
+
+$$
+J(\mathbf{w}, b) = \mathcal{L}(\mathbf{w}, b) + \lambda_1\lVert\mathbf{w}\rVert_1 + \lambda_2\lVert\mathbf{w}\rVert_2^2
+$$
+
+Setting $\lambda_2 = 0$ yields Lasso; setting $\lambda_1 = 0$ yields Ridge. When features exhibit severe multicollinearity (such as $z_{14}$ and $z_{15}$), Lasso tends to pick one arbitrarily and zero out the other. The L2 component encourages correlated features to share weights jointly, while the L1 component preserves exact sparsity. In scikit-learn, hyperparameters map to `alpha` and `l1_ratio` (detailed in code cell 3).
+
+### Tuning λ
+
+Penalty weight $\lambda$ is a hyperparameter tuned identically to polynomial degree: scan candidate values across a geometric grid (typically powers of 10), identify the setting minimizing cross-validation MSE, re-fit the entire training set, and score **once** on the test set. Encapsulate `StandardScaler` **inside** the pipeline to ensure cross-validation folds compute normalization statistics strictly on their respective training partitions.
+
+### Limitations
+
+- **Cannot overcome poor model family choices.** On this dataset, regularized degree-15 polynomials still fall short of an unpenalized degree-3 model (see benchmark table).
+- **Optimal $\lambda$ shows variance on small sample sizes.**
+- **Lasso feature selection is unstable under severe collinearity.** Do not interpret retained features as absolute ground-truth indicators of physical importance.
+- **Broad applicability.** Regularization generalizes beyond linear regression: logistic regression and deep neural networks routinely employ L2 weight decay.
+
+## Illustration
+
+Explore regularization interactively. The plot displays 16 training samples (solid dots), 8 test samples (open circles), and the regularized degree-15 polynomial curve. The slider navigates 17 discrete penalty values: 0, followed by logarithmic steps from $10^{-14}$ to $10$. Toggling **Ridge** and **Lasso** compares penalty types at identical $\lambda$. The lower panel displays empirical MSE scores, exact zero counts, and individual coefficient bar magnitudes $w_k$. Try:
+
+1. Initial state: Ridge at $\lambda = 0$: interpolates all training dots, test MSE is 133.20, and all coefficient bars clip the chart.
+2. Advance to $\lambda = 0.001$: train MSE is 0.0491, test MSE reaches 0.0894 (slider minimum, marked ✓), and all bars stay well within bounds.
+3. Switch to **Lasso**: train MSE is 0.0314, test MSE improves to 0.0851, and 10 of 15 coefficients become exactly zero, leaving only $k \in \{1, 2, 4, 9, 15\}$.
+4. Advance to $\lambda = 10$: Ridge yields train MSE 0.3148, test MSE 0.4750 (underfitting). Lasso zeros out all 15 weights, flattening into a horizontal line at sample mean $\bar{y} = 0.0831$.
+
+The checkmark highlights test set minima for pedagogical demonstration (which cannot be done in production). The Lasso trajectory is pre-calculated using high-precision optimization because standard coordinate descent converges sluggishly at tiny penalties.
+
+{/* VIZ: moderate λ minimizes test MSE; Lasso sets coefficients to zero, Ridge shrinks them smoothly. */}
+<RegularizationViz />
+
+## Code examples
+
+The three cells below run independently. Each loads the 24-point dataset self-containedly. Pipelines consistently chain `PolynomialFeatures` to generate $x, \dots, x^{15}$, `StandardScaler` to normalize terms, and regularized estimators. Access the final estimator via `model[-1]`, exposing `coef_` ($w_k$) and `intercept_` ($b$).
+
+### Ridge across penalty strengths
+
+The first cell evaluates Ridge across five orders of magnitude, reporting error metrics, maximum coefficient magnitude, and intercept $b$.
+
+<PythonRunner code={ridgeCode} title="Ridge on degree-15 polynomial" />
+
+A minuscule penalty of $\lambda = 10^{-12}$ slashes test MSE from ~133 down to 0.5375, bringing maximum weights down from billions to 26 594.49. At $\lambda = 0.001$, test MSE achieves its minimum (0.0894) with maximum coefficient down to 2.75. At $\lambda = 10$, training MSE surges to 0.3148—worse than a simple straight line (0.1663)—exhibiting severe underfitting. Intercept $b$ remains constant at $0.0831$ (matching training mean $\bar{y}$) across all runs, validating Step 1.
+
+### Lasso and sparse coefficients
+
+The second cell evaluates Lasso across three penalty strengths, counting exact zeros (`w == 0`) and listing surviving features. Ridge at $\lambda = 0.001$ serves as a comparison baseline.
+
+<PythonRunner code={lassoCode} title="Lasso: counting zero coefficients" />
+
+- At $\lambda = 0.001$, Lasso achieves test MSE 0.0851 (edging out Ridge's 0.0894) while retaining only 5 active features: $k \in \{1, 2, 4, 9, 15\}$. At $\lambda = 0.01$, active features drop to 4; at $\lambda = 0.1$, only 3 remain.
+- Ridge at identical strength $\lambda = 0.001$ has 0 zero coefficients; its smallest weight is 0.07, small but non-zero.
+
+Active indices shift non-monotonically between adjacent runs (e.g. trading powers 4 and 9 for 6 and 7) due to high collinearity among normalized powers—the exact motivation behind Elastic Net. We avoid $\lambda \le 10^{-4}$ because coordinate descent struggles to converge at extreme limits.
+
+### Selecting λ via cross-validation
+
+The third cell tunes $\lambda$ exclusively on 16 training points using 4-fold cross-validation (`KFold(n_splits=4, shuffle=True, random_state=0)`). Ridge evaluates a logarithmic grid from $10^{-6}$ to 10. Lasso and Elastic Net ($\lambda_1 = \lambda_2 = \lambda$) evaluate 0.01 and 0.1 to avoid fold-level convergence warnings.
+
+<PythonRunner code={chooseLambdaCode} title="Selecting λ via cross-validation" />
+
+Cross-validation selects **Ridge $\lambda = 0.1$** (CV MSE 0.1605), producing an honest test MSE of 0.1747. It does **not** pick $\lambda = 0.001$, which achieved post-hoc optimality on test points: under CV, $\lambda = 0.001$ scored 0.3409 (twice as high).
+
+Why the difference? Test points happen to interleave neatly between training samples ($x \in [0.06, 0.94]$). Cross-validation folds, by contrast, occasionally leave outer boundary points (like $x = 0.03$ or $0.98$) unobserved, forcing candidate polynomials to extrapolate into empty margins. Lightly regularized high-degree curves swing violently at boundaries: when holding out $x = 0.98$, squared error at that point is 0.88 under $\lambda = 0.001$ but only 0.02 under $\lambda = 0.1$. Cross-validation penalizes boundary volatility heavily, favoring stronger regularizers. The resulting 0.1747 test score is realistic and unbiased.
+
+Lasso selects $\lambda = 0.01$: test MSE is 0.1341 with 11 zero coefficients. Elastic Net selects $\lambda = 0.01$: CV MSE is 0.1696, test MSE is 0.1481, and 6 coefficients become zero because L2 sharing prevents dropping collinear groups entirely.
+
+### Is regularization worthwhile?
+
+| Model | Selection protocol | Test MSE |
+|---|---|---:|
+| Degree 15, unregularized | | ~133 |
+| Degree 3, unregularized | Cross-validation (previous lesson) | 0.0754 |
+| Ridge degree 15, $\lambda = 0.001$ | Test set inspection (invalid protocol) | 0.0894 |
+| Lasso degree 15, $\lambda = 0.001$ | Test set inspection (invalid protocol) | 0.0851 |
+| Ridge degree 15, $\lambda = 0.1$ | Cross-validation | 0.1747 |
+| Lasso degree 15, $\lambda = 0.01$ | Cross-validation | 0.1341 |
+| Elastic Net degree 15, $\lambda = 0.01$ | Cross-validation | 0.1481 |
+
+Directly put: **on this specific dataset, choosing the correct degree 3 remains superior**. Even when unfairly cherry-picking optimal $\lambda$ from test observations, Ridge lags degree 3 by ~19%, and Lasso lags by ~13%. Because the true generative process is structurally close to a cubic polynomial, degree tuning represents the exact natural knob for this problem. Why then is regularization invaluable?
+
+- **Eliminates combinatorial subset search.** In 1D polynomial modeling, powers have a natural linear hierarchy ($1 \dots 15$). With 50 unstructured real-world features (area, bedrooms, transit distance), there is no single "degree", and exhaustive feature subset search requires evaluating $2^{50}$ (~$10^{15}$) combinations. Regularization compresses all feature weights into a single continuous tuning knob.
+- **Prevents catastrophic divergence.** Regularization tames errors from 133 down to 0.1747 via a single scalar penalty.
+- **Automates feature selection.** Lasso zeroes out uninformative variables automatically, and joint cross-validation can tune capacity and regularization simultaneously.
+
+## Common pitfalls
+
+:::caution[Passing λ directly into alpha]
+Scikit-learn's `Ridge` minimizes unnormalized residual sums without dividing by $m$: `alpha` $= m\lambda$. Conversely, `Lasso` applies $\frac{1}{2m}$ to residual sums: `alpha` $= \lambda/2$. The same `alpha` numerical value produces completely different shrinkage across classes: `Ridge(alpha=0.001)` on 16 samples represents an extremely weak penalty $\lambda \approx 6 \times 10^{-5}$. Always verify objective definitions before copying parameters across literature.
+:::
+
+:::caution[Omitting standardization, or standardizing outside pipelines]
+Omitting standardization subjects features with larger arbitrary units to disproportionately weaker regularization. Conversely, standardizing the entire dataset prior to cross-validation fold splitting allows feature transformers to observe validation targets, causing data leakage. Always bundle `StandardScaler` inside `make_pipeline`.
+:::
+
+:::caution[ConvergenceWarning at tiny penalties]
+Coordinate descent is an iterative algorithm. When features exhibit extreme correlation and $\lambda$ approaches zero, convergence slows dramatically. On our dataset, `Lasso` with $\lambda \le 10^{-4}$ triggers a `ConvergenceWarning` despite setting `max_iter=100_000`, generating corrupted zero-coefficient counts. Never ignore this warning: standardize features, increase `max_iter`, or raise penalty thresholds.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Regularization augments MSE loss with complexity penalties: Ridge adds $\lambda\lVert\mathbf{w}\rVert_2^2$, Lasso adds $\lambda\lVert\mathbf{w}\rVert_1$, and Elastic Net incorporates both; intercept $b$ is never penalized. Overly weak penalties cause overfitting; excessive penalties trigger underfitting.
+- Ridge regression yields $\left(\mathbf{X}^\top\mathbf{X} + m\lambda\mathbf{I}\right)\mathbf{w} = \mathbf{X}^\top\mathbf{y}$ and $b = \bar{y}$ on standardized inputs. Coefficients shrink smoothly toward zero without reaching exact sparsity.
+- Lasso applies soft-thresholding ($w = 0$ when $\lvert c\rvert \le \lambda/2$), producing sparse models. The L1 constraint diamond features sharp vertices anchored directly on coordinate axes.
+- Always encapsulate feature standardization within cross-validation pipelines. Convert theoretical $\lambda$ to package parameter `alpha` accurately (Ridge: $m\lambda$, Lasso: $\lambda/2$). Select penalty strengths via cross-validation, even when resulting models are more conservative than post-hoc test minima.
+
+**Further reading:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Lesson 15: Overfitting](https://machinelearningcoban.com/2017/03/04/overfitting/), regularization section. Accessible Vietnamese guide covering L2 weight decay, L1, and Elastic Net formulations.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Linear Models](https://scikit-learn.org/1.8/modules/linear_model.html), sections on Ridge, Lasso, and Elastic-Net. Detailed mathematical objective definitions ensuring proper `alpha` parameter mappings.
+- James, G., Witten, D., Hastie, T., Tibshirani, R. (2013). [*An Introduction to Statistical Learning*](https://www.statlearning.com/s/ISLR-Seventh-Printing.pdf) (PDF), 1st ed., Chapter 6: Linear Model Selection and Regularization. In-depth conceptual analysis of shrinkage and geometry.
+- Tibshirani, R. (1996). [*Regression Shrinkage and Selection via the Lasso*](https://doi.org/10.1111/j.2517-6161.1996.tb02080.x). *Journal of the Royal Statistical Society: Series B* 58(1), 267–288. Foundational paper introducing the Lasso algorithm.
+- Hoerl, A. E., Kennard, R. W. (1970). [*Ridge Regression: Biased Estimation for Nonorthogonal Problems*](https://doi.org/10.1080/00401706.1970.10488634). *Technometrics* 12(1), 55–67. And Zou, H., Hastie, T. (2005). [*Regularization and Variable Selection via the Elastic Net*](https://doi.org/10.1111/j.1467-9868.2005.00503.x). *Journal of the Royal Statistical Society: Series B* 67(2), 301–320. Original milestone publications defining Ridge regression and Elastic Net.
+
+<LessonProgress />
