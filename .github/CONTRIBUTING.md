@@ -81,6 +81,7 @@ Vài điều nên biết:
 - `main` là nhánh chính và luôn phải build được. Khi đã kết nối Cloudflare Pages, mỗi lần push lên `main` sẽ deploy bản chính thức. Nhánh khác có URL xem trước riêng.
 - Người duy trì có thể commit thẳng lên `main` với thay đổi nhỏ. Thay đổi lớn và mọi đóng góp từ người khác đi qua nhánh riêng và pull request.
 - Tên nhánh: tiếng Anh, kebab-case, có tiền tố theo loại việc.
+- Nhánh `main` được bảo vệ bằng quy tắc branch protection và git hook kiểm thử tự động trước khi push. Xem chi tiết tại [BRANCH_PROTECTION.md](BRANCH_PROTECTION.md).
 
 | Tiền tố | Dùng cho | Ví dụ |
 |---|---|---|

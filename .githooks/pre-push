@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Pre-push hook: ensures that any push targeting `main` passes `npm run check` and `npm test`.
+# Prevents pushing broken code or force-pushing to the production branch.
+
+remote="$1"
+url="$2"
+
+zero_oid="0000000000000000000000000000000000000000"
+
+while read -r local_ref local_oid remote_ref remote_oid; do
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    # Skip checks when deleting the branch
+    if [ "$local_oid" = "$zero_oid" ]; then
+      continue
+    fi
+
+    echo "🛡️  [AI Atlas Guard] Verifying code quality before pushing to 'main'..."
+
+    # Check for non-fast-forward / force push
+    if [ "$remote_oid" != "$zero_oid" ]; then
+      if ! git merge-base --is-ancestor "$remote_oid" "$local_oid" 2>/dev/null; then
+        echo "❌ [AI Atlas Guard] Error: Force-pushing to 'main' is blocked!"
+        echo "   Please rebase or pull remote changes before pushing."
+        exit 1
+      fi
+    fi
+
+    # 1. Run type check (must have 0 errors and 0 warnings)
+    echo "🔍 [AI Atlas Guard] Running TypeScript type check..."
+    if ! npm run check; then
+      echo "❌ [AI Atlas Guard] 'npm run check' failed! Push to 'main' aborted."
+      exit 1
+    fi
+
+    # 2. Run unit tests
+    echo "🧪 [AI Atlas Guard] Running Vitest unit tests..."
+    if ! npm test; then
+      echo "❌ [AI Atlas Guard] 'npm test' failed! Push to 'main' aborted."
+      exit 1
+    fi
+
+    echo "✅ [AI Atlas Guard] All quality checks passed. Proceeding with push to 'main'."
+  fi
+done
+
+exit 0

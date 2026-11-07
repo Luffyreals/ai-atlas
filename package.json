@@ -15,6 +15,9 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test --grep-invert @network",
     "test:e2e:network": "playwright test --grep @network --project=desktop",
+    "verify": "npm run check && npm test && npm run build",
+    "prepush": "npm run check && npm test",
+    "prepare": "git config core.hooksPath .githooks",
     "og:images": "node scripts/make-og-images.mjs",
     "astro": "astro"
   },
