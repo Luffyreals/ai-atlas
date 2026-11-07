@@ -242,7 +242,7 @@ export const LESSONS: readonly Lesson[] = [
     id: 'ml/logistic-regression',
     title: { vi: 'Hồi quy Logistic', en: 'Logistic Regression' },
     prerequisites: ['ml/linear-regression', 'ml/gradient-descent', 'math/probability-statistics'],
-    status: { vi: 'published', en: 'planned' },
+    status: { vi: 'published', en: 'published' },
   },
   {
     id: 'ml/classification-metrics',

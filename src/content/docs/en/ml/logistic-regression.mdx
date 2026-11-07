@@ -1,0 +1,390 @@
+---
+title: Logistic Regression
+description: 'Predict pass or fail from study hours. The sigmoid function for probability, odds and log-odds, decision boundary, log loss derived from maximum likelihood, gradient, and L2 regularization.'
+quiz:
+  - question: 'A logistic regression model has coefficient $w = 0.7$ for the feature "study hours". A student currently has a pass probability of 0.5. If they study for 1 additional hour (holding other features constant), what is their new approximate pass probability?'
+    options: ['$1.2$', '$0.85$', '$0.67$', '$0.5 \cdot e^{0.7} \approx 1.01$']
+    answer: 2
+    explanation: 'Adding 1 hour increases log-odds by $0.7$, meaning odds are multiplied by $e^{0.7} \approx 2.01$. The previous odds were $0.5 / 0.5 = 1$, and new odds are $\approx 2.01$, so the new probability is $2.01 / (1 + 2.01) \approx 0.67$. Directly adding $0.7$ to probability, or multiplying probability by $e^{0.7}$, yields numbers greater than 1: the coefficient scales odds, not probabilities directly.'
+  - question: 'A model with two features has $w_1 = 2$, $w_2 = -1$, and $b = -3$. With a decision threshold of 0.5, what does the model predict for $\mathbf{x} = [3, 2]^\top$?'
+    options:
+      - 'Class 1, with $\hat{y} = \sigma(1) \approx 0.73$'
+      - 'Class 0, because $w_2$ is negative'
+      - 'Class 1, with $\hat{y} = 1$ because $z > 0$'
+      - 'Cannot predict, because sigmoid only applies to a single feature'
+    answer: 0
+    explanation: '$z = 2 \cdot 3 - 1 \cdot 2 - 3 = 1 > 0$, so the point lies on the class 1 side of the decision boundary $2x_1 - x_2 - 3 = 0$, and $\hat{y} = \sigma(1) \approx 0.73$. A negative coefficient only pulls $z$ down partially; all terms must be summed to determine the sign of $z$. Sigmoid never outputs exactly 1: $z > 0$ simply means $\hat{y} > 0.5$.'
+  - question: 'A student passes, but the model currently outputs $\hat{y} = 0.01$. Considering the derivative of the sample loss with respect to $z$, why does training with log loss correct this sample much faster than squared error $(\hat{y} - y)^2$?'
+    options:
+      - 'Because log loss for this sample is smaller: $-\ln 0.01 < (0.01 - 1)^2$'
+      - 'Because log loss does not require computing the sigmoid derivative'
+      - 'Both correct at the same rate because both follow the negative gradient'
+      - 'Because log loss has derivative $\hat{y} - y = -0.99$, whereas squared error has $2(\hat{y} - y)\hat{y}(1 - \hat{y}) \approx -0.0196$'
+    answer: 3
+    explanation: 'Squared error retains the $\hat{y}(1 - \hat{y}) = 0.0099$ factor from the sigmoid derivative, causing an extremely confident wrong prediction to exert almost zero gradient: roughly 50 times smaller. With log loss, this factor cancels out, providing a strong corrective signal when errors are severe. The first option is also numerically incorrect: $-\ln 0.01 \approx 4.61$, far larger than $0.98$.'
+  - question: 'You fit `LogisticRegression(C=1e10)` on standardized data. Training accuracy is 1.000, the largest coefficient in magnitude is around 200, and test accuracy is lower than the default model. How should you adjust it?'
+    options:
+      - 'Increase `C` to `1e12` to penalize more heavily'
+      - 'Decrease `C`, for example to the default `C=1`, to increase L2 regularization'
+      - 'Remove `StandardScaler`, because standardization causes large coefficients'
+      - 'Increase `max_iter`, because the model has not converged'
+    answer: 1
+    explanation: '`C` is the inverse of regularization strength: the objective function contains $\frac{1}{2mC}\lVert\mathbf{w}\rVert_2^2$, so smaller `C` means stronger regularization. When a hyperplane linearly separates the classes, without regularization log loss keeps decreasing as $\mathbf{w}$ grows indefinitely, resulting in huge coefficients and severe overfitting. Increasing `C` weakens regularization, which is opposite to what is needed.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import gdNumpyCode from '@code/ml/logistic-regression/gd-numpy.en.py?raw';
+import lineVsSigmoidCode from '@code/ml/logistic-regression/line-vs-sigmoid.en.py?raw';
+import breastCancerCode from '@code/ml/logistic-regression/breast-cancer.en.py?raw';
+
+## Objectives
+
+After this lesson, you will be able to:
+
+- Understand why binary classification requires a model predicting probabilities, and why thresholding linear regression outputs fails.
+- Interpret logistic regression from three viewpoints: probability via the sigmoid function, linear log-odds, and the decision boundary $\mathbf{w}^\top\mathbf{x} + b = 0$.
+- Derive the log loss function from maximum likelihood and calculate its gradient $\frac{1}{m}\sum_i\left(\hat{y}^{(i)} - y^{(i)}\right)x^{(i)}_j$.
+- Implement logistic regression using gradient descent and scikit-learn, configure the `C` parameter, and interpret coefficients via odds ratios.
+
+## Prerequisites
+
+{/* List pulled dynamically from prerequisites in roadmap.ts */}
+
+<Prerequisites />
+
+:::tip[Quick Reminder]
+**Conditional probability** $P(y = 1 \mid \mathbf{x})$ is the probability that $y = 1$ given $\mathbf{x}$. When two events are **independent**, the probability of both occurring together is the product of their individual probabilities. This lesson also uses the **natural logarithm** $\ln$: $\ln(ab) = \ln a + \ln b$, $\ln a^k = k\ln a$, and since $\ln$ is monotonically increasing, larger values have larger logs.
+:::
+
+## Intuition
+
+A class advisor recorded the weekly study hours of 18 students before an exam, along with whether each passed or failed. The numbers below represent synthetic data generated for this lesson.
+
+| Result | Weekly Study Hours |
+|---|---|
+| Fail (9 students) | 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4.5, 6 |
+| Pass (9 students) | 4, 5, 5.5, 6.5, 7, 7.5, 8, 9, 10 |
+
+At a glance: studying less often leads to failing, studying more often leads to passing, with an overlapping region in between (a student with 4 hours passed, while students with 4.5 and 6 hours failed). The teacher wants to answer: **if a student studies for 5 hours, what is their probability of passing?**
+
+This is a **classification** problem: the label $y$ takes only two values, 1 (pass) or 0 (fail). What the teacher needs is not just a discrete "pass or fail", but a **probability**: 90% and 51% both predict "pass", but carry vastly different confidence levels.
+
+### Trying Linear Regression with a Threshold
+
+The first intuitive attempt is to treat 0 and 1 as numerical targets, fit an ordinary least squares line as in [Linear Regression](/en/ml/linear-regression/), and predict "pass" whenever the predicted value is at least 0.5. For our 18 students, the fitted line is $\hat{y} = 0.1413x - 0.1828$. The 0.5 threshold falls at $x = 4.83$ hours, correctly classifying 16 out of 18 students. While seemingly reasonable, this approach suffers from two fundamental flaws.
+
+**First, predictions are not valid probabilities.** A student studying 0 hours receives $\hat{y} = -0.183$, while 10 hours yields $\hat{y} = 1.230$. Probabilities below 0 or above 1 are mathematically meaningless.
+
+**Second, the line is distorted by "overly correct" points.** Suppose a student studies for 30 hours and naturally passes. This extreme point makes the classification problem no harder. Yet the regression line must stretch to reach $(30, 1)$, tilting the line downward: $\hat{y} = 0.0421x + 0.2671$. The 0.5 threshold shifts from 4.83 to **5.53 hours**. Consequently, students studying 5 and 5.5 hours—who actually passed—are now misclassified as failures: accuracy on the original 18 students drops to 14/18. Mean squared error penalizes the 30-hour student simply because $\hat{y}$ exceeds 1, even though in classification, being "confidently correct" should never be penalized.
+
+### Squashing Outputs into (0, 1)
+
+What we need is an S-shaped curve: hovering near 0 for very low study hours, approaching 1 for high study hours, and transitioning smoothly from 0 to 1 through the overlapping zone. At both extremes, the curve must flatten **horizontally**, so an extreme point at 30 hours that is already near 1 exerts almost no pull on the curve. This is the sigmoid curve, and logistic regression is the method for fitting it.
+
+The objective is: **given feature values of a sample, estimate the probability that it belongs to class 1 using an S-shaped curve, choosing parameters that maximize the likelihood of observing the training data.**
+
+## Theory
+
+### Problem Formulation
+
+We have $m$ training samples. The $i$-th sample has a feature vector $\mathbf{x}^{(i)}$ with $n$ dimensions and a label $y^{(i)} \in \{0, 1\}$. Class 1 is called the positive class, and class 0 is the negative class. For our 18 students, $m = 18$, $n = 1$, and $x$ is study hours.
+
+Logistic regression proceeds in two stages. The first stage mirrors linear regression by computing a linear score:
+
+$$
+z = \mathbf{w}^\top\mathbf{x} + b
+$$
+
+where $\mathbf{w}$ represents weights and $b$ is the intercept (bias). Here $z$ can take any real value and is called the **logit**. The second stage passes $z$ through the **sigmoid function** $\sigma$ to produce a valid probability:
+
+$$
+\hat{y} = \sigma(z) = \frac{1}{1 + e^{-z}}, \qquad \hat{y} = P(y = 1 \mid \mathbf{x})
+$$
+
+Unlike linear regression where $\hat{y}$ is a continuous target prediction, $\hat{y}$ here represents the **model's estimated probability for class 1**. The probability of class 0 is simply $1 - \hat{y}$.
+
+### The Sigmoid Function
+
+Inspecting the formula reveals why it produces an S-shaped curve:
+
+- When $z \to +\infty$: $e^{-z} \to 0$, so $\sigma(z) \to 1/1 = 1$.
+- When $z \to -\infty$: $e^{-z} \to +\infty$, so $\sigma(z) \to 0$.
+- When $z = 0$: $e^{0} = 1$, so $\sigma(0) = 1/2$.
+
+Because $e^{-z} > 0$ for all real $z$, the denominator strictly exceeds 1, guaranteeing that $\sigma(z)$ lies strictly **inside** the open interval $(0, 1)$, never reaching exactly 0 or 1. The function is symmetric around $(0, 0.5)$: $\sigma(-z) = 1 - \sigma(z)$. Representative values include:
+
+| $z$ | $-6$ | $-4$ | $-2$ | $0$ | $2$ | $4$ | $6$ |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| $\sigma(z)$ | 0.0025 | 0.018 | 0.1192 | 0.5 | 0.8808 | 0.982 | 0.9975 |
+
+The curve is steepest around $z = 0$, and flattens out almost entirely once $\lvert z\rvert > 5$: exactly the behavior desired in the Intuition section. The diagram in the Visualization section illustrates this curve.
+
+### Odds and Log-Odds: Interpreting the Model Linearly
+
+The **odds** of a probability $p$ is the ratio $p / (1 - p)$: the probability of occurrence divided by non-occurrence. A probability of 0.8 corresponds to odds of $0.8 / 0.2 = 4$ ("4 to 1"). A probability of 0.5 has odds of 1. Odds range from 0 to $+\infty$.
+
+Inverting $\hat{y} = \sigma(z)$ allows us to express $z$ in terms of $\hat{y}$. Invert both sides, subtract 1, and take the natural logarithm:
+
+$$
+\begin{aligned}
+\frac{1}{\hat{y}} &= 1 + e^{-z} \\
+\frac{1 - \hat{y}}{\hat{y}} &= e^{-z} \\
+\ln\frac{\hat{y}}{1 - \hat{y}} &= z = \mathbf{w}^\top\mathbf{x} + b
+\end{aligned}
+$$
+
+The second step subtracts 1 from both sides and takes a common denominator: $\frac{1}{\hat{y}} - 1 = \frac{1 - \hat{y}}{\hat{y}}$. The third step flips the fraction (turning $e^{-z}$ into $e^{z}$) and takes $\ln$. The left-hand side is the **log-odds**, also called the logit of $\hat{y}$. Hence:
+
+:::note[Key Takeaway]
+Logistic regression is a **linear model for log-odds**: $\ln\frac{\hat{y}}{1 - \hat{y}} = \mathbf{w}^\top\mathbf{x} + b$. The name "logistic" comes from the logistic function, another name for the sigmoid.
+:::
+
+This formulation provides a clear interpretation for weights. Increasing $x_j$ by 1 unit while holding other features constant increases log-odds by exactly $w_j$, meaning odds are **multiplied by $e^{w_j}$**:
+
+$$
+\text{odds}(x_j + 1) = e^{z + w_j} = e^{z} \cdot e^{w_j} = \text{odds}(x_j) \cdot e^{w_j}
+$$
+
+In our first code cell, fitting the 18 students gives $w = 1.263$ and $b = -6.006$. Each additional hour of study multiplies the odds of passing by $e^{1.263} \approx 3.54$. A student studying 4 hours has $\hat{y} = 0.278$ with odds 0.386; studying 5 hours gives $\hat{y} = 0.577$ with odds 1.365, exactly $3.54\times$ greater. Notice that probability does **not** increase linearly: moving from 4 to 5 hours boosts probability by 0.3, while moving from 9 to 10 hours changes it minimally as it approaches saturation near 1. If $w_j$ is negative, $e^{w_j} < 1$, reducing the odds.
+
+### Decision Boundary
+
+To assign a discrete predicted class, we compare $\hat{y}$ against a **threshold**, typically 0.5 by default: predicting class 1 when $\hat{y} \ge 0.5$. Because $\sigma$ is strictly monotonic and $\sigma(0) = 0.5$:
+
+$$
+\hat{y} \ge 0.5 \iff z \ge 0 \iff \mathbf{w}^\top\mathbf{x} + b \ge 0
+$$
+
+The set of points where $\mathbf{w}^\top\mathbf{x} + b = 0$ defines the **decision boundary**. For one feature, it is a single point: $x = -b / w = 6.006 / 1.263 \approx 4.75$ hours. For two features, it is a line $w_1x_1 + w_2x_2 + b = 0$; for $n$ features, it is a hyperplane. The non-linear S-curve only serves to map real numbers to probabilities; the decision boundary itself is always **flat (linear)**. Thus, logistic regression is fundamentally a **linear classifier**.
+
+The 0.5 threshold is merely a default. When missing a positive case carries greater penalty than a false alarm (e.g., medical diagnosis), one lowers the threshold. Choosing thresholds and evaluating classifiers beyond simple accuracy is covered in [Model Evaluation: Accuracy, Precision, Recall, F1](/en/ml/classification-metrics/).
+
+### Loss Function: From Maximum Likelihood to Log Loss
+
+We need an objective function measuring model performance. The principle of **maximum likelihood** states: choose parameters that make the **observed data most probable** under the model.
+
+**Step 1: Probability of an individual sample.** The model specifies $P(y = 1 \mid \mathbf{x}) = \hat{y}$ and $P(y = 0 \mid \mathbf{x}) = 1 - \hat{y}$. We unify both cases into a single concise expression:
+
+$$
+P(y \mid \mathbf{x}) = \hat{y}^{\,y}\,(1 - \hat{y})^{1 - y}
+$$
+
+Verification: when $y = 1$, the second factor becomes $(1 - \hat{y})^0 = 1$, leaving $\hat{y}$. When $y = 0$, the first factor becomes $\hat{y}^0 = 1$, leaving $1 - \hat{y}$. This is the Bernoulli distribution.
+
+**Step 2: Probability of the entire dataset.** Assuming training samples are independent and identically distributed, the joint probability of observing all $m$ labels is the product:
+
+$$
+\text{Lik}(\mathbf{w}, b) = \prod_{i=1}^{m}\left(\hat{y}^{(i)}\right)^{y^{(i)}}\left(1 - \hat{y}^{(i)}\right)^{1 - y^{(i)}}
+$$
+
+This quantity, viewed as a function of the parameters, is the **likelihood**. We seek to maximize it.
+
+**Step 3: Taking the logarithm.** The product of many numbers strictly less than 1 rapidly underflows to 0. For the optimal model on our 18 students, likelihood is merely 0.0062; with thousands of samples, floating-point arithmetic rounds it to zero. Because $\ln$ is strictly increasing, maximizing $\ln\text{Lik}$ is equivalent to maximizing $\text{Lik}$. Applying $\ln(ab) = \ln a + \ln b$ and $\ln a^k = k\ln a$:
+
+$$
+\ln\text{Lik}(\mathbf{w}, b) = \sum_{i=1}^{m}\left[y^{(i)}\ln\hat{y}^{(i)} + \left(1 - y^{(i)}\right)\ln\left(1 - \hat{y}^{(i)}\right)\right]
+$$
+
+**Step 4: Converting to a minimization problem.** In machine learning, loss functions are conventionally minimized. Negating the log-likelihood and averaging over $m$ samples yields **log loss**, also known as **binary cross-entropy**:
+
+$$
+\mathcal{L}(\mathbf{w}, b) = -\frac{1}{m}\sum_{i=1}^{m}\left[y^{(i)}\ln\hat{y}^{(i)} + \left(1 - y^{(i)}\right)\ln\left(1 - \hat{y}^{(i)}\right)\right]
+$$
+
+Minimizing $\mathcal{L}$ directly maximizes likelihood since $\mathcal{L} = -\frac{1}{m}\ln\text{Lik}$.
+
+Examining each sample: every point contributes **$-\ln$ of the probability assigned to its true label**. Assigning 0.9 to the true label incurs a loss of 0.105; 0.5 incurs 0.693; 0.1 incurs 2.303; approaching 0 incurs nearly infinite penalty. Log loss heavily punishes **confident incorrect predictions**. Among our 18 students, the two most heavily penalized samples are the two misclassified students: the one studying 4 hours who passed ($\hat{y} = 0.278$, loss $-\ln 0.278 = 1.28$) and the one studying 6 hours who failed ($\hat{y} = 0.828$, loss $-\ln 0.172 = 1.76$). Averaged over all 18 students, $\mathcal{L} = 0.2826$. An uninformative model with $\mathbf{w} = \mathbf{0}, b = 0$ giving every student 0.5 yields $\mathcal{L} = \ln 2 \approx 0.6931$.
+
+### Why Not Mean Squared Error
+
+Why not retain MSE $\frac{1}{m}\sum_i\left(\hat{y}^{(i)} - y^{(i)}\right)^2$ with $\hat{y} = \sigma(z)$? Consider a sample with $y = 1$ and examine its loss as a function of $z$:
+
+- **MSE**: $\left(\sigma(z) - 1\right)^2$. As $z \to -\infty$, it plateaus near 1; as $z \to +\infty$, it plateaus near 0. A function that transitions from flat, down a slope, and back to flat is S-shaped, **not a convex bowl**. When summing over multiple samples, the loss surface contains extensive plateaus where gradient descent crawls extremely slowly.
+- **Log loss**: $-\ln\sigma(z)$. As $z \to -\infty$, it increases asymptotically along the straight line $-z$, without plateauing. The worse the error, the steeper the slope.
+
+Numerically: at $z = -6$ ($\hat{y} = 0.0025$, a confident error), the derivative with respect to $z$ under MSE is merely $-0.0049$, whereas under log loss it is $-0.9975$—roughly 200 times stronger. The following derivation shows why.
+
+### Gradient of Log Loss
+
+Gradient descent requires the partial derivatives of $\mathcal{L}$ with respect to each $w_j$ and $b$. Consider a single sample, omitting the $(i)$ superscript: $\ell = -\left[y\ln\hat{y} + (1 - y)\ln(1 - \hat{y})\right]$, with $\hat{y} = \sigma(z)$ and $z = \mathbf{w}^\top\mathbf{x} + b$. By the **chain rule**:
+
+$$
+\frac{\partial\ell}{\partial w_j} = \frac{\partial\ell}{\partial\hat{y}} \cdot \frac{d\hat{y}}{dz} \cdot \frac{\partial z}{\partial w_j}
+$$
+
+**Step 1: Derivative of sigmoid.** Writing $\sigma(z) = \left(1 + e^{-z}\right)^{-1}$, the derivative of $u^{-1}$ is $-u^{-2}$, multiplied by the derivative of $1 + e^{-z}$, which is $-e^{-z}$:
+
+$$
+\begin{aligned}
+\sigma'(z) &= \frac{e^{-z}}{\left(1 + e^{-z}\right)^2} \\
+&= \frac{1}{1 + e^{-z}} \cdot \frac{e^{-z}}{1 + e^{-z}} \\
+&= \sigma(z)\left(1 - \sigma(z)\right)
+\end{aligned}
+$$
+
+The second step factors the fraction. The third step uses $\frac{e^{-z}}{1 + e^{-z}} = \frac{(1 + e^{-z}) - 1}{1 + e^{-z}} = 1 - \sigma(z)$. Thus $\frac{d\hat{y}}{dz} = \hat{y}(1 - \hat{y})$. This derivative peaks at 0.25 at $z = 0$ and vanishes at both extremes: this explains why MSE paired with sigmoid saturates and stalls.
+
+**Step 2: Derivative of $\ell$ with respect to $\hat{y}$.** Differentiating $\ln u$ gives $1/u$; differentiating $\ln(1 - \hat{y})$ with respect to $\hat{y}$ gives $-\frac{1}{1 - \hat{y}}$:
+
+$$
+\begin{aligned}
+\frac{\partial\ell}{\partial\hat{y}} &= -\frac{y}{\hat{y}} + \frac{1 - y}{1 - \hat{y}} \\
+&= \frac{-y(1 - \hat{y}) + (1 - y)\hat{y}}{\hat{y}(1 - \hat{y})} \\
+&= \frac{\hat{y} - y}{\hat{y}(1 - \hat{y})}
+\end{aligned}
+$$
+
+The second step finds a common denominator. The third expands the numerator: $-y + y\hat{y} + \hat{y} - y\hat{y} = \hat{y} - y$.
+
+**Step 3: Putting it together.** Since $z = w_1x_1 + \dots + w_nx_n + b$, we have $\frac{\partial z}{\partial w_j} = x_j$ and $\frac{\partial z}{\partial b} = 1$. Multiplying all three terms:
+
+$$
+\frac{\partial\ell}{\partial w_j} = \frac{\hat{y} - y}{\hat{y}(1 - \hat{y})} \cdot \hat{y}(1 - \hat{y}) \cdot x_j = (\hat{y} - y)\,x_j
+$$
+
+The factor $\hat{y}(1 - \hat{y})$ in the numerator and denominator **cancels out completely**. This is why log loss does not saturate when making severe mistakes: the derivative with respect to $z$ simplifies cleanly to $\hat{y} - y$.
+
+**Step 4: Averaging over $m$ samples.** Because $\mathcal{L}$ is the mean of individual sample losses $\ell^{(i)}$, its derivative is the mean of individual gradients:
+
+$$
+\frac{\partial\mathcal{L}}{\partial w_j} = \frac{1}{m}\sum_{i=1}^{m}\left(\hat{y}^{(i)} - y^{(i)}\right)x^{(i)}_j, \qquad
+\frac{\partial\mathcal{L}}{\partial b} = \frac{1}{m}\sum_{i=1}^{m}\left(\hat{y}^{(i)} - y^{(i)}\right)
+$$
+
+In compact matrix notation with feature matrix $\mathbf{X}$ ($m \times n$) and vector $\hat{\mathbf{y}}$ of predicted probabilities: $\nabla_{\mathbf{w}}\mathcal{L} = \frac{1}{m}\mathbf{X}^\top\left(\hat{\mathbf{y}} - \mathbf{y}\right)$.
+
+:::note[Key Takeaway]
+The gradient of log loss shares the **exact same form** as the MSE gradient in linear regression: the average of (prediction minus true label) multiplied by feature values. In linear regression, a factor of 2 arises from squaring, and $\hat{y}$ is $\mathbf{w}^\top\mathbf{x} + b$ rather than $\sigma(\mathbf{w}^\top\mathbf{x} + b)$.
+:::
+
+### Training with Gradient Descent
+
+Setting the gradient to zero yields transcendental equations involving $\sigma$, which lack closed-form analytical solutions like the normal equation. We turn to [gradient descent](/en/ml/gradient-descent/):
+
+$$
+w_j \leftarrow w_j - \eta\,\frac{1}{m}\sum_{i=1}^{m}\left(\hat{y}^{(i)} - y^{(i)}\right)x^{(i)}_j, \qquad
+b \leftarrow b - \eta\,\frac{1}{m}\sum_{i=1}^{m}\left(\hat{y}^{(i)} - y^{(i)}\right)
+$$
+
+The reassuring fact: **log loss is convex** in $(\mathbf{w}, b)$. As a function of $z$, a sample loss has derivative $\sigma(z) - y$ and second derivative $\sigma(z)\left(1 - \sigma(z)\right) > 0$, curving upward like a bowl. Since $z$ is linear in the parameters, the sum across all samples remains strictly convex. There are no local minima to get trapped in. By default, scikit-learn uses L-BFGS rather than standard gradient descent, leveraging curvature approximations to converge in fewer iterations to the same global optimum.
+
+### Regularization in scikit-learn
+
+Scikit-learn's `LogisticRegression` includes **L2 regularization by default**, similar to Ridge regression in [Ridge, Lasso, and Elastic Net](/en/ml/regularization/). In version 1.8, the objective function (for uniformly weighted samples) is formulated as:
+
+$$
+J(\mathbf{w}, b) = \mathcal{L}(\mathbf{w}, b) + \frac{1}{2mC}\lVert\mathbf{w}\rVert_2^2
+$$
+
+- **`C` is the inverse of regularization strength.** Comparing with $\mathcal{L} + \lambda\lVert\mathbf{w}\rVert_2^2$ in the Regularization lesson, $\lambda = \frac{1}{2mC}$. Smaller `C` imposes stronger regularization, whereas larger `C` weakens it. The default is `C=1`.
+- **$b$ is not regularized** (with the default `lbfgs` solver).
+- **To disable regularization**, scikit-learn 1.8 recommends `C=np.inf` (the `penalty` parameter is deprecated). Because version 1.8.0 emits an extraneous warning with `C=np.inf`, our code examples use `C=1e10`: penalty is negligible and does not alter results.
+- **Features should be standardized**, for the same reason as Ridge: regularization penalizes all $w_j$ equally.
+
+Regularization also prevents pathology in a critical scenario: when classes are **linearly separable**. In that case, doubling $\mathbf{w}$ and $b$ leaves the boundary unchanged while pushing every $\hat{y}$ closer to 0 or 1, further driving log loss down. There is no finite minimum: weights inflate indefinitely. The third code example demonstrates this phenomenon.
+
+### Limitations
+
+- **Decision boundaries are always linear.** If two classes form concentric circles, no straight boundary can separate them. One must engineer features like $x_1^2, x_1x_2$ (akin to polynomial regression), or switch to non-linear algorithms as in [K-Nearest Neighbors](/en/ml/k-nearest-neighbors/) and [Decision Trees and Random Forests](/en/ml/decision-tree-random-forest/).
+- **Limited to binary classification natively.** For multi-class classification, softmax replaces sigmoid, as covered in [Softmax Regression](/en/ml/softmax-regression/).
+- **Probabilities are trustworthy only if the model is well-specified.** If true log-odds are non-linear with respect to features, estimated probabilities may be miscalibrated even when classification accuracy remains high.
+- **Weights are hard to interpret under multicollinearity** (see the third pitfall below).
+
+## Visualization
+
+The figure below plots the sigmoid function against $z$. Observe the two ends of the curve flattening horizontally toward horizontal asymptotes at 0 and 1, and the inflection point at $\sigma(0) = 0.5$. Dots represent the 18 students positioned at $z^{(i)} = 1.263x^{(i)} - 6.006$ from the first code cell, at height 1 if passing and 0 if failing. The vertical line $z = 0$ corresponds to the decision boundary at 4.75 study hours.
+
+{/* FIG: SigmoidFigure
+    Concept: Sigmoid squashes any z into (0, 1), steepest around z = 0 and horizontal at both ends; decision boundary is z = 0.
+    Blocks & arrows: Sigmoid curve spanning z from -7 to 7, y-axis from -0.05 to 1.05.
+      Two horizontal dashed lines at 0 and 1 (asymptotes). A thin horizontal dashed line at 0.5 and vertical line
+      at z = 0, intersecting at marker (0, 0.5). Second group: 18 data points, solid dots at height 1 (pass),
+      hollow circles at height 0 (fail). Two misclassified points (z = -0.95 pass, z = 1.57 fail) clearly visible.
+      Axis ticks at -6, -4, -2, 0, 2, 4, 6 on x-axis; 0, 0.5, 1 on y-axis.
+    Labels: "pass", "fail", "boundary 4.75 hrs", "asymptote 1", "asymptote 0"; axis titles "score z" and
+      "pass probability". Value 0.5 read from y-axis tick, symbol σ(0) in caption.
+    Caption: Sigmoid function $\sigma(z) = 1/(1 + e^{-z})$ and 18 students plotted at $z = 1.263x - 6.006$;
+      the vertical line $z = 0$ ($x \approx 4.75$ hours) is the decision boundary where $\sigma(0) = 0.5$. */}
+
+## Code Examples
+
+The three cells below run independently, each generating its own dataset. The first execution takes slightly longer while the browser loads scikit-learn; the second cell also loads Matplotlib.
+
+### Gradient Descent with NumPy
+
+The first cell implements the theory from scratch: sigmoid, log loss, gradient $\frac{1}{m}\sum_i\left(\hat{y}^{(i)} - y^{(i)}\right)x^{(i)}$, starting from $w = b = 0$ with $\eta = 0.2$, stopping when gradient magnitude drops below $10^{-6}$. Finally, scikit-learn's `LogisticRegression` is run side-by-side for comparison.
+
+<PythonRunner code={gdNumpyCode} title="Logistic regression via gradient descent" />
+
+GD stops after 7540 steps with $w = 1.263$, $b = -6.006$, and log loss 0.2826, matching scikit-learn to three decimal places. The decision boundary is $-b/w = 4.754$ hours, with each extra hour of study multiplying pass odds by 3.54. Pass probabilities evaluate to 0.030, 0.278, 0.828, and 0.984 for 2, 4, 6, and 8 hours: increasing fastest near the boundary and saturating at both ends, tracing an S-curve.
+
+Over 7500 steps is relatively high because hours were unstandardized: as shown in [Gradient Descent](/en/ml/gradient-descent/), features far from zero create elongated loss valleys. Changing `eta` to 0.05 converges to the exact same values, but requires roughly 30,000 steps.
+
+### Straight Line vs. S-Curve
+
+The second cell verifies the numerical observations from the Intuition section: fitting linear regression and logistic regression on 18 students, then repeating on 19 students (including an outlier studying 30 hours), printing thresholds and accuracy on the original 18, and plotting all four models.
+
+<PythonRunner
+  code={lineVsSigmoidCode}
+  title="Linear regression vs. logistic regression"
+  figureAlt={['Prediction chart vs study hours, from 0 to 32 hours. Black dots represent students at height 0 (fail) or 1 (pass), with a single pass dot at 30 hours. Solid orange line (18 students) runs from roughly -0.2 and exceeds 1.5 before 12 hours; dashed orange line (19 students) is much flatter, crossing 0.5 at roughly 5.5 hours. Two blue sigmoid S-curves (solid and dashed) nearly overlap, climbing from 0 to 1 near 4.75 hours then flattening close to 1.']}
+/>
+
+On 18 students, both approaches yield close thresholds (4.83 vs. 4.75 hours) and identical accuracy of 0.889 (16/18). However, linear regression predicts $-0.183$ at 0 hours, $1.230$ at 10 hours, and $4.055$ at 30 hours: non-interpretable as probabilities. Adding the 30-hour student tilts the line down, shifting the threshold to 5.53 hours and reducing accuracy on the original 18 students to 0.778. Meanwhile, the sigmoid curve barely moves: its threshold remains 4.75 hours. The explanation lies in the gradient: the 30-hour student has $\hat{y}$ close to 1, making $\hat{y} - y \approx 0$, exerting virtually zero gradient push.
+
+### Real-World Data: Breast Cancer Diagnosis
+
+The third cell uses the built-in `load_breast_cancer` dataset: 569 tumor samples with 30 features computed from cell nuclei images (radius, texture, concavity...). **Label 1 indicates benign**, and label 0 indicates malignant. The code splits into 75% train and 25% test stratified by class (`stratify=y`), places `StandardScaler` in a pipeline, fits with `C=1` (default) and `C=1e10` (essentially unregularized), and inspects the three largest coefficients of the default model.
+
+<PythonRunner code={breastCancerCode} title="Logistic regression on breast cancer dataset" />
+
+- **Default `C=1`**: test accuracy 0.958 (137/143 tumors), with the largest coefficient magnitude at only 1.2.
+- **`C=1e10`**: training accuracy reaches 1.000, revealing a linearly separating hyperplane on training data, causing the largest coefficient to balloon to 205.9, as predicted in the Regularization section. Test accuracy drops to 0.944 due to overfitting.
+- **The top three coefficients are all negative**: radius error (fluctuation of nucleus radius, $w = -1.213$), worst texture (roughness in the worst region, $-1.107$), mean concave points (average number of concave indentations, $-1.106$). Because features are standardized: increasing radius error by **one standard deviation** (holding other features constant) multiplies the odds of being benign by $e^{-1.213} = 0.297$—less than a third. Negative weights here indicate malignant risk, since class 1 denotes benign.
+- The first five test tumors have benign probabilities of 0.996, 0.000, 0.000, 1.000, and 0.003, all correctly predicted. The "0.000" and "1.000" are artifacts of rounding; sigmoid never evaluates to absolute 0 or 1.
+
+## Common Pitfalls
+
+:::caution[Forgetting That `LogisticRegression` Regularizes by Default]
+`LogisticRegression()` applies L2 penalty with `C=1` by default, rather than standard unregularized logistic regression from classic statistics textbooks. On our 18 students, it yields $w = 1.002$ instead of $1.263$. When comparing with formulas in textbooks or interpreting coefficients as odds ratios, always verify what value of `C` is in use. Keep in mind the inverted direction: smaller `C` means **stronger** penalty, opposite to `alpha` or $\lambda$ in `Ridge`.
+:::
+
+:::caution[Misinterpreting the Class Label Orientation]
+A positive coefficient means that increasing the feature increases the odds of **class 1**. Which outcome corresponds to class 1 depends entirely on the dataset: in `load_breast_cancer`, class 1 is benign (`data.target_names` is `['malignant', 'benign']`), meaning negative coefficients are malignant indicators. Reversing the interpretation flips clinical conclusions. `predict_proba(X)[:, 1]` corresponds to the second class in `model.classes_`, not necessarily the more severe class.
+:::
+
+:::caution[Treating Coefficients as True Feature Importance]
+Comparing coefficient magnitudes is only meaningful when features are standardized, and even then demands caution. The breast cancer dataset contains highly correlated features (radius, perimeter, area), allowing the model to divide weights among them somewhat arbitrarily, just like collinear features in Lasso. The assumption "increase one feature while holding others constant" is often unrealistic when physical features naturally move together.
+:::
+
+## Quick Check
+
+{/* Questions defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and Further Reading
+
+**Key Takeaways:**
+
+- Logistic regression computes $z = \mathbf{w}^\top\mathbf{x} + b$ and applies sigmoid: $\hat{y} = \sigma(z) = 1/(1 + e^{-z}) = P(y = 1 \mid \mathbf{x})$. Unlike straight lines, predictions stay strictly within $(0, 1)$ and remain robust to extreme, confidently correct points.
+- Log-odds are linear: $\ln\frac{\hat{y}}{1 - \hat{y}} = \mathbf{w}^\top\mathbf{x} + b$. Increasing $x_j$ by one unit scales odds by $e^{w_j}$. The decision boundary at threshold 0.5 is the linear hyperplane $\mathbf{w}^\top\mathbf{x} + b = 0$.
+- **Log loss** is $-\frac{1}{m}$ times the log-likelihood:
+  $$
+  \mathcal{L}(\mathbf{w}, b) = -\frac{1}{m}\sum_{i=1}^{m}\left[y^{(i)}\ln\hat{y}^{(i)} + \left(1 - y^{(i)}\right)\ln\left(1 - \hat{y}^{(i)}\right)\right]
+  $$
+  This loss function is convex, heavily penalizes confident errors, and has gradient $\frac{1}{m}\sum_i\left(\hat{y}^{(i)} - y^{(i)}\right)x^{(i)}_j$, mirroring linear regression. Since no closed-form solution exists, training relies on gradient descent or L-BFGS.
+- `LogisticRegression` applies L2 regularization by default with `C=1`, $\lambda = \frac{1}{2mC}$: smaller `C` means stronger regularization. Regularization keeps coefficients bounded when data is linearly separable.
+
+**Further Reading:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Bài 10: Logistic Regression](https://machinelearningcoban.com/2017/01/27/logisticregression/). Clear derivation of loss from likelihood and Python examples with study hours. Uses slightly different notation: $N$ for sample count, $z_i$ for sigmoid output, and unscaled sum for loss $J(\mathbf{w})$.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*: Logistic regression](https://scikit-learn.org/1.8/modules/linear_model.html#logistic-regression), Section 1.1.11. Exact loss formulation including `C`, solver comparisons, and default regularization rationales.
+- Jurafsky, D., Martin, J. H. (2026). [*Speech and Language Processing*, 3rd ed. draft, Chapter 4: Logistic Regression and Text Classification](https://web.stanford.edu/~jurafsky/slp3/4.pdf) (PDF). Rigorous derivation of cross-entropy and gradients with text classification examples.
+- Ma, T., Ng, A. (2026). [*CS229 Lecture Notes*](https://cs229.stanford.edu/main_notes.pdf) (PDF), Section 2.1: Logistic regression. Gradient derivation from log-likelihood, using $h_\theta(x)$ for $\hat{y}$ and maximizing log-likelihood with gradient ascent.
+- Cox, D. R. (1958). [*The Regression Analysis of Binary Sequences*](https://doi.org/10.1111/j.2517-6161.1958.tb00292.x). *Journal of the Royal Statistical Society: Series B* 20(2), 215–232. Landmark paper introducing logistic regression to modern statistical methodology.
+
+<LessonProgress />
