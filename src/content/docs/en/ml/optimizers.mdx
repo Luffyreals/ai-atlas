@@ -1,0 +1,332 @@
+---
+title: 'Advanced Optimizers: SGD, Momentum, RMSProp, Adam'
+description: Standard GD crawls through narrow ravines and oscillates under mini-batch noise. How Momentum, RMSProp, and Adam fix these issues with bias correction and learning rate schedules.
+quiz:
+  - question: 'You use Momentum with $\beta = 0.9$. On a constant linear slope, the gradient remains constant at $\mathbf{g}$ over many steps. In steady state, how far does $\boldsymbol{\theta}$ advance at each step?'
+    options: ['$\eta\mathbf{g}$, identical to standard GD', '$0.9\,\eta\mathbf{g}$', '$10\,\eta\mathbf{g}$', '$0.1\,\eta\mathbf{g}$']
+    answer: 2
+    explanation: 'Velocity accumulates historical gradients: $\mathbf{v}_t = \mathbf{g}\left(1 + \beta + \beta^2 + \dots\right)$, converging to $\mathbf{g} / (1 - \beta) = 10\,\mathbf{g}$. The effective parameter step is $\eta\mathbf{v}_t$, which is 10 times longer than standard gradient descent. The parameter $\beta$ is not a scalar step multiplier, but rather the fraction of previous velocity retained across iterations.'
+  - question: 'You run Adam ($\beta_1 = 0.9$, $\beta_2 = 0.999$, negligible $\varepsilon$, with bias correction enabled). At step 1, the gradient is $0.002$ along $\theta_1$ and $500$ along $\theta_2$. How far does each parameter step?'
+    options:
+      - 'Both step exactly $\eta$, in the direction opposite their respective gradients'
+      - '$\theta_2$ steps roughly 250,000 times farther than $\theta_1$'
+      - 'Both step $0.1\,\eta$, because $1 - \beta_1 = 0.1$'
+      - 'Both step roughly $3.16\,\eta$'
+    answer: 0
+    explanation: 'At step 1, bias correction ensures $\hat{\mathbf{v}}_1 = \mathbf{g}_1$ and $\hat{\mathbf{s}}_1 = \mathbf{g}_1^2$. The step for each parameter evaluates to $\eta\,g / \lvert g\rvert$, which is exactly $\eta$ in magnitude regardless of whether the gradient is tiny or massive. The ratio of 250,000 would occur under standard GD. The factor $3.16\,\eta$ arises only if bias correction is omitted, since $0.1 / \sqrt{0.001} \approx 3.16$.'
+  - question: 'You scale the loss function by a factor of 100 (e.g., changing units of $y$) while keeping a previously well-tuned $\eta$ unchanged. What is most likely to happen to standard GD and Adam?'
+    options:
+      - 'Both diverge because gradients are 100 times larger'
+      - 'Both behave identically because the minimum coordinates are unchanged'
+      - 'Adam diverges, while GD remains unaffected'
+      - 'GD steps 100 times farther, easily exceeding the $2/L$ stability threshold and diverging; Adam remains virtually unchanged'
+    answer: 3
+    explanation: 'Scaling the loss by 100 scales gradient magnitudes by 100, which multiplies the GD step length by 100 while lowering the convergence threshold $2/L$ by a factor of 100. In Adam, both $\hat{\mathbf{v}}_t$ and $\sqrt{\hat{\mathbf{s}}_t}$ scale by 100, leaving their quotient invariant (ignoring $\varepsilon$). While the optimum location does not move, GD stability breaks down.'
+  - question: 'You train a model extensively with AdaGrad. Loss remains high and gradients are non-zero, yet parameters have virtually ceased updating. What is the most plausible explanation?'
+    options:
+      - 'The model reached a global minimum'
+      - 'Accumulator $\mathbf{s}_t$ only adds positive squared terms and never decays, causing effective learning rate $\eta / \sqrt{\mathbf{s}_t}$ to asymptotically vanish toward 0'
+      - 'Bias correction made step sizes too short'
+      - '$\varepsilon$ is excessively large compared to gradients'
+    answer: 1
+    explanation: 'AdaGrad monotonically accumulates squared gradients from step 1 onward. The denominator strictly grows, monotonically driving effective learning rates to zero and stalling training prematurely. RMSProp resolves this by replacing cumulative sums with exponential moving averages to discount distant gradients.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import compareCode from '@code/ml/optimizers/compare.en.py?raw';
+import pathsCode from '@code/ml/optimizers/paths.en.py?raw';
+import minibatchCode from '@code/ml/optimizers/minibatch.en.py?raw';
+
+## Objectives
+
+After this lesson, you will be able to:
+
+- Identify the three fundamental weaknesses of standard gradient descent: slow progress through ill-conditioned ravines, oscillations driven by mini-batch noise, and a single shared learning rate across heterogeneous parameters.
+- Formulate the update equations for Momentum, AdaGrad, RMSProp, and Adam, explaining the role of each constituent term.
+- Explain why Adam requires bias correction, demonstrating its impact with step-1 calculations.
+- Choose appropriate optimizers, base learning rates, and learning rate schedules when approaching new machine learning tasks.
+
+## Prerequisites
+
+{/* List pulled dynamically from prerequisites in roadmap.ts */}
+
+<Prerequisites />
+
+:::tip[Quick Reminder]
+[Gradient Descent](/en/ml/gradient-descent/) demonstrated that on quadratic surfaces, GD converges if $\eta < 2/L$, where $L$ is maximum **curvature**. When directional curvatures differ sharply—yielding a large **condition number** $\kappa$—contours form elongated ellipses, causing standard GD to crawl. That lesson also introduced **mini-batching**, where gradients are estimated on subsets of size $B$ rather than the full dataset of size $m$.
+:::
+
+## Intuition
+
+Imagine rolling a heavy ball down a steep, narrow ravine whose floor gently slopes toward one end. The ball does not roll straight down the valley floor. It oscillates back and forth against the steep valley walls several times before gradually progressing along the bottom. Unlike gradient descent, however, a physical ball possesses **momentum**: the longer it rolls in a consistent direction, the faster it travels.
+
+Standard gradient descent lacks momentum entirely. At each step, it only evaluates the instantaneous local slope under its feet. Consider a synthetic toy ravine to observe this limitation:
+
+$$
+\mathcal{L}(w_1, w_2) = \frac{1}{2}\left(w_1^2 + 100\,w_2^2\right)
+$$
+
+The minimum sits at $(0, 0)$. Curvature is 1 along $w_1$ and 100 along $w_2$, yielding condition number $\kappa = 100$: the valley is 10 times longer than it is wide ($\sqrt{\kappa} = 10$). We initialize optimization at $(-8, 1.5)$.
+
+### Three Weaknesses of Standard Gradient Descent
+
+**1. Narrow ravines.** The steep slope along $w_2$ forces a tight step bound $\eta < 2/100 = 0.02$. Setting $\eta = 0.018$ near the stability boundary, distance to the valley floor along $w_2$ scales by $1 - 0.018 \times 100 = -0.8$ each step: $w_2$ oscillates wildly back and forth across the ravine floor (zigzagging). Along $w_1$, distance scales by $1 - 0.018 \times 1 = 0.982$: each iteration advances by only 1.8%. Standard GD requires 369 iterations to enter a 0.01 radius around the origin, spending nearly all its steps crawling along the valley floor.
+
+**2. Mini-batch noise.** In stochastic mini-batch settings, gradient estimates computed on small subsets fluctuate, causing search paths to jitter randomly. With fixed $\eta$, SGD wanders perpetually around the minimum rather than settling at the bottom.
+
+**3. A single global learning rate for all parameters.** At the starting point, the gradient vector is $[-8, 150]^\top$: the gradient along $w_2$ is almost 19 times larger than along $w_1$. Under a single shared $\eta$, parameters with steep gradients take massive strides while flat parameters crawl, despite the flat parameter needing to cover far greater distance (from $-8$ to 0). In deep networks with millions of parameters, gradient magnitudes span several orders of magnitude.
+
+### Two Remedial Ideas
+
+1. **Retain directional history.** Accumulate historical gradients into a persistent "velocity". Along directions where gradients point consistently, velocity accumulates (accelerating down the ravine). Along directions where gradients oscillate signs, opposing components cancel out (damping transversal oscillation). This is **Momentum**.
+2. **Individualize learning rates.** Scale each parameter's step inversely by its typical historical gradient magnitude. Steep parameters are damped; flat parameters are boosted. This is the core mechanism of **AdaGrad** and **RMSProp**.
+
+**Adam** unifies both concepts. The objective of this lesson is: **engineer gradient update rules that navigate narrow ravines rapidly, dampen stochastic noise, and eliminate manual per-parameter learning rate tuning.**
+
+## Theory
+
+### Unified Notation
+
+All algorithms in this lesson build directly on gradient descent. We index iterations starting from $t = 1$:
+
+$$
+\mathbf{g}_t = \nabla_{\boldsymbol{\theta}}\mathcal{L}\left(\boldsymbol{\theta}_{t-1}\right), \qquad t = 1, 2, 3, \dots
+$$
+
+where $\mathbf{g}_t$ is the gradient computed at parameters $\boldsymbol{\theta}_{t-1}$. Standard GD is expressed as $\boldsymbol{\theta}_t = \boldsymbol{\theta}_{t-1} - \eta\,\mathbf{g}_t$. The optimizers below maintain internal auxiliary vectors of matching dimension, known as the **optimizer state**, initialized to $\mathbf{0}$.
+
+From RMSProp onward, vector squares, square roots, and divisions operate **element-wise**: $\mathbf{g}_t^2$ denotes the vector of squared elements $g_j^2$, rather than a scalar dot product.
+
+### Momentum: Adding Velocity
+
+**Momentum** (Polyak, 1964), also known as the heavy-ball method, maintains a persistent **velocity** vector $\mathbf{v}$:
+
+$$
+\begin{aligned}
+\mathbf{v}_t &= \beta\,\mathbf{v}_{t-1} + \mathbf{g}_t \\
+\boldsymbol{\theta}_t &= \boldsymbol{\theta}_{t-1} - \eta\,\mathbf{v}_t
+\end{aligned}
+$$
+
+The coefficient $\beta \in [0, 1)$ is the **momentum factor**, typically set to $\beta = 0.9$. The first equation retains fraction $\beta$ of previous velocity and adds the current gradient. The second equation updates parameters along velocity rather than raw gradient. When $\beta = 0$, $\mathbf{v}_t = \mathbf{g}_t$, recovering standard GD.
+
+**What does velocity remember?** Expanding $\mathbf{v}_{t-1}$ recursively down to $\mathbf{v}_0 = \mathbf{0}$:
+
+$$
+\mathbf{v}_t = \mathbf{g}_t + \beta\,\mathbf{g}_{t-1} + \beta^2\,\mathbf{g}_{t-2} + \dots + \beta^{t-1}\,\mathbf{g}_1
+$$
+
+Velocity is an exponentially decayed sum of all past gradients. Consider two illustrative regimes:
+
+- **Consistently aligned gradients** (along the valley floor), $\mathbf{g}_t = \mathbf{g}$: the sum forms a geometric series $\mathbf{g}\left(1 + \beta + \beta^2 + \dots\right)$, converging to $\mathbf{g} / (1 - \beta)$. For $\beta = 0.9$, steps become **10 times longer** than standard GD.
+- **Alternating gradients** (across the ravine walls), $\mathbf{g}, -\mathbf{g}, \mathbf{g}, \dots$: the sum evaluates to $\mathbf{g}\left(1 - \beta + \beta^2 - \dots\right)$, converging to $\mathbf{g} / (1 + \beta) \approx 0.53\,\mathbf{g}$. Opposing components cancel out by roughly half.
+
+On our toy ravine with $\eta = 0.018$, Momentum enters the 0.01 error ball in **111 steps** versus 369 for GD. The trade-off is inertial overshoot: the heavy ball surges down the valley, **overshooting the minimum** to $w_1 \approx 2.19$ before reversing.
+
+Alternative literature formulates velocity as an **exponential moving average** (EMA): $\mathbf{v}_t = \beta\,\mathbf{v}_{t-1} + (1 - \beta)\,\mathbf{g}_t$. This scales velocity down by $(1 - \beta)$, meaning both formulations produce identical trajectories if the latter scales $\eta$ up by $1 / (1 - \beta)$. Always verify which convention a codebase uses before adopting learning rates.
+
+**Nesterov accelerated gradient** computes the gradient at the anticipated lookahead position $\boldsymbol{\theta}_{t-1} - \eta\beta\,\mathbf{v}_{t-1}$ rather than the current parameters:
+
+$$
+\mathbf{v}_t = \beta\,\mathbf{v}_{t-1} + \nabla_{\boldsymbol{\theta}}\mathcal{L}\left(\boldsymbol{\theta}_{t-1} - \eta\beta\,\mathbf{v}_{t-1}\right)
+$$
+
+If momentum is about to overshoot the basin, the lookahead gradient detects the opposing slope early and applies braking force. Scikit-learn's `MLPClassifier` enables this by default (`nesterovs_momentum=True`).
+
+### AdaGrad and RMSProp: Per-Parameter Learning Rates
+
+**AdaGrad** (Duchi, Hazan, Singer, 2011) accumulates squared gradients per parameter, dividing parameter updates by the square root of historical sum:
+
+$$
+\begin{aligned}
+\mathbf{s}_t &= \mathbf{s}_{t-1} + \mathbf{g}_t^2 \\
+\boldsymbol{\theta}_t &= \boldsymbol{\theta}_{t-1} - \frac{\eta}{\sqrt{\mathbf{s}_t} + \varepsilon}\,\mathbf{g}_t
+\end{aligned}
+$$
+
+The scalar $\varepsilon \approx 10^{-8}$ prevents division by zero. Parameter $j$ receives effective learning rate $\eta / (\sqrt{s_j} + \varepsilon)$: historical steepness scales steps down, while rarely occurring sparse features receive larger steps. However, accumulator $\mathbf{s}_t$ **strictly increases monotonically**, eventually causing effective learning rates to decay toward zero and freezing training before convergence.
+
+**RMSProp** (Hinton, 2012) resolves AdaGrad's premature freezing by replacing cumulative sums with an exponential moving average, allowing older gradients to be forgotten:
+
+$$
+\begin{aligned}
+\mathbf{s}_t &= \rho\,\mathbf{s}_{t-1} + (1 - \rho)\,\mathbf{g}_t^2 \\
+\boldsymbol{\theta}_t &= \boldsymbol{\theta}_{t-1} - \frac{\eta}{\sqrt{\mathbf{s}_t} + \varepsilon}\,\mathbf{g}_t
+\end{aligned}
+$$
+
+The decay rate $\rho$ is typically 0.9 or 0.99 (PyTorch default: 0.99). Here $\sqrt{\mathbf{s}_t}$ represents the **root mean square** (RMS) of recent gradients. If gradient magnitudes hover around $\lvert g\rvert$, then $\sqrt{s} \approx \lvert g\rvert$ and parameter step sizes evaluate to $\eta\,g / \lvert g\rvert$: **roughly length $\eta$ regardless of raw gradient magnitude**. At our toy ravine start, the gradient along $w_2$ is 19 times larger than $w_1$, yet RMSProp advances both dimensions by equal step lengths.
+
+A key property: **scaling the loss function by scalar $k$** multiplies gradients by $k$ and $\sqrt{\mathbf{s}_t}$ by $k$, leaving effective step sizes completely invariant. In standard GD, steps scale by $k$, breaking stability.
+
+At step 1, because $\mathbf{s}_0 = \mathbf{0}$, $\mathbf{s}_1 = (1 - \rho)\,\mathbf{g}_1^2$, giving $\sqrt{\mathbf{s}_1} = \sqrt{1 - \rho}\,\lvert\mathbf{g}_1\rvert$. With $\rho = 0.99$, this evaluates to $0.1\,\lvert\mathbf{g}_1\rvert$, inflating the initial step length to **10 times $\eta$**. Adam addresses this start-up artifact directly.
+
+### Adam: Combining Momentum with Adaptive Learning Rates
+
+**Adam** (Adaptive Moment Estimation; Kingma and Ba, 2015) maintains two concurrent exponential moving averages: first moments (like Momentum) and uncentered second moments (like RMSProp):
+
+$$
+\begin{aligned}
+\mathbf{v}_t &= \beta_1\,\mathbf{v}_{t-1} + (1 - \beta_1)\,\mathbf{g}_t \\
+\mathbf{s}_t &= \beta_2\,\mathbf{s}_{t-1} + (1 - \beta_2)\,\mathbf{g}_t^2
+\end{aligned}
+$$
+
+Vector $\mathbf{v}_t$ estimates the expected gradient (first moment), while $\mathbf{s}_t$ estimates the expected squared gradient (second moment). Because Adam tracks two state vectors, it requires auxiliary memory twice the parameter count. Both moments are corrected for zero-initialization bias:
+
+$$
+\begin{aligned}
+\hat{\mathbf{v}}_t &= \frac{\mathbf{v}_t}{1 - \beta_1^t}, \qquad \hat{\mathbf{s}}_t = \frac{\mathbf{s}_t}{1 - \beta_2^t} \\
+\boldsymbol{\theta}_t &= \boldsymbol{\theta}_{t-1} - \eta\,\frac{\hat{\mathbf{v}}_t}{\sqrt{\hat{\mathbf{s}}_t} + \varepsilon}
+\end{aligned}
+$$
+
+The exponent $\beta^t$ denotes the power of time step $t$. Default hyperparameters across the original paper, PyTorch, and scikit-learn are: $\eta = 0.001$, $\beta_1 = 0.9$, $\beta_2 = 0.999$, $\varepsilon = 10^{-8}$.
+
+**Why bias correction is essential.** Because moving averages initialize at $\mathbf{0}$, early estimates are severely biased toward zero. At step 1 on our ravine with $\mathbf{g}_1 = [-8, 150]^\top$:
+
+$$
+\begin{aligned}
+\mathbf{v}_1 &= 0.1\,\mathbf{g}_1 = [-0.8,\ 15]^\top \\
+\mathbf{s}_1 &= 0.001\,\mathbf{g}_1^2 = [0.064,\ 22.5]^\top, \qquad \sqrt{\mathbf{s}_1} \approx [0.253,\ 4.743]^\top
+\end{aligned}
+$$
+
+Uncorrected $\mathbf{v}_1$ is only 10% of true gradient, while $\sqrt{\mathbf{s}_1}$ is shrunk to $\sqrt{0.001} \approx 3.2\%$ of true magnitude. Without correction, their ratio evaluates to $[-3.16, 3.16]^\top$: the denominator is suppressed far more aggressively than the numerator, blowing up the first step to $0.1 / \sqrt{0.001} \approx 3.16\,\eta$. After bias correction, $\hat{\mathbf{v}}_1 = \mathbf{g}_1$ and $\hat{\mathbf{s}}_1 = \mathbf{g}_1^2$, restoring unit ratio $[-1, 1]^\top$ so each parameter steps exactly $\eta$.
+
+**Why dividing by $1 - \beta^t$ corrects bias.** Assuming gradient remains constant $\mathbf{g}_t = \mathbf{g}$, unrolling the recursion:
+
+$$
+\begin{aligned}
+\mathbf{v}_t &= (1 - \beta_1)\left(1 + \beta_1 + \dots + \beta_1^{t-1}\right)\mathbf{g} \\
+&= (1 - \beta_1)\,\frac{1 - \beta_1^t}{1 - \beta_1}\,\mathbf{g} = \left(1 - \beta_1^t\right)\mathbf{g}
+\end{aligned}
+$$
+
+The raw average is scaled by $(1 - \beta_1^t)$; dividing by this term recovers unbiased expectation $\mathbf{g}$. While $\beta_1 = 0.9$ dissipates its bias within tens of steps, $\beta_2 = 0.999$ recovers slowly: $1 - 0.999^{100} \approx 0.095$, meaning uncorrected $\mathbf{s}_{100}$ is only 10% of true scale after 100 steps. Without correction, early steps remain amplified for hundreds of iterations.
+
+On our ravine, Adam ($\eta = 0.1$) converges in **193 steps**—faster than GD (369), but behind Momentum (111) and RMSProp (103). Adam is not universally the fastest optimizer; its advantage lies in exceptional stability across diverse gradient scales.
+
+:::note[Key Takeaway]
+Momentum accumulates gradients to accelerate along consistent directions. RMSProp scales steps inversely by recent gradient RMS, maintaining step lengths near $\eta$ across disparate scales. Adam combines both, scaling by $1 - \beta^t$ to counteract zero-initialization bias.
+:::
+
+### Learning Rate Schedules
+
+Under mini-batch noise, maintaining constant $\eta$ causes parameters to bounce around the minimum. Decaying $\eta$ over time stabilizes convergence:
+
+- **Step decay**: Multiplies $\eta$ by 0.1 at fixed epoch milestones.
+- **Cosine decay**: Decays $\eta$ from $\eta_{\max}$ to $\eta_{\min}$ along a cosine half-cycle—gentle at the start and finish, steepest in the middle.
+- **Warmup**: Linearly ramps $\eta$ from near zero to $\eta_{\max}$ during initial steps before decaying. This prevents unstable updates when parameter weights and optimizer moments are uncalibrated. Transformer and LLM training universally pair warmup with cosine decay.
+
+Over total steps $T$, cosine decay follows:
+
+$$
+\eta_t = \eta_{\min} + \frac{1}{2}\left(\eta_{\max} - \eta_{\min}\right)\left(1 + \cos\frac{\pi t}{T}\right)
+$$
+
+At $t = 0$, $\eta_0 = \eta_{\max}$; at $t = T$, $\eta_T = \eta_{\min}$.
+
+### Practical Recommendations
+
+| Setting | Recommended Starting Point |
+|---|---|
+| Deep neural networks, new problems | Adam ($\eta = 10^{-3}$). Most forgiving baseline |
+| Transformers and LLMs | AdamW with warmup and cosine decay |
+| Computer vision CNNs (tuned) | SGD with Momentum 0.9 (or Nesterov) and step/cosine decay |
+| Small linear models, tabular data | Standard solvers (Normal equation, L-BFGS in scikit-learn) |
+
+**AdamW** (Loshchilov and Hutter, 2019) decouples weight decay from gradient updates. In standard Adam with L2 penalty, regularizing gradients are divided by $\sqrt{\hat{\mathbf{s}}_t}$, inadvertently penalizing large-gradient weights less. AdamW subtracts decay term $\eta\lambda\boldsymbol{\theta}_{t-1}$ directly outside the adaptive fraction, ensuring uniform shrinkage across all parameters.
+
+### Limitations
+
+- **No single optimizer dominates all benchmarks.** On simple quadratic surfaces, Momentum and RMSProp often outperform Adam. Wilson et al. (2017) observed that well-tuned SGD with momentum can yield better test generalization than adaptive methods.
+- **First-order limitations.** All four methods remain strictly first-order gradient algorithms, mitigating but not eliminating condition number bottlenecks. Feature scaling remains essential.
+- **Non-convex landscapes.** Complex networks feature non-convex saddle points and local minima where global convergence guarantees do not hold.
+
+## Visualization
+
+The diagram below plots loss contours for $\mathcal{L} = \frac{1}{2}\left(w_1^2 + 100\,w_2^2\right)$ and the first 60 optimization steps starting from $(-8, 1.5)$:
+
+{/* FIG: OptimizerPathsFigure
+    Concept: In a narrow ravine, GD zigzags and crawls, Momentum surges forward and overshoots, and Adam cuts smoothly toward the minimum.
+    Blocks & arrows: Contour plot spanning w1 from -9 to 3, w2 from -2 to 2.
+      Background shows elliptical level curves of L = 0.5(w1^2 + 100 w2^2) centered at (0, 0) with 10:1 aspect ratio.
+      Three discrete paths from (-8, 1.5) over 60 steps: GD (η = 0.018), Momentum (η = 0.018, β = 0.9),
+      and Adam (η = 0.1, β1 = 0.9, β2 = 0.999, ε = 1e-8, bias-corrected).
+    Labels: "GD", "Momentum", "Adam"; "Start" at (-8, 1.5); "Minimum" at (0, 0); axis labels w1, w2.
+    Caption: After 60 steps, GD sits at $(-2.690, 0)$ and Adam at $(-2.799, 0.045)$, whereas Momentum overshot to $w_1 \approx 2.19$ before reversing toward $(-0.184, -0.065)$. */}
+
+The second code cell animates this comparison across all four optimizers alongside log-loss trajectories.
+
+## Code Examples
+
+The three cells below run independently.
+
+The first cell implements all four optimizers from scratch in NumPy, optimizing the toy ravine from $(-8, 1.5)$ until reaching a 0.01 error radius or 1,000 steps. A second run scales the loss by 10 (`scale = 10`) holding all learning rates constant.
+
+<PythonRunner code={compareCode} title="Four optimizers on a narrow ravine" />
+
+With `scale = 1`, iteration counts match theory: GD requires 369, Momentum 111, RMSProp 103, and Adam 193 steps. When `scale = 10`, curvature along $w_2$ inflates to 1000, reducing GD's stability threshold to $2/1000 = 0.002$; consequently, $\eta = 0.018$ causes both GD and Momentum to diverge. In contrast, RMSProp and Adam converge in the **exact same number of steps**, demonstrating scale invariance.
+
+The second cell plots 100-step trajectory paths across contour ellipses (left) alongside log-loss convergence curves (right).
+
+<PythonRunner
+  code={pathsCode}
+  title="Optimization paths on contour plots"
+  figureAlt={['Left: horizontally elongated contour ellipses centered at the origin, with four trajectories originating from (-8, 1.5). GD oscillates vertically before crawling along the horizontal axis, stopping near -1.3. Momentum swings widely, overshooting past 2.2 before returning near the origin. RMSProp makes an initial leap to (-7, 0.5) and travels straight along the axis. Adam tracks diagonally downward, smoothly curving toward -0.9. Right: loss versus iteration on log scale; RMSProp decreases steadily to lowest loss, Momentum drops rapidly with sawtooth ripples, while GD and Adam descend gradually.']}
+/>
+
+After 100 iterations, RMSProp loss drops to $7.1 \times 10^{-5}$, Momentum reaches $1.1 \times 10^{-3}$, Adam sits at $0.45$, and GD at $0.85$. Momentum's loss curve exhibits ripples from transversal bouncing. Adam smoothly hugs the $w_1$ axis without zigzagging. Note RMSProp's large step-1 jump (length 1.0 rather than 0.1), confirming our theoretical analysis.
+
+The third cell trains an `MLPClassifier` neural network (32 hidden neurons, ~2,400 parameters) on `load_digits` (1,797 handwritten $8 \times 8$ digits) across 20 epochs with batch size 64 and $\eta = 0.01$, comparing SGD, Momentum, and Adam.
+
+<PythonRunner
+  code={minibatchCode}
+  title="SGD, Momentum, and Adam on load_digits"
+  figureAlt={['Training loss versus epoch (1 to 20) on a log scale. SGD remains relatively flat, descending slowly from 2.4 to 1.48. Momentum drops steadily from 2.2 to 0.18. Adam decreases most aggressively, plunging from 1.6 to below 0.04 by epoch 20 with minor stochastic ripples.']}
+/>
+
+After 20 epochs: SGD reaches loss 1.4786 with test accuracy 0.680; Momentum achieves loss 0.1815 and test accuracy 0.947; Adam drives loss down to 0.0321 with test accuracy 0.971.
+
+## Common Pitfalls
+
+:::caution[Switching Optimizers Without Re-tuning the Learning Rate]
+Each optimizer interprets $\eta$ differently. Under Momentum ($\beta = 0.9$), effective step length scales to $\approx 10\,\eta\,\lVert\mathbf{g}\rVert$, whereas Adam maintains steps near $\eta$ regardless of gradient scale. When switching optimizers, always reset $\eta$ to standard defaults: $10^{-3}$ for Adam, and $10^{-2}$ to $10^{-1}$ for SGD with momentum.
+:::
+
+:::caution[Omitting Bias Correction or Indexing Time from Step Zero]
+Omitting bias correction causes early updates to be 2 to 6.5 times larger than $\eta$ (under standard hyperparameters), frequently destabilizing training at the outset. Indexing time from $t = 0$ evaluates $1 - \beta^0 = 0$, causing division by zero. Always index steps starting at $t = 1$.
+:::
+
+:::caution[Assuming Adam Replaces Feature Standardization]
+While Adam adapts learning rates per coordinate axis, it cannot untangle diagonal correlations between non-orthogonal features. Standardizing inputs as shown in [Gradient Descent](/en/ml/gradient-descent/) remains computationally inexpensive and universally recommended.
+:::
+
+## Quick Check
+
+{/* Questions defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and Further Reading
+
+**Key Takeaways:**
+
+- Standard GD crawls when condition number $\kappa$ is large because steep directions constrain $\eta < 2/L$. On our $\kappa = 100$ ravine, GD requires 369 iterations.
+- Momentum maintains velocity $\mathbf{v}_t = \beta\mathbf{v}_{t-1} + \mathbf{g}_t$, accelerating consistent directions by $1 / (1 - \beta)$ while damping transversal oscillations, at the cost of inertial overshoot.
+- RMSProp scales updates by the square root of exponentially decayed squared gradients, keeping step lengths near $\eta$ and conferring loss-scale invariance. AdaGrad accumulates sums indefinitely, freezing prematurely.
+- Adam tracks both first and second moments, applying $1 - \beta^t$ bias correction to prevent initial step blowup. Recommended default: Adam (or AdamW) with $\eta = 10^{-3}$ and a learning rate schedule.
+
+**Further Reading:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Bài 8: Gradient Descent (phần 2/2)](https://machinelearningcoban.com/2017/01/16/gradientdescent2/). Clear Vietnamese introduction to Momentum and Nesterov with animated illustrations.
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. (2023). [*Dive into Deep Learning*, Chapter 12: Optimization Algorithms](https://d2l.ai/chapter_optimization/). Sections 12.6 through 12.11 provide derivations and code using matching notation.
+- Goh, G. (2017). [*Why Momentum Really Works*](https://distill.pub/2017/momentum/). *Distill*. Visual, interactive breakdown of momentum dynamics on quadratic surfaces.
+- Ruder, S. (2016). [*An overview of gradient descent optimization algorithms*](https://arxiv.org/abs/1609.04747). arXiv:1609.04747. Comprehensive survey of modern optimization methods.
+- Original Papers: Kingma & Ba (2015), [*Adam: A Method for Stochastic Optimization*](https://arxiv.org/abs/1412.6980); Duchi et al. (2011), [*Adaptive Subgradient Methods*](https://jmlr.org/papers/v12/duchi11a.html) (AdaGrad); Hinton et al. (2012), [*RMSProp*](https://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf); Loshchilov & Hutter (2019), [*Decoupled Weight Decay Regularization*](https://arxiv.org/abs/1711.05101) (AdamW).
+
+<LessonProgress />

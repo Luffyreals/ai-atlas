@@ -224,7 +224,7 @@ export const LESSONS: readonly Lesson[] = [
     title: { vi: 'Các thuật toán tối ưu nâng cao: SGD, Momentum, RMSProp, Adam', en: 'Advanced Optimizers: SGD, Momentum, RMSProp, Adam' },
     shortTitle: { vi: 'Thuật toán tối ưu nâng cao', en: 'Advanced Optimizers' },
     prerequisites: ['ml/gradient-descent'],
-    status: { vi: 'published', en: 'planned' },
+    status: { vi: 'published', en: 'published' },
   },
   {
     id: 'ml/k-means',
