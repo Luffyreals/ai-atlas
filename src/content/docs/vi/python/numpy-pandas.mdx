@@ -1,0 +1,230 @@
+---
+title: 'Numpy và Pandas'
+description: 'Làm chủ NumPy và Pandas cho AI: mảng đa chiều ndarray, vectorization, broadcasting, DataFrame, xử lý giá trị khuyết và tổng hợp dữ liệu tốc độ cao.'
+quiz:
+  - question: 'Vì sao phép cộng hai mảng NumPy 1 000 000 phần tử lại nhanh hơn từ 50 đến 100 lần so với việc dùng vòng lặp `for` cộng hai `list` tương đương trong Python?'
+    options:
+      - 'Vì NumPy tự động chuyển code sang ngôn ngữ Assembly và bỏ qua kiểm tra an toàn bộ nhớ'
+      - 'Vì mảng NumPy lưu trữ dữ liệu đồng nhất trên các ô nhớ liên tục (contiguous memory) trong C và tận dụng các tập lệnh SIMD của CPU'
+      - 'Vì NumPy sử dụng GPU mặc định cho mọi phép tính số học'
+      - 'Vì danh sách Python chỉ hỗ trợ kiểu dữ liệu chuỗi văn bản'
+    answer: 1
+    explanation: '`list` trong Python lưu trữ danh sách các con trỏ trỏ tới các đối tượng số thực nằm rải rác trong bộ nhớ (overhead rất lớn). Ngược lại, mảng `ndarray` của NumPy lưu dữ liệu cùng kiểu nguyên thủy trên một khối bộ nhớ liền mạch (contiguous block) được viết bằng C/Fortran, giúp CPU nạp dữ liệu vào bộ nhớ đệm cache siêu tốc và xử lý song song nhiều phần tử cùng lúc thông qua SIMD.'
+  - question: 'Cho hai mảng $A$ có kích thước `(4, 1)` và $B$ có kích thước `(3,)`. Kết quả của phép cộng broadcasting `A + B` sẽ có kích thước (shape) là gì?'
+    options:
+      - 'Báo lỗi `ValueError` vì số chiều không bằng nhau'
+      - '`(4, 3)`'
+      - '`(4, 1)`'
+      - '`(3, 4)`'
+    answer: 1
+    explanation: 'Theo quy tắc broadcasting của NumPy, mảng $B$ có shape `(3,)` sẽ được căn lề phải thành `(1, 3)`. Khi so khớp từ phải sang trái: chiều cuối là 1 và 3 (thỏa mãn, mở rộng thành 3); chiều kế tiếp là 4 và 1 (thỏa mãn, mở rộng thành 4). Do đó, mảng kết quả cuối cùng có kích thước là `(4, 3)`.'
+  - question: 'Cho một DataFrame `df` có chỉ mục tùy biến gồm các chuỗi: `df.index = ["k1", "k2", "k3"]`. Lệnh `df.iloc[0]` và `df.loc["k1"]` lần lượt trả về dòng dữ liệu nào?'
+    options:
+      - 'Cả hai lệnh đều lấy dòng đầu tiên của DataFrame'
+      - '`df.iloc[0]` báo lỗi cú pháp vì chỉ mục là chuỗi ký tự'
+      - '`df.loc["k1"]` lấy dòng cuối cùng, `df.iloc[0]` lấy dòng đầu tiên'
+      - 'Cả hai lệnh đều trả về một cột dữ liệu'
+    answer: 0
+    explanation: '`iloc` (integer location) luôn truy cập dữ liệu dựa trên vị trí chỉ số số nguyên vật lý (0 tương ứng với dòng đầu tiên). `loc` (label location) truy cập dữ liệu dựa trên tên nhãn của chỉ mục ("k1" là nhãn của dòng đầu tiên). Do đó, cả hai lệnh đều trả về cùng dòng dữ liệu đầu tiên.'
+  - question: 'Phương pháp nào sau đây là cách chuẩn mực để điền các giá trị thiếu (`NaN`) của cột `"age"` bằng giá trị trung vị trong Pandas?'
+    options:
+      - '`df["age"].dropna(inplace=True)`'
+      - '`df["age"] = df["age"].fillna(df["age"].median())`'
+      - '`df["age"].replace(0, df["age"].mean())`'
+      - '`df["age"].isna() = df["age"].median()`'
+    answer: 1
+    explanation: 'Hàm `.fillna()` nhận một giá trị cụ thể để thay thế cho tất cả các vị trí `NaN`. Việc tính trung vị qua `df["age"].median()` rồi truyền vào `.fillna()` giúp bảo toàn số lượng dòng dữ liệu và giảm thiểu ảnh hưởng của các điểm ngoại lai lệch cực đoan so với giá trị trung bình.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import vectorCode from '@code/python/numpy-pandas/vectorization.vi.py?raw';
+import dfOpsCode from '@code/python/numpy-pandas/dataframe-ops.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu rõ cấu trúc mảng đa chiều `ndarray` của NumPy, cơ chế lưu trữ bộ nhớ liên tục (contiguous memory) và sự khác biệt về hiệu năng so với danh sách Python thuần.
+- Làm chủ kỹ thuật tính toán vector hóa (**Vectorization**) và quy tắc mở rộng kích thước tự động (**Broadcasting**) để viết code đại số tuyến tính không cần vòng lặp.
+- Thành thạo thao tác với cấu trúc `Series` và `DataFrame` trong Pandas: truy xuất lát cắt với `.loc` và `.iloc`.
+- Xử lý dữ liệu bảng thực tế trong AI: phát hiện và xử lý giá trị khuyết (`NaN`), gom nhóm và tổng hợp dữ liệu với `.groupby()`.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Trong các bài trước, bạn đã làm việc với các cấu trúc dữ liệu cơ bản như `list` và `dict`. Trong bài này, bạn sẽ bước vào thế giới tính toán số học hiệu năng cao với **NumPy** và xử lý dữ liệu dạng bảng với **Pandas** — hai thư viện nền móng của mọi đường ống dữ liệu AI.
+:::
+
+## Trực giác
+
+Tại sao chúng ta không thể dùng danh sách `list` của Python để huấn luyện mạng nơ-ron?
+
+Hãy xem xét một ví dụ nhỏ: bạn muốn nhân một ma trận ảnh $1000 \times 1000$ điểm ảnh với một ma trận trọng số.
+- Nếu dùng vòng lặp `for` lồng nhau trong Python thuần, chương trình phải thực hiện 1 tỷ phép tính nhân cộng. Mỗi phép tính, Python phải kiểm tra kiểu dữ liệu, giải mã con trỏ và cấp phát đối tượng mới. Quá trình này có thể mất tới hàng chục giây.
+- Với **NumPy**, toàn bộ khối dữ liệu 1 triệu con số được lưu trữ liền kề nhau dưới dạng các byte nhị phân trong bộ nhớ RAM. CPU chỉ cần một lệnh máy duy nhất để xử lý đồng thời cả một khối số (SIMD - Single Instruction, Multiple Data). Phép tính kết thúc chỉ trong vài phần nghìn giây!
+
+**NumPy** đóng vai trò là "động cơ toán học" phía sau mọi thư viện Machine Learning và Deep Learning. Còn **Pandas** là "bàn làm việc dữ liệu" giúp bạn làm sạch, biến đổi và khám phá các tập dữ liệu thực tế trước khi đưa vào mô hình.
+
+## Lý thuyết
+
+### NumPy và Mảng Đa Chiều `ndarray`
+
+Mảng `ndarray` (N-dimensional array) là cấu trúc trung tâm của NumPy:
+- Tất cả các phần tử trong mảng phải có **cùng một kiểu dữ liệu** (đồng nhất - homogeneous, ví dụ toàn bộ là `float32` hoặc `int64`).
+- Kích thước các chiều được mô tả qua thuộc tính `.shape` (tuple thể hiện số chiều).
+- Kiểu dữ liệu được lưu trong `.dtype`.
+
+#### Vectorization: Tư Duy Tính Toán Vector Hóa
+
+**Vectorization** là phương pháp diễn đạt các phép toán trên toàn bộ mảng cùng lúc thay vì lặp qua từng phần tử bằng vòng lặp `for`.
+
+Thay vì viết:
+
+```python
+# Cách chậm (Python for loop):
+c = [a[i] * b[i] for i in range(len(a))]
+```
+
+Bạn chỉ cần viết:
+
+```python
+# Cách vector hóa siêu tốc (NumPy C-speed):
+c = a * b
+```
+
+#### Cơ Chế Phát Sóng (Broadcasting)
+
+Broadcasting cho phép NumPy thực hiện các phép toán số học giữa các mảng có kích thước khác nhau mà không cần tốn bộ nhớ sao chép dữ liệu.
+
+**Quy tắc phát sóng:** Khi so khớp hai mảng, NumPy so sánh kích thước của từng chiều từ **phải sang trái**:
+1. Hai chiều bằng nhau: Hợp lệ.
+2. Một trong hai chiều bằng 1: Chiều đó sẽ được kéo giãn ảo để khớp với chiều còn lại.
+3. Nếu khác nhau và không có chiều nào bằng 1: Báo lỗi `ValueError: operands could not be broadcast together`.
+
+Ví dụ: ma trận kích thước $(4, 3)$ cộng với vector $(3,)$ sẽ tự động mở rộng vector thành $(1, 3)$, rồi phát sóng thành $(4, 3)$ để thực hiện phép cộng trên từng dòng.
+
+### Pandas: Phân Tích và Xử Lý Dữ Liệu Dạng Bảng
+
+Pandas cung cấp hai cấu trúc dữ liệu thiết yếu:
+- **Series:** Mảng dữ liệu một chiều kèm theo nhãn chỉ mục (index).
+- **DataFrame:** Bảng dữ liệu hai chiều gồm nhiều dòng và cột (tương tự như một bảng tính Excel hay bảng SQL).
+
+#### Truy Xuất Dữ Liệu: `.loc` và `.iloc`
+
+Để tránh nhầm lẫn và lỗi logic, Pandas phân định rõ ràng hai phương thức truy xuất:
+- **`df.loc[...]`:** Truy xuất dựa trên **nhãn (label-based)**. Bạn truyền vào tên cột hoặc giá trị của index.
+- **`df.iloc[...]`:** Truy xuất dựa trên **vị trí số nguyên (integer position-based)** từ `0` đến `n-1`.
+
+```python
+# Lấy dòng có index nhãn "HN" và cột "price":
+val = df.loc["HN", "price"]
+
+# Lấy dòng thứ 0 và cột thứ 2 theo thứ tự vật lý:
+val = df.iloc[0, 2]
+```
+
+#### Xử Lý Giá Trị Khuyết (Missing Data)
+
+Trong thực tế, dữ liệu thu thập luôn có các giá trị bị khuyết (`NaN` - Not a Number hoặc `None`). Các thao tác cốt lõi:
+- `df.isna().sum()`: Đếm số lượng giá trị khuyết trên từng cột.
+- `df.dropna()`: Xóa bỏ các dòng hoặc cột có chứa giá trị khuyết.
+- `df.fillna(value)`: Điền giá trị thay thế (ví dụ giá trị trung bình `.mean()` hoặc trung vị `.median()`).
+
+#### Gom Nhóm và Tổng Hợp với `.groupby()`
+
+Quy trình **Split-Apply-Combine** (Chia tách - Áp dụng - Gom lại) được thực hiện thông qua `.groupby()`:
+
+```python
+# Gom nhóm theo loại căn hộ và tính diện tích trung bình
+df.groupby("type")["area"].mean()
+```
+
+Bạn cũng có thể dùng `.agg()` để tính toán đồng thời nhiều chỉ số thống kê trên các cột khác nhau trong một câu lệnh duy nhất.
+
+## Minh họa
+
+Quy tắc mở rộng kích thước tự động (Broadcasting) trong NumPy:
+
+```text
+Ma trận A (3 × 3):               Vector B (1 × 3):
+┌───┬───┬───┐                    ┌───┬───┬───┐
+│ 1 │ 2 │ 3 │                    │ 10│ 20│ 30│
+├───┼───┼───┤                    └───┴───┴───┘
+│ 4 │ 5 │ 6 │         +                │ (Tự động phát sóng dọc theo 3 dòng)
+├───┼───┼───┤                          ▼
+│ 7 │ 8 │ 9 │                    ┌───┬───┬───┐
+└───┴───┴───┘                    │ 10│ 20│ 30│
+                                 ├───┼───┼───┤
+                                 │ 10│ 20│ 30│
+                                 ├───┼───┼───┤
+                                 │ 10│ 20│ 30│
+                                 └───┴───┴───┘
+```
+
+Quy trình Split-Apply-Combine của Pandas `.groupby()`:
+
+```text
+[ Dữ liệu thô ] ──► SPLIT (Tách nhóm theo chuyên mục: A, B)
+                        ├── Nhóm A ──► APPLY: Tính giá trị trung bình ──┐
+                        └── Nhóm B ──► APPLY: Tính giá trị trung bình ──┴──► COMBINE: Ghép thành bảng tổng hợp
+```
+
+## Ví dụ code
+
+Các ô dưới đây chạy độc lập. Bạn có thể nhấn nút **Chạy** để xem ngay kết quả.
+
+Ô thứ nhất ứng dụng NumPy để tính toán mô hình tuyến tính vector hóa: nhân ma trận đặc trưng $\mathbf{X}$ với trọng số $\mathbf{w}$, cộng hệ số chệch $b$ bằng broadcasting, và tính sai số bình phương trung bình (MSE) chỉ trong vài dòng code:
+
+<PythonRunner code={vectorCode} title="Tính toán mô hình tuyến tính vector hóa với NumPy" />
+
+Mọi phép tính ma trận và thống kê sai số diễn ra tức thì mà không cần bất kỳ một vòng lặp `for` nào. Đây chính là cách các thuật toán Machine Learning xử lý hàng triệu điểm dữ liệu huấn luyện.
+
+Ô thứ hai thể hiện các kỹ năng làm sạch và tổng hợp dữ liệu nhà đất với Pandas: xử lý giá trị khuyết bằng trung vị, lọc dòng bằng `.loc`, và tổng hợp thống kê bằng `.groupby()`.
+
+<PythonRunner code={dfOpsCode} title="Tiền xử lý và gom nhóm thống kê với Pandas" />
+
+Kết quả in ra bảng tổng hợp giá bán trung bình và số lượng giao dịch theo từng quận, cung cấp bức tranh dữ liệu tổng quan nhanh chóng và chính xác.
+
+## Lỗi hay gặp
+
+:::caution[Lỗi không tương thích kích thước (Shape Mismatch) khi nhân ma trận]
+Toán tử `@` biểu thị phép nhân ma trận đại số tuyến tính: số cột của ma trận bên trái bắt buộc phải bằng số dòng của ma trận bên phải ($A_{(m \times k)} @ B_{(k \times n)} \to C_{(m \times n)}$). Nếu nhầm lẫn giữa phép nhân đại số `@` và phép nhân từng phần tử `*` (element-wise multiplication), chương trình sẽ báo lỗi `ValueError: matmul: Input operand 1 has a mismatch in its core dimension 0`.
+:::
+
+:::caution[Dùng vòng lặp duyệt qua từng dòng của DataFrame]
+Viết `for index, row in df.iterrows():` để tính toán trên từng dòng là một thói quen rất xấu làm giảm tốc độ thực thi hàng trăm lần. Hãy luôn tận dụng các hàm vector hóa có sẵn của Pandas hoặc NumPy như `df["col_c"] = df["col_a"] + df["col_b"]`.
+:::
+
+:::caution[Cảnh báo `SettingWithCopyWarning`]
+Khi bạn gán giá trị trên một tập con dữ liệu lọc ra từ DataFrame (ví dụ `sub_df["price"] = 10`), Pandas có thể không chắc chắn bạn đang thao tác trên dữ liệu gốc hay một bản sao tạm thời. Hãy sử dụng `.copy()` tường minh nếu muốn tạo bản sao độc lập (`sub_df = df[cond].copy()`), hoặc dùng `.loc[cond, "price"] = 10` để chỉnh sửa trực tiếp trên bảng gốc.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- `ndarray` của NumPy lưu trữ dữ liệu đồng nhất trên các ô nhớ liên tục trong C, mang lại tốc độ vượt trội nhờ cơ chế cache và SIMD.
+- Vectorization loại bỏ hoàn toàn các vòng lặp thủ công, giúp mã nguồn ngắn gọn, tối ưu và hạn chế lỗi.
+- Broadcasting mở rộng các mảng có kích thước tương thích mà không cần cấp phát thêm bộ nhớ vật lý.
+- Pandas cung cấp `DataFrame` và `Series` cho phép thao tác dữ liệu dạng bảng mạnh mẽ với `.loc`, `.iloc`, `.fillna()`, và `.groupby()`.
+
+**Đọc thêm:**
+
+- Harris, C. R., et al. (2020). [*Array programming with NumPy*](https://doi.org/10.1038/s41586-020-2649-2). Tạp chí *Nature*, 585(7825), 357–362. Bài báo kinh điển phân tích kiến trúc nền tảng của NumPy.
+- McKinney, W. (2010). [*Data Structures for Statistical Computing in Python*](https://doi.org/10.25080/Majora-92bf1922-00a). Kỷ yếu hội nghị *SciPy 2010*. Tài liệu giới thiệu kiến trúc nguyên bản của thư viện Pandas.
+- NumPy Developers (2024). [*NumPy User Guide: Broadcasting*](https://numpy.org/doc/stable/user/basics.broadcasting.html). Hướng dẫn chuẩn thức về các quy tắc mở rộng chiều trong NumPy.
+
+<LessonProgress />

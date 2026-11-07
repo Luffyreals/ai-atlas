@@ -1,0 +1,237 @@
+---
+title: 'Lập trình hướng đối tượng (OOP)'
+description: 'Nắm vững lập trình hướng đối tượng trong Python cho AI: Class, Object, self, cùng 4 trụ cột OOP ứng dụng trực tiếp trong PyTorch và Scikit-Learn.'
+quiz:
+  - question: 'Cho định nghĩa lớp sau: `class DenseLayer: weights = []`. Nếu ta khởi tạo hai đối tượng `layer1 = DenseLayer()` và `layer2 = DenseLayer()`, rồi gọi `layer1.weights.append(0.5)`, giá trị của `layer2.weights` sẽ là gì?'
+    options:
+      - '`[]` (danh sách rỗng vì hai đối tượng độc lập)'
+      - '`[0.5]` (danh sách có một phần tử)'
+      - 'Báo lỗi `AttributeError` vì `weights` chưa được gán trong `__init__`'
+      - '`None`'
+    answer: 1
+    explanation: '`weights = []` được khai báo trực tiếp ở thân lớp nên là một biến lớp (class attribute). Tất cả các thực thể (instance) tạo từ lớp đó đều dùng chung một đối tượng danh sách duy nhất trong bộ nhớ. Để mỗi lớp có trọng số riêng biệt, bạn bắt buộc phải gán `self.weights = []` bên trong phương thức khởi tạo `__init__`.'
+  - question: 'Trong Python, từ khóa `self` trong định nghĩa phương thức `def forward(self, x):` đóng vai trò gì?'
+    options:
+      - 'Là một từ khóa hệ thống bắt buộc phải đặt đúng tên `self` để giải phóng bộ nhớ'
+      - 'Là tham chiếu đại diện cho chính thực thể (instance) cụ thể đang gọi phương thức đó'
+      - 'Là con trỏ trỏ tới lớp cha (parent class)'
+      - 'Là biến tĩnh lưu trữ số lượng đối tượng đã được khởi tạo'
+    answer: 1
+    explanation: 'Khi bạn gọi `model.forward(x)`, Python sẽ tự động chuyển đổi thành `ModelClass.forward(model, x)`. Tham số đầu tiên đại diện cho chính đối tượng cụ thể đang thực thi phương thức. Tên gọi `self` là một quy ước chuẩn mực toàn cầu của cộng đồng Python.'
+  - question: 'Khi xây dựng một kiến trúc mạng nơ-ron tùy biến kế thừa từ lớp cha (ví dụ `torch.nn.Module`), vì sao bước đầu tiên trong `def __init__(self):` luôn phải là `super().__init__()`?'
+    options:
+      - 'Để kích hoạt trình thu gom rác tự động của Python'
+      - 'Để gọi hàm khởi tạo của lớp cha, giúp đăng ký các tham số trọng số, buffer và hook của hạ tầng mạng'
+      - 'Để chuyển toàn bộ dữ liệu của lớp con sang GPU'
+      - 'Để đóng băng (freeze) các trọng số không cho cập nhật gradient'
+    answer: 1
+    explanation: '`super().__init__()` kích hoạt hàm tạo của lớp cha. Đối với các thư viện học sâu như PyTorch, bước này thiết lập các bảng băm nội bộ theo dõi tham số (`_parameters`), các module con (`_modules`) và trạng thái tính toán. Nếu bỏ quên dòng này, mô hình sẽ ném lỗi ngay khi bạn gán các layer con.'
+  - question: 'Tính chất nào của OOP cho phép Scikit-Learn chạy hàm đánh giá chéo `cross_val_score(model, X, y)` trên hàng chục mô hình khác nhau (LinearRegression, RandomForest, SVM) mà không cần viết lại mã nguồn kiểm tra?'
+    options:
+      - 'Tính đóng gói (Encapsulation)'
+      - 'Tính đa hình (Polymorphism)'
+      - 'Tính đệ quy (Recursion)'
+      - 'Tính bất biến (Immutability)'
+    answer: 1
+    explanation: 'Tính đa hình (Polymorphism) cho phép các đối tượng thuộc các lớp khác nhau cùng cung cấp một bộ giao diện (interface) chung thống nhất như `.fit(X, y)` và `.predict(X)`. Hàm đánh giá bên ngoài chỉ cần tương tác qua giao diện chuẩn mà không cần bận tâm thuật toán bên trong hoạt động ra sao.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import linearModelCode from '@code/python/oop/linear-model.vi.py?raw';
+import batcherCode from '@code/python/oop/data-batcher.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Hiểu rõ bản chất của **Lớp (Class)** và **Đối tượng (Object)**, làm chủ phương thức khởi tạo `__init__` và tham số thực thể `self`.
+- Phân biệt biến thực thể (instance attribute) độc lập với biến lớp (class attribute) dùng chung để tránh lỗi rò rỉ trọng số mô hình.
+- Nắm vững 4 trụ cột của lập trình hướng đối tượng (**Đóng gói**, **Kế thừa**, **Đa hình**, **Trừu tượng**) và liên hệ trực tiếp với các framework AI hàng đầu như PyTorch và Scikit-Learn.
+- Sử dụng các phương thức ma thuật (dunder methods như `__len__`, `__getitem__`, `__call__`) để xây dựng các lớp nạp dữ liệu và mô hình máy học chuyên nghiệp.
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Trong bài trước, bạn đã tổ chức mã nguồn thành các hàm độc lập. Bài học này sẽ đưa tư duy tổ chức mã lên một tầm cao mới: kết hợp cả **trạng thái dữ liệu** (biến, trọng số) và **hành vi tính toán** (hàm, thuật toán) vào chung một thực thể hướng đối tượng duy nhất.
+:::
+
+## Trực giác
+
+Hãy tưởng tượng bạn đang xây dựng một hệ thống thị giác máy tính với 50 tầng mạng nơ-ron:
+- Mỗi tầng mạng có hàng nghìn tham số ma trận trọng số $\mathbf{W}$ và hệ số chệch $\mathbf{b}$.
+- Mỗi tầng cần lưu lại kết quả trung gian để phục vụ thuật toán lan truyền ngược (backpropagation).
+- Nếu chỉ dùng các hàm rời rạc và các biến từ điển (`dict`) trôi nổi, bạn sẽ phải liên tục truyền hàng chục tham số qua lại giữa các hàm. Chỉ cần sơ suất gán nhầm tên biến, toàn bộ hệ thống sẽ sụp đổ trong im lặng.
+
+**Lập trình hướng đối tượng (OOP)** giải quyết triệt để bài toán này. Nó cho phép bạn coi mỗi tầng mạng như một **"cỗ máy nhỏ" tự quản**:
+- Cỗ máy tự cất giữ trọng số riêng bên trong thân máy (**Đóng gói**).
+- Cỗ máy có thể được nâng cấp từ một thiết kế chuẩn có sẵn mà không cần chế tạo lại từ đầu (**Kế thừa**).
+- Bất kỳ cỗ máy nào cũng chỉ cần một nút bấm "Dự đoán" duy nhất để vận hành, dù bên trong là mạng tích chập hay mạng Transformer (**Đa hình**).
+
+## Lý thuyết
+
+### Lớp (Class), Đối Tượng (Object) và `self`
+
+- **Lớp (Class):** Là một bản thiết kế (blueprint) định nghĩa cấu trúc dữ liệu và các thao tác có thể thực hiện.
+- **Đối tượng (Object / Instance):** Là một thực thể cụ thể được sinh ra trong bộ nhớ từ bản thiết kế đó.
+- **`__init__`:** Phương thức khởi tạo đặc biệt được Python tự động kích hoạt khi một đối tượng mới được tạo ra.
+- **`self`:** Tham số đầu tiên trong các phương thức thực thể, đại diện cho chính đối tượng đang thực hiện hành vi.
+
+```python
+class Neuron:
+    def __init__(self, weight: float, bias: float):
+        # Thuộc tính thực thể (instance attributes)
+        self.w = weight
+        self.b = bias
+
+    def activate(self, x: float) -> float:
+        # Phương thức thực thể (instance method)
+        return self.w * x + self.b
+```
+
+### Phân Biệt Biến Lớp và Biến Thực Thể
+
+Một trong những cạm bẫy lớn nhất trong lập trình AI là nhầm lẫn giữa hai loại biến:
+
+1. **Biến thực thể (Instance Attribute):** Được gán thông qua `self.ten_bien` bên trong các phương thức. Mỗi đối tượng sở hữu một vùng nhớ độc lập hoàn toàn.
+2. **Biến lớp (Class Attribute):** Được định nghĩa trực tiếp trong thân `class`, nằm ngoài mọi phương thức. Tất cả các đối tượng tạo từ lớp này đều trỏ chung vào cùng một vùng nhớ. Nếu biến lớp là kiểu khả biến (như `list` hay `dict`), việc một đối tượng sửa đổi sẽ làm thay đổi giá trị của tất cả đối tượng còn lại!
+
+### 4 Trụ Cột OOP Ứng Dụng Trong AI
+
+#### 1. Tính Đóng Gói (Encapsulation)
+
+Đóng gói là cơ chế gom nhóm dữ liệu (thuộc tính) và các hàm thao tác trên dữ liệu đó (phương thức) vào cùng một đơn vị, đồng thời hạn chế sự can thiệp trực tiếp từ bên ngoài.
+
+Trong Python, ta dùng quy ước đặt tên với dấu gạch dưới:
+- `_attribute`: Biến nội bộ (protected convention), cảnh báo người dùng không nên truy cập trực tiếp từ bên ngoài.
+- `__attribute`: Kích hoạt cơ chế đổi tên (name mangling) để tránh xung đột tên trong kế thừa.
+
+#### 2. Tính Kế Thừa (Inheritance)
+
+Kế thừa cho phép một lớp mới (lớp con - child class) tiếp nhận toàn bộ thuộc tính và phương thức của một lớp đã có (lớp cha - parent class), đồng thời mở rộng hoặc định nghĩa lại (override) các hành vi cần thiết.
+
+Trong PyTorch, mọi mô hình học sâu đều bắt buộc kế thừa từ `torch.nn.Module`:
+
+```python
+# Lớp con kế thừa lớp cha nn.Module
+class MyClassifier(nn.Module):
+    def __init__(self, in_features: int, out_features: int):
+        super().__init__()  # Kích hoạt khởi tạo của nn.Module
+        self.linear = nn.Linear(in_features, out_features)
+
+    def forward(self, x):
+        return self.linear(x)
+```
+
+Hàm `super().__init__()` kích hoạt hạ tầng của `nn.Module`, giúp mô hình tự động quản lý gradient, theo dõi thiết bị (CPU/GPU) và lưu trữ checkpoint.
+
+#### 3. Tính Đa Hình (Polymorphism)
+
+Đa hình là khả năng các đối tượng khác nhau phản hồi theo cách riêng của mình trước cùng một lời gọi phương thức.
+
+Hệ sinh thái Scikit-Learn là ví dụ điển hình nhất về tính đa hình:
+- Mọi mô hình ước lượng (Estimator) — từ `LinearRegression`, `DecisionTreeClassifier` đến `RandomForestRegressor` — đều cung cấp hai phương thức chuẩn hóa:
+  - `model.fit(X, y)`: Huấn luyện tìm tham số tối ưu.
+  - `model.predict(X)`: Suy luận đưa ra kết quả dự đoán.
+- Nhờ đa hình, bạn có thể viết một hàm kiểm thử duy nhất nhận bất kỳ mô hình nào vào làm tham số mà không cần sửa đổi dù chỉ một dòng code.
+
+#### 4. Tính Trừu Tượng (Abstraction)
+
+Trừu tượng hóa là việc ẩn đi các chi tiết cài đặt phức tạp bên dưới, chỉ cung cấp ra bên ngoài một giao diện làm việc tối giản và thiết yếu.
+
+Python hỗ trợ tính trừu tượng thông qua module chuẩn `abc` (Abstract Base Classes). Lớp cơ sở trừu tượng quy định các phương thức bắt buộc bằng decorator `@abstractmethod`, buộc các lớp con kế thừa phải cài đặt đầy đủ logic nếu không muốn bị báo lỗi ngay khi khởi tạo.
+
+### Các Phương Thức Ma Thuật (Dunder Methods)
+
+Python sở hữu các phương thức đặc biệt có hai dấu gạch dưới ở đầu và cuối (Double Underscore - viết tắt là Dunder):
+
+- `__len__(self)`: Cho phép gọi hàm `len(obj)`. Thường dùng để đếm số mẫu hoặc số batch trong tập dữ liệu.
+- `__getitem__(self, idx)`: Cho phép truy xuất phần tử theo cú pháp chỉ số `obj[idx]`.
+- `__call__(self, *args)`: Biến đối tượng thành một hàm có thể gọi được `obj(x)`. Đây chính là cách PyTorch cho phép bạn viết `output = model(input)` thay vì gọi tường minh `model.forward(input)`.
+
+## Minh họa
+
+Mối quan hệ kế thừa và giao diện đa hình chuẩn mực trong kiến trúc học máy:
+
+```text
+       ┌────────────────────────────────────────────────────────┐
+       │             Lớp Trừu Tượng: BaseEstimator              │
+       │  - Giao diện trừu tượng: fit(X, y), predict(X)         │
+       └───────────────────────────┬────────────────────────────┘
+                                   │
+              ┌────────────────────┴────────────────────┐
+              ▼                                         ▼
+   ┌───────────────────────┐                 ┌───────────────────────┐
+   │  Lớp LinearRegression │                 │ Lớp DecisionTreeModel │
+   │  - self.w, self.b     │                 │ - self.tree_nodes     │
+   │  - fit(): giải OLS    │                 │ - fit(): chia nhánh   │
+   │  - predict(): w*x + b │                 │ - predict(): duyệt cây│
+   └───────────────────────┘                 └───────────────────────┘
+              │                                         │
+              └────────────────────┬────────────────────┘
+                                   │ (Tính đa hình Polymorphism)
+                                   ▼
+          ┌──────────────────────────────────────────────────┐
+          │ Pipeline / cross_val_score(model, X_val, y_val)  │
+          │ Gọi chung: model.fit(...) và model.predict(...)  │
+          └──────────────────────────────────────────────────┘
+```
+
+## Ví dụ code
+
+Các ô dưới đây chạy độc lập. Bạn có thể nhấn nút **Chạy** để xem ngay kết quả.
+
+Ô thứ nhất xây dựng một lớp `LinearModel` hoàn chỉnh từ đầu: đóng gói trọng số `self.w` và độ lệch `self.b`, cung cấp phương thức `fit()` tối ưu hóa gradient descent và phương thức `predict()` suy luận.
+
+<PythonRunner code={linearModelCode} title="Xây dựng lớp mô hình hồi quy tuyến tính với OOP" />
+
+Toàn bộ quá trình tính đạo hàm riêng và cập nhật tham số được gói gọn gàng bên trong phương thức `fit()`. Người dùng bên ngoài chỉ cần tương tác với mô hình qua giao diện sạch sẽ, trực quan.
+
+Ô thứ hai xây dựng lớp `DataBatcher` mô phỏng cơ chế mini-batching trong Deep Learning, minh họa tính đóng gói dữ liệu và phương thức ma thuật `__len__`.
+
+<PythonRunner code={batcherCode} title="Xây dựng lớp DataBatcher phân chia mini-batch" />
+
+Đối tượng `batcher` che giấu cấu trúc danh sách bên trong, tự động tính toán tổng số batch và chia nhỏ tập dữ liệu tương ứng với từng bước lặp huấn luyện.
+
+## Lỗi hay gặp
+
+:::caution[Dùng biến lớp (Class Variable) cho các cấu trúc khả biến (Mutable)]
+Nếu bạn khai báo `class Model: layers = []`, danh sách `layers` sẽ được chia sẻ cho mọi đối tượng của lớp `Model`. Khi đối tượng thứ nhất thêm một tầng mạng, đối tượng thứ hai cũng bị ảnh hưởng. Hãy luôn khởi tạo các biến thực thể bên trong `def __init__(self): self.layers = []`.
+:::
+
+:::caution[Bỏ quên tham số `self` trong định nghĩa phương thức]
+Khi định nghĩa phương thức trong lớp, bạn bắt buộc phải đặt `self` ở vị trí tham số đầu tiên: `def predict(self, x):`. Nếu bạn viết `def predict(x):`, Python sẽ báo lỗi `TypeError: predict() takes 1 positional argument but 2 were given` khi bạn gọi `model.predict(x)`.
+:::
+
+:::caution[Quên gọi `super().__init__()` khi kế thừa]
+Khi kế thừa một lớp cơ sở phức tạp như `torch.nn.Module`, nếu không gọi `super().__init__()` ngay dòng đầu tiên của `__init__`, các thuộc tính và cơ chế quản lý tham số ngầm định của lớp cha sẽ không được khởi tạo, dẫn đến các lỗi runtime rất khó truy vết.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- Lớp là bản thiết kế, đối tượng là thực thể cụ thể; `self` đại diện cho chính đối tượng đang thực thi.
+- Luôn khởi tạo thuộc tính bên trong `__init__` để bảo đảm tính độc lập dữ liệu giữa các thực thể.
+- 4 trụ cột OOP (Đóng gói, Kế thừa, Đa hình, Trừu tượng) là nền tảng kiến trúc của mọi thư viện AI chuyên nghiệp (PyTorch, Scikit-Learn, Hugging Face).
+- Các phương thức ma thuật (`__len__`, `__getitem__`, `__call__`) biến các lớp tự định nghĩa thành những đối tượng chuẩn mực của Python.
+
+**Đọc thêm:**
+
+- Python Software Foundation (2024). [*The Python Tutorial: Classes*](https://docs.python.org/3/tutorial/classes.html). Hướng dẫn chính thức về cú pháp hướng đối tượng, scope và không gian tên trong Python.
+- PyTorch Team (2024). [*torch.nn.Module Documentation*](https://pytorch.org/docs/stable/generated/torch.nn.Module.html). Hướng dẫn về lớp cơ sở của mọi mạng nơ-ron trong PyTorch.
+- Scikit-Learn Developers (2024). [*Developing Scikit-Learn Estimators*](https://scikit-learn.org/stable/developers/develop.html). Tài liệu về quy chuẩn thiết kế lớp ước lượng máy học với các giao diện `fit`, `predict`.
+
+<LessonProgress />

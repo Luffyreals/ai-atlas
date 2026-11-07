@@ -1,0 +1,222 @@
+---
+title: 'Trực quan hóa dữ liệu: Matplotlib và Seaborn'
+description: 'Làm chủ trực quan hóa dữ liệu trong AI: kiến trúc Figure và Axes, phân tích khám phá EDA, biểu đồ đường loss, scatter plot đặc trưng và ma trận tương quan heatmap.'
+quiz:
+  - question: 'Trong kiến trúc hướng đối tượng của Matplotlib, đối tượng `Figure` và `Axes` có mối quan hệ cấu trúc như thế nào?'
+    options:
+      - '`Axes` là khung tranh ngoài cùng, còn `Figure` là các đường vẽ bên trong'
+      - '`Figure` là khung tranh tổng thể (canvas), có thể chứa một hoặc nhiều hệ trục tọa độ `Axes` nơi dữ liệu thực sự được vẽ lên'
+      - '`Figure` và `Axes` là hai tên gọi hoàn toàn đồng nghĩa trong Matplotlib'
+      - '`Axes` chỉ dùng cho đồ họa 3D, còn `Figure` dùng cho đồ họa 2D'
+    answer: 1
+    explanation: '`Figure` đóng vai trò như trang giấy trắng hay khung tranh tổng thể bao trùm toàn bộ cửa sổ hình vẽ. Bên trong một `Figure`, bạn có thể tạo một hoặc nhiều `Axes` (các ô đồ thị với hệ trục tọa độ riêng biệt) để vẽ đường, điểm phân tán, biểu đồ cột hoặc biểu đồ nhiệt.'
+  - question: 'Khi thực hiện phân tích khám phá dữ liệu (EDA), loại biểu đồ nào là công cụ chuẩn mực và trực quan nhất để phát hiện các giá trị ngoại lai (outliers) dựa trên khoảng tứ phân vị (IQR)?'
+    options:
+      - 'Biểu đồ tròn (Pie chart)'
+      - 'Biểu đồ hộp (Box plot)'
+      - 'Biểu đồ đường (Line plot)'
+      - 'Biểu đồ mạng nhện (Radar chart)'
+    answer: 1
+    explanation: 'Biểu đồ hộp (Box plot) hiển thị rõ ràng 5 vị trí thống kê quan trọng: giá trị nhỏ nhất, tứ phân vị thứ nhất ($Q_1$), trung vị ($Q_2$), tứ phân vị thứ ba ($Q_3$) và giá trị lớn nhất. Mọi điểm dữ liệu nằm ngoài phạm vi $[Q_1 - 1.5 \times \text{IQR}, Q_3 + 1.5 \times \text{IQR}]$ đều được vẽ dưới dạng các dấu chấm riêng biệt, giúp phát hiện ngoại lai tức thì.'
+  - question: 'Quan sát biểu đồ quá trình huấn luyện: đường Train Loss liên tục giảm đều đặn về gần 0, trong khi đường Validation Loss giảm tới epoch 6 rồi bắt đầu đảo chiều tăng dần. Biểu đồ này cảnh báo hiện tượng gì?'
+    options:
+      - 'Hiện tượng dưới khớp (Underfitting) do mô hình quá đơn giản'
+      - 'Hiện tượng quá khớp (Overfitting) vì mô hình bắt đầu học vẹt dữ liệu huấn luyện và mất khả năng tổng quát hóa'
+      - 'Tốc độ học (Learning rate) đang được đặt quá nhỏ'
+      - 'Dữ liệu kiểm định bị đảo ngược thứ tự ngẫu nhiên'
+    answer: 1
+    explanation: 'Khi Train Loss tiếp tục giảm nhưng Validation Loss bắt đầu phân kỳ và tăng lên, đó là dấu hiệu kinh điển của quá khớp (overfitting). Mô hình đang ghi nhớ chi tiết nhiễu của tập train thay vì học quy luật tổng quát. Đây là căn cứ quan trọng để áp dụng kỹ thuật dừng sớm (Early Stopping) ở epoch 6.'
+  - question: 'Trên ma trận nhiệt tương quan (Correlation Heatmap), nếu hai đặc trưng đầu vào có hệ số tương quan Pearson lên tới $0.98$, vấn đề gì có thể xảy ra và cách xử lý phù hợp là gì?'
+    options:
+      - 'Không có vấn đề gì, tương quan càng cao thì mô hình càng học tốt'
+      - 'Xảy ra hiện tượng đa cộng tuyến (multicollinearity), khiến ước lượng trọng số của các mô hình tuyến tính bị mất ổn định; nên loại bỏ bớt một đặc trưng hoặc áp dụng giảm chiều dữ liệu'
+      - 'Mô hình sẽ bị chia cho số 0'
+      - 'Bắt buộc phải nhân đôi số lượng mẫu huấn luyện'
+    answer: 1
+    explanation: 'Hệ số tương quan $0.98$ cho thấy hai đặc trưng gần như mang thông tin trùng lặp hoàn toàn (đa cộng tuyến). Trong các mô hình tuyến tính hay hồi quy logistic, hiện tượng này làm ma trận hiệp phương sai gần như suy biến, khiến nghiệm trọng số bị dao động dữ dội. Giải pháp chuẩn là loại bớt một trong hai đặc trưng hoặc dùng kỹ thuật giảm chiều PCA.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import lossCurvesCode from '@code/python/data-visualization/loss-curves.vi.py?raw';
+import scatterClustersCode from '@code/python/data-visualization/scatter-clusters.vi.py?raw';
+
+## Mục tiêu
+
+Sau bài này, bạn sẽ:
+
+- Thấu hiểu triết lý trực quan hóa dữ liệu trong phân tích khám phá (**Exploratory Data Analysis - EDA**) trước khi huấn luyện mô hình học máy.
+- Làm chủ kiến trúc hướng đối tượng của Matplotlib: phân biệt tường minh giữa khung hình tổng thể (**Figure**) và hệ trục tọa độ (**Axes**).
+- Nhận biết và lựa chọn chính xác các loại biểu đồ thiết yếu trong AI: biểu đồ đường (theo dõi hàm mất mát), biểu đồ phân tán (không gian đặc trưng), biểu đồ phân phối và biểu đồ nhiệt tương quan.
+- Đọc hiểu biểu đồ huấn luyện để chẩn đoán các trạng thái của mô hình AI: hội tụ, quá khớp (overfitting), hoặc dưới khớp (underfitting).
+
+## Cần biết trước
+
+{/* Danh sách lấy từ prerequisites của bài trong roadmap.ts. Không viết link tay. */}
+
+<Prerequisites />
+
+:::tip[Nhắc nhanh]
+Trong bài trước, bạn đã thành thạo thao tác với mảng NumPy và bảng dữ liệu Pandas. Trong bài này, bạn sẽ biến các con số khô khan trong ma trận thành những hình ảnh trực quan sinh động bằng hai thư viện đồ họa cốt lõi: **Matplotlib** và **Seaborn**.
+:::
+
+## Trực giác
+
+Trong câu chuyện nổi tiếng về *Bộ tứ Anscombe (Anscombe's quartet)*, có 4 tập dữ liệu khác nhau sở hữu cùng giá trị trung bình, cùng phương sai, cùng hệ số tương quan và cùng phương trình hồi quy tuyến tính. Tuy nhiên, ngay khi bạn vẽ chúng lên đồ thị:
+- Một tập dữ liệu là đường thẳng mượt mà với nhiễu ngẫu nhiên.
+- Một tập dữ liệu uốn lượn theo hình parabol cong rõ rệt.
+- Một tập dữ liệu bị kéo lệch hoàn toàn bởi một điểm ngoại lai duy nhất!
+
+Nếu chỉ nhìn vào các con số thống kê tóm tắt, bạn sẽ bị dữ liệu "đánh lừa". **Trực quan hóa dữ liệu (Data Visualization)** chính là chiếc kính hiển vi giúp bạn:
+1. Phát hiện sớm các dị thường, giá trị lỗi và ngoại lai trước khi đổ dữ liệu vào mạng nơ-ron.
+2. Theo dõi "nhịp tim" của mô hình học máy trong suốt quá trình huấn luyện thông qua các đường cong mất mát (loss curves).
+
+## Lý thuyết
+
+### Cấu Trúc Hướng Đối Tượng Của Matplotlib
+
+Matplotlib hỗ trợ hai phong cách viết code: phong cách trạng thái MATLAB (`plt.plot(...)`) và phong cách **hướng đối tượng (Object-Oriented API)**. Trong các dự án AI chuyên nghiệp, phong cách hướng đối tượng luôn là chuẩn mực:
+
+```python
+fig, ax = plt.subplots(figsize=(8, 5))
+```
+
+- **`Figure` (Khung tranh):** Là vùng chứa tổng thể cấp cao nhất. Nó quản lý kích thước khung hình, màu nền, tiêu đề chung và tất cả các đồ thị con (subplots).
+- **`Axes` (Hệ trục tọa độ):** Là vùng đồ thị thực sự nằm bên trong Figure. Mỗi `Axes` sở hữu trục hoành (X-axis), trục tung (Y-axis), các đường chia độ (ticks), nhãn (labels), đường lưới (grid) và các nét vẽ dữ liệu. Một Figure có thể chứa nhiều `Axes` xếp cạnh nhau (ví dụ: một ô vẽ ảnh, một ô vẽ biểu đồ dự đoán).
+
+### Các Biểu Đồ Thiết Yếu Trong Machine Learning
+
+#### 1. Biểu Đồ Đường (Line Plot): Theo Dõi Tiến Trình Huấn Luyện
+
+Biểu đồ đường kết nối các điểm dữ liệu tuần tự theo thời gian hoặc theo chu kỳ huấn luyện (epoch).
+- Trục hoành: Số thứ tự epoch (hoặc số bước cập nhật gradient).
+- Trục tung: Giá trị hàm mất mát (loss) hoặc thước đo hiệu năng (accuracy, F1-score).
+- Ứng dụng: Giám sát tốc độ hội tụ và phát hiện điểm bắt đầu quá khớp giữa tập huấn luyện (train) và tập kiểm định (validation).
+
+#### 2. Biểu Đồ Phân Tán (Scatter Plot): Khám Phá Không Gian Đặc Trưng
+
+Biểu đồ phân tán hiển thị từng mẫu dữ liệu dưới dạng một điểm trên mặt phẳng tọa độ hai chiều $(x_1, x_2)$:
+- Giúp quan sát tương quan phi tuyến giữa hai thuộc tính.
+- Phân biệt các cụm dữ liệu (clusters) trong học không giám sát.
+- Hiển thị ranh giới quyết định (decision boundary) phân tách giữa các lớp phân loại.
+
+#### 3. Histogram và Ước Lượng Mật Độ Kernel (KDE): Kiểm Tra Phân Phối
+
+- **Histogram:** Chia khoảng giá trị thành các thùng (bins) và đếm số lượng mẫu rơi vào mỗi thùng.
+- **KDE (Kernel Density Estimation):** Làm mượt histogram thành một đường cong mật độ xác suất liên tục.
+- Ứng dụng: Kiểm tra xem phân phối của dữ liệu có tuân theo phân phối chuẩn (Gaussian distribution) hay bị lệch (skewed). Nhiều thuật toán AI (như Linear Regression, PCA) hoạt động tốt nhất khi các đặc trưng đầu vào có phân phối hình chuông đối xứng.
+
+#### 4. Biểu Đồ Hộp (Box Plot): Phát Hiện Ngoại Lai (Outliers)
+
+Biểu đồ hộp tóm tắt dữ liệu qua 5 chỉ số thống kê then chốt:
+- Trung vị ($Q_2$): Đường vạch ở giữa hộp.
+- Hộp tứ phân vị: Chứa 50% dữ liệu ở giữa, từ $Q_1$ (phân vị 25%) đến $Q_3$ (phân vị 75%). Khoảng cách này gọi là $\text{IQR} = Q_3 - Q_1$.
+- Râu (Whiskers): Kéo dài tới giá trị lớn nhất và nhỏ nhất trong khoảng $[Q_1 - 1.5 \times \text{IQR}, Q_3 + 1.5 \times \text{IQR}]$.
+- Các điểm chấm rời rạc nằm ngoài râu chính là các **điểm ngoại lai (outliers)** cần được kiểm tra kỹ lưỡng.
+
+#### 5. Bản Đồ Nhiệt Tương Quan (Correlation Heatmap)
+
+Thư viện **Seaborn** xây dựng dựa trên Matplotlib và cung cấp hàm `sns.heatmap()` chuyên dụng:
+- Tính ma trận tương quan giữa tất cả các cặp đặc trưng: `corr = df.corr()`.
+- Biểu diễn bằng các ô màu: màu nóng biểu thị tương quan dương mạnh, màu lạnh biểu thị tương quan âm mạnh.
+- Giúp phát hiện hiện tượng đa cộng tuyến (multicollinearity) để loại bỏ các đặc trưng dư thừa.
+
+## Minh họa
+
+Kiến trúc phân cấp Figure và Axes trong Matplotlib:
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│  Figure (Khung tranh tổng thể bao bọc)                       │
+│                                                              │
+│  ┌────────────────────────────┐  ┌─────────────────────────┐ │
+│  │ Axes 1 (Đồ thị Train Loss) │  │ Axes 2 (Đồ thị Val Loss)│ │
+│  │  ▲ Loss                    │  │  ▲ Loss                 │ │
+│  │  │ ╲                       │  │  │ ╲    ╱               │ │
+│  │  │  ╲                      │  │  │  ╲──╱                │ │
+│  │  └────────► Epoch          │  │  └────────► Epoch       │ │
+│  └────────────────────────────┘  └─────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
+```
+
+Chẩn đoán hiện tượng quá khớp (Overfitting) qua biểu đồ đường:
+
+```text
+ Loss
+  ▲
+  │   Train Loss tiếp tục giảm sâu ──► Mô hình học vẹt tập train
+  │╲
+  │ ╲       Điểm dừng sớm (Early Stopping)
+  │  ╲            ▼
+  │   ╲───────────┬───────────────
+  │    ╲          │   ╱
+  │     ╲─────────┴──╱  ◄─── Val Loss quay đầu tăng (Quá khớp!)
+  └──────────────────────────────► Epoch
+```
+
+## Ví dụ code
+
+Các ô dưới đây chạy độc lập. Bạn có thể nhấn nút **Chạy** để xem ngay kết quả đồ thị sinh ra.
+
+Ô thứ nhất vẽ biểu đồ đường theo dõi tiến trình mất mát huấn luyện (Train Loss) và mất mát kiểm định (Val Loss) theo từng epoch với phong cách hướng đối tượng chuẩn mực của Matplotlib:
+
+<PythonRunner
+  code={lossCurvesCode}
+  title="Biểu đồ đường theo dõi tiến trình mất mát (Loss Curves)"
+  figureAlt={[
+    'Biểu đồ đường thể hiện Train Loss và Val Loss qua 8 epoch. Train Loss giảm đều từ 0.82 xuống 0.08; Val Loss giảm từ 0.85 xuống đáy 0.30 ở epoch 6 rồi tăng nhẹ lên 0.35, thể hiện dấu hiệu quá khớp (overfitting).',
+  ]}
+/>
+
+Đồ thị cho thấy rõ nét hiện tượng phân kỳ: từ epoch 6 trở đi, trong khi Train Loss tiếp tục đi xuống thì Val Loss lại quay đầu đi lên. Đây là tín hiệu trực quan báo hiệu thời điểm nên dừng huấn luyện (Early Stopping).
+
+Ô thứ hai tạo biểu đồ phân tán không gian hai đặc trưng, phân biệt rõ ràng hai cụm dữ liệu phân loại và đánh dấu tâm phân phối của mỗi cụm:
+
+<PythonRunner
+  code={scatterClustersCode}
+  title="Biểu đồ phân tán không gian đặc trưng (Feature Space Scatter Plot)"
+  figureAlt={[
+    'Biểu đồ phân tán gồm hai cụm điểm dữ liệu đại diện cho hai lớp. Cụm Lớp 0 màu xanh tập trung quanh tọa độ (2, 2); Cụm Lớp 1 màu đỏ tập trung quanh tọa độ (4.5, 4.5); tâm phân phối của mỗi cụm được đánh dấu bằng dấu chữ x màu đen nổi bật.',
+  ]}
+/>
+
+Biểu đồ phân tán giúp trực quan hóa cấu trúc hình học của dữ liệu: hai cụm tách biệt rõ rệt trong không gian đặc trưng, cho phép các mô hình phân loại tuyến tính dễ dàng tìm được mặt phẳng phân cách tối ưu.
+
+## Lỗi hay gặp
+
+:::caution[Nhầm lẫn giữa cú pháp trạng thái MATLAB và API hướng đối tượng]
+Việc trộn lẫn giữa `plt.plot()` và `ax.plot()` trong cùng một đoạn code khiến việc tùy biến giao diện trở nên rối rắm và khó kiểm soát khi có nhiều đồ thị con (subplots). Hãy luôn khởi tạo bằng `fig, ax = plt.subplots()` và gọi các phương thức trực tiếp trên biến `ax` (`ax.set_title()`, `ax.set_xlabel()`).
+:::
+
+:::caution[Quên đóng hình vẽ gây rò rỉ bộ nhớ]
+Khi bạn vẽ hàng trăm biểu đồ trong một vòng lặp kiểm định hoặc sinh ảnh tự động, Matplotlib sẽ giữ lại toàn bộ đối tượng hình ảnh trong bộ nhớ cho đến khi bạn giải phóng nó. Hãy gọi `plt.close(fig)` sau khi lưu hình ảnh ra tệp để giải phóng tài nguyên RAM.
+:::
+
+:::caution[Bỏ qua bước chuẩn hóa thang đo giữa các trục]
+Khi vẽ biểu đồ phân tán hoặc đường mức (contour plot) để quan sát thuật toán Gradient Descent, nếu hai trục có thang đo chênh lệch hàng nghìn lần (ví dụ trục $x_1$ từ 0 đến 1, trục $x_2$ từ 0 đến 10 000), hình ảnh biểu diễn sẽ bị méo mó, khiến bạn ngộ nhận về hình dạng thực sự của không gian mất mát.
+:::
+
+## Kiểm tra nhanh
+
+{/* Câu hỏi nằm ở trường `quiz` trong frontmatter. */}
+
+<Quiz />
+
+## Tóm tắt và đọc thêm
+
+**Ý chính:**
+
+- EDA là bước bắt buộc trước khi áp dụng bất kỳ mô hình học máy nào; trực quan hóa giúp khám phá các mẫu hình mà thống kê tóm tắt bỏ sót.
+- Chuẩn hóa viết mã Matplotlib với API hướng đối tượng: `Figure` là khung tranh bao quát, `Axes` là hệ trục chứa biểu đồ cụ thể.
+- Biểu đồ đường giúp theo dõi hàm mất mát và phát hiện sớm các hiện tượng quá khớp hay dưới khớp.
+- Biểu đồ hộp (Box plot) và biểu đồ phân tán (Scatter plot) là công cụ đắc lực để sàng lọc ngoại lai và thấu hiểu không gian đặc trưng.
+
+**Đọc thêm:**
+
+- Hunter, J. D. (2007). [*Matplotlib: A 2D graphics environment*](https://doi.org/10.1109/MCSE.2007.55). Tạp chí *Computing in Science & Engineering*, 9(3), 90–95. Bài báo gốc công bố thư viện Matplotlib.
+- Waskom, M. L. (2021). [*Seaborn: statistical data visualization*](https://doi.org/10.21105/joss.03021). Tạp chí *Journal of Open Source Software*, 6(60), 3021.
+- Matplotlib Development Team (2024). [*Matplotlib Application Interfaces: Explicit vs Implicit*](https://matplotlib.org/stable/users/explain/quick_start.html). Hướng dẫn chuẩn thức giải thích kiến trúc Figure/Axes và phong cách hướng đối tượng.
+
+<LessonProgress />

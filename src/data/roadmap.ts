@@ -153,19 +153,19 @@ export const LESSONS: readonly Lesson[] = [
     id: 'python/oop',
     title: { vi: 'Lập trình hướng đối tượng (OOP)', en: 'Object-Oriented Programming (OOP)' },
     prerequisites: ['python/functions-strings-files'],
-    status: { vi: 'planned', en: 'planned' },
+    status: { vi: 'published', en: 'planned' },
   },
   {
     id: 'python/numpy-pandas',
     title: { vi: 'Numpy và Pandas', en: 'NumPy and Pandas' },
     prerequisites: ['python/functions-strings-files'],
-    status: { vi: 'planned', en: 'planned' },
+    status: { vi: 'published', en: 'planned' },
   },
   {
     id: 'python/data-visualization',
     title: { vi: 'Trực quan hóa dữ liệu: Matplotlib và Seaborn', en: 'Data Visualization: Matplotlib and Seaborn' },
     prerequisites: ['python/numpy-pandas'],
-    status: { vi: 'planned', en: 'planned' },
+    status: { vi: 'published', en: 'planned' },
   },
 
   // Part 2: Math for AI (3)
