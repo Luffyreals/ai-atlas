@@ -1,0 +1,369 @@
+---
+title: Gradient Descent
+description: Find the MSE minimum of 10 apartments step by step down the slope. Update rules, learning rate and the 2/L threshold, feature scaling, stopping criteria, SGD and mini-batch.
+quiz:
+  - question: 'A 1D loss function is $\mathcal{L}(w) = 2(w - 3)^2$. You run gradient descent with $\eta = 0.4$, starting from $w = 0$. What happens?'
+    options:
+      - '$w$ increases monotonically toward 3 and never exceeds 3'
+      - '$w$ oscillates back and forth across 3, getting closer on each step, and converges to 3'
+      - '$w$ oscillates indefinitely between 0 and 6 forever'
+      - '$w$ moves progressively farther away from 3, diverging to infinity'
+    answer: 1
+    explanation: 'The derivative is $4(w - 3)$, so curvature is $L = 4$. Each step multiplies the distance $w - 3$ by contraction factor $q = 1 - \eta L = 1 - 1.6 = -0.6$. The negative sign causes $w$ to jump across the optimum ($0 \to 4.8 \to 1.92 \to 3.648$), while magnitude $\lvert q\rvert = 0.6 < 1$ shrinks the error distance exponentially. Because $\eta = 0.4$ remains below the divergence boundary $2/L = 0.5$, it converges despite oscillations caused by exceeding $1/L = 0.25$.'
+  - question: 'At parameter state $\boldsymbol{\theta} = [w, b]^\top = [1, 2]^\top$, the loss gradient is $\nabla\mathcal{L} = [-4, 2]^\top$. After one gradient descent update with learning rate $\eta = 0.1$, what is the new value of $\boldsymbol{\theta}$?'
+    options: ['$[0.6, 2.2]^\top$', '$[0.6, 1.8]^\top$', '$[1.4, 1.8]^\top$', '$[1.4, 2.2]^\top$']
+    answer: 2
+    explanation: 'Step opposite the gradient: $\boldsymbol{\theta} - \eta\nabla\mathcal{L} = [1 - 0.1 \cdot (-4),\ 2 - 0.1 \cdot 2]^\top = [1.4, 1.8]^\top$. A negative partial derivative with respect to $w$ indicates that increasing $w$ reduces loss, so $w$ must increase. Option $[0.6, 2.2]^\top$ results from mistakenly adding the gradient (gradient ascent).'
+  - question: 'You run gradient descent on raw apartment area (m², unstandardized) with an $\eta$ that converges well. A colleague converts the area column to dm² (multiplying by 100) and keeps $\eta$ unchanged. What is most likely to happen?'
+    options:
+      - 'Gradient descent diverges, because loss curvature with respect to $w$ increases by roughly 10 000, causing the old $\eta$ to exceed threshold $2/L$'
+      - 'Gradient descent converges roughly 100 times faster, because gradients are larger'
+      - 'Nothing changes, because optimal predictions are invariant to measurement units'
+      - 'Gradient descent converges to a different local minimum with higher MSE'
+    answer: 0
+    explanation: 'Loss curvature along $w$ is $\frac{2}{m}\sum_i \left(x^{(i)}\right)^2$. Multiplying features by 100 scales this sum by 10 000, increasing curvature $L$ proportionally and shrinking stability bound $2/L$ by a factor of 10 000: the old $\eta$ virtually guaranteed to explode. Larger gradients do not imply faster progress: excessive step lengths overshoot the valley. The optimal line remains conceptually identical, but the gradient optimization path breaks.'
+  - question: 'A training dataset contains $m = 1000$ instances. You train for 3 epochs using mini-batches of size 50. How many parameter updates take place?'
+    options: ['3 updates', '50 updates', '150 updates', '60 updates']
+    answer: 3
+    explanation: 'An epoch consists of a complete pass through all 1000 instances. Processing 50 samples per step yields $1000/50 = 20$ updates per epoch, amounting to $3 \times 20 = 60$ total updates across 3 epochs. 3 updates corresponds to batch gradient descent (1 update per epoch). Under stochastic gradient descent (batch size 1), there would be 3000 updates.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import DatasetTable from '@components/DatasetTable.astro';
+import GradientDescentViz from '@components/viz/GradientDescentViz.astro';
+import gdNumpyCode from '@code/ml/gradient-descent/gd-numpy.en.py?raw';
+import learningRateCode from '@code/ml/gradient-descent/learning-rate.en.py?raw';
+import sgdCode from '@code/ml/gradient-descent/sgd.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Understand how gradient descent (GD) finds loss function minima, and why moving opposite the gradient guarantees descent.
+- Express the parameter update rule $\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \eta\nabla\mathcal{L}(\boldsymbol{\theta})$ for MSE in vector form, and implement it from scratch using NumPy.
+- Explain why small learning rates $\eta$ cause slow convergence while excessive rates induce oscillations or divergence, characterized by stability threshold $\eta < 2/L$; why feature scaling accelerates optimization, and how to define stopping criteria.
+- Distinguish batch GD, stochastic gradient descent (SGD), and mini-batch GD, define an epoch, and train models with scikit-learn's `SGDRegressor`.
+
+## Prerequisites
+
+{/* The list comes from the lesson's prerequisites in roadmap.ts. Do not write the links by hand. */}
+
+<Prerequisites />
+
+:::tip[Quick reminder]
+This lesson revisits the optimization objective from [Linear Regression](/en/ml/linear-regression/): finding parameters $w$ and $b$ that minimize MSE across 10 apartments. The established analytical solution is $w \approx 0.1695$, $b \approx 2.04$, and MSE $\approx 0.3615$. The **derivative** of a single-variable function represents graph slope: positive derivatives indicate ascending values as inputs increase; negative values indicate descending values. The **second derivative** quantifies curvature (how steeply the slope changes).
+:::
+
+## Intuition
+
+Imagine standing on a mountain slope blanketed in dense fog, attempting to reach the valley floor. You cannot see the destination, but you can feel the slope of the ground beneath your boots. The intuitive strategy: take a short step downward in the direction of steepest descent, pause, assess the slope once more, and step again. When the terrain flattens completely beneath your feet, you have reached the valley bottom.
+
+This describes the entire operational concept of **gradient descent** (GD). The "mountain" is the loss function surface, your "position" represents the model parameters, and local "slope" is the gradient.
+
+While our earlier lesson solved parameters directly via the normal equation, many advanced models (such as logistic regression and deep neural networks) possess no closed-form analytical formulas. Furthermore, when feature dimension $n$ scales into thousands, solving linear systems with $n + 1$ unknowns requires approximately $\mathcal{O}(n^3)$ operations. Gradient descent only requires computing local derivatives at the current parameter position. We apply it to our 10-apartment dataset to trace and verify every step numerically.
+
+<DatasetTable dataset="apartments" />
+
+### Manually sensing the slope
+
+Begin with an uneducated initial baseline: $w = 0$ and $b = 0$, predicting zero rent for every apartment. The resulting MSE is 129.75. Unsure where the minimum lies, nudge each parameter slightly and inspect the change in MSE:
+
+| Trial | MSE |
+|---|---:|
+| Initial state: $w = 0$, $b = 0$ | 129.75 |
+| Increase $w$ by 0.01 | 117.42 |
+| Increase $b$ by 0.01 | 129.53 |
+
+Nudging either parameter downward reduces loss, confirming both should increase. However, incrementing $w$ slashes MSE by 12.33, whereas incrementing $b$ reduces loss by merely 0.22—a 50-fold difference. The physical intuition: increasing $w$ by 0.01 raises the predicted rent of an average 52 m² apartment by 0.52 million VND, whereas increasing $b$ by 0.01 lifts all predictions uniformly by only 0.01 million VND. Local derivatives indicate which direction to step, and with what relative urgency. This directional disparity causes severe optimization challenges addressed by feature scaling.
+
+The objective of this lesson is: **from an arbitrary starting parameter vector, iteratively measure gradients and take descent steps until reaching the global MSE minimum, tuning step sizes to converge rapidly without overshooting the valley.**
+
+## Theory
+
+### The gradient: combining partial derivatives into a vector
+
+As established earlier, concatenate parameters into column vector $\boldsymbol{\theta} = [w, b]^\top$. The **gradient** of $\mathcal{L}$ at $\boldsymbol{\theta}$ is the vector of all first-order partial derivatives, denoted $\nabla\mathcal{L}(\boldsymbol{\theta})$:
+
+$$
+\nabla\mathcal{L}(\boldsymbol{\theta}) = \begin{bmatrix} \partial\mathcal{L}/\partial w \\ \partial\mathcal{L}/\partial b \end{bmatrix}
+$$
+
+For $n$ features, the gradient contains $n + 1$ elements. Our linear regression lesson derived the partial derivatives of MSE, where $\hat{y}^{(i)} = wx^{(i)} + b$:
+
+$$
+\begin{aligned}
+\frac{\partial\mathcal{L}}{\partial w} &= \frac{2}{m}\sum_{i=1}^{m}x^{(i)}\left(\hat{y}^{(i)} - y^{(i)}\right) \\
+\frac{\partial\mathcal{L}}{\partial b} &= \frac{2}{m}\sum_{i=1}^{m}\left(\hat{y}^{(i)} - y^{(i)}\right)
+\end{aligned}
+$$
+
+Expressed via design matrix $\mathbf{X}$ (feature column followed by the bias column of ones): vector $\mathbf{X}\boldsymbol{\theta} - \mathbf{y}$ collects residual errors $\hat{y}^{(i)} - y^{(i)}$. Multiplying by $\mathbf{X}^\top$ computes the respective weighted sums across both components. Multiplying by factor $\frac{2}{m}$ yields the exact gradient vector:
+
+$$
+\nabla\mathcal{L}(\boldsymbol{\theta}) = \frac{2}{m}\mathbf{X}^\top\left(\mathbf{X}\boldsymbol{\theta} - \mathbf{y}\right)
+$$
+
+This matrix formulation holds for any arbitrary feature dimension $n$. Setting the gradient to zero yields $\mathbf{X}^\top\left(\mathbf{X}\boldsymbol{\theta} - \mathbf{y}\right) = \mathbf{0}$, which is the normal equation. The stationary termination point of gradient descent coincides with ordinary least squares.
+
+At initial state $(0, 0)$, the gradient evaluates to $[-1264.08, -21.84]^\top$. Scaling by step size 0.01 gives shifts of $-12.64$ and $-0.22$, matching our manual sensitivity checks.
+
+### Why moving opposite the gradient descends the loss
+
+**Single-variable Taylor approximation.** Inspected within an infinitesimal neighborhood of point $w$, function $\mathcal{L}$ closely matches its linear tangent line with slope $\mathcal{L}'(w)$. For a small perturbation $\Delta$:
+
+$$
+\mathcal{L}(w + \Delta) \approx \mathcal{L}(w) + \mathcal{L}'(w)\,\Delta
+$$
+
+Choosing step displacement $\Delta = -\eta\,\mathcal{L}'(w)$ for small scalar $\eta > 0$:
+
+$$
+\mathcal{L}(w + \Delta) \approx \mathcal{L}(w) - \eta\left(\mathcal{L}'(w)\right)^2
+$$
+
+Because squared terms are non-negative, $\mathcal{L}$ strictly decreases (unless $\mathcal{L}'(w) = 0$, indicating a flat stationary point). In words: if the function ascends to the right ($\mathcal{L}' > 0$), step left; if it descends to the right ($\mathcal{L}' < 0$), step right.
+
+**Multivariate generalization.** Displace parameters by vector $\boldsymbol{\Delta} = [\Delta_w, \Delta_b]^\top$. The total first-order differential is the inner product of the gradient and displacement:
+
+$$
+\begin{aligned}
+\mathcal{L}(\boldsymbol{\theta} + \boldsymbol{\Delta}) &\approx \mathcal{L}(\boldsymbol{\theta}) + \frac{\partial\mathcal{L}}{\partial w}\Delta_w + \frac{\partial\mathcal{L}}{\partial b}\Delta_b \\
+&= \mathcal{L}(\boldsymbol{\theta}) + \nabla\mathcal{L}(\boldsymbol{\theta})^\top\boldsymbol{\Delta}
+\end{aligned}
+$$
+
+Setting $\boldsymbol{\Delta} = -\eta\nabla\mathcal{L}(\boldsymbol{\theta})$ transforms the inner product into $-\eta\lVert\nabla\mathcal{L}(\boldsymbol{\theta})\rVert^2$, which is strictly non-positive. Furthermore, among all candidate vectors of fixed Euclidean length, the inner product $\nabla\mathcal{L}^\top\boldsymbol{\Delta} = \lVert\nabla\mathcal{L}\rVert\,\lVert\boldsymbol{\Delta}\rVert\cos\alpha$ minimizes when angle $\alpha = 180^\circ$. Thus, the gradient points along the direction of **steepest ascent**, and its negation points along **steepest descent**. On a topographic **contour map** connecting equal-loss coordinates, this descent vector is orthogonal to the local level curve.
+
+The term "approximation" is vital: tangent approximations hold only locally, meaning excessively large steps can overshoot and cause loss to increase.
+
+This foundational concept was formalized in 1847 by Augustin-Louis Cauchy, who solved astronomical orbit calculations by minimizing residual sums of squares through iterative coordinate updates opposite their partial derivatives.
+
+### The update rule
+
+Gradient descent iteratively applies a single vector update:
+
+$$
+\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \eta\nabla\mathcal{L}(\boldsymbol{\theta}_t)
+$$
+
+Here $t = 0, 1, 2, \dots$ indexes the iteration step, $\boldsymbol{\theta}_0$ is the initial parameter vector (typically $\mathbf{0}$), and $\eta > 0$ is the **learning rate** hyperparameter. Substituting the MSE gradient:
+
+$$
+\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \eta \cdot \frac{2}{m}\mathbf{X}^\top\left(\mathbf{X}\boldsymbol{\theta}_t - \mathbf{y}\right)
+$$
+
+Because each step computes gradients across all $m$ training samples, this variant is called **batch gradient descent**. Two notable properties emerge:
+
+- **Step lengths naturally shrink near the minimum.** The step displacement is $\eta\lVert\nabla\mathcal{L}\rVert$. As parameters approach stationary points, gradients diminish, smoothly dampening steps without requiring manually scheduled decay.
+- **MSE loss for linear regression is strictly convex.** The loss surface forms an ideal paraboloid bowl containing a single global minimum, free from deceptive local minima. Neural networks lack this convexity guarantee.
+
+### Learning rate dynamics: the 1D case
+
+Consider the canonical 1D quadratic function:
+
+$$
+f(w) = \frac{L}{2}\left(w - w^\ast\right)^2 + c
+$$
+
+where $w^\ast$ is the minimizer, $c$ is minimum loss, and $L > 0$ represents **curvature** (the second derivative $f''(w)$ measuring valley steepness). Do not confuse curvature $L$ with loss $\mathcal{L}$.
+
+The first derivative is $f'(w) = L\left(w - w^\ast\right)$. Substituting into update rule $w_{t+1} = w_t - \eta f'(w_t)$ and subtracting $w^\ast$ from both sides:
+
+$$
+\begin{aligned}
+w_{t+1} - w^\ast &= \left(w_t - w^\ast\right) - \eta L\left(w_t - w^\ast\right) \\
+&= \left(1 - \eta L\right)\left(w_t - w^\ast\right)
+\end{aligned}
+$$
+
+At each step, parameter distance to the target is multiplied by constant factor $q = 1 - \eta L$. After $t$ steps, error scales as $q^t\left(w_0 - w^\ast\right)$. System behavior depends entirely on multiplier $q$:
+
+| Learning rate $\eta$ | Contraction factor $q = 1 - \eta L$ | Optimization behavior |
+|---|---|---|
+| $0 < \eta < 1/L$ | $0 < q < 1$ | Monotonic convergence from one side. Smaller $\eta$ yields $q \to 1$, leading to **sluggish** progress |
+| $\eta = 1/L$ | $q = 0$ | Exact convergence in a single step |
+| $1/L < \eta < 2/L$ | $-1 < q < 0$ | Alternating sign jumps across the minimum: **oscillatory** yet asymptotically convergent |
+| $\eta = 2/L$ | $q = -1$ | Undamped oscillation between boundary states, failing to converge |
+| $\eta > 2/L$ | $q < -1$ | Exponentially expanding step lengths: **divergence** |
+
+Evaluating against $f(w) = w^2$ (where $L = 2$, optimum $w^\ast = 0$, stability bound $2/L = 1$, starting from $w_0 = 1$):
+
+| $\eta$ | $q$ | Sequence $w_0, w_1, \dots, w_5$ |
+|---|---:|---|
+| 0.1 | 0.8 | 1, 0.8, 0.64, 0.512, 0.4096, 0.3277 |
+| 0.5 | 0 | 1, 0, 0, 0, 0, 0 |
+| 0.9 | −0.8 | 1, −0.8, 0.64, −0.512, 0.4096, −0.3277 |
+| 1.1 | −1.2 | 1, −1.2, 1.44, −1.728, 2.0736, −2.4883 |
+
+Compare rows $\eta = 0.1$ and $\eta = 0.9$: distance magnitudes are identical at every step, differing only in alternating signs. Taking 9-fold larger steps provides zero speed advantage.
+
+:::note[Takeaway]
+On a quadratic surface with curvature $L$, gradient descent converges if and only if $0 < \eta < 2/L$. Steeper terrain (larger $L$) imposes strictly tighter upper bounds on learning rate $\eta$.
+:::
+
+### Multivariate dynamics: anisotropic curvature
+
+The MSE surface over $(w, b)$ is a 2D paraboloid bowl with asymmetric curvature along different axes. Second-order partial derivatives form the **Hessian matrix**:
+
+$$
+\mathbf{H} = \begin{bmatrix} \frac{2}{m}\sum_i \left(x^{(i)}\right)^2 & \frac{2}{m}\sum_i x^{(i)} \\ \frac{2}{m}\sum_i x^{(i)} & 2 \end{bmatrix} = \frac{2}{m}\mathbf{X}^\top\mathbf{X}
+$$
+
+Because $\mathbf{H}$ is independent of parameter state $\boldsymbol{\theta}$, bowl curvature is uniform throughout.
+
+Any quadratic bowl decomposes into orthogonal principal directions (the eigenvectors of $\mathbf{H}$), along which gradient descent behaves **identically to decoupled 1D systems**, governed by their respective curvatures (the eigenvalues of $\mathbf{H}$). Let $L$ denote the maximal eigenvalue (steepest curvature), and $\mu$ denote the minimal eigenvalue (flattest curvature). Distance to the minimum contracts by factors $1 - \eta L$ and $1 - \eta\mu$ along these respective axes:
+
+- **The steepest axis determines stability.** Convergence strictly requires $\eta < 2/L$. Exceeding this threshold triggers explosive divergence along the steep coordinate.
+- **The slowest contraction factor dictates convergence rate.** When $\eta \ll 2/L$, the flat axis bottlenecks progress: $1 - \eta\mu \approx 1$ when $\mu$ is small. Near the upper bound, $1 - \eta L \approx -1$, creating undamped high-frequency oscillations across the steep valley walls.
+
+The ratio $\kappa = L/\mu$ defines the **condition number**. High condition numbers indicate highly ill-conditioned, elongated elliptical ravines where no single scalar $\eta$ satisfies both axes effectively.
+
+### Feature scaling
+
+Evaluating raw apartment areas in square meters:
+
+$$
+\mathbf{H} = \begin{bmatrix} 6197.6 & 104.8 \\ 104.8 & 2 \end{bmatrix}, \qquad L \approx 6199.4, \quad \mu \approx 0.228
+$$
+
+This produces condition number $\kappa \approx 27\,200$. The steep axis aligns with $w$ while the flat axis aligns with $b$: the loss surface forms an **extremely long, narrow canyon**. Steep walls restrict learning rates to $\eta < 2/L \approx 3.2 \times 10^{-4}$. At $\eta = 3 \times 10^{-4}$, progress along the canyon floor contracts by $1 - 3 \times 10^{-4} \times 0.228 \approx 0.99993$ per step: after 100 iterations, $b$ advances from 0 to merely 0.017 (against true target 2.04).
+
+The solution is **feature scaling**: normalizing features to comparable unit ranges. We apply **min-max scaling**, mapping floor areas from $[25, 85]$ m² into dimensionless interval $[0, 1]$:
+
+$$
+\tilde{x} = \frac{x - 25}{85 - 25} = \frac{x - 25}{60}
+$$
+
+Normalizing strictly the input feature preserves target scale $y$ and MSE comparability. The transformed model is $\hat{y} = \tilde{w}\tilde{x} + \tilde{b}$, where parameters carry clear intuitive physical interpretations:
+
+- $\tilde{b}$ represents predicted rent for the smallest apartment (25 m²), where $\tilde{x} = 0$.
+- $\tilde{w}$ represents rent differential between the largest (85 m²) and smallest unit, as $\tilde{x}$ traverses 0 to 1.
+
+Re-evaluating the Hessian on normalized feature matrix $\mathbf{X}$:
+
+$$
+\mathbf{H} = \begin{bmatrix} 0.613 & 0.913 \\ 0.913 & 2 \end{bmatrix}, \qquad L \approx 2.4533, \quad \mu \approx 0.160
+$$
+
+The stability bound expands to $2/L \approx 0.815$, and the condition number drops from 27 200 down to $\kappa \approx 15$—a well-conditioned ellipse with aspect ratio $\sqrt{\kappa} \approx 3.9$.
+
+Starting from $(0, 0)$ with $\eta = 0.3$, the first step shifts parameters to $(3.59, 6.55)$, collapsing MSE from 129.75 down to 12.05. Gradient descent rapidly converges to $(\tilde{w}, \tilde{b}) \approx (10.17, 6.28)$. Unpacking parameters back to physical units:
+
+$$
+\tilde{w}\,\frac{x - 25}{60} + \tilde{b} = \frac{\tilde{w}}{60}\,x + \left(\tilde{b} - 25\,\frac{\tilde{w}}{60}\right)
+\quad\Rightarrow\quad
+w = \frac{\tilde{w}}{60}, \qquad b = \tilde{b} - 25w
+$$
+
+This yields $w = 10.17/60 \approx 0.1695$ and $b \approx 6.28 - 25 \times 0.1695 \approx 2.04$, recovering the analytical solution.
+
+Standardization via **z-scores** (`StandardScaler`, detailed in [Ridge, Lasso, Elastic Net](/en/ml/regularization/)) standardizes columns to zero mean and unit variance. For single features, it produces circular level curves ($\kappa = 1$). Both transformers must derive scaling parameters strictly from training data.
+
+### Stopping criteria
+
+Gradient descent requires programmatic **stopping criteria**:
+
+1. **Maximum iteration count.** An essential safeguard preventing runaway execution during numerical divergence.
+2. **Gradient norm threshold:** $\lVert\nabla\mathcal{L}\rVert < \varepsilon$ (e.g. $10^{-6}$), confirming local terrain is sufficiently flat.
+3. **Loss improvement threshold.** Tracking relative change in loss $\Delta\mathcal{L}$ across iterations. Scikit-learn implements this via parameter `tol`, which can trigger premature convergence along flat ravines.
+
+### Batch, SGD, and mini-batch
+
+On datasets with $m = 10$ million instances, evaluating full-batch gradients at every step is computationally prohibitive. Stochastic approximations evaluate gradients over data subsets:
+
+- **Stochastic gradient descent (SGD)**: computes gradients over a **single** randomly sampled instance at each step.
+- **Mini-batch gradient descent**: computes gradients across small cohorts of size $B$: $\frac{2}{B}\mathbf{X}_B^\top\left(\mathbf{X}_B\boldsymbol{\theta} - \mathbf{y}_B\right)$. This constitutes the universal standard for deep neural network optimization.
+- **Epoch**: a complete pass over the entire training corpus, encompassing $m/B$ gradient steps. Training data should be shuffled before each epoch.
+
+Within a single epoch, SGD executes $m$ updates, whereas batch GD performs only one. However, SGD introduces stochastic gradient variance, causing parameters to fluctuate near the optimum under constant learning rates. Decaying learning rates over time (learning rate schedules) dampens these oscillations. Modern optimizers such as Momentum and Adam are explored in Advanced Optimization Algorithms.
+
+### Limitations
+
+Gradient descent requires careful learning rate tuning and feature standardization, guarantees global convergence only on convex surfaces, and is computationally less efficient than direct analytical solutions on small tabular datasets. It becomes indispensable when feature counts $n$ or dataset sizes $m$ scale beyond memory limits, or when models lack closed-form estimators (as in Logistic Regression and Artificial Neural Networks).
+
+## Illustration
+
+Explore optimization dynamics visually. The contour map plots MSE level curves over $(\tilde{w}, \tilde{b})$, with the global minimum marked at × $(10.17, 6.28)$ and initial parameters at $(0, 0)$. Use **Step** for single updates, **Run** to simulate up to 100 iterations, and **Reset** to return to origin. The slider selects among five learning rate configurations. The secondary plot traces loss trajectories on logarithmic scales, with the dashed reference indicating optimal loss 0.3615. Stability bound evaluates to $2/L \approx 0.815$. Try:
+
+1. At $\eta = 0.30$: click **Step**. Loss progresses $129.75 \to 12.05 \to 3.5960$. Initial steps descend steeply into the basin, after which trajectories pivot along the ravine floor, entering within 1% of optimal loss by step 69.
+2. At $\eta = 0.05$: click **Run**. Step lengths contract gradually; after 100 iterations, loss remains stuck at 1.0023.
+3. At $\eta = 0.70$: trajectories oscillate in a narrowing zigzag across the valley, entering the 1% error margin by step 29 (the fastest among all five presets).
+4. At $\eta = 0.80$ and $0.85$: near the boundary, updates bounce across the full ravine width, finishing 100 steps at 0.4240. Exceeding the threshold ($\eta = 0.85$) triggers immediate divergence: loss expands $151.40 \to 177.24 \to 207.95 \to 244.32$, blowing off the viewport by step 4.
+
+{/* VIZ: stepping opposite gradient; η determines whether parameters converge slowly, rapidly, oscillate, or diverge. */}
+<GradientDescentViz />
+
+## Code examples
+
+The three cells below run independently; each constructs the apartment dataset locally.
+
+The first cell implements batch gradient descent from scratch in NumPy: min-max normalizes features, starts from $(0, 0)$ with $\eta = 0.3$, halts when $\lVert\nabla\mathcal{L}\rVert < 10^{-6}$ or at 10 000 steps, and maps learned parameters back to physical units.
+
+<PythonRunner code={gdNumpyCode} title="Batch gradient descent in NumPy" />
+
+The loop terminates after 282 iterations at $\tilde{w} = 10.1686$ and $\tilde{b} = 6.2763$, mapping to $w = 0.1695$, $b = 2.0394$, and MSE $= 0.3615$, replicating the analytical normal equation. Loss enters within 1% of optimality by step 69; remaining iterations refine gradient norms below $10^{-6}$.
+
+The second cell runs 100 iterations across multiple learning rates, comparing unstandardized features (left) against normalized inputs (right), plotting log-scale loss curves.
+
+<PythonRunner
+  code={learningRateCode}
+  title="Learning rates with and without feature scaling"
+  figureAlt={['Two log-scale loss plots against iteration step from 0.1 to 1000, horizontal dotted line at 0.3615. Left, raw features: eta 0.0003 drops over 20 steps then plateaus near 0.83; eta 0.00033 diverges off-chart. Right, normalized features: eta 0.7 reaches 1% of minimum by step 29; eta 0.3 drops steeply then settles, reaching threshold by step 69; eta 0.05 descends sluggishly toward 1; eta 0.8 descends with oscillations toward 0.42; eta 0.85 diverges off-chart.']}
+/>
+
+- **Normalized features:** matches interactive visualization metrics. Notice $\eta = 0.8$: loss curves appear smooth despite parameter coordinate oscillations. At $\eta = 0.85$, loss explodes to $1.635 \times 10^{9}$.
+- **Raw features:** stability bound is $2/L \approx 3.226 \times 10^{-4}$. Setting $\eta = 3 \times 10^{-4}$ descends into the canyon and stalls at 0.8273, taking 35 650 iterations to enter the 1% target window. Setting $\eta = 3.3 \times 10^{-4}$ exceeds the stability bound and diverges to $9.987 \times 10^{5}$.
+
+The third cell compares batch sizes using custom optimization loops ($\eta = 0.1$, 100 epochs), and benchmarks against scikit-learn's `SGDRegressor`.
+
+<PythonRunner code={sgdCode} title="SGD, mini-batch, and SGDRegressor" />
+
+Target parameters are $w = 0.1695$, $b = 2.04$, and MSE 0.3615.
+
+- **Batch 10 (Full batch GD)** performs 100 updates, reaching MSE 0.4885 (incomplete convergence).
+- **Batch 2 (Mini-batch)** executes 500 updates, reaching closest to target: MSE 0.3632.
+- **Batch 1 (Stochastic GD)** executes 1 000 updates but finishes farther from the optimum (MSE 0.3766, $b = 2.15$) due to stochastic oscillations around the minimum.
+
+Default `SGDRegressor()` on raw features diverges to MSE $3.6 \times 10^{24}$ within 6 epochs: default `eta0=0.01` is far too large for unscaled square-meter coordinates. Our final configuration chains `MinMaxScaler`, disables default L2 penalties (`penalty=None`), sets constant learning rate 0.05, and sets `tol=None` to ensure 1000 full epochs. It recovers optimal MSE 0.3615.
+
+## Common pitfalls
+
+:::caution[Omitting feature scaling]
+Without feature scaling, gradient descent either converges at an excruciatingly slow crawl or explodes into numerical divergence, often without triggering explicit warnings (`SGDRegressor()` in cell 3). Always encapsulate scalers within pipelines, such as `make_pipeline(MinMaxScaler(), SGDRegressor(...))` or `StandardScaler()`, ensuring transformation parameters derive strictly from training data.
+:::
+
+:::caution[Assuming a flat loss curve indicates convergence]
+On raw features with $\eta = 3 \times 10^{-4}$, MSE between iterations 50 and 100 creeps from 0.8306 to 0.8273, while the true minimum sits far below at 0.3615. Loss-difference stopping criteria fall into this trap: default `SGDRegressor` terminates when loss fails to improve by `tol=1e-3` across 5 consecutive epochs, stopping prematurely at suboptimal solutions without warning. Always verify gradient norms alongside loss improvements.
+:::
+
+:::caution[Copying learning rates across literature]
+Curvature bound $2/L$ depends on feature scaling and objective loss definitions. Textbooks frequently formulate MSE with a $\frac{1}{2m}$ factor rather than $\frac{1}{m}$, halving gradient magnitudes and doubling stability limits. Scikit-learn's `SGDRegressor` similarly defines sample loss as $\frac{1}{2}\left(y - \hat{y}\right)^2$, meaning its `eta0` settings cannot be directly compared to standard formulas without adjustment.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Gradient descent iteratively updates $\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \eta\nabla\mathcal{L}(\boldsymbol{\theta})$, where $\nabla\mathcal{L} = \frac{2}{m}\mathbf{X}^\top\left(\mathbf{X}\boldsymbol{\theta} - \mathbf{y}\right)$ for MSE, converging to the exact solution of the normal equation.
+- Convergence strictly requires $0 < \eta < 2/L$, where $L$ is the maximal eigenvalue of Hessian matrix $\frac{2}{m}\mathbf{X}^\top\mathbf{X}$. Learning rates below $1/L$ converge monotonically; rates between $1/L$ and $2/L$ oscillate; rates above $2/L$ diverge.
+- Min-max scaling $\tilde{x} = (x - 25)/60$ reduces condition number $\kappa$ from 27 200 to 15, reducing steps required to enter the 1% target window from 35 650 down to 69 iterations. Learned parameters map back to original coordinates via $w = \tilde{w}/60$ and $b = \tilde{b} - 25w$.
+- Full-batch GD computes gradients across all $m$ samples, mini-batch GD processes batches of size $B$, and stochastic GD updates on single samples. A plateauing loss curve does not guarantee convergence along ill-conditioned ravines.
+
+**Further reading:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Lesson 7: Gradient Descent (Part 1)](https://machinelearningcoban.com/2017/01/12/gradientdescent/) and [Lesson 8: Gradient Descent (Part 2)](https://machinelearningcoban.com/2017/01/16/gradientdescent2/). Clear Vietnamese coverage of SGD, mini-batch, and momentum extensions.
+- Google (updated 2025–2026). [*Machine Learning Crash Course*: Linear regression: Gradient descent](https://developers.google.com/machine-learning/crash-course/linear-regression/gradient-descent) and [Linear regression: Hyperparameters](https://developers.google.com/machine-learning/crash-course/linear-regression/hyperparameters). Intuitive visual overviews.
+- scikit-learn developers (2007–2026). [*scikit-learn 1.8 User Guide*, Section 1.5: Stochastic Gradient Descent](https://scikit-learn.org/1.8/modules/sgd.html). Official documentation detailing objective formulations and learning rate schedules in `SGDRegressor`.
+- Ruder, S. (2016). [*An overview of gradient descent optimization algorithms*](https://arxiv.org/abs/1609.04747). arXiv:1609.04747. Authoritative survey covering modern optimizers including Momentum, Adagrad, RMSProp, and Adam.
+- Landmark original papers. Cauchy, A. (1847). [*Méthode générale pour la résolution des systèmes d'équations simultanées*](https://gtfp.cs.rhul.ac.uk/pulskamp/Cauchy/Orbits/1847%20CR%20536%28383%29.pdf) (PDF, English translation by R. J. Pulskamp). *Comptes rendus de l'Académie des sciences* 25, 536–538: original mathematical introduction of gradient descent. Robbins, H., Monro, S. (1951). [*A Stochastic Approximation Method*](https://doi.org/10.1214/aoms/1177729586). *The Annals of Mathematical Statistics* 22(3), 400–407: foundational precursor to stochastic gradient descent.
+
+<LessonProgress />
