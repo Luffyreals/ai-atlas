@@ -2,7 +2,7 @@
 
 
 def out_size(n, k, p=0, s=1):
-    """Kích thước đầu ra: floor((n + 2p - k) / s) + 1."""
+    # Kích thước đầu ra: floor((n + 2p - k) / s) + 1.
     return (n + 2 * p - k) // s + 1
 
 

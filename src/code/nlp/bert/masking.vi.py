@@ -3,8 +3,8 @@ import numpy as np
 
 rng = np.random.default_rng(0)
 # Một câu đã tách token (theo âm tiết, để dễ đọc), có [CLS] và [SEP]
-tokens = ("[CLS] hà nội là thủ đô của việt nam , nơi có hơn "
-          "một nghìn năm lịch sử và rất nhiều món ăn ngon . [SEP]").split()
+tokens = ("[CLS] hà nội là thủ đô của việt nam , nơi có hơn một nghìn "
+          "năm lịch sử và rất nhiều món ăn ngon . [SEP]").split()
 special = {"[CLS]", "[SEP]"}
 vocab = sorted(set(tokens) - special) + ["mèo", "sông", "xanh"]
 

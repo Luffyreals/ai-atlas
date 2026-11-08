@@ -41,7 +41,7 @@ import confusionMatrixCode from '@code/ml/classification-metrics/confusion-matri
 import thresholdCurvesCode from '@code/ml/classification-metrics/threshold-curves.en.py?raw';
 import imbalancedCode from '@code/ml/classification-metrics/imbalanced.en.py?raw';
 
-## Objectives
+## Goals
 
 After this lesson, you will be able to:
 
@@ -302,7 +302,7 @@ To diagnose whether a model neglects minority classes, always check `macro avg`.
 - **Threshold-dependent metrics do not verify probability calibration.** A well-calibrated model ensures that among cases assigned $p = 0.9$, approximately 90% are truly positive. Calibration is an orthogonal property not captured by thresholded counts.
 - **Measuring imbalance is not equivalent to remedying it.** Techniques for handling class imbalance (resampling, class-weighted loss) are detailed in [Data Preprocessing](/en/ml/data-preprocessing/).
 
-## Visualization
+## Illustration
 
 The interactive tool below displays all 20 patients along a probability axis from 0 to 1, colored by their true label (diseased or healthy). The slider adjusts threshold $t$ from 0 to 1 in steps of 0.05. A vertical guideline marks the current threshold; all points to the right (including those landing directly on the boundary) are predicted positive. Alongside, the $2 \times 2$ confusion matrix and the four metrics (accuracy, precision, recall, F1) update dynamically as you drag. Try the following:
 
@@ -313,7 +313,7 @@ The interactive tool below displays all 20 patients along a probability axis fro
 
 <ThresholdViz />
 
-## Code Examples
+## Code examples
 
 The three cells below run independently, each handling its own imports and synthetic datasets. The first two replicate the 20-patient dataset. Loading scikit-learn in the browser adds a brief delay on initial execution.
 
@@ -353,7 +353,7 @@ The test set contains 400 instances, including 22 positive samples (`support` co
 
 The bottom rows illustrate aggregation strategies. Under threshold 0.5, `macro avg` F1 is 0.704, whereas `weighted avg` is 0.949. Weighted averaging assigns overwhelming weight to class `0` (378 instances), concealing poor performance on the minority class. Macro averaging weights both classes equally, immediately highlighting the deficiency.
 
-## Common Pitfalls
+## Common pitfalls
 
 :::caution[Reporting Accuracy Without a Baseline]
 A test accuracy of 0.960 sounds impressive until one learns that an uninformative majority-class predictor achieves 0.945. Always contextualize accuracy against `DummyClassifier(strategy="most_frequent")`, and report precision, recall, and F1 for minority classes (`classification_report` displays all three by default).
@@ -367,13 +367,13 @@ Sweeping thresholds directly on test data to report the best obtainable F1 inval
 Either metric is trivial to game in isolation. Predicting positive on every sample ($t = 0$) guarantees 1.000 recall despite miserable precision. Conversely, predicting positive on only the single most confident instance ($t = 0.9$) guarantees 1.000 precision while sacrificing recall. Always report both together alongside the operating threshold, or summarize them via F1 and precision–recall curves.
 :::
 
-## Quick Check
+## Quick check
 
 {/* Questions defined in the `quiz` frontmatter field. */}
 
 <Quiz />
 
-## Summary and Further Reading
+## Summary and further reading
 
 **Key Takeaways:**
 

@@ -1,0 +1,323 @@
+---
+title: 'Convolutional Neural Networks (CNN)'
+description: 'A 3×3 filter slides across an image to detect edges. Convolution, padding, stride, multi-channel tensors, pooling, receptive field, and why CNNs use far fewer parameters than MLPs.'
+quiz:
+  - question: 'An input image is $32 \times 32$, with a $5 \times 5$ kernel, padding $p = 2$, and stride $s = 2$. What is the spatial size of the output feature map?'
+    options: ['$32 \times 32$', '$15 \times 15$', '$16 \times 16$', '$14 \times 14$']
+    answer: 2
+    explanation: '$\lfloor (32 + 2 \cdot 2 - 5)/2 \rfloor + 1 = \lfloor 15.5 \rfloor + 1 = 16$. Padding 2 with a $5 \times 5$ kernel preserves the spatial size only when the stride is 1; stride 2 halves it. $15$ comes from forgetting to add 1 at the end of the formula.'
+  - question: 'An RGB color image enters a convolutional layer with 16 kernels of size $3 \times 3$. How many parameters does this layer have, including biases?'
+    options: ['$160$', '$448$', '$432$', '$3 \times 3 \times 16 \times$ (number of pixels)']
+    answer: 1
+    explanation: 'Each kernel spans all 3 color channels, so it has $3 \cdot 3 \cdot 3 = 27$ weights plus 1 bias, giving 28 parameters. Across 16 kernels, $16 \cdot 28 = 448$. $160$ forgets that each kernel has depth equal to the number of input channels; $432$ forgets the biases. Parameter count does not depend on image size because the same kernel is shared across every spatial location.'
+  - question: 'You stack three $3 \times 3$ convolutional layers with stride 1 and no pooling. Each output value of the third layer depends on a patch of how many pixels in the input image?'
+    options: ['$3 \times 3$', '$9 \times 9$', '$27 \times 27$', '$7 \times 7$']
+    answer: 3
+    explanation: 'Each stride-1 $3 \times 3$ layer expands the receptive field by $k - 1 = 2$ pixels along each dimension: $3$, then $5$, then $7$. Receptive fields add rather than multiply; $9 \times 9$ and $27 \times 27$ come from multiplying by mistake. Only pooling or a stride greater than 1 makes the receptive field grow multiplicatively.'
+  - question: 'Consider a convolutional layer (stride 1, with same-size padding). You shift the object in the image 2 pixels to the right, keeping it well inside the image border. How does the layer''s feature map change?'
+    options:
+      - 'It also shifts 2 cells to the right, with the same values'
+      - 'It does not change at all, because convolution is translation-invariant'
+      - 'It changes completely, because every spatial position has its own weights'
+      - 'It shrinks by 2 columns'
+    answer: 0
+    explanation: 'Because the exact same kernel scans every position, wherever a pattern moves in the input, its response moves by the same offset in the output: the feature map shifts right by 2 cells. This property is called translation equivariance. The feature map is not stationary; only after pooling (or global pooling over the whole image) does the output become approximately invariant. Separate weights per location is what a fully connected layer does.'
+  - question: 'You extract the learned kernel from a PyTorch `nn.Conv2d` layer and apply it to an image using `scipy.signal.convolve2d`. The output differs completely from PyTorch''s layer output. What is the most likely reason?'
+    options:
+      - 'PyTorch always adds automatic padding so the output shape differs'
+      - 'A learned kernel must be normalized to sum to 1 before use'
+      - '`convolve2d` flips the kernel by 180 degrees, whereas PyTorch computes cross-correlation without flipping'
+      - 'SciPy uses 64-bit floats so rounding error is large'
+    answer: 2
+    explanation: 'Mathematical convolution flips the kernel before sliding, which is what `convolve2d` does. PyTorch''s "convolution" layer actually computes cross-correlation without flipping. Calling `scipy.signal.correlate2d` (or flipping the kernel first) matches PyTorch. `nn.Conv2d` defaults to padding 0, and 64-bit floating-point precision cannot cause a wholesale discrepancy.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import conv2dCode from '@code/dl/cnn/conv2d.en.py?raw';
+import paramsCode from '@code/dl/cnn/params.en.py?raw';
+import cnnDigitsCode from '@code/dl/cnn/cnn-digits.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Understand how images are stored as 2D matrices or multi-channel tensors, and how a $3 \times 3$ **filter** sliding across an image blurs, sharpens, or detects edges.
+- Compute 2D **convolution** by hand and in NumPy, know why deep learning libraries actually compute cross-correlation, and calculate output dimensions given padding and stride.
+- Count the parameters of a multi-channel convolutional layer, and explain why a **Convolutional Neural Network (CNN)** needs far fewer parameters than an MLP thanks to local connectivity and weight sharing.
+- Recognize the standard pipeline (convolution → activation → pooling → … → fully connected layer), compute the **receptive field**, and read a compact PyTorch CNN.
+
+## Prerequisites
+
+{/* List taken from prerequisites in roadmap.ts. Do not write manual links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+A **fully connected layer** computes $\mathbf{z} = \mathbf{W}\mathbf{a} + \mathbf{b}$: every output connects to **every** input with its own dedicated weight, followed by an **activation function** such as ReLU, $g(z) = \max(0, z)$ ([Neural Networks](/en/dl/neural-networks/)). The network learns via **backpropagation** ([Training Neural Networks](/en/dl/training-neural-networks/)) and an optimizer like Adam. This lesson changes only **how layers are wired together**; the way the network learns stays the same.
+:::
+
+## Intuition
+
+### An image is a grid of numbers
+
+To a computer, a grayscale image is a 2D table of numbers. Each cell is a **pixel**, and larger numbers mean brighter pixels. Here is an $8 \times 8$ grayscale image showing a bright square (9) on a dark background (0). We will use this exact image throughout the lesson:
+
+$$
+\mathbf{X} = \begin{bmatrix}
+0&0&0&0&0&0&0&0\\
+0&0&0&0&0&0&0&0\\
+0&0&9&9&9&9&0&0\\
+0&0&9&9&9&9&0&0\\
+0&0&9&9&9&9&0&0\\
+0&0&9&9&9&9&0&0\\
+0&0&0&0&0&0&0&0\\
+0&0&0&0&0&0&0&0
+\end{bmatrix}
+$$
+
+A color image stacks three such grids on top of one another, one per color **channel**: red, green, and blue (RGB). An image of height $H$, width $W$, and $C$ channels is a 3D array — a **tensor** — of shape $H \times W \times C$. A modest $224 \times 224$ color photo contains $224 \cdot 224 \cdot 3 = 150\,528$ numbers.
+
+### Trying what we already know: flatten and feed into an MLP
+
+You already know MLPs. The most direct approach is to flatten the image into one long vector and feed it into a fully connected layer. Three big problems immediately arise:
+
+- **Way too many parameters.** Connecting a $224 \times 224 \times 3$ image to just 1000 hidden neurons already requires $150\,528 \cdot 1000 \approx 150$ million weights in the first layer alone.
+- **Throwing away spatial neighborhood.** Once flattened, two vertically adjacent pixels sit an entire row apart in the vector. The MLP has no idea which pixels are neighbors; it has to rediscover 2D geometry from scratch.
+- **Relearning the same detector at every location.** An edge in the top-left corner and the exact same edge in the bottom-right corner pass through completely separate weights. The network must learn to recognize edges independently at every position.
+
+### The idea: a small window sliding across the image
+
+Image processing has long used a better tool. Take a tiny $3 \times 3$ table of numbers called a **filter** or **kernel**. Place it over the top-left corner of the image, multiply each kernel entry by the pixel directly beneath it, and sum the nine products into a single number. Slide the window one cell to the right and repeat. When you reach the end of a row, move down one row. The resulting grid of numbers forms a new image.
+
+The numbers inside the kernel determine what the output highlights:
+
+| Kernel | Values | Effect |
+|---|---|---|
+| Box blur | all nine cells equal $1/9$ | Replaces each pixel with the average of its $3 \times 3$ neighborhood, smoothing out detail |
+| Sharpen | center $5$, four cardinal neighbors $-1$, corners $0$ | Amplifies differences between a pixel and its neighbors, making edges pop |
+| Vertical Sobel | left column $-1, -2, -1$; middle $0$; right column $1, 2, 1$ | Measures "how much brighter is the right side than the left", lighting up vertical edges |
+
+Two things make this powerful. First, the kernel looks at **a local patch**, respecting 2D pixel neighborhoods. Second, **the exact same kernel** is reused at every position, so 9 numbers suffice to detect vertical edges anywhere in the image.
+
+The goal of this lesson is: **instead of hand-crafting kernels like Sobel, let a neural network learn the kernels directly from data, stack multiple convolutional layers on top of one another, and understand what each layer takes in, what it outputs, and how many parameters it costs.**
+
+## Theory
+
+### 2D convolution
+
+Let $\mathbf{X}$ be a grayscale image and $\mathbf{K}$ be a $k \times k$ kernel. Write $X_{i,j}$ for the pixel at row $i$, column $j$, and $K_{u,v}$ for the kernel entry at row $u$, column $v$, both 0-indexed as in NumPy. Placing the top-left corner of the kernel at $(i, j)$, multiply corresponding entries and sum:
+
+$$
+Z_{i,j} = \sum_{u=0}^{k-1}\sum_{v=0}^{k-1} X_{i+u,\, j+v}\, K_{u,v} + b
+$$
+
+Here $b$ is a scalar bias shared across the whole kernel (classic image-processing filters have $b = 0$). The output grid $\mathbf{Z}$ is called a **feature map**: at each position $(i, j)$, it measures how strongly the local image patch matches the pattern encoded by the kernel.
+
+**Computing one cell by hand.** Apply the vertical Sobel kernel to our $8 \times 8$ image at $(i, j) = (2, 0)$. The $3 \times 3$ window covers rows 2 to 4 and columns 0 to 2 of $\mathbf{X}$:
+
+$$
+\begin{bmatrix} 0&0&9\\ 0&0&9\\ 0&0&9 \end{bmatrix}
+\odot
+\begin{bmatrix} -1&0&1\\ -2&0&2\\ -1&0&1 \end{bmatrix}
+=
+\begin{bmatrix} 0&0&9\\ 0&0&18\\ 0&0&9 \end{bmatrix}
+$$
+
+Here $\odot$ denotes elementwise multiplication. Summing the nine products gives $Z_{2,0} = 9 + 18 + 9 = 36$. The right column of the window is bright while the left column is dark: we have found the left edge of the bright square. Slide the window to $(2, 2)$, where all nine pixels equal 9: the left and right columns of the kernel cancel out, giving $Z_{2,2} = 0$ (no edge inside the flat interior). At the right border of the square, the dark background sits on the right, flipping the sign to $Z_{2,5} = -36$.
+
+With an $8 \times 8$ image and a $3 \times 3$ kernel, the kernel's top-left corner fits in 6 positions along each axis without hanging over the border, so $\mathbf{Z}$ has shape $6 \times 6$.
+
+:::note[Convolution in deep learning is actually cross-correlation]
+In mathematics and signal processing, true **convolution** flips the kernel by 180 degrees before sliding: $\sum_{u,v} X_{i-u,\, j-v} K_{u,v}$. The formula above does not flip the kernel, so its strict mathematical name is **cross-correlation**. Virtually every deep learning library — including PyTorch's `nn.Conv2d` — computes cross-correlation while calling it "convolution". For a neural network, the distinction is immaterial: because the kernel weights are learned from data, if the network needs the flipped version it simply learns the flipped weights. It only matters when comparing outputs against a signal-processing function like `scipy.signal.convolve2d` (see the first box under Common pitfalls).
+:::
+
+### Padding and stride
+
+**Padding** $p$: surround the image with $p$ rings of zeros before sliding the kernel. Without padding, every convolutional layer shrinks the image by $k - 1$ pixels along each dimension, and border pixels get visited by the kernel far fewer times than center pixels. For a $3 \times 3$ kernel ($k = 3$), setting $p = 1$ preserves the exact input height and width.
+
+**Stride** $s$: advance the kernel by $s$ pixels per step instead of 1. A stride of 2 roughly halves the output height and width.
+
+For a square input of side $n$ (where $n$ is the image width/height in pixels), padding increases the side to $n + 2p$. Placing a $k \times k$ kernel at the starting position uses up the first $k$ pixels, leaving $n + 2p - k$ pixels of room to slide. Stepping by $s$ pixels at a time yields $\lfloor (n + 2p - k)/s \rfloor$ full steps, plus 1 for the initial position:
+
+$$
+n_{\text{out}} = \left\lfloor \frac{n + 2p - k}{s} \right\rfloor + 1
+$$
+
+The floor brackets $\lfloor\cdot\rfloor$ round down: any partial step at the end where the kernel would hang past the padded border is dropped. Here are three common cases on our $8 \times 8$ image:
+
+| Kernel, padding, stride | Calculation | Output side |
+|---|---|---:|
+| $k = 3$, $p = 0$, $s = 1$ ("valid") | $\lfloor 5/1 \rfloor + 1$ | 6 |
+| $k = 3$, $p = 1$, $s = 1$ ("same") | $\lfloor 7/1 \rfloor + 1$ | 8 |
+| $k = 3$, $p = 0$, $s = 2$ | $\lfloor 5/2 \rfloor + 1$ | 3 |
+
+### Multiple input and output channels
+
+Write $C_{\text{in}}$ for the number of input channels and $C_{\text{out}}$ for the number of output channels, matching the `in_channels` and `out_channels` arguments of PyTorch's `nn.Conv2d`. An RGB image has $C_{\text{in}} = 3$. In that case, a single kernel is no longer a flat $3 \times 3$ slice, but a 3D block of shape $k \times k \times C_{\text{in}}$ — one $k \times k$ slice per input channel. At each spatial position, it multiplies all $k \cdot k \cdot C_{\text{in}}$ values across **all** input channels and sums them into a **single** scalar, then adds the scalar bias $b$. Thus one 3D kernel always produces one 2D feature map, regardless of how many input channels there are.
+
+A convolutional layer uses $C_{\text{out}}$ distinct kernels, each learning to detect a different pattern (vertical edge, horizontal edge, color blob…). Those $C_{\text{out}}$ kernels produce $C_{\text{out}}$ feature maps, stacked into an output tensor of shape $n_{\text{out}} \times n_{\text{out}} \times C_{\text{out}}$, which serves as a $C_{\text{out}}$-channel input to the next layer.
+
+**Counting parameters.** Each kernel has $k^2 C_{\text{in}}$ weights plus 1 bias. Across all $C_{\text{out}}$ kernels:
+
+$$
+\text{parameters} = \left(k^2 C_{\text{in}} + 1\right) C_{\text{out}}
+$$
+
+Notice that $n$ does not appear anywhere in this formula: **the number of parameters does not depend on image resolution**. For example, a layer mapping a grayscale image ($C_{\text{in}} = 1$) to 8 channels with $3 \times 3$ kernels has $(9 + 1) \cdot 8 = 80$ parameters whether the image is $28 \times 28$ or $1000 \times 1000$.
+
+### Pooling
+
+A **pooling** layer downsamples each feature map spatially. The most common variant is $2 \times 2$ **max-pooling** with stride 2: partition the feature map into non-overlapping $2 \times 2$ patches and keep only the maximum value in each patch. **Average pooling** takes the average of each patch instead. Pooling has **zero learnable parameters** and operates independently on each channel.
+
+Take our $6 \times 6$ vertical Sobel feature map, pass it through ReLU (turning negative values into 0), and apply $2 \times 2$ max-pooling. The $3 \times 3$ result (verified in the first code cell) is:
+
+$$
+\begin{bmatrix} 27&0&0\\ 36&0&0\\ 27&0&0 \end{bmatrix}
+$$
+
+The grid has shrunk to a quarter of its cells, yet the essential message remains intact: "there is a dark-to-bright vertical edge along the left column". Pooling serves three purposes: it cuts computation and memory in subsequent layers, widens the input region that downstream neurons see, and makes representations less sensitive to small spatial shifts.
+
+### Anatomy of a CNN
+
+A classic classification CNN stacks layers in three stages from input image to class prediction:
+
+1. **Convolution → activation (typically ReLU) → pooling**, repeated several times. Across stages, spatial height and width shrink while the number of channels typically grows (e.g., 8 → 16 → 32).
+2. **Flatten** the final 3D feature tensor into a 1D vector.
+3. **One or more fully connected layers**, ending with $K$ class logits passed into softmax and cross-entropy loss, just like an MLP.
+
+Early layers detect simple local patterns like edges and color gradients. Middle layers combine edges into corners, contours, and textures. Deep layers assemble those into object parts and whole objects. The entire network is trained end-to-end by backpropagation; kernel entries are simply weights updated by gradient descent.
+
+### Why CNNs beat MLPs on images
+
+Comparing a convolutional layer against a fully connected layer mapping the same input to the same output size highlights four advantages:
+
+- **Local connectivity.** Each output depends only on a $k \times k$ neighborhood rather than the entire image, baking in a strong prior that nearby pixels are closely related.
+- **Weight sharing.** The exact same kernel weights scan every spatial position. A vertical edge detector useful in the top-left is equally useful in the bottom-right, so the network learns it once.
+- **Drastically fewer parameters.** Together, local connectivity and weight sharing slash parameter count: a $1 \to 8$ channel $3 \times 3$ convolution on a $28 \times 28$ image produces $26 \times 26 \times 8 = 5\,408$ outputs using just 80 parameters, whereas a fully connected layer producing 5,408 outputs requires 4,245,280 parameters (second code cell).
+- **Translation equivariance.** Shifting the object in the input image right by 1 pixel shifts the convolution feature map right by 1 cell without changing its values, because the same kernel scans every location. Pooling turns this equivariance into **approximate translation invariance**: small shifts barely change the pooled output. It is only approximate: shifting our bright square right by 1 pixel changes the $3 \times 3$ max-pooled grid from having one nonzero column to two. If you take the maximum over the entire feature map (**global max pooling**), the output stays at 36 in both cases.
+
+Conversely, CNNs rely on the assumption that features are local and translationally shift-invariant. On tabular data where column order is arbitrary, that assumption fails and CNNs offer no advantage over MLPs or tree models.
+
+### Receptive field
+
+The **receptive field** of a cell in a feature map is the patch of the original input image that can influence that cell's value. After one $3 \times 3$ convolutional layer, each cell sees a $3 \times 3$ pixel patch. Stack a second $3 \times 3$ layer on top: each cell in layer 2 looks at a $3 \times 3$ neighborhood in layer 1, and each of those layer-1 cells looks at a $3 \times 3$ patch of the input image — overlapping to cover a $5 \times 5$ patch of the original image.
+
+In general, tracking forward from the input image, let $r$ be the receptive field width and $\Delta$ be the effective stride (the distance in input pixels between two adjacent cells in the current feature map). Start at the input image with $r = 1$ and $\Delta = 1$. Every layer (convolutional or pooling) with kernel size $k$ and stride $s$ updates:
+
+$$
+r \leftarrow r + (k - 1)\, \Delta, \qquad \Delta \leftarrow \Delta \cdot s
+$$
+
+The first rule holds because a $k \times k$ window reaches $k - 1$ steps wider in the current feature map, where each step spans $\Delta$ input pixels. The second rule holds because a stride of $s$ spaces adjacent outputs $s$ times farther apart.
+
+- Three stacked $3 \times 3$ layers with stride 1: $r = 3, 5, 7$. The receptive field grows linearly, adding 2 pixels per layer.
+- The CNN in the second code cell ($3 \times 3$ conv → $2 \times 2$ pool stride 2 → $3 \times 3$ conv → $2 \times 2$ pool stride 2): $r = 3$, then $4$ ($\Delta$ becomes 2), then $4 + 2 \cdot 2 = 8$, then $8 + 1 \cdot 2 = 10$. Each value at the end summarizes a $10 \times 10$ region of the $28 \times 28$ input image.
+
+Pooling and strides > 1 multiply $\Delta$, allowing deeper layers to expand their receptive fields rapidly so a deep network can see the entire image using only small $3 \times 3$ kernels.
+
+:::note[Key takeaway]
+A convolutional layer slides $C_{\text{out}}$ kernels of shape $k \times k \times C_{\text{in}}$ across the input. Its output has spatial size $\lfloor (n + 2p - k)/s \rfloor + 1$ and $C_{\text{out}}$ channels, using $(k^2 C_{\text{in}} + 1) C_{\text{out}}$ parameters independent of image resolution. Pooling downsamples feature maps with zero parameters.
+:::
+
+### Limitations
+
+- **Translation invariance is only approximate.** While stride-1 convolution is translation-equivariant, strides $> 1$, pooling boundaries, and image borders break exact invariance, as our third code cell demonstrates. Standard CNNs are also not naturally invariant to rotation or scale changes; practitioners compensate with **data augmentation** (random crops, flips, and rotations during training).
+- **Each layer sees only a local neighborhood.** Relating two distant parts of an image requires stacking enough layers for the receptive field to span both. Designing deep architectures that do this efficiently is the topic of [Modern CNN Architectures](/en/dl/modern-cnn-architectures/).
+
+## Illustration
+
+The interactive visualization conceptually pairs our $8 \times 8$ grayscale image with a selectable $3 \times 3$ kernel (**Identity**, **Box Blur**, **Sharpen**, **Vertical Sobel**, **Horizontal Sobel**) and the resulting $6 \times 6$ feature map. Stepping the $3 \times 3$ window across the image shows the nine elementwise products and their sum at each cell $(i, j)$ (0-indexed):
+
+1. **Vertical Sobel:** At $(1, 1)$, the right column of the kernel overlaps two 9s, giving $2 \cdot 9 + 1 \cdot 9 = 27$. At $(2, 0)$, the right column of the window hits three 9s, giving the maximum response $9 + 18 + 9 = 36$. At $(2, 2)$, the window lies entirely inside the bright square (all 9s), so the left and right columns cancel to 0. At $(2, 5)$, the dark background sits on the right, giving $-36$.
+2. **Horizontal Sobel:** The top two rows of the feature map are positive (peaking at 36), the bottom two rows are negative ($-36$), and the middle two rows are 0 — detecting horizontal edges.
+3. **Identity:** Only the center weight of the kernel is 1, so each output cell copies the center pixel of its window, reproducing the inner $6 \times 6$ crop of the image.
+4. **Box Blur** and **Sharpen:** Box Blur outputs 9.00 at the four center cells and tapers off toward 1.00 at the corners. Sharpen boosts the four inner corners of the square to 27, keeps the flat center at 9, and creates a $-9$ halo just outside the square.
+
+{/* VIZ: ConvolutionViz
+    Idea: 2D convolution slides a 3x3 window, multiplies elementwise by the kernel, and sums. */}
+
+## Code examples
+
+The first two cells run directly in the browser using only NumPy or plain Python, independent of one another. The third cell trains a CNN in PyTorch on your machine.
+
+The first cell implements `conv2d` with two nested loops matching the formula in the Theory section, applies vertical Sobel to our $8 \times 8$ image, and passes the result through ReLU and $2 \times 2$ max-pooling.
+
+<PythonRunner code={conv2dCode} title="2D convolution, Sobel edge detection, and max-pooling in NumPy" />
+
+The $6 \times 6$ feature map has two positive columns on the left reading 9, 27, 36, 36, 27, 9 from top to bottom (left edge, dark to bright), and two negative columns on the right reading $-9, -27, -36, -36, -27, -9$ (right edge, bright to dark). The two middle columns are 0 because the window sits on a uniform region where the kernel's opposite columns cancel out. The values taper at the top and bottom rows because the window only partially overlaps the bright square: on rows 2 and 3, all three rows of the window hit the square for $9 \cdot (1 + 2 + 1) = 36$; on row 1, only the bottom two rows hit for $9 \cdot (2 + 1) = 27$; on row 0, only the bottom row hits for $9 \cdot 1 = 9$. With `stride=2`, the output side is $\lfloor (8 - 3)/2 \rfloor + 1 = 3$, matching our formula. ReLU zeroes out the negative right edge, and $2 \times 2$ max-pooling keeps 27, 36, 27 in the left column — the exact $3 \times 3$ matrix shown in the Pooling section.
+
+Note the idiom `pooled = relu.reshape(3, 2, 3, 2).max(axis=(1, 3))`: NumPy reshapes the $6 \times 6$ grid into a $3 \times 3$ grid of $2 \times 2$ blocks and takes the maximum over each block without any Python loops. Try changing `fmap = conv2d(IMAGE, SOBEL_V)` to `conv2d(IMAGE, SOBEL_V.T)` (horizontal Sobel): the positive responses move to the top rows and the pooled 27, 36, 27 appear along the top row instead of the left column.
+
+The second cell counts parameters for a $28 \times 28$ grayscale digit image, comparing an MLP against a small CNN using the two formulas from the Theory section.
+
+<PythonRunner code={paramsCode} title="Counting parameters: MLP vs. CNN" />
+
+The 784 → 128 → 10 MLP has 101,770 parameters, almost all of them in the first layer ($784 \cdot 128 + 128 = 100\,480$). The CNN has just 5,258 parameters — roughly 19 times fewer. Following the spatial dimensions shows floor rounding in action: 28 → 26 → 13 → 11 → 5, where $2 \times 2$ pooling on an $11 \times 11$ map gives $\lfloor 9/2 \rfloor + 1 = 5$ and drops the last column/row. Most of the CNN's parameters (4,010) actually live in the final fully connected layer; the second convolutional layer has only $(9 \cdot 8 + 1) \cdot 16 = 1\,168$.
+
+The last two lines make the starkest comparison: a $1 \to 8$ channel $3 \times 3$ convolutional layer produces $26 \times 26 \times 8 = 5\,408$ outputs with just 80 parameters, whereas a fully connected layer producing 5,408 outputs needs 4,245,280 parameters — over 50,000 times more.
+
+The third cell trains a compact CNN on scikit-learn's `load_digits` dataset (1,797 $8 \times 8$ single-channel digit images bundled with scikit-learn), compares it against an MLP trained for the same number of epochs, and then evaluates both models when every test image is shifted right by 1 pixel.
+
+<LocalCode
+  code={cnnDigitsCode}
+  title="CNN vs. MLP on 8×8 handwritten digits"
+  packages={['torch', 'scikit-learn']}
+  hardware="CPU is enough. Takes 40 seconds to 2 minutes depending on your machine"
+  sampleVaries={false}
+>
+
+```text
+CNN:  6090 params  test acc 0.976  shifted 0.650
+MLP:  4810 params  test acc 0.957  shifted 0.461
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **Comparable parameter counts.** The CNN has 6,090 parameters: 160 in the first conv layer ($(9 + 1) \cdot 16$), 4,640 in the second ($(9 \cdot 16 + 1) \cdot 32$), and 1,290 in the final linear layer. The MLP has 4,810. Both conv layers use `padding=1` to preserve spatial dimensions, so only pooling halves the image size: 8 → 4 → 2.
+- **Higher test accuracy for the CNN:** 0.976 vs. 0.957 after 15 epochs with the same Adam optimizer. On larger images, the gap between CNNs and MLPs widens substantially.
+- **When shifting test images by 1 pixel, both drop**, but the CNN holds up much better: 0.650 vs. 0.461. While the convolutional layers are translation-equivariant, the final `nn.Linear` layer still ties each weight to a specific spatial cell, and on an $8 \times 8$ image a 1-pixel shift is a full eighth of the image width. That puts a concrete number on why pooling gives only *approximate* shift invariance, and why training with random shifts and crops (data augmentation) is standard practice in computer vision.
+
+## Common pitfalls
+
+:::caution[Comparing against signal-processing libraries without accounting for kernel flipping]
+`scipy.signal.convolve2d` computes true mathematical convolution, flipping the kernel by 180 degrees before sliding. PyTorch's `nn.Conv2d` does not flip the kernel. With symmetric kernels like a box blur or sharpen filter, both give the same output, hiding the difference. With an asymmetric kernel like vertical Sobel, flipping negates the entire output: the left edge of our square comes out as $-36$ instead of $+36$. To match PyTorch, call `scipy.signal.correlate2d` or pre-flip the kernel with `kernel[::-1, ::-1]`.
+:::
+
+:::caution[Mixing up channel dimension order ($H \times W \times C$ vs. $N \times C \times H \times W$)]
+NumPy, Pillow, and matplotlib store images in channels-last order $H \times W \times C$. PyTorch expects channels-first batches: $N \times C \times H \times W$ (batch size, channels, height, width). Passing a $32 \times 32 \times 3$ array directly into `nn.Conv2d(3, ...)` raises a channel-mismatch error — or worse, silently scrambles the spatial grid if dimensions happen to match. Reorder a single image with `x.permute(2, 0, 1)` and add a batch axis with `x.unsqueeze(0)`.
+:::
+
+:::caution[Forgetting kernel depth ($C_{\text{in}}$) when counting parameters]
+A "$3 \times 3$ kernel" on an RGB image is actually a $3 \times 3 \times 3$ block, and on a 64-channel feature map it is $3 \times 3 \times 64$. A layer `nn.Conv2d(64, 128, 3)` has $(9 \cdot 64 + 1) \cdot 128 = 73\,856$ parameters, not $(9 + 1) \cdot 128 = 1\,280$. Always verify quickly with `sum(p.numel() for p in layer.parameters())`.
+:::
+
+## Quick check
+
+{/* Questions live in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- An image is a tensor of shape $H \times W \times C$. A convolutional layer slides $C_{\text{out}}$ small 3D kernels of shape $k \times k \times C_{\text{in}}$ across the input, multiplying elementwise and summing; in deep learning this operation does not flip the kernel, so it is technically cross-correlation.
+- Output spatial size is $\lfloor (n + 2p - k)/s \rfloor + 1$. Parameter count is $(k^2 C_{\text{in}} + 1) C_{\text{out}}$, independent of image resolution. Pooling downsamples feature maps with zero parameters.
+- A CNN stacks conv → ReLU → pooling blocks before flattening into a final classifier. Local connectivity and weight sharing give CNNs orders of magnitude fewer parameters than MLPs along with translation equivariance; pooling adds approximate translation invariance.
+- Receptive fields grow with depth: each layer adds $(k - 1)\,\Delta$, and pooling or strides $> 1$ multiply $\Delta$ so deep layers see the whole image.
+
+**Further reading:**
+
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. (2023). [*Dive into Deep Learning*, Chapter 7: Convolutional Neural Networks](https://d2l.ai/chapter_convolutional-neural-networks/index.html) ([Vietnamese translation](https://d2l.aivivn.com/chapter_convolutional-neural-networks/index_vn.html)). Walks from fully connected layers to convolution, padding, stride, multi-channel layers, and pooling with runnable code.
+- Goodfellow, I., Bengio, Y., Courville, A. (2016). [*Deep Learning*, Chapter 9: Convolutional Networks](https://www.deeplearningbook.org/contents/convnets.html). Covers convolution vs. cross-correlation (Section 9.1), sparse interactions, parameter sharing, and equivariance (Section 9.2), and pooling (Section 9.3).
+- Dumoulin, V., Visin, F. (2016). [*A guide to convolution arithmetic for deep learning*](https://arxiv.org/abs/1603.07285). Visual diagrams and output-shape formulas for every combination of padding and stride.
+- Stanford CS231n. [*Convolutional Neural Networks for Visual Recognition*: Convolutional Networks](https://cs231n.github.io/convolutional-networks/). Classic lecture notes on CNN layers and parameter counting.
+- Azulay, A., Weiss, Y. (2019). [*Why do deep convolutional networks generalize so poorly to small image transformations?*](https://arxiv.org/abs/1805.12177). *JMLR* 20(184). Explains why stride and pooling cause modern CNNs to change predictions under 1-pixel shifts.
+
+<LessonProgress />

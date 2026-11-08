@@ -1,0 +1,310 @@
+---
+title: LangChain and LlamaIndex
+description: Rewrite a RAG pipeline with two frameworks. When you need a framework, retrievers, chains and LCEL, indexes and query engines, a side-by-side comparison, and APIs that have changed.
+quiz:
+  - question: 'In which situation does switching from handwritten code (the `openai` SDK and NumPy) to a framework like LangChain or LlamaIndex bring the least benefit?'
+    options:
+      - 'A document corpus of PDFs, web pages, and a Word folder that all need to be read and split into chunks'
+      - 'You want to try three different vector stores with minimal code changes'
+      - 'A Q&A chatbot over 20 plain-text passages, one provider, and a fixed pipeline'
+      - 'You want to inspect every step (what was retrieved, what the prompt looked like) of each query'
+    answer: 2
+    explanation: 'A fixed pipeline with few steps, one provider, and plain-text data is well served by 40 lines of handwritten code; a framework only adds an abstraction layer and dozens of dependencies whose APIs change quickly. The other three cases are exactly where frameworks shine: multi-format loaders, a unified interface across vector stores, and step-by-step tracing tools.'
+  - question: 'You run the LlamaIndex code from this lesson but delete the line `Settings.embed_model = ...`. Your environment variables point to Gemini: `OPENAI_BASE_URL` is Gemini''s endpoint, and `OPENAI_API_KEY` is a Gemini key. What happens?'
+    options:
+      - 'LlamaIndex falls back to OpenAI''s default embedding model, sends your Gemini key to OpenAI''s servers, and gets a 401 error'
+      - 'LlamaIndex automatically reads `OPENAI_BASE_URL`, so embeddings still go to Gemini'
+      - 'LlamaIndex skips the embedding step and searches chunks by keyword'
+    answer: 0
+    explanation: 'When configuration is missing, `Settings` defaults to OpenAI''s embedding model with OpenAI''s default endpoint; `OPENAI_BASE_URL` is not read here. Sending a Gemini key to OpenAI results in a 401 rejection. The second option is tempting because the `openai` SDK reads that variable automatically, but LlamaIndex passes its own base URL into the SDK.'
+  - question: 'In the chain `{"context": retriever | format_docs, "question": RunnablePassthrough()} | prompt | llm | StrOutputParser()`, you call `chain.invoke("What time does the club meet?")`. What does the `prompt` step receive?'
+    options:
+      - 'Only the question string, because `prompt` stands after the first `|`'
+      - 'A dict: `context` is the text of the retrieved chunks joined into a single string; `question` is the original question'
+      - 'A dict: `context` is a list of `Document` objects; `question` is the original question'
+      - 'The list of `Document` objects returned by the retriever, without the question'
+    answer: 1
+    explanation: 'The dict at the start of the chain runs both branches on the same input (the question). The `context` branch passes the question through the retriever (producing a list of `Document` objects) and then through `format_docs` (producing a single string). The `question` branch passes the question through unchanged. `prompt` receives that dict and fills in the two placeholders `{context}` and `{question}`. The third option is what happens when you forget `format_docs`.'
+  - question: 'You copy code from LangChain to LlamaIndex and keep `chunk_size=80` for both on the same text. How do the resulting chunks compare?'
+    options:
+      - 'They are the same size, because `chunk_size` is identical'
+      - 'LlamaIndex chunks are shorter, because LlamaIndex counts words'
+      - 'LlamaIndex chunks are much longer: LangChain counts 80 characters, whereas LlamaIndex counts 80 tokens (including metadata), and a token is typically several characters long'
+    answer: 2
+    explanation: '`RecursiveCharacterTextSplitter` measures length in characters. LlamaIndex''s `SentenceSplitter` measures length in tokenizer tokens and subtracts the token count of the chunk''s metadata. Even after subtracting metadata tokens, 80 tokens hold far more text than 80 characters. The same parameter name does not mean the same unit.'
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Prerequisites from '@components/Prerequisites.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import RagPipelineFigure from '@components/figures/RagPipelineFigure.astro';
+import langchainCode from '@code/llm/langchain-llamaindex/rag-langchain.en.py?raw';
+import llamaindexCode from '@code/llm/langchain-llamaindex/rag-llamaindex.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Decide when a **framework** like LangChain or LlamaIndex is worth using, and when a few dozen lines of handwritten code are enough.
+- Understand the core abstractions shared by both libraries: **document loaders**, **text splitters**, **indexes**, **retrievers**, **chains**, and **query engines**.
+- Rewrite a minimal RAG pipeline in LangChain using LCEL, and in LlamaIndex using `as_query_engine`, both connected to an OpenAI-compatible API.
+- Spot real-world pitfalls when using the two libraries: differing parameter names, default settings that silently point to OpenAI, removed legacy imports, and conflicting dependencies.
+
+## Prerequisites
+
+{/* List populated from roadmap.ts prerequisites. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In [RAG and Modern Chatbots](/en/llm/rag-chatbot/), you built a RAG pipeline from scratch: **indexing** splits documents into **chunks**, computes an **embedding** for each chunk, and stores them in a **vector store**; then for each question, you embed the question, retrieve the **top-$k$** closest chunks by cosine similarity, stuff them into a prompt, and call a chat model. This lesson performs those exact same steps, except that a library does the plumbing for you.
+:::
+
+## Intuition
+
+Your RAG chatbot is working great: around 40 lines of Python, the `openai` SDK, and a NumPy array acting as a vector store. Then new requirements start pouring in. The documents are now 200 PDF files, a handful of web pages, and a folder of Word files. An in-RAM vector store is no longer enough; you need a real vector database. Your team wants to try another provider without rewriting the code. And when the chatbot gives a wrong answer, you want to inspect which chunks it retrieved and what the exact prompt sent to the model looked like.
+
+Every one of those requirements can be coded by hand. But if you build them all, you are essentially writing your own library: a PDF reader, a sentence-aware chunk splitter, wrapper classes for each vector store, and a step-by-step logger. **LangChain** and **LlamaIndex** are two Python libraries that have already built those pieces. They do not do RAG differently: it is still split, embed, search, assemble a prompt, and call the model. They simply name each stage and give you pre-made building blocks.
+
+Think of it like building a table. With hand tools and raw lumber, you understand every screw, but it takes effort. With a flat-pack kit, assembly is much faster; however, when the manufacturer changes the screw design, old tutorials online no longer match, and you have to figure out which bag the new screw is in.
+
+To decide which approach fits your project, ask yourself three questions:
+
+1. Is your pipeline fixed with only a few steps?
+2. Do you need multiple data sources, multiple vector stores, or multiple providers?
+3. Are you willing to update your code whenever the library changes its API?
+
+If your answers are "yes, no, no", writing it yourself makes sense. The further your answers drift from that, the more a framework is worth considering.
+
+**The problem: rewrite a minimal RAG pipeline in LangChain and in LlamaIndex, understand which concept in each library maps to each stage, and know the trade-offs of adopting them.**
+
+## Theory
+
+This lesson introduces no new math formulas. The theory here is how the two libraries slice a RAG pipeline into abstractions, and how each library wires those abstractions together.
+
+### Five stages, two sets of names
+
+A RAG pipeline has five stages. The two libraries give different names to the exact same jobs:
+
+1. **Loading documents.** A document loader reads files or web pages and returns `Document` objects, each containing text and **metadata** (such as the source filename). LangChain keeps most loaders in the `langchain-community` package. LlamaIndex calls them readers—for example, `SimpleDirectoryReader` reads an entire folder.
+2. **Splitting into chunks.** A text splitter divides each `Document` into chunks while preserving metadata for every chunk. LangChain provides `RecursiveCharacterTextSplitter`, which tries splitting on double newlines first, then single newlines, then spaces, keeping each chunk under `chunk_size` **characters**. LlamaIndex calls this stage a node parser and calls each chunk a **node**; `SentenceSplitter` tries to keep whole sentences intact and measures `chunk_size` in **tokens**.
+3. **Embedding and storing.** Compute a vector for each chunk and save it in a vector store. In LangChain, that is `OpenAIEmbeddings` paired with a store like `InMemoryVectorStore`. In LlamaIndex, `VectorStoreIndex` bundles both: creating an **index** splits, embeds, and stores in a single call.
+4. **Retrieval.** A **retriever** is an object that takes a question and returns the most relevant chunks. It hides how the search is performed—whether cosine similarity over a vector store, keyword search, or a hybrid of both, the caller only sees "question in, chunks out."
+5. **Prompt assembly and model call.** In LangChain, you explicitly pipe the retriever, prompt, model, and output parser into a **chain**. In LlamaIndex, a **query engine** wraps retrieval, prompt construction, and the model call behind a single `query` method.
+
+The diagram below, reused from [RAG and Modern Chatbots](/en/llm/rag-chatbot/), sketches that pipeline. Each block in the diagram corresponds to a concept in the comparison table in the Illustration section.
+
+{/* FIG: reused from rag-chatbot: the question is used to retrieve chunks, then chunks are stuffed into the prompt. */}
+<RagPipelineFigure />
+
+### LangChain: assembling blocks with LCEL
+
+Every building block in LangChain (prompt, chat model, retriever, output parser) is a **Runnable**: an object with an `invoke` method that takes an input and returns an output. The `|` operator chains two Runnables into one: the output of the left block becomes the input of the right block, just like a pipe in a shell command. This style is called **LCEL** (LangChain Expression Language). Here is the chain from this lesson's code:
+
+```python
+chain = (
+    {"context": retriever | format_docs, "question": RunnablePassthrough()}
+    | prompt | llm | StrOutputParser()
+)
+```
+
+Read it from left to right, starting with the question string as input:
+
+- **The leading dict** runs two branches on the same question. In the `context` branch, the retriever returns a list of `Document` objects, and the `format_docs` function joins their text into a single string. LangChain automatically wraps a plain Python function into a Runnable when it appears next to `|`. In the `question` branch, `RunnablePassthrough()` passes the question through untouched. The result is a dict `{"context": ..., "question": ...}`.
+- **`prompt`** is a `ChatPromptTemplate` with two placeholders, `{context}` and `{question}`. It fills in the dict values and produces a list of `system` and `human` messages.
+- **`llm`** (`ChatOpenAI`) sends those messages to the API and returns a model message.
+- **`StrOutputParser()`** extracts the text string from that message.
+
+The advantage of this style is that the pipeline sits out in the open: if you want to insert a step—say, rewriting the question before searching—you slot a block into the exact spot. The downside is that you have to wire it yourself and keep track of the data shape at each stage.
+
+### LlamaIndex: index and query engine
+
+LlamaIndex takes the opposite approach: it bundles more out of the box. You configure global defaults once in **`Settings`** (chat model, embedding model, chunk splitter), and then two lines do the rest:
+
+```python
+index = VectorStoreIndex.from_documents([doc])
+query_engine = index.as_query_engine(similarity_top_k=2)
+```
+
+`from_documents` splits documents into nodes using `Settings.node_parser`, embeds each node using `Settings.embed_model`, and stores them in an in-memory vector store. `as_query_engine` returns a query engine; when you call `query_engine.query(question)`, it finds the `similarity_top_k` closest nodes (2 by default), builds a prompt, calls `Settings.llm`, and returns a `Response` object. Printing `Response` gives the answer text, while `response.source_nodes` reveals which nodes were used. Because the pipeline is hidden, `source_nodes` is the easiest place to check what the model relied on.
+
+Two important details about what happens under the hood:
+
+- **Missing settings default to OpenAI.** If you forget to set `Settings.llm` or `Settings.embed_model`, LlamaIndex falls back to OpenAI's models and OpenAI's endpoint, and **does not read** `OPENAI_BASE_URL`. If a Gemini or Ollama user forgets one line, the program sends their key to OpenAI's servers.
+- **The built-in prompt has its own wording.** The system instruction opens with "You are an expert Q&A system…", and the context block starts with "Context information is below." (see the Illustration section). If you want to control the tone, language, or strictness of the rules, pass your own prompt via `text_qa_template`. Because this template replaces **both** the default system instructions and the context wrapper, make sure to include all your rules in it:
+
+```python
+from llama_index.core import PromptTemplate
+
+qa_prompt = PromptTemplate(
+    "Context:\n{context_str}\n\n"
+    "Answer using only the context above.\n"
+    "Question: {query_str}"
+)
+query_engine = index.as_query_engine(text_qa_template=qa_prompt)
+```
+
+### Connecting to OpenAI-compatible APIs
+
+Both libraries provide classes for OpenAI-compatible APIs, but their parameter names differ. This is the easiest place to trip up when porting code between the two:
+
+| Task | LangChain | LlamaIndex |
+|---|---|---|
+| Chat model class | `ChatOpenAI` (package `langchain-openai`) | `OpenAILike` (package `llama-index-llms-openai-like`) |
+| API base URL | `base_url=` | `api_base=` |
+| Embedding model name | `model=` | `model_name=` |
+| Extra flag required | `check_embedding_ctx_length=False` on `OpenAIEmbeddings` | `is_chat_model=True` on `OpenAILike` |
+
+Why those last three flags matter:
+
+- **`model_name=`, not `model=`.** LlamaIndex's `OpenAIEmbedding` validates the `model` parameter against an enum of OpenAI model names. Passing any other name—such as an Ollama embedding model—immediately raises `ValueError: '...' is not a valid OpenAIEmbeddingModelType`. The `model_name` parameter bypasses that check.
+- **`check_embedding_ctx_length=False`.** By default, `OpenAIEmbeddings` tokenizes text with `tiktoken` and sends **arrays of token IDs** instead of raw strings. OpenAI's own API accepts token ID arrays, but the `langchain-openai` documentation notes that many other providers do not, and recommends setting `False` to send plain text. Testing against a mock server confirms this: with the default setting the server receives lists of integers, whereas with `False` it receives strings.
+- **`is_chat_model=True`.** `OpenAILike` defaults to legacy completion mode: it sends a single prompt string to `/completions` instead of a message list to `/chat/completions`. Many providers only expose the chat endpoint; our mock server does too, returning a 404 error if this flag is omitted.
+
+The embedding setup in both code cells reads the same environment variables as [RAG and Modern Chatbots](/en/llm/rag-chatbot/): `EMBEDDING_MODEL` is required, while `EMBEDDING_BASE_URL` and `EMBEDDING_API_KEY` are optional and fall back to the chat endpoint and key when unset. Therefore, if you use OpenAI for embeddings while using another provider for chat, you must explicitly set `EMBEDDING_BASE_URL` to `https://api.openai.com/v1`; leaving it blank sends embedding requests to your chat provider's URL.
+
+### What has changed (tested 10/2026)
+
+Both libraries evolve rapidly, so most examples you find online were written for older versions. Everything below was tested with `langchain` 1.4.7, `langchain-classic` 1.0.8, and `llama-index-core` 0.14.25 in October 2026; newer releases may differ.
+
+- **LangChain 1.x split and removed many modules.** `from langchain.chains import RetrievalQA` and `from langchain.text_splitter import ...` now raise `ModuleNotFoundError`. Legacy chains such as `RetrievalQA` live in a separate `langchain-classic` package (imported from `langchain_classic.chains`) and are marked deprecated. Text splitters live in `langchain-text-splitters`; `Document`, prompts, and the in-memory vector store live in `langchain-core`.
+- **LangChain renamed its agent constructor.** LangGraph's `create_react_agent` moved to `create_agent` in `langchain.agents`. LangChain's official RAG tutorial now builds on Deep Agents (package `deepagents`, function `create_deep_agent`), where an agent decides when to call a search tool. Meanwhile, the Retrieval concept guide still documents "2-Step RAG" (always retrieve first, then call the model)—matching the chain in this lesson—and notes that it fits Q&A bots and documentation assistants well. An LCEL chain like ours still works and is ideal for learning each stage; agents are covered in [Agents](/en/llm/agents/).
+- **Install LlamaIndex selectively.** The umbrella package `llama-index` 0.14.25 requires `llama-index-llms-openai` below 0.8, whereas `llama-index-llms-openai-like` 0.8.1 requires 0.8 or higher, causing pip to report a conflict. Installing `llama-index-core` alongside only the specific integration packages you need works cleanly, just as LlamaIndex's installation guide recommends.
+- **LlamaIndex does not yet accept `openai` 3.** `llama-index-llms-openai` pins `openai` below 3, whereas the other lessons in this part use `openai` 3.37. `langchain-openai` 1.7.2 accepts both.
+
+### Limitations
+
+- **The vector stores in both code cells live in memory.** Exiting the program wipes them out, so the next run re-embeds everything from scratch and calls the API again. Production apps persist indexes to disk or use a dedicated vector database.
+- **A framework does not make RAG more accurate.** Retrieval quality still depends on how you split chunks, which embedding model you pick, $k$, and your prompt. The evaluation practices from [RAG and Modern Chatbots](/en/llm/rag-chatbot/) remain just as necessary.
+- **This lesson only touches the RAG slice.** Both libraries also support agents (LangChain builds agents on LangGraph; LlamaIndex has `FunctionAgent`), which are the topic of [Agents](/en/llm/agents/).
+
+## Illustration
+
+The table below lines up every stage of the pipeline across three approaches: handwritten code from [RAG and Modern Chatbots](/en/llm/rag-chatbot/), LangChain, and LlamaIndex. Read across each row: the same job, three different names.
+
+| Stage | Handwritten (`openai` + NumPy) | LangChain | LlamaIndex |
+|---|---|---|---|
+| Document | string or list of strings | `Document(page_content, metadata)` | `Document(text, metadata)`, `SimpleDirectoryReader` |
+| Chunk splitting | manual split, or pre-written chunks | `RecursiveCharacterTextSplitter` (characters) | `SentenceSplitter` (tokens) |
+| Embedding | `client.embeddings.create` | `OpenAIEmbeddings` | `OpenAIEmbedding` |
+| Vector store | normalized NumPy array | `InMemoryVectorStore` | `VectorStoreIndex` (includes splitting and embedding) |
+| Retrieval | `index @ q`, then `argsort` | `store.as_retriever(search_kwargs={"k": 2})` | `similarity_top_k=2` |
+| Prompt | f-string | `ChatPromptTemplate` | built-in prompt, or `text_qa_template` |
+| Chat model call | `client.chat.completions.create` | `ChatOpenAI` | `OpenAILike` |
+| Wiring steps together | a few lines of Python | LCEL chain: `\|` | `query_engine.query(...)` |
+| Inspecting used chunks | already in the `top` variable | call `retriever.invoke(...)` | `response.source_nodes` |
+
+To see what LlamaIndex's "built-in prompt" actually looks like, here are the exact messages that our LlamaIndex cell sends to the API for the question "What time does the club meet?". We captured them with a mock server standing in for the API, so this is the real prompt from `llama-index-core` 0.14.25, not a model's output. The two chunks in the context are chosen by the embedding model; the table replaces them with placeholders.
+
+| Role | Content |
+|---|---|
+| `system` | You are an expert Q&A system that is trusted around the world.<br/>Always answer the query using the provided context information, and not prior knowledge.<br/>Some rules to follow:<br/>1. Never directly reference the given context in your answer.<br/>2. Avoid statements like 'Based on the context, ...' or 'The context information ...' or anything along those lines. |
+| `user` | Context information is below.<br/>---------------------<br/>source: club-rules.txt<br/><br/>(first chunk)<br/><br/>source: club-rules.txt<br/><br/>(second chunk)<br/>---------------------<br/>Given the context information and not prior knowledge, answer the query.<br/>Query: What time does the club meet?<br/>Answer: |
+
+Notice the `source: club-rules.txt` lines: document metadata is prepended to every chunk. That is why `SentenceSplitter` subtracts the metadata's token count from `chunk_size`. The LangChain cell, by contrast, sends only the two messages you wrote in `ChatPromptTemplate`, with nothing added.
+
+## Code examples
+
+The code in this lesson was last tested in October 2026 with Python 3.14. The LangChain cell uses `langchain` 1.4.7, `langchain-openai` 1.7.2, and `openai` 3.37. The LlamaIndex cell uses `llama-index-core` 0.14.25 and `openai` 2.54 in a separate virtual environment. Both cells call an external API, so run them on your own machine rather than in the browser.
+
+Both cells perform the exact same task on the same data: a four-paragraph rulebook for a fictional club, followed by a question the model cannot answer without reading the rules. Place the two cells side by side and match each line against the table in the Illustration section.
+
+### Setup
+
+Set the three environment variables from [Using Text APIs](/en/llm/text-api/#setup-providers-and-environment-variables), plus the name of an embedding model. If your chat provider does not offer embeddings (the provider table in Using Text APIs notes which ones do), also set the base URL and key of a provider that does:
+
+<Tabs syncKey="os">
+<TabItem label="macOS, Linux (bash)">
+
+```sh
+export EMBEDDING_MODEL="<embedding model name>"
+# Only if your chat provider does not offer embeddings:
+export EMBEDDING_BASE_URL="<API base URL with embeddings>"
+export EMBEDDING_API_KEY="<key for that provider>"
+```
+
+</TabItem>
+<TabItem label="Windows (PowerShell)">
+
+```powershell
+$env:EMBEDDING_MODEL = "<embedding model name>"
+# Only if your chat provider does not offer embeddings:
+$env:EMBEDDING_BASE_URL = "<API base URL with embeddings>"
+$env:EMBEDDING_API_KEY = "<key for that provider>"
+```
+
+</TabItem>
+</Tabs>
+
+Install each cell into **its own separate virtual environment**. As explained under "What has changed", LlamaIndex downgrades `openai` to version 2, which can break code from other lessons if installed in the same environment. Package versions are pinned to the exact releases tested for this lesson because both libraries change their APIs frequently.
+
+### RAG with LangChain
+
+<LocalCode
+  code={langchainCode}
+  title="Minimal RAG with LangChain: retriever and LCEL chain"
+  packages={['langchain==1.4.7', 'langchain-openai==1.7.2', 'langchain-text-splitters==1.1.3', 'numpy']}
+/>
+
+Read the code through its four numbered blocks:
+
+1. `RecursiveCharacterTextSplitter` with `chunk_size=80` splits the rules at double newlines. Each paragraph is 57 to 68 characters long, and any two adjacent paragraphs exceed 80 characters, so the first printed line is `Chunks: 4`. Splitting does not call the API, so this number is identical on every machine.
+2. `InMemoryVectorStore` calls the embedding API once for all four chunks, and `as_retriever` creates a retriever that returns the 2 closest chunks. Because this store computes cosine similarity using NumPy, `numpy` is listed in the install command even though our code never imports it directly: without NumPy, the search step raises an `ImportError`.
+3. `ChatPromptTemplate` defines the system instruction and two placeholders.
+4. The LCEL chain wires everything together. The two lines starting with `-` are the two chunks found by the retriever; the chunk about meeting times should appear first. The final line is the model's answer, which should mention Thursday evenings at 7 pm.
+
+Notice that the retriever is invoked twice: once to print the chunks, and once inside the chain. Each invocation embeds the question once, so the program calls the embedding API three times in total.
+
+### RAG with LlamaIndex
+
+<LocalCode
+  code={llamaindexCode}
+  title="Minimal RAG with LlamaIndex: index and query engine"
+  packages={['llama-index-core==0.14.25', 'llama-index-llms-openai-like==0.8.1', 'llama-index-embeddings-openai==0.7.0']}
+/>
+
+The top half configures `Settings`; the rest is much shorter than the LangChain cell because `from_documents` and `as_query_engine` handle splitting, embedding, retrieval, and prompt assembly for you. Here `chunk_size=64` counts tokens and includes metadata: each paragraph of the rules is around 15 tokens, and after subtracting the metadata tokens, each paragraph (or pair) fits within the token budget, printing `Chunks: ...` followed by the `-` lines from `response.source_nodes` and the final answer.
+
+On its first run, LlamaIndex does not need to download anything extra: the tokenizer used by `SentenceSplitter` is bundled inside `llama-index-core`. However, if your API URL is wrong, be patient: `OpenAIEmbedding` retries up to 10 times by default, so when tested against a closed port, `APIConnectionError` took over a minute to appear.
+
+## Common pitfalls
+
+:::caution[Copying code from old tutorials, or installing both libraries in one environment]
+Examples online often start with `from langchain.chains import RetrievalQA` or `from langchain.text_splitter import ...`. In `langchain` 1.x, both raise `ModuleNotFoundError`. Do not blindly install extra packages until the error goes away: check which version the tutorial used, read the docs for the version you installed, and pin versions in `requirements.txt`. Similarly, installing the umbrella `llama-index` package alongside a recent `llama-index-llms-openai-like` triggers a pip conflict, and installing LlamaIndex into an environment with `openai` 3 silently downgrades `openai`. Give each project its own virtual environment.
+:::
+
+:::caution[Mixing up parameter names, or forgetting LlamaIndex's `Settings`]
+`base_url` is LangChain's name; LlamaIndex calls it `api_base`. LlamaIndex's embedding class takes a custom model name via `model_name`; writing `model=` with a non-OpenAI model name raises a `ValueError`. Forgetting `is_chat_model=True` makes `OpenAILike` call the legacy `/completions` endpoint, causing chat-only providers to return a 404 error. Worst of all is forgetting `Settings.llm` or `Settings.embed_model`: LlamaIndex silently defaults to OpenAI, sends your other provider's key to OpenAI's servers, and gets an `AuthenticationError` (401). If you see a 401 error when you are not even using OpenAI, check `Settings` first.
+:::
+
+:::caution[Assuming a framework makes RAG more accurate or cheaper]
+A framework only packages the steps; poorly split chunks, a weak embedding model, or a vague prompt will still produce poor answers, just as in handwritten code. Nor does a framework reduce API calls: both code cells re-embed the entire document on every run because their vector stores live in memory. With a large corpus, every test run bills you for embeddings again, so persist your index to disk. And as in every API lesson: keep keys in environment variables, never in code, even when a framework lets you pass `api_key="..."` directly.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- LangChain and LlamaIndex do not change how RAG works: it is still load documents, split chunks, embed and store, retrieve, assemble a prompt, and call the model. They name and pre-build each stage. When your pipeline is fixed, short, and uses a single provider, handwritten code is usually enough.
+- LangChain pipes Runnable blocks together with LCEL: `{"context": retriever | format_docs, "question": RunnablePassthrough()} | prompt | llm | StrOutputParser()`. The pipeline is explicit and easy to insert steps into.
+- LlamaIndex bundles the pipeline: configure `Settings` once, build an index with `VectorStoreIndex.from_documents`, and answer questions with `as_query_engine`; `response.source_nodes` shows which chunks were used. You can replace the default prompt via `text_qa_template`.
+- Both libraries change rapidly: parameter names differ (`base_url` vs. `api_base`, `model` vs. `model_name`), missing LlamaIndex settings silently fall back to OpenAI, and legacy LangChain imports have been removed. Pin package versions and use separate virtual environments.
+
+**Further reading:**
+
+- LangChain (2026). [*LangChain overview*](https://docs.langchain.com/oss/python/langchain/overview). Official overview of LangChain 1.x: core building blocks and why agents are built on LangGraph. The docs are unversioned; this lesson was verified against `langchain` 1.4.7.
+- LangChain (2026). [*Migrate to LangChain v1*](https://docs.langchain.com/oss/python/migrate/langchain-v1). Summary of what moved to `langchain-classic`, changed names, or was removed. Worth reading before adapting an older example.
+- LangChain (2026). [*Retrieval Augmented Generation (RAG) with Deep Agents*](https://docs.langchain.com/oss/python/deepagents/rag). The current official RAG tutorial, built on Deep Agents where the agent decides when to search.
+- LangChain (2026). [*Retrieval*](https://docs.langchain.com/oss/python/deepagents/retrieval). Concept guide comparing 2-Step RAG (like the chain in this lesson) with Agentic RAG, and when to use each.
+- LlamaIndex (2026). [*Starter example*](https://developers.llamaindex.ai/python/framework/getting_started/starter_example/) and [*Installation*](https://developers.llamaindex.ai/python/framework/getting_started/installation/). Official walkthrough with `SimpleDirectoryReader`, `VectorStoreIndex`, and `Settings`, plus how to install selectively using `llama-index-core` and individual integration packages.
+- PyPI. [*llama-index-llms-openai-like 0.8.1*](https://pypi.org/project/llama-index-llms-openai-like/0.8.1/). Package page for the exact `OpenAILike` release tested in this lesson, including its dependency constraints.
+
+<LessonProgress />

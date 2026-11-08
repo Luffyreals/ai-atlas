@@ -1,0 +1,274 @@
+---
+title: Building UIs with Gradio and Streamlit
+description: Turn API-calling code into a browser chat app. Gradio calls a function you write; Streamlit reruns the whole script. Streaming and keeping conversation history.
+quiz:
+  - question: 'In a Streamlit app, you write `history = []` at the top of the file (a plain Python variable, not `st.session_state`), and on each new message you append to `history` and redraw the list. The user sends a second message. What appears on the screen?'
+    options:
+      - 'Both turns, because the variable `history` stays in the server''s memory'
+      - 'A `NameError` because `history` is not defined'
+      - 'Only the second turn, because Streamlit reruns the whole file and `history = []` creates a new empty list'
+      - 'The first turn twice'
+    answer: 2
+    explanation: 'Every time the user sends a message, Streamlit reruns the script from the first line, so `history = []` runs again and wipes out everything added earlier. Only `st.session_state` survives across reruns. The first option is a common trap because in a normal long-running Python process the variable would stay in memory—but here the assignment line itself runs again.'
+  - question: 'In your Gradio `chat` function, you write `yield piece` (only the newly arrived chunk) instead of `yield reply` (the accumulated text so far). The model replies "Hello, I am an assistant." across five chunks. When the stream finishes, what does the chat bubble show?'
+    options:
+      - 'Only the last chunk, e.g. "assistant."'
+      - 'The full sentence, because Gradio automatically concatenates yielded chunks'
+      - 'Five separate chat bubbles, one per chunk'
+      - 'Nothing, because `yield` must return a list'
+    answer: 0
+    explanation: 'On each `yield`, Gradio replaces the entire currently displayed message with the newly yielded value. That is why you must `yield` the accumulated text so far. Gradio only computes the diff under the hood to keep network traffic to the browser small; it does not concatenate pieces for you. The final message saved to history is also just the last chunk.'
+  - question: 'Consider the Streamlit app in this lesson (one `system` message prepended on every API call, and history storing both questions and answers). The user is sending their 5th question. How many messages are in the `messages` list sent to the API?'
+    options: ['2', '5', '9', '10']
+    answer: 3
+    explanation: 'It includes 1 `system` message, 4 question–answer pairs from the four earlier turns (8 messages), and the new question: $1 + 8 + 1 = 10$, or $2k$ with $k = 5$. Because the API is stateless, every turn must resend the entire conversation. Option 9 forgets the `system` message; option 2 assumes the API remembers past turns on its own.'
+  - question: 'Why does the `chat` function in this lesson pass each item of Gradio''s `history` through `to_text` instead of passing `history` directly into `messages`?'
+    options:
+      - 'Because Gradio''s `history` only contains user messages'
+      - 'Because in Gradio 6 `content` is a list of parts alongside `metadata` and `options` keys, whereas a plain string is accepted everywhere'
+      - 'Because Gradio''s `history` already includes a `system` message, so passing it directly would duplicate it'
+      - 'Because `to_text` prepends the `system` message to the list'
+    answer: 1
+    explanation: '`history` contains both user and assistant messages, but in Gradio''s own format: `content` is a list of content parts, accompanied by extra keys that the API does not define. `to_text` keeps only `role` and joins the text into a single string, matching the `{"role": ..., "content": "..."}` shape accepted by every OpenAI-compatible API. `history` also has no `system` message: that message is added on the first line of `chat`, not inside `to_text`.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import gradioChatCode from '@code/llm/gradio-streamlit/gradio-chat.en.py?raw';
+import streamlitChatCode from '@code/llm/gradio-streamlit/streamlit-chat.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand two distinct execution models: Gradio calls **a single function** you write whenever a new message arrives, whereas Streamlit **reruns the entire script** whenever the user interacts with the page.
+- Build a browser-based **chat interface** connected to an **OpenAI-compatible** API using both libraries.
+- Stream model responses to the UI so words appear incrementally instead of all at once at the end.
+- Maintain **conversation history** properly across both layers: the UI layer for redrawing the screen, and the API layer so the model "remembers" earlier turns.
+
+## Prerequisites
+
+{/* List populated from prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In [Using Text Generation APIs](/en/llm/text-api/), you called a model with `client.chat.completions.create` by passing a **`messages`** list, where each message has a `role` (`system`, `user`, `assistant`) and `content`. The API is **stateless**: on every call, you must resend the entire conversation. With `stream=True`, the response arrives as a sequence of **chunks**; the new text in each chunk sits at `chunk.choices[0].delta.content`, which can be `None`.
+:::
+
+## Intuition
+
+You already have a Python script that chats with a language model in the terminal. Now you want a colleague to try it out. Your colleague is not a programmer, and "open a terminal and run `python chat.py`" is a non-starter. What they need is a web page with an input box, a send button, and chat bubbles.
+
+Building that page from scratch means writing HTML, CSS, JavaScript, and a backend server to handle browser requests—a whole separate discipline. **Gradio** and **Streamlit** are two Python libraries that let you skip all of that: a few dozen lines of Python become a working web app running on your machine.
+
+The two libraries follow very different mental models:
+
+- **Gradio is like a ready-made picture frame.** The chat layout is already built: input box, send button, stop button, message list. You only supply the "picture"—a Python function that takes a question and returns an answer.
+- **Streamlit is like a whiteboard.** You write a script that draws on the board from top to bottom. Every time someone touches the board (sends a message, clicks a button), Streamlit **wipes the board clean and runs your script from the top**. Anything that needs to survive across redraws must be written down in a separate notebook.
+
+Regardless of which library you pick, you face the same three questions: where does the UI call the API, how do you make text appear incrementally, and who remembers the conversation?
+
+**The problem: turn an API-calling script into a browser chat app where text streams in as the model replies and the model remembers what was said earlier in the conversation.**
+
+## Theory
+
+This lesson has no heavy formulas. The "theory" here is how each library executes your Python code. Once you have that mental model straight, most of the bugs in the Common pitfalls section disappear on their own.
+
+### Gradio: you write a function
+
+With Gradio, you write a function `chat(message, history)`:
+
+- `message` is the string the user just sent.
+- `history` holds the earlier turns as a list of dicts with `role` (`"user"` or `"assistant"`) and `content`. This history lives in the browser UI; every time a new message is sent, Gradio passes the history into your function.
+
+Then `gr.ChatInterface(chat)` wraps a complete chat UI around that function, and `demo.launch()` starts a local web server, defaulting to port 7860. Your function can reply in one of two ways:
+
+- **`return` a string:** the entire answer appears at once after the function finishes.
+- **`yield` multiple times:** turning the function into a **generator** (a function that uses `yield`). On each `yield`, Gradio **replaces the entire** currently displayed assistant message with the new value. You must therefore `yield` the accumulated text so far, not just the newest piece. Gradio automatically computes the diff to send over the network to the browser.
+
+There are two Gradio 6 details where older online examples often break:
+
+- In Gradio 6.30.0 (the version tested for this lesson), each message's `content` inside `history` is a **list of parts**, such as `[{"type": "text", "text": "Hello"}]`, and each message dict also carries `metadata` and `options` keys. While OpenAI's own API accepts content as a list of parts, not every OpenAI-compatible provider does (especially on `assistant` messages), and `metadata` and `options` are not defined by the API specification. The code in this lesson therefore converts each turn into `{"role": ..., "content": "plain string"}`, which every provider accepts.
+- `history` does not include a `system` message. Providing system instructions to the model is your responsibility: prepend the `system` message to the list on every API call.
+
+Gradio also offers `gr.load_chat(base_url, model=..., token=...)`, which spins up a chat UI for an OpenAI-compatible API in a single line. We write the `chat` function ourselves here so you can inspect and customize every step.
+
+### Streamlit: the script reruns from top to bottom
+
+With Streamlit, you write a normal Python script that executes from top to bottom. Each `st.*` call draws an element on the page. The crucial rule is: **every time the user interacts with the page, Streamlit reruns the entire script** from line 1. For a chat app, that has three direct consequences:
+
+1. **Plain Python variables are recreated from scratch** after every message. Anything that must persist across reruns belongs in `st.session_state`, a dict-like object that survives reruns, with an isolated copy per browser tab.
+2. **The screen is redrawn from scratch**, so your script must loop through and redraw all earlier messages, each inside an `st.chat_message(role)` block.
+3. **`st.chat_input` returns `None`** on every run except the rerun triggered right after the user submits a message, when it returns the submitted string. That is why Streamlit chat code uses `if prompt := st.chat_input(...):`—the API is only called when a new message has just arrived.
+
+Because of the first consequence, you must only initialize the message list when it does not yet exist. If you write `st.session_state.messages = []` unconditionally, that line also reruns after every message and wipes out the history:
+
+```python
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+```
+
+Rerunning the entire script sounds wasteful, and it would be if the top of your script performed heavy work like loading a large dataset or a local model. For those cases, Streamlit provides `st.cache_resource` and `st.cache_data` to keep objects alive across reruns. Our app only creates an API `client` (which is very lightweight), so caching is unnecessary.
+
+### Conversation history: two layers of memory
+
+"Remembering the conversation" is actually two separate jobs:
+
+- **The UI remembers so it can redraw the chat.** Gradio manages this automatically inside `ChatInterface`. In Streamlit, you store it yourself in `st.session_state.messages`.
+- **The model "remembers" because you resend the history.** Since the API is stateless, on every turn you send the `system` message, the full history, and the new question. On turn $k$, the list sent to the API contains $1 + 2(k - 1) + 1 = 2k$ messages: one `system` message, $k - 1$ earlier question–answer pairs, and the new question.
+
+Both layers must stay in sync. If the UI displays the model's reply on screen but you forget to append it to the stored history, on the next turn the model will have no idea what it just answered (see the second box in Common pitfalls).
+
+Because the message count grows with $k$, the number of input tokens also grows on every turn: the longer the conversation, the more expensive and slower each API call becomes, until the total exceeds the model's **context window** (the maximum number of tokens the model can process at once). Production apps must trim or summarize older turns; this lesson keeps the full history to stay simple.
+
+By default, both libraries lose the conversation history when you refresh the browser page: the history only lives for that single browser session. Gradio provides `gr.ChatInterface(..., save_history=True)` to persist conversations in the browser's local storage and list them in a sidebar. To persist history on the server, you have to save it to a file or database yourself.
+
+### Streaming to the UI
+
+When you call the API with `stream=True`, you get back an iterator of chunks. Each chunk carries a few new characters in `chunk.choices[0].delta.content`. Three kinds of chunks carry no text at all: the opening chunk that only announces the `assistant` role (empty `content`), the closing chunk that reports `finish_reason` (`content` is `None`), and the token-usage chunk sent when `include_usage` is enabled (or sent automatically by some providers), whose `choices` list is empty. Your code must skip all three; otherwise you will hit a `TypeError` when concatenating `None` to a string, or an `IndexError` when accessing `choices[0]`.
+
+**Gradio:** you loop over the stream yourself, skip empty chunks, accumulate the text into `reply`, and `yield reply`. Here is the loop inside `chat`:
+
+```python
+for chunk in stream:
+    if not chunk.choices:  # some providers send chunks without choices
+        continue
+    piece = chunk.choices[0].delta.content
+    if piece:  # a chunk may be None or an empty string
+        reply += piece
+        yield reply  # yield the full text so far; Gradio redraws the message
+```
+
+**Streamlit:** you pass the `openai` SDK stream directly to `st.write_stream`. This helper automatically skips empty chunks, renders text incrementally, and once the stream ends, **returns the complete reply** as a string. You then append that returned string to the history.
+
+:::note[Key takeaway]
+Gradio calls your function with `(message, history)` and you `yield` the accumulated text so far. Streamlit reruns the entire script on every interaction; history lives in `st.session_state`, and `st.write_stream` returns the completed reply. In both libraries, every turn sends the `system` message, the full history, and the new question to the API.
+:::
+
+### Limitations
+
+- **The app only runs on your machine**, at `localhost`. Packaging and deploying it to a server so others can access it over the web is covered in [Docker and the Cloud](/en/llm/docker-cloud/).
+- **History is never trimmed**, so very long conversations will consume many tokens and eventually exceed the context window.
+- **Mid-stream errors are not handled.** The SDK does not retry a stream that drops partway through ([Using Text Generation APIs](/en/llm/text-api/)). A production app should catch stream exceptions and notify the user.
+- **The model only knows what it was trained on.** Letting the model read your own documents before answering is the topic of [RAG and Modern Chatbots](/en/llm/rag-chatbot/).
+
+## Illustration
+
+The table below compares the two libraries side by side. Pay special attention to the first three rows: who calls your code, where history lives, and how streaming works.
+
+| Aspect | Gradio | Streamlit |
+|---|---|---|
+| Who calls your code | Gradio calls `chat(message, history)` on each new message | Streamlit reruns the entire script on every user interaction |
+| Where history lives | Kept by the chat component and passed via `history` | Kept by you in `st.session_state` |
+| Streaming | Accumulate text and `yield` the full string so far | `st.write_stream(stream)`, which returns the full reply |
+| Chat layout | Pre-built: `gr.ChatInterface(chat)` | Assembled by you: `st.chat_message`, `st.chat_input` |
+| `system` message | Prepend on every API call | Prepend on every API call |
+| Best suited for | Quick demos of a single model or function | Multi-part apps with tables, charts, and sidebars |
+| Run command | `python gradio_app.py` | `streamlit run streamlit_app.py` |
+| Default port | 7860 | 8501 |
+| Minimum Python (PyPI, 10/2026) | 3.10 | 3.11 |
+
+The "Best suited for" row is a rule of thumb, not a hard boundary: Gradio can build multi-part layouts with `gr.Blocks`, and Streamlit can build quick demos just as well.
+
+To make "resending the full history" concrete, here is the exact `messages` list that both apps in this lesson send to the API on **turn 3** of a conversation. It has $2k = 6$ messages. Model replies are shown as placeholders.
+
+| Role | Content | Source |
+|---|---|---|
+| `system` | You are a friendly assistant. Keep your answers short. | The `SYSTEM` constant in code |
+| `user` | What is Gradio? | History, turn 1 |
+| `assistant` | (model's reply from turn 1) | History, turn 1 |
+| `user` | What about Streamlit? | History, turn 2 |
+| `assistant` | (model's reply from turn 2) | History, turn 2 |
+| `user` | Which one should I pick for a quick demo? | Input box, just submitted |
+
+## Code examples
+
+The code in this lesson was last tested in October 2026 with Python 3.14, `openai` 3.37, `gradio` 6.30.0, and `streamlit` 1.66.1. Both programs run on your machine rather than in the browser: each one starts a local web server and needs network access to call the LLM API.
+
+Before running either app, set the three environment variables from [Using Text Generation APIs](/en/llm/text-api/) in the exact terminal window where you will launch the app. The provider table and `OPENAI_BASE_URL` values are in that lesson as well. Both apps share the same `SYSTEM` prompt so you can compare them directly.
+
+### Chat app with Gradio
+
+Save the code below as `gradio_app.py`, run `python gradio_app.py`, and open the URL printed in your terminal (usually `http://127.0.0.1:7860`). This code targets Gradio 6 or newer; in Gradio 5 and earlier, `history` had a different structure.
+
+<LocalCode
+  code={gradioChatCode}
+  title="Chat with Gradio and streaming"
+  file="gradio_app.py"
+  command="python gradio_app.py"
+  packages={['openai', 'gradio>=6']}
+/>
+
+Trace the code in the order Gradio calls it:
+
+- **At startup**, `client`, `MODEL`, and `demo` are created once. If `OPENAI_API_KEY` or `LLM_MODEL` is unset, the script exits immediately with a `KeyError` naming the missing variable before starting the server.
+- **Whenever you send a message**, Gradio calls `chat(message, history)`. The function builds `messages` from the `system` prompt, the earlier turns (normalized via `to_text`), and the new user message, then calls the API with `stream=True`.
+- **As each chunk arrives**, the function appends the new text to `reply` and executes `yield reply`. The message bubble on screen grows incrementally. When the stream finishes, the final yielded string is the complete reply, which Gradio saves into `history` for the next turn.
+
+The `if __name__ == "__main__":` guard lets the file be run directly as a script or imported as a module without launching the server. The two starter prompts shown in the empty chat window come from the `examples` argument; clicking one submits it immediately.
+
+### Chat app with Streamlit
+
+Save the code below as `streamlit_app.py` and run it with `streamlit run streamlit_app.py`—**not** `python streamlit_app.py`. Streamlit opens a browser tab at `http://localhost:8501`. Streamlit 1.66 requires Python 3.11 or newer. Unlike Gradio, if an environment variable is missing, the Streamlit server still starts up, and displays the `KeyError` with the missing variable name inside the web page.
+
+<LocalCode
+  code={streamlitChatCode}
+  title="Chat with Streamlit and streaming"
+  file="streamlit_app.py"
+  command="streamlit run streamlit_app.py"
+  packages={['openai', 'streamlit']}
+/>
+
+Trace the code across Streamlit reruns:
+
+- **On the initial run**, `st.session_state.messages` is initialized as an empty list, the `for` loop draws nothing, and `st.chat_input` returns `None`, so the `if` block is skipped. The page shows only the title and the input box.
+- **When you send a first question**, Streamlit reruns the script from line 1. This time `st.chat_input` returns your question. The script appends it to `st.session_state.messages`, renders it in a user bubble, opens an `st.chat_message("assistant")` block, and calls the API. `st.write_stream` renders the incoming tokens and returns the full reply string; the final line saves that string into `st.session_state.messages`.
+- **When you send a second question**, the script reruns from line 1 again. Now the `for` loop redraws the two messages from turn one, and the `if` block processes the new question along with the full history.
+
+Notice that the `system` message is not stored inside `st.session_state.messages`; instead, it is prepended when calling the API. That way, the `for` loop does not render the system prompt as a visible chat bubble.
+
+Send two follow-up questions and you will see the reply stream in word by word, with the second reply taking the first turn into account.
+
+## Common pitfalls
+
+:::caution[Storing Streamlit history in a plain variable, or reinitializing it on every rerun]
+Putting either `history = []` or an unconditional `st.session_state.messages = []` at the top of your file causes it to execute again after every message, wiping out the conversation history: the screen only ever shows the latest turn, and the model sees nothing from earlier turns. Always guard the initialization inside `if "messages" not in st.session_state:`, as shown in our code.
+:::
+
+:::caution[Forgetting to save the assistant's reply, or sending history in the wrong format]
+In Streamlit, if you omit the final line that appends `reply` to `st.session_state.messages`, the answer still appears on screen during that turn, but vanishes on the next turn—and the `messages` list sent to the API ends up with two consecutive `user` messages and no `assistant` reply in between. Ask "what did you just say?" and the model has no way of knowing. In Gradio, the UI component manages history for you, but if you `yield piece` instead of `yield reply`, only the final chunk gets saved.
+
+Gradio also has a format trap when sending `history` to the API: in Gradio 6, each turn's `content` is a list of parts accompanied by `metadata` and `options` keys. Passing `history` raw to the API can be rejected depending on the provider; normalize each turn to `{"role": ..., "content": "string"}` using a helper like `to_text`. Older tutorials written for Gradio 4 or 5 also pass `type="messages"` to `gr.ChatInterface` or treat `history` as a list of `(question, answer)` tuples. Gradio 6 removed both: passing `type="messages"` in Gradio 6.30.0 raises a `TypeError` immediately.
+:::
+
+:::caution[Exposing an app to the public Internet with your own API key]
+Calling `demo.launch(share=True)` in Gradio creates a public URL where anyone with the link can chat, and every message is billed to your API key—draining your balance or rate-limit quota. Only enable sharing when necessary, and protect it with a password via the `auth` parameter of `launch`. Never hardcode your API key in source files or paste it into an input box on a public page. If you use Streamlit's `st.secrets` as shown in their tutorials, make sure `.streamlit/secrets.toml` is never committed to Git.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Gradio and Streamlit turn a few dozen lines of Python into a local web app without requiring HTML or JavaScript.
+- Gradio: write `chat(message, history)` and wrap it in `gr.ChatInterface`. When streaming with a generator, `yield` the accumulated text so far because each `yield` replaces the entire displayed message. In Gradio 6, convert `history` items to standard API `messages` dicts before sending.
+- Streamlit: every user interaction reruns the entire script from top to bottom. Keep history in `st.session_state` (initializing it only when absent), redraw past turns with `st.chat_message`, and capture the full reply returned by `st.write_stream`.
+- Because the API is stateless, turn $k$ sends $2k$ messages. Longer histories consume more tokens until they hit the context window.
+
+**Further reading:**
+
+- Gradio. [*Creating a Chatbot Fast*](https://www.gradio.app/guides/creating-a-chatbot-fast). Official guide to `gr.ChatInterface`: chat functions, streaming with `yield`, `examples`, and `additional_inputs` (such as adding a system prompt textbox or temperature slider). Tested against Gradio 6.30.0.
+- Gradio. [*ChatInterface*](https://www.gradio.app/docs/gradio/chatinterface). Reference documentation listing all parameters of `gr.ChatInterface`.
+- Streamlit. [*Build a basic LLM chat app*](https://docs.streamlit.io/develop/tutorials/chat-and-llm-apps/build-conversational-apps). Official tutorial following the same `st.session_state` – `st.chat_message` – `st.write_stream` pattern used here (note that their example reads keys from `st.secrets` and hardcodes the model name, whereas this lesson reads both from environment variables).
+- Streamlit. [*Session State*](https://docs.streamlit.io/develop/concepts/architecture/session-state) and [*st.write_stream*](https://docs.streamlit.io/develop/api-reference/write-magic/st.write_stream). Details on the rerun execution model and how `st.write_stream` consumes `openai` SDK streams (Streamlit 1.66).
+- Abid, A., Abdalla, A., Abid, A., Khan, D., Alfozan, A., Zou, J. (2019). [*Gradio: Hassle-Free Sharing and Testing of ML Models in the Wild*](https://arxiv.org/abs/1906.02569). The original paper introducing Gradio and the motivation for letting non-programmers test ML models interactively.
+
+<LessonProgress />

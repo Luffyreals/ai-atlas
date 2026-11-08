@@ -1,0 +1,373 @@
+---
+title: Text Generation and Summarization
+description: Condensing a news report into two sentences. Greedy, beam search, sampling, top-k, top-p, and repetition penalty; extractive and abstractive summarization; ROUGE and hallucination.
+quiz:
+  - question: 'The reference summary is "Huế mưa lớn suốt ba ngày" (6 syllables) and the system summary is "mưa lớn ở Huế ba ngày" (6 syllables, case-insensitive, each syllable treated as one word). What are ROUGE-1, ROUGE-2, and ROUGE-L (F1), respectively?'
+    options:
+      - '$0.833$, $0.833$, $0.833$'
+      - '$1.000$, $0.400$, $0.667$'
+      - '$0.833$, $0.400$, $0.667$'
+      - '$0.833$, $0.200$, $0.500$'
+    answer: 2
+    explanation: 'Both strings have 6 syllables and share 5 (all except "suốt" and "ở"), so ROUGE-1 has $P = R = 5/6$ and F1 $= 0.833$. Each string has 5 bigrams, and only "mưa lớn" and "ba ngày" match: $P = R = 2/5$, giving F1 $= 0.4$. The longest common subsequence is "mưa lớn ba ngày" (4 words), so ROUGE-L $= 4/6 = 0.667$. ROUGE-1 is not 1 because "ở" and "suốt" do not appear in the other string.'
+  - question: 'You apply Hugging Face''s repetition penalty with $\theta = 1.5$. A previously generated token has logit $-2.0$. What is its new logit, and why don''t we simply divide by $\theta$ as written in the CTRL paper?'
+    options:
+      - '$-1.33$: dividing by $\theta$ always shrinks the logit'
+      - '$-3.0$: dividing a negative number by $\theta > 1$ moves it closer to 0, which increases its probability'
+      - '$-2.0$: the repetition penalty only applies to positive logits'
+      - '$0$: already-generated tokens are banned outright'
+    answer: 1
+    explanation: 'For a negative logit, $-2.0 / 1.5 = -1.33 > -2.0$, which would boost the repeated token instead of penalizing it. Hugging Face therefore multiplies negative logits by $\theta$ ($-2.0 \times 1.5 = -3.0$) and divides only positive logits by $\theta$. Banning repeated spans outright is the job of `no_repeat_ngram_size`, not `repetition_penalty`.'
+  - question: 'You have two tasks: (a) summarizing a residential lease agreement for a tenant, and (b) brainstorming 20 distinct advertising slogans for a coffee shop. Which decoding setup makes the most sense?'
+    options:
+      - '(a) beam search or greedy decoding; (b) top-p sampling with temperature around 1'
+      - '(a) high-temperature sampling; (b) beam search with $B = 20$'
+      - 'Greedy decoding for both, because it always finds the highest-probability sentence'
+      - 'Pure ancestral sampling over the full vocabulary for both'
+    answer: 0
+    explanation: 'Summarization is directed generation: the output is tightly constrained by the source text and needs to be factual and stable, making likelihood-maximizing decoding (beam search or greedy) a good fit. Slogans are open-ended generation requiring diversity, where truncated sampling shines. Beam search with $B = 20$ produces 20 nearly identical variations, and greedy decoding neither guarantees the globally highest-probability sequence nor avoids repetition in long text.'
+  - question: 'A source article states "Đà Nẵng mở tuyến xe buýt điện đầu tiên" ("Da Nang opens its first electric bus route"). Summary A writes "Đà Nẵng mở tuyến xe buýt điện thứ hai" ("...its second electric bus route"). Summary B writes "Đà Nẵng mở tuyến xe buýt điện đầu tiên do một công ty Nhật vận hành" ("...operated by a Japanese company", which the source never mentions). Under the taxonomy of Maynez et al. (2020), how are A and B classified?'
+    options:
+      - 'Both A and B are extrinsic hallucinations'
+      - 'A is faithful because it stays on topic; B is an intrinsic hallucination'
+      - 'Only B is a hallucination, because A has a high ROUGE-1 score'
+      - 'A is an intrinsic hallucination; B is an extrinsic hallucination'
+    answer: 3
+    explanation: 'Summary A distorts facts present in the source ("first" turned into "second"): that is an intrinsic hallucination. Summary B introduces a detail absent from the source: that is an extrinsic hallucination (even if it happened to be true in the real world, it is unfaithful to the source document). Summary A''s high ROUGE-1 ($0.778$ in our Illustration table) is the exact reason ROUGE cannot be trusted to catch factual errors.'
+  - question: 'In the extractive summarization code cell, suppose you replace each sentence''s score with the mean idf of its words (instead of cosine similarity with the whole-document vector). What is likely to happen?'
+    options:
+      - 'The selected sentences stay the same, because idf is already part of TF-IDF'
+      - 'Sentences packed with once-off words (ticket prices, minor details) get picked instead of sentences expressing the main topic'
+      - 'The first sentence is guaranteed to win'
+      - 'ROUGE is guaranteed to rise, because rare words carry more information'
+    answer: 1
+    explanation: 'High idf means a word appears in very few sentences of the article, so averaging idf rewards sentences that are outliers relative to the rest of the text. The central topic of a news story is repeated across multiple sentences ("xe buýt điện"), which is why comparing against the whole-document centroid vector finds representative sentences. On our news paragraph, mean-idf picks sentences 1 and 3 (ticket prices), dropping ROUGE-1 from $0.667$ down to $0.508$.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import SamplingViz from '@components/viz/SamplingViz.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import extractiveCode from '@code/nlp/text-generation-summarization/extractive-rouge.en.py?raw';
+import t5Code from '@code/nlp/text-generation-summarization/t5-summarize.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Compare major **decoding strategies**—greedy decoding, beam search, **sampling**, **temperature**, top-k, top-p, and **repetition penalty**—and choose the right strategy for a given task.
+- Distinguish **extractive summarization** from **abstractive summarization**, and explain how BART, T5, and PEGASUS are pretrained for summarization.
+- Compute ROUGE-1, ROUGE-2, and ROUGE-L by hand, and explain both what ROUGE captures and what it misses.
+- Spot **hallucinations** in generated summaries, distinguish intrinsic from extrinsic hallucinations, and apply practical mitigation techniques.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+## Intuition
+
+### A highlighter pen or rewriting from scratch
+
+Suppose you read a seven-sentence morning news brief: Da Nang launches its first electric bus route, how long the route is, the ticket price, free rides during the first month, how far each bus travels per charge, what residents say about it, and how many more routes are planned for next year. Your manager asks you to condense it into two sentences. You have two ways to do it.
+
+**Method 1: use a highlighter pen.** Highlight the two most important sentences and copy them verbatim. You can never invent a false claim that the article did not make, because every word comes straight from the article. However, two sentences lifted out of context can feel choppy: if you copy `"Tuyến dài 18 km"` ("The route is 18 km long") on its own, the reader has no idea which route "the route" refers to.
+
+**Method 2: rewrite in your own words.** *"Da Nang has opened its first electric bus route linking the airport to My Khe beach. Rides are free for the first month, with three more routes planned next year."* That is tighter and smoother. But now you are **writing**, which means you can introduce mistakes: accidentally turning *"first"* into *"second"*, or slipping in a detail the article never mentioned.
+
+A neural model performs Method 2 by **generating text** one token at a time. At every step, the model outputs a probability distribution over its entire vocabulary, and we must **choose** one token. Should we always pick the single most likely token, or draw at random for variety? When summarizing a contract, we want accuracy and stability. When writing a story, we want surprise.
+
+One more question: when you have a thousand machine-generated summaries to evaluate and not enough human readers, how do you score them automatically?
+
+The problem of this lesson is: **how to choose tokens when generating text, whether to select existing sentences or rewrite from scratch when summarizing, and how to score a summary automatically without being fooled.**
+
+## Theory
+
+### Text generation as an autoregressive loop
+
+As seen in [GPT and Distributed Training](/en/nlp/gpt-distributed-training/), a causal language model learns $p(x_t \mid x_{<t})$: the probability distribution of the next token given all preceding tokens. An encoder–decoder model such as T5 learns $p(y_i \mid y_{<i}, \mathbf{x})$, conditioning on a source text $\mathbf{x}$ as well ([Sequence-to-Sequence Models](/en/llm/seq2seq/)). Both generate text through the exact same **autoregressive** loop:
+
+1. Feed the tokens generated so far into the model to obtain a logit $z_i$ for every token $i$ in the vocabulary.
+2. Convert the logits into a probability distribution and **select** one token according to a decoding rule.
+3. Append the chosen token to the sequence and repeat from Step 1 until `<EOS>` is produced or the maximum token limit is reached.
+
+The neural network only performs Step 1. A **decoding strategy** is the rule used in Step 2. With the exact same model weights, changing the decoding rule can completely change the generated text.
+
+### Decoding strategies side by side
+
+The table below compares the main decoding strategies. The exact formulas and hand calculations for temperature, top-k, and top-p were introduced in [Using Text APIs](/en/llm/text-api/), and beam search with length penalty was covered in [Sequence-to-Sequence Models](/en/llm/seq2seq/). Here we put them side by side.
+
+| Strategy | How the next token is chosen | `generate` parameters | Strengths | Weaknesses |
+|---|---|---|---|---|
+| Greedy decoding | Pick the single highest-probability token | `num_beams=1`, `do_sample=False` | Fast, deterministic | Cannot revise early choices; prone to repetition in long text |
+| Beam search | Maintain the $B$ partial sequences with the highest total log-probability | `num_beams`, `length_penalty` | Finds higher-probability sequences than greedy | Bland, repetitive in open-ended generation; costs $B\times$ compute |
+| Pure sampling | Draw a token directly from the model's full distribution | `do_sample=True`, `top_k=0` | Maximum diversity | Occasionally samples nonsensical tokens from the long tail |
+| Temperature $T$ | Divide logits by $T$ before softmax, then sample | `temperature` | Single knob trading off sharpness vs. diversity | Does not truncate the tail on its own |
+| Top-k sampling | Sample only from the $k$ most likely tokens | `top_k` | Cuts off the long tail | Fixed $k$ cannot adapt when the distribution is very peaked or very flat |
+| Top-p (nucleus) | Sample from the smallest set of top tokens whose cumulative probability is $\ge p$ | `top_p` | Candidate pool expands and shrinks dynamically with model uncertainty | Still stochastic, harder to reproduce across hardware |
+
+Top-k sampling was popularized for story generation by Fan, Lewis, and Dauphin (2018), who sampled from the top $k = 10$ tokens at each step and found it far more engaging than beam search, which tended to repeat generic phrases. Top-p (nucleus) sampling was proposed by Holtzman et al. (2020) for the reason explained next.
+
+### Neural text degeneration
+
+If a well-trained language model assigns high probability to good text, shouldn't picking the sequence with the highest probability produce the best text? Surprisingly, no. Holtzman et al. (2020) prompted GPT-2 Large to continue 5,000 passages (up to 200 tokens each) and measured what percentage of continuations got stuck in a repetition loop (a phrase repeated at least three times at the end):
+
+| Decoding method | Repetition rate (%) |
+|---|---:|
+| Human text | 0.28 |
+| Greedy decoding | 73.66 |
+| Beam search, $B = 16$ | 28.94 |
+| Pure sampling | 0.22 |
+| Top-p sampling, $p = 0.95$ | 0.36 |
+
+Why does greedy decoding repeat so badly? Holtzman et al. showed that the model's assigned probability for a repeated phrase **increases** with each repetition: once a phrase repeats once, repeating it a third and fourth time becomes even more "probable", creating a positive feedback loop. Human writing does the opposite: it continually branches into lower-probability, higher-information tokens.
+
+Pure sampling virtually eliminates repetition loops, but fails in the opposite direction: the text wanders incoherently and sometimes invents bizarre wording. The culprit is the **unreliable tail** of the softmax distribution: tens of thousands of unlikely tokens whose individual probabilities are tiny, but whose combined probability mass is substantial. Top-p sampling slices off that tail. While pure sampling has an even lower raw repetition rate in the table, top-p produces text closest to human writing across perplexity and HUSE (a combined human-and-statistical evaluation metric).
+
+Holtzman et al. coined the term **neural text degeneration** for both failure modes: dull, repetitive loops when maximizing likelihood, and incoherent rambling when sampling from the unpruned tail.
+
+### Repetition penalty
+
+A direct way to discourage repetition is to penalize tokens that have already appeared. In their paper introducing the CTRL model, Keskar et al. (2019) proposed **penalized sampling**. Let $g$ be the set of tokens already generated. The probability of token $i$ at the next step is:
+
+$$
+p_i = \frac{\exp\big(z_i / (T \cdot I(i \in g))\big)}{\sum_j \exp\big(z_j / (T \cdot I(j \in g))\big)},
+\qquad
+I(c) = \begin{cases} \theta & \text{if } c \text{ is true} \\ 1 & \text{otherwise} \end{cases}
+$$
+
+Reading the formula:
+
+- If token $i$ has **not** appeared yet: $I = 1$, and its logit is simply divided by temperature $T$ as usual.
+- If token $i$ **has** already appeared: its logit is divided by an extra factor $\theta$. For $\theta > 1$ and a positive logit $z_i > 0$, this shrinks the logit and lowers the token's probability.
+- $\theta = 1$ disables the penalty. Keskar et al. found that near-greedy decoding with $\theta \approx 1.2$ struck a good balance between coherence and non-repetition.
+
+**A trap with negative logits.** Dividing a negative number by $\theta > 1$ moves it **closer to 0**, making it **larger**: $-1.0 / 1.2 \approx -0.83 > -1.0$. That would accidentally *boost* a repeated token whenever its raw logit happened to be negative! To fix this, `repetition_penalty` in Hugging Face `transformers` divides positive logits by $\theta$ but **multiplies** negative logits by $\theta$. With $\theta = 1.2$, a logit of $2.0$ becomes $2.0 / 1.2 \approx 1.67$, while a logit of $-1.0$ becomes $-1.0 \times 1.2 = -1.2$. Both move downward as intended.
+
+A harder constraint is `no_repeat_ngram_size=n`, which sets the probability of any previously seen $n$-gram to zero. Keep in mind that both penalties also suppress **legitimate** repetition: a summary about electric buses may genuinely need to mention `"xe buýt điện"` ("electric bus") twice, which `no_repeat_ngram_size=3` forbids.
+
+### Which strategy to use when
+
+Holtzman et al. divide text generation tasks into two broad regimes:
+
+- **Directed generation:** the output is tightly constrained by the input, as in machine translation, summarization, or data-to-text generation. Beam search (or greedy decoding) is the standard choice. Repetition loops are much less common here because the source text anchors the content, while stability and faithfulness to the input are paramount.
+- **Open-ended generation:** story continuation, creative writing, chitchat, brainstorming. Truncated sampling (top-p, or top-k with temperature) produces much more natural and varied prose.
+
+Treat this as a starting point rather than a rigid law. For instance, the model configuration file of `t5-small` stores task-specific summarization defaults inside `config.task_specific_params`: beam search with $B = 4$ and `no_repeat_ngram_size=3`. Note that calling `model.generate` in recent versions of `transformers` does not load those task-specific parameters automatically; calling `generate` without extra arguments runs greedy decoding, as shown in the `greedy` row of our T5 code cell below.
+
+:::note[Key takeaway]
+The model produces a probability distribution; the decoding strategy chooses the token. Likelihood-maximizing decoding (greedy, beam search) is stable but prone to repetition in long open-ended text. Pure sampling is diverse but wanders into the unreliable tail. Top-p dynamically truncates that tail based on model certainty. Repetition penalty divides positive logits (and multiplies negative logits) of already-seen tokens by $\theta$. Use beam or greedy for summarization and translation; use truncated sampling for creative writing.
+:::
+
+### Extractive summarization: picking sentences
+
+Extractive summarization scores each sentence in the source document and selects the top few sentences, **preserving their original order** so the resulting passage reads coherently. Here are three classic ways to score sentences, from simplest to richest:
+
+**Lead baseline (first $k$ sentences).** News articles are traditionally written in an "inverted pyramid" style, placing the most important facts in the opening sentences. Simply taking the first $k$ sentences is therefore a famously tough baseline on news benchmarks—though it fails on genres with a different structure, such as scientific papers, emails, or meeting transcripts.
+
+**TF-IDF centroid similarity.** Treat the $N$ sentences of the document as a mini-corpus. Represent each sentence $j$ by its TF-IDF vector $\mathbf{s}_j$ ([Vector Semantics and Embeddings](/en/nlp/vector-semantics-embeddings/)): the count of term $t$ in the sentence multiplied by $\mathrm{idf}_t = \ln\frac{1 + N}{1 + \mathrm{df}_t} + 1$, where $\mathrm{df}_t$ is the number of sentences containing $t$. Sum all sentence vectors to form a **centroid** vector $\mathbf{c}$ representing the document as a whole, and score each sentence by its cosine similarity to $\mathbf{c}$:
+
+$$
+\mathbf{c} = \sum_{j=1}^{N} \mathbf{s}_j, \qquad
+\mathrm{score}_j = \cos(\mathbf{s}_j, \mathbf{c}) = \frac{\mathbf{s}_j^\top \mathbf{c}}{\lVert \mathbf{s}_j \rVert \, \lVert \mathbf{c} \rVert}
+$$
+
+A high-scoring sentence is one that best resembles the document as a whole: it contains topical terms that recur across several sentences without appearing in every single one. Dividing by $\lVert \mathbf{s}_j \rVert$ prevents long sentences from winning automatically.
+
+**TextRank.** Mihalcea and Tarau (2004) turn the document into a graph: each sentence is a node, and two sentences are connected by an edge weighted by the number of words they share, divided by $\log |S_i| + \log |S_j|$ (where $|S_i|$ is the length of sentence $i$) to normalize for length. They then run PageRank (damping factor $d = 0.85$) over this graph. The intuition is **voting**: a sentence is important if it is similar to many other sentences, especially other important ones. On 567 news articles from DUC 2002 (100-word summaries), unsupervised TextRank competed closely with the best supervised systems in the shared task.
+
+Extractive summarization **never invents new sentences** because every sentence is copied verbatim from the source, although lifting a sentence out of context can still mislead a reader. Its downside is inflexibility: it cannot merge facts from two sentences, trim irrelevant clauses from a long sentence, or fix dangling pronouns like `"Tuyến dài 18 km"`.
+
+### Abstractive summarization: rewriting
+
+Abstractive summarization uses a sequence-to-sequence model: an encoder reads the source document, and a decoder generates the summary token by token using one of the decoding strategies above. Training such a model from scratch would require millions of `(article, summary)` pairs; in practice, modern systems pretrain an encoder–decoder with a self-supervised denoising objective on unlabeled text, then fine-tune on summarization datasets:
+
+- **BART** (Lewis et al., 2020) and **T5** (Raffel et al., 2020) are denoising encoder–decoder Transformers covered in [Advanced Transformers](/en/nlp/advanced-transformers/). T5 specifies the task via a text prefix such as `"summarize: "`. Because the released T5 checkpoints were multi-task trained on a mixture that already included CNN/Daily Mail summarization, prepending `"summarize: "` lets `t5-small` summarize English news out of the box.
+- **PEGASUS** (Zhang et al., 2020) designed a pretraining objective **tailored specifically for summarization**, called **Gap Sentences Generation** (GSG). During pretraining, the authors remove whole **important sentences** from a document, replace each removed sentence with a mask token `[MASK1]`, and train the decoder to generate the missing sentences from the remaining text. Importance is measured by computing the ROUGE-1 F1 of each sentence against the rest of the document (masking the top 30% of sentences in their main ablation). Because this pretraining task closely mirrors summarization itself, the largest PEGASUS model set new state-of-the-art results across all 12 summarization benchmarks tested, and surpassed prior state-of-the-art on 6 benchmarks with just 1,000 fine-tuning examples.
+- **Prompting an instruction-tuned LLM.** A decoder-only LLM can summarize zero-shot when prompted with *"Summarize the following article in two sentences"* ([Prompt Engineering](/en/llm/prompt-engineering/)). This requires no fine-tuning and lets you control length, style, and format in natural language, though compute cost and hallucination risk remain.
+
+For Vietnamese, **ViT5** (Phan et al., 2022) pretrains the T5 architecture on Vietnamese text, achieving strong abstractive summarization results on the Vietnews and WikiLingua benchmarks.
+
+| Criterion | Extractive | Abstractive |
+|---|---|---|
+| Output | Verbatim sentences from the source | Newly generated sentences; may use words outside the source |
+| Factual fabrication | Cannot invent new sentences, though out-of-context quotes can mislead | Can hallucinate distorted or unsupported facts |
+| Fluency | Can feel disjointed or leave dangling references | Smooth, compact, able to fuse ideas across sentences |
+| Requirements | Unsupervised (lead, TF-IDF centroid, TextRank) | Pretrained encoder–decoder or LLM |
+
+### Scoring summaries with ROUGE
+
+Lin (2004) introduced **ROUGE** (Recall-Oriented Understudy for Gisting Evaluation), which scores a candidate summary $\hat{\mathbf{y}}$ produced by a system against one or more human-written **reference** summaries $\mathbf{y}$ by counting overlapping lexical units.
+
+**ROUGE-N** counts overlapping $n$-grams (contiguous sequences of $n$ words). For each distinct $n$-gram $g$, let $\mathrm{cnt}_{\hat{\mathbf{y}}}(g)$ and $\mathrm{cnt}_{\mathbf{y}}(g)$ be its occurrence counts in the candidate and reference. The clipped overlap count is:
+
+$$
+\mathrm{hit}_n = \sum_{g} \min\big(\mathrm{cnt}_{\hat{\mathbf{y}}}(g),\ \mathrm{cnt}_{\mathbf{y}}(g)\big)
+$$
+
+Taking the $\min$ clips each $n$-gram's count so that repeating a word ten times in the candidate summary cannot earn more credit than the number of times it actually appears in the reference. From $\mathrm{hit}_n$ we compute precision, recall, and F1:
+
+$$
+P_n = \frac{\mathrm{hit}_n}{\text{number of } n\text{-grams in } \hat{\mathbf{y}}}, \qquad
+R_n = \frac{\mathrm{hit}_n}{\text{number of } n\text{-grams in } \mathbf{y}}, \qquad
+F_n = \frac{2 P_n R_n}{P_n + R_n}
+$$
+
+- **Precision** $P_n$: what fraction of the system's $n$-grams appear in the reference? Long, padded summaries get penalized on precision.
+- **Recall** $R_n$: what fraction of the reference's $n$-grams did the system recover? Overly brief summaries get penalized on recall.
+- **F1** $F_n$: the harmonic mean of $P_n$ and $R_n$, which is high only when both precision and recall are high.
+
+Lin's original 2004 paper defined ROUGE primarily as a **recall** metric (hence "Recall-Oriented" in the name); modern papers almost always report **F1**. Whenever you read a ROUGE table, check whether the numbers are recall or F1.
+
+**ROUGE-L** replaces contiguous $n$-grams with the **longest common subsequence** (LCS): the longest sequence of words that appear in both $\hat{\mathbf{y}}$ and $\mathbf{y}$ **in the same relative order**, without needing to be adjacent. Writing $\mathrm{LCS}(\hat{\mathbf{y}}, \mathbf{y})$ for its length, we have $P = \mathrm{LCS} / |\hat{\mathbf{y}}|$ and $R = \mathrm{LCS} / |\mathbf{y}|$, combined into F1 as above. ROUGE-L rewards preserving word order without requiring exact adjacency. (Lin's original paper weighted precision and recall with a parameter $\beta$ set very large in DUC evaluations, effectively reducing to recall, and defined a sentence-level union LCS for multi-sentence summaries; our code cell below treats the whole summary as a single sequence for simplicity.)
+
+**Hand calculation.** Reference: `"trời hôm nay rất đẹp"` ("the weather today is very nice", 5 syllables). Candidate: `"hôm nay trời đẹp"` ("today the weather is nice", 4 syllables).
+
+- **ROUGE-1.** Four unigrams match (`trời`, `hôm`, `nay`, `đẹp`): $P_1 = 4/4 = 1$, $R_1 = 4/5 = 0.8$, $F_1 = 2 \cdot 1 \cdot 0.8 / 1.8 \approx 0.889$.
+- **ROUGE-2.** The reference has 4 bigrams (`trời hôm`, `hôm nay`, `nay rất`, `rất đẹp`) and the candidate has 3 (`hôm nay`, `nay trời`, `trời đẹp`). Only `hôm nay` matches: $P_2 = 1/3$, $R_2 = 1/4$, $F_2 = 2 \cdot \frac{1}{12} / \frac{7}{12} = 2/7 \approx 0.286$.
+- **ROUGE-L.** The longest common subsequence is `"hôm nay đẹp"` of length 3 (`"trời"` sits before `"hôm nay"` in the reference but after it in the candidate, so it cannot join the same increasing subsequence): $P = 3/4$, $R = 3/5$, F1 $= 2 \cdot 0.45 / 1.35 \approx 0.667$.
+
+Notice how swapping word order causes ROUGE-2 and ROUGE-L to drop sharply while leaving ROUGE-1 untouched.
+
+### What ROUGE misses
+
+- **Inverted roles.** Reference `"mèo đuổi chuột"` ("cat chases mouse") vs. candidate `"chuột đuổi mèo"` ("mouse chases cat"): ROUGE-1 is 1.000 even though the meaning is reversed (ROUGE-2 is 0, ROUGE-L is $1/3$).
+- **Synonyms and paraphrases.** `"khai trương"` ("inaugurate") and `"mở"` ("open") mean the same thing here, but share zero characters and receive zero credit.
+- **Factual accuracy.** Changing `"đầu tiên"` ("first") to `"thứ hai"` ("second") alters only two syllables; a factually wrong summary can easily outscore a faithful paraphrase on ROUGE, as the table in the Illustration section shows.
+- **Tokenization sensitivity.** On Vietnamese, counting syllables (`"xe"`, `"buýt"`) vs. segmented compound words (`"xe_buýt"`) produces different numbers ([Tokenization](/en/nlp/tokenization/)). Never compare ROUGE scores computed with different tokenizers.
+
+ROUGE is valuable for comparing systems quickly on the same benchmark under the same tokenizer—Lin (2004) showed that it correlates well with human rankings at the system level on DUC data—but it cannot replace human checks when factual faithfulness matters.
+
+### Hallucination and faithfulness
+
+A summary is **faithful** to its source document if every claim it makes is entailed by the source. Any unsupported or contradicted claim is a **hallucination**. Maynez et al. (2020) divide hallucinations into two categories:
+
+- **Intrinsic hallucination:** the model manipulates or recombines information **present** in the source in a way that distorts the facts—for example, attaching a title to the wrong person, or turning `"first"` into `"second"`.
+- **Extrinsic hallucination:** the model introduces information **absent** from the source—for example, adding a year or an organization that the article never mentioned.
+
+Maynez et al. had human annotators judge one-sentence summaries generated for 500 articles from the XSum dataset. Over 70% of summaries across all neural systems contained hallucinations—mostly extrinsic—and over 90% of those extrinsic hallucinations were **factually wrong** rather than helpful background knowledge. Even more strikingly, 76.9% of XSum's *human reference summaries* contained hallucinations (73.1% extrinsic), because XSum was constructed by stripping the opening sentence off BBC articles and asking models to predict that sentence from the body; journalists often put background facts in the lead sentence that were never repeated in the body. Models trained on such pairs learn to fabricate extra details. Two encouraging findings from the same study: pretrained encoder–decoder models achieved both higher ROUGE and higher human faithfulness than non-pretrained seq2seq models, and automated **textual entailment** (NLI) classifiers correlated much better with human faithfulness judgments than ROUGE did.
+
+Practical ways to reduce hallucination in summarization systems:
+
+- **Cleaner training data:** filter out training pairs whose reference summary contains entities or facts absent from the source article.
+- **Conservative decoding:** use beam search or greedy decoding rather than high-temperature sampling when factual precision matters.
+- **Post-generation verification:** run a natural language inference (entailment) model or check that every number and named entity in the summary appears in the source.
+- **Hybrid extract-then-abstract pipelines:** extract key sentences first and rewrite only from those sentences, or require an LLM to cite the source sentence for each claim.
+
+### Limitations
+
+- **Very long documents:** standard encoder–decoder models have a fixed context window; book-length inputs require chunk-by-chunk hierarchical summarization or long-context architectures.
+- **Multi-document summarization:** synthesizing conflicting reports across dozens of articles introduces cross-document coreference and contradiction challenges beyond single-document summarization.
+- **Evaluation:** ROUGE misses faithfulness and readability, and model-based evaluators (NLI classifiers or LLM-as-a-judge) bring their own biases; see the second caution box under Common pitfalls.
+
+## Illustration
+
+The interactive chart below shows the next-token distribution after `"Hôm nay trời rất"` ("Today the weather is very...") across 10 candidate tokens. [Using Text APIs](/en/llm/text-api/) used this widget to introduce the $T$, top-k, and top-p sliders; here, look at its two extremes as the two poles of our decoding table:
+
+1. Drag $T$ all the way down to 0 and click **"Sample 100 times"**: `"đẹp"` gets probability 1.0 and is chosen 100 times out of 100. That is greedy decoding—deterministic on every run.
+2. Set $T = 1$, turn off top-k and top-p, and click **"Sample 100 times"** several times: that is pure sampling. `"đẹp"` has probability 0.38, and tail tokens like `"tối"` ("dark") occasionally get drawn. In a real 50,000-token vocabulary, that tail stretches across tens of thousands of tokens; top-k and top-p sit between these two extremes by slicing off the tail before renormalizing.
+
+{/* VIZ: model logits stay fixed; T sharpens or flattens the distribution, top-k and top-p truncate the tail and renormalize before drawing a token; T -> 0 reduces to greedy decoding. */}
+<SamplingViz />
+
+The second table illustrates what ROUGE sees and what it misses. The reference is `"Đà Nẵng mở tuyến xe buýt điện đầu tiên"` ("Da Nang opens its first electric bus route", 9 syllables); each row is a candidate summary scored by F1 using the syllable-level ROUGE functions from the first code cell. Compare the faithful paraphrase against the two factually wrong rows:
+
+| Candidate summary | Factually faithful? | ROUGE-1 | ROUGE-2 | ROUGE-L |
+|---|---|---:|---:|---:|
+| `Đà Nẵng mở tuyến xe buýt điện đầu tiên` | Yes, exact copy | 1.000 | 1.000 | 1.000 |
+| `Tuyến xe buýt điện đầu tiên mở ở Đà Nẵng` | Yes, reordered | 0.947 | 0.706 | 0.632 |
+| `Đà Nẵng khai trương tuyến buýt chạy điện đầu tiên` | Yes, paraphrased | 0.737 | 0.353 | 0.737 |
+| `Đà Nẵng mở tuyến xe buýt điện thứ hai` | No ("second" instead of "first") | 0.778 | 0.750 | 0.778 |
+| `Đà Nẵng đóng tuyến xe buýt điện đầu tiên` | No, opposite meaning ("closes") | 0.889 | 0.750 | 0.889 |
+
+The candidate that says Da Nang **closed** the route scores 0.889 on ROUGE-1—substantially higher than the faithful paraphrase (0.737). ROUGE measures **lexical overlap**, not **truth**.
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the extractive summarization and ROUGE cell on Python 3.14 in Pyodide (standard library only), and the T5 cell on Python 3.14, `transformers` 5.22, and PyTorch 2.14 on CPU. The first cell runs directly in your browser; the second downloads model weights from the Hugging Face Hub and runs on your machine.
+
+### Extractive summarization and ROUGE
+
+The cell below implements both parts of the Theory section on our seven-sentence electric-bus news brief. First, it scores each sentence by the cosine similarity between its TF-IDF vector and the whole-document centroid vector, keeping the top two sentences in their original order. Second, it implements ROUGE-1, ROUGE-2, and ROUGE-L (F1) from scratch and compares the TF-IDF extractive summary against the `lead-2` baseline (the first two sentences) using a hand-written reference summary.
+
+<PythonRunner code={extractiveCode} title="Extractive summarization with TF-IDF and ROUGE evaluation" />
+
+Reading the output:
+
+- **The seven sentence scores** are `0.520, 0.473, 0.405, 0.466, 0.431, 0.360, 0.484`. Sentence 1 (opening the first route) and Sentence 7 (three more routes planned next year) score highest because both mention `"tuyến xe buýt điện"` ("electric bus route"), the central phrase of the article. Sentence 6 (residents praising the quiet ride) scores lowest because most of its words do not recur elsewhere.
+- **The TF-IDF summary selects sentences 1 and 7**, achieving ROUGE-1 `0.667`, ROUGE-2 `0.557`, and ROUGE-L `0.603`. The `lead-2` baseline (sentences 1 and 2) scores only `0.492, 0.413, 0.492` because Sentence 2 lists route length and operating hours that the reference summary omitted.
+- **Verifying ROUGE-1 on the TF-IDF summary:** the candidate has 36 syllable-words, the reference has 27, and 21 overlap. Thus $P = 21/36 \approx 0.583$, $R = 21/27 \approx 0.778$, and F1 $\approx 0.667$. Precision is lower than recall because copying two full sentences verbatim drags along extra phrases like `"Sáng 3/11"`, `"đưa vào hoạt động"`, and `"dự kiến"`.
+- The detail `"tháng đầu miễn phí vé"` ("free rides in the first month") from the reference sits in Sentence 4 (`0.466`), which placed third and was left out. Including it requires either keeping three sentences or rewriting abstractively.
+
+Try changing `[:2]` to `[:3]` on the sentence-selection line to see Sentence 4 join the summary, or replace the cosine score with the mean idf of each sentence's words to verify Quiz Question 5.
+
+### Summarizing with T5-small across three decoding strategies
+
+The script below summarizes a short English news paragraph about heavy rain in Hue using `google-t5/t5-small` (Raffel et al., 2020; ~60M parameters). It calls `AutoTokenizer` and `AutoModelForSeq2SeqLM.generate` directly so you can see the exact decoding arguments: greedy decoding, beam search with $B = 4$, and nucleus sampling with `top_p=0.9` (passing `top_k=0` because `generate` defaults to `top_k=50` when sampling). Calling `set_seed(0)` before each run makes the sampling output reproducible.
+
+<LocalCode
+  code={t5Code}
+  title="Summarizing with T5-small: greedy, beam search, and top-p"
+  packages={['transformers', 'torch']}
+  hardware="CPU is sufficient. The first run downloads about 244 MB (242 MB of model weights plus tokenizer files). Once cached, the script finishes in 10–20 seconds on CPU"
+>
+
+```text
+input tokens: 83
+[greedy] heavy rain hits central city of Hue on Monday, flooding more than 2,000 homes and closing 40 schools. the river rose 1.5 metres overnight, the highest level since 2020.
+[beam 4] heavy rain hit central city of Hue on Monday, flooding more than 2,000 homes and closing 40 schools. the river rose 1.5 metres overnight, the highest level since 2020. no deaths have been reported.
+[top-p 0.9] heavy rain hit the central city of Hue on monday. about 3,000 people are moved to safer areas, and no deaths have been reported. the river rose 1.5 metres overnight, the highest level since 2020.
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **All three summaries are largely extractive:** they copy clauses nearly verbatim from the source, trimming attribution phrases like `"Local officials said"`. The T5 paper notes that on CNN/Daily Mail—the primary summarization dataset in T5's multi-task mixture—extractive baselines perform strongly, encouraging the model to stay close to source wording. Lowercase sentence starts (`"the river"`, `"monday"`) are a well-known artifact of the lowercased CNN/Daily Mail training data in T5's mixture.
+- **Greedy decoding** stops after two sentences and changes `"hit"` to `"hits"`. **Beam search ($B = 4$)** finds a higher-scoring continuation that includes `"no deaths have been reported"`, a key fact. Both are completely deterministic.
+- **Top-p ($p = 0.9$)** makes a different editorial choice: it includes the 3,000 evacuated residents, drops the 2,000 flooded homes, and shifts `"were moved"` to `"are moved"`. While nothing is fabricated here, changing the random seed produces a different selection of facts on each run—variability you rarely want when summarizing factual documents.
+
+Because `t5-small` was pretrained only on English and a few European languages, do not feed Vietnamese text into this checkpoint; for Vietnamese abstractive summarization, use a Vietnamese pretrained model such as ViT5.
+
+## Common pitfalls
+
+:::caution[Using the same decoding strategy for every task]
+Running high-temperature sampling to summarize a legal contract yields a different summary on every run and risks altering numbers or obligations. Conversely, running beam search for creative story writing produces flat, repetitive prose (28.94% of beam-16 continuations got stuck in repetition loops in Holtzman et al.'s experiments). Match the strategy to the regime: beam search or greedy decoding for directed generation (summarization, translation, extraction), and top-p or top-k sampling for open-ended generation. Always inspect a few dozen outputs before locking in parameters.
+:::
+
+:::caution[Assuming a high ROUGE score means the summary is factually true]
+In our Illustration table, `"Đà Nẵng đóng tuyến xe buýt điện đầu tiên"` ("Da Nang closes its first electric bus route") scored 0.889 ROUGE-1—higher than a faithful paraphrase. ROUGE counts surface word overlap, not factual entailment. Use ROUGE to compare models on the same dataset with the same tokenizer, and pair it with entity/number verification, NLI entailment checks, and human spot checks whenever factual accuracy matters.
+:::
+
+:::caution[Setting the repetition penalty too high]
+An overly aggressive `repetition_penalty` or a small `no_repeat_ngram_size` bans legitimate repetition. A summary about a company needs to repeat the company's name; a summary about electric buses may need `"xe buýt điện"` twice, which `no_repeat_ngram_size=3` forbids. Forced to avoid those tokens, the decoder may resort to awkward circumlocutions or substitute an incorrect term. Start near $\theta \approx 1.2$ (as in Keskar et al.) and inspect the output rather than cranking the penalty up blindly.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Text generation runs an autoregressive loop: the model outputs next-token logits, and the decoding strategy selects a token. Greedy and beam search are stable but prone to repetition in open-ended text (neural text degeneration); pure sampling is diverse but wanders into the unreliable tail; top-k and top-p truncate that tail, with top-p adapting dynamically to model uncertainty. Repetition penalty divides positive logits (and multiplies negative logits) of already-seen tokens by $\theta$.
+- Extractive summarization selects verbatim source sentences (lead-$k$, TF-IDF centroid cosine, TextRank): it cannot invent new sentences, but can feel disjointed. Abstractive summarization rewrites via pretrained encoder–decoder models (BART, T5, PEGASUS with Gap Sentences Generation) or instruction-tuned LLMs: fluent and compact, but vulnerable to hallucination.
+- ROUGE-N counts clipped $n$-gram overlap ($\min$ of counts) and ROUGE-L uses the longest common subsequence; precision divides by candidate length, recall by reference length, and F1 is their harmonic mean. ROUGE is blind to synonyms and factual inversions.
+- Intrinsic hallucinations distort facts present in the source; extrinsic hallucinations add unsupported facts. Maynez et al. found hallucinations in over 70% of one-sentence neural summaries on XSum. Mitigate them with cleaner training data, conservative decoding, NLI verification, and extract-then-abstract pipelines.
+
+**Further reading:**
+
+- Holtzman, A., Buys, J., Du, L., Forbes, M., Choi, Y. (2020). [*The Curious Case of Neural Text Degeneration*](https://arxiv.org/abs/1904.09751), ICLR 2020, Sections 1, 2, and 5. Explains why likelihood-maximizing decoding causes repetition loops and how nucleus (top-p) sampling fixes them.
+- Lin, C.-Y. (2004). [*ROUGE: A Package for Automatic Evaluation of Summaries*](https://aclanthology.org/W04-1013/), Text Summarization Branches Out, Sections 2 and 3. The original definitions of ROUGE-N and ROUGE-L (note that the paper writes $X$ for the reference and $Y$ for the candidate where this lesson writes $\mathbf{y}$ and $\hat{\mathbf{y}}$).
+- Maynez, J., Narayan, S., Bohnet, B., McDonald, R. (2020). [*On Faithfulness and Factuality in Abstractive Summarization*](https://aclanthology.org/2020.acl-main.173/), ACL 2020, Sections 2 and 3. Defines intrinsic and extrinsic hallucinations with human evaluation results on XSum.
+- Zhang, J., Zhao, Y., Saleh, M., Liu, P. J. (2020). [*PEGASUS: Pre-training with Extracted Gap-sentences for Abstractive Summarization*](https://arxiv.org/abs/1912.08777), ICML 2020, Section 3. Introduces Gap Sentences Generation and compares sentence-importance heuristics.
+- Phan, L., Tran, H., Nguyen, H., Trinh, T. H. (2022). [*ViT5: Pretrained Text-to-Text Transformer for Vietnamese Language Generation*](https://aclanthology.org/2022.naacl-srw.18/), NAACL 2022 Student Research Workshop, pp. 136–142. Pretrains T5 for Vietnamese with abstractive summarization benchmarks on Vietnews and WikiLingua.
+- Hugging Face (2026). [*Generation strategies*](https://huggingface.co/docs/transformers/v5.22.1/en/generation_strategies), `transformers` v5.22.1 documentation. Walkthrough of decoding methods and `generate` parameters (`num_beams`, `do_sample`, `top_k`, `top_p`, `repetition_penalty`, `no_repeat_ngram_size`), with full API details under [*Generation*](https://huggingface.co/docs/transformers/v5.22.1/en/main_classes/text_generation).
+
+<LessonProgress />

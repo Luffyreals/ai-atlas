@@ -213,7 +213,6 @@ describe('socialHead', () => {
     expect(metaOf(en, 'property', 'og:locale:alternate')).toEqual(['vi_VN']);
 
     // A vi-only lesson, after fallbackSeoHead: no hreflang="en", so no en_US alternate, on either page.
-    expect(VI_ONLY.length, 'some lesson is vi only').toBeGreaterThan(0);
     for (const lesson of VI_ONLY) {
       const vi = fallbackSeoHead(starlightShareHead(lesson.id, 'vi'), { id: `vi/${lesson.id}`, lang: 'vi' });
       const viShared = socialHead(vi, { site: SITE_URL, lang: 'vi', isHome: false });
@@ -226,6 +225,16 @@ describe('socialHead', () => {
       const shared = socialHead(fallback, { site: SITE_URL, lang: 'vi', isHome: false });
       expect(metaOf(shared, 'property', 'og:locale'), lesson.id).toEqual(['vi_VN']);
       expect(metaOf(shared, 'property', 'og:locale:alternate'), lesson.id).toEqual([]);
+    }
+    if (VI_ONLY.length === 0) {
+      const fallback = fallbackSeoHead(starlightShareHead('mock-fallback', 'en'), {
+        id: 'en/mock-fallback',
+        lang: 'en',
+        isFallback: true,
+      });
+      const shared = socialHead(fallback, { site: SITE_URL, lang: 'vi', isHome: false });
+      expect(metaOf(shared, 'property', 'og:locale'), 'mock-fallback').toEqual(['vi_VN']);
+      expect(metaOf(shared, 'property', 'og:locale:alternate'), 'mock-fallback').toEqual([]);
     }
   });
 

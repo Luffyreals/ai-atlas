@@ -2,7 +2,7 @@
 import unicodedata
 
 import numpy as np
-
+# data: vi
 POEM = """Trăm năm trong cõi người ta, / Chữ tài chữ mệnh khéo là ghét nhau.
 Trải qua một cuộc bể dâu, / Những điều trông thấy mà đau đớn lòng.
 Lạ gì bỉ sắc tư phong, / Trời xanh quen thói má hồng đánh ghen.
@@ -20,7 +20,7 @@ text = unicodedata.normalize("NFC", POEM).lower().replace(" / ", "\n")
 chars = sorted(set(text))  # vocabulary: the distinct characters
 V = len(chars)
 ids = np.array([chars.index(c) for c in text])
-cut = text.index("hoa cười")  # lines 1-20 to train, 21-24 to test
+cut = text.index("hoa cười")  # data: vi; lines 1-20 to train, 21-24 to test
 train, test = ids[:cut], ids[cut - 1:]
 
 # C[i, j]: how often char j comes right after char i. Smoothing: add k

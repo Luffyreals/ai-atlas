@@ -37,7 +37,7 @@ export default defineConfig({
     processor: unified({
       remarkPlugins: [remarkMath],
       rehypePlugins: [
-        rehypeKatex,
+        [rehypeKatex, { strict: 'ignore' }],
         // Names every display formula, "Công thức: <TeX>" / "Formula: <TeX>" (decision 25 in docs/decisions.md).
         [
           rehypeKatexA11y,

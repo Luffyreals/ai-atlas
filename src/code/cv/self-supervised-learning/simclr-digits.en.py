@@ -8,10 +8,10 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 torch.manual_seed(0)
-X, y = load_digits(return_X_y=True)  # nhãn y chỉ dùng ở bước linear probe
+X, y = load_digits(return_X_y=True)  # labels y used only for linear probing
 X = torch.tensor(X / 16.0, dtype=torch.float32).view(-1, 1, 8, 8)
 
-def augment(x):  # dịch tối đa 1 pixel, thêm nhiễu, che một ô 3x3
+def augment(x):  # shift up to 1 pixel, add noise, mask a 3x3 square
     n = len(x)
     theta = torch.tensor([[1.0, 0, 0], [0, 1.0, 0]]).repeat(n, 1, 1)
     theta[:, :, 2] = (torch.rand(n, 2) - 0.5) * 0.5
@@ -23,11 +23,11 @@ def augment(x):  # dịch tối đa 1 pixel, thêm nhiễu, che một ô 3x3
     hole = (i >= r) & (i < r + 3) & (j >= c) & (j < c + 3)
     return x.masked_fill(hole, 0.0)
 
-def encoder():  # f: ảnh 8x8 -> biểu diễn h có 16 chiều
+def encoder():  # f: 8x8 image -> 16-dimensional representation h
     return nn.Sequential(nn.Flatten(), nn.Linear(64, 256), nn.ReLU(),
                          nn.Linear(256, 16))
 
-def nt_xent(z, tau=0.5):  # hàng i và i + n là hai góc nhìn của một ảnh
+def nt_xent(z, tau=0.5):  # rows i and i + n are two views of the same image
     z = F.normalize(z, dim=1)
     s = (z @ z.T / tau).fill_diagonal_(float("-inf"))
     n = len(z) // 2
@@ -37,7 +37,7 @@ def nt_xent(z, tau=0.5):  # hàng i và i + n là hai góc nhìn của một ả
 random_f, f = encoder(), encoder()
 head = nn.Sequential(nn.Linear(16, 64), nn.ReLU(), nn.Linear(64, 32))
 opt = torch.optim.Adam([*f.parameters(), *head.parameters()], lr=1e-3)
-for epoch in range(40):  # học không cần nhãn
+for epoch in range(40):  # train without labels
     for idx in torch.randperm(len(X)).split(256):
         views = torch.cat([augment(X[idx]), augment(X[idx])])
         loss = nt_xent(head(f(views)))
@@ -46,7 +46,7 @@ for epoch in range(40):  # học không cần nhãn
         opt.step()
 print(f"last NT-Xent loss: {loss.item():.3f}")
 
-# Linear probe: đóng băng f, chỉ học hồi quy logistic trên h
+# Linear probe: freeze f and train only logistic regression on h
 tr, te = train_test_split(range(len(y)), test_size=0.5,
                           random_state=0, stratify=y)
 for n_labels in [100, len(tr)]:

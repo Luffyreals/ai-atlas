@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader, DistributedSampler, TensorDataset
 
 # 4 câu đầu Truyện Kiều làm dữ liệu
 TEXT = ("trăm năm trong cõi người ta,\nchữ tài chữ mệnh khéo là ghét nhau.\n"
-        "trải qua một cuộc bể dâu,\nnhững điều trông thấy mà đau đớn lòng.\n")
+"trải qua một cuộc bể dâu,\nnhững điều trông thấy mà đau đớn lòng.\n")
 L, D, WORLD = 16, 32, 2  # độ dài ngữ cảnh, số chiều, số tiến trình
 ADDR = "tcp://127.0.0.1:29500"  # nơi các tiến trình hẹn gặp nhau
 

@@ -1,0 +1,378 @@
+---
+title: 'Sequence-to-Sequence Models (Seq2Seq)'
+description: Translating a sequence into another sequence of different length and word order. Encoder–decoder, attention, cross-attention, teacher forcing, beam search, and T5.
+quiz:
+  - question: 'A source sentence has 12 tokens, and the decoder has generated 5 tokens so far. In a cross-attention layer (considering a single head), what is the shape of the score matrix $\mathbf{Q}\mathbf{K}^\top$, and does it need a causal mask?'
+    options:
+      - '$5 \times 12$, no causal mask needed'
+      - '$12 \times 5$, causal mask needed'
+      - '$5 \times 5$, causal mask needed'
+      - '$12 \times 12$, no causal mask needed'
+    answer: 0
+    explanation: 'Queries come from the decoder (5 rows) and keys come from the encoder (12 rows), so $\mathbf{Q}\mathbf{K}^\top$ has 5 rows and 12 columns: each target position scores every source position. Because the full source sentence is already available from the start, nothing in the source is "in the future", so no causal mask is needed. $5 \times 5$ is the shape of the decoder''s self-attention matrix, which is the only place that needs a causal mask.'
+  - question: 'You train an encoder–decoder Transformer and forget to pass the causal mask to the decoder''s self-attention. Training loss drops to $0.001$. Which evaluation will expose this bug?'
+    options:
+      - 'Checking whether training loss keeps decreasing'
+      - 'Measuring exact-match accuracy using teacher forcing on unseen data'
+      - 'Running autoregressive (greedy) generation on unseen data and comparing against the reference'
+      - 'Increasing the number of training steps to see whether loss reaches 0'
+    answer: 2
+    explanation: 'Without a causal mask, when the ground-truth target sequence is fed in, position $i$ can look ahead at the true token $y_i$ in the next slot and simply copy it. Consequently, both training loss and teacher-forced evaluation (which also feeds the ground-truth target sequence) look great. Only when the model has to generate on its own—with no ground-truth future tokens to copy—does the bug show up: in our PyTorch example, teacher forcing scores $1.000$ while greedy generation drops to around $0.02$.'
+  - question: 'Beam search finishes with two hypotheses. Hypothesis A has 3 tokens (including `<EOS>`) and total log-probability $-1.8$. Hypothesis B has 7 tokens and total log-probability $-2.4$. Using $\mathrm{lp}(\mathbf{y}) = ((5 + |\mathbf{y}|)/6)^{\alpha}$, which hypothesis is chosen when $\alpha = 0$ and when $\alpha = 1$?'
+    options:
+      - 'A in both cases'
+      - 'A when $\alpha = 0$, B when $\alpha = 1$'
+      - 'B in both cases'
+      - 'B when $\alpha = 0$, A when $\alpha = 1$'
+    answer: 1
+    explanation: 'When $\alpha = 0$, $\mathrm{lp} = 1$, so we compare raw log-probabilities directly: $-1.8 > -2.4$, and A wins. When $\alpha = 1$, $\mathrm{lp}(A) = 8/6$ and $\mathrm{lp}(B) = 12/6 = 2$, giving normalized scores $-1.8 \cdot 6/8 = -1.35$ and $-2.4/2 = -1.2$: B wins. The length penalty compensates for longer sequences having to sum more negative log-probabilities.'
+  - question: 'A summarization model achieves very high per-token accuracy under teacher forcing on the validation set. Yet when generating freely, its summaries start out accurate and then drift off-topic halfway through. Which explanation fits best?'
+    options:
+      - 'The beam is too narrow, so increasing $B$ will eliminate the drift'
+      - 'Cross-attention uses a causal mask, preventing the decoder from seeing the end of the source document'
+      - 'Overfitting: the model memorized the training set'
+      - 'Exposure bias: during training it always saw ground-truth prefixes, whereas at inference it must continue from its own generated tokens'
+    answer: 3
+    explanation: 'Teacher forcing always feeds ground-truth prefixes to the decoder, so the model never practices recovering from a prefix containing its own mistakes. During free generation, a single slightly off token makes the prefix unlike anything seen in training, and errors compound step by step. A wider beam only searches more thoroughly under the same flawed model. Cross-attention does not use a causal mask. And overfitting does not match the symptom: validation accuracy under teacher forcing is already high, showing that the breakdown specifically happens in autoregressive generation.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import EncoderDecoderFigure from '@components/figures/EncoderDecoderFigure.astro';
+import beamCode from '@code/llm/seq2seq/beam.en.py?raw';
+import tinyTransformerCode from '@code/llm/seq2seq/tiny-transformer.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Understand the sequence-to-sequence (Seq2Seq) problem, the encoder–decoder framework, and why compressing an entire source sentence into a single fixed-size vector creates a bottleneck.
+- Explain Bahdanau attention and cross-attention in the Transformer: queries come from the decoder, while keys and values come from the encoder.
+- Distinguish teacher forcing during training from autoregressive generation at inference, and recognize exposure bias.
+- Implement beam search with length penalty in NumPy, and read a compact encoder–decoder Transformer written in PyTorch.
+
+## Prerequisites
+
+{/* List taken from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+A **recurrent neural network** (RNN) reads a sequence one token at a time and updates a **hidden state**, a vector summarizing all tokens read so far. An **LSTM** adds gating mechanisms to remember over longer distances, and a **bidirectional** RNN runs both forward and backward and concatenates the two states. **Self-attention** lets each position compute a weighted average over positions in the same sequence, with weights derived from **queries** $\mathbf{Q}$, **keys** $\mathbf{K}$, and **values** $\mathbf{V}$.
+:::
+
+## Intuition
+
+### The output does not align one-to-one with the input
+
+Consider translating two short phrases from English to Vietnamese:
+
+| Source phrase | Target phrase | Word count |
+|---|---|---|
+| Good morning | Chào buổi sáng | 2 → 3 |
+| the black cat | con mèo đen | 3 → 3, but "black cat" flips to "mèo đen" ("cat black") |
+
+Two properties make this fundamentally different from token classification. **Different lengths**: the output sequence may be longer or shorter than the input, and we do not know its length in advance. **Different word order**: the second word of the output does not necessarily correspond to the second word of the input. Thus we cannot simply attach one target label to each source word the way part-of-speech tagging does.
+
+Machine translation is just one example. Text summarization (long article in, short paragraph out), generative question answering, and grammatical error correction all share the same structure: **one sequence in, one sequence out**, with arbitrary lengths and alignments on both sides.
+
+### The interpreter and the tiny note card
+
+The earliest neural approach worked like an interpreter who listens to an entire sentence, jots the gist onto **one tiny note card**, turns the original text face down, and translates solely from the note card. The listening half is the **encoder**, and the speaking half is the **decoder**. For a five-word sentence, that works fine. For a fifty-word sentence, the note card stays the exact same size, so details inevitably get lost.
+
+A much better workflow: leave the original text face up on the desk. Every time the interpreter writes the next word, they **glance back at the relevant spot** in the source sentence. When writing "mèo" ("cat"), look at "cat"; when writing "đen" ("black"), look at "black". That is the core idea of attention—and of cross-attention in the Transformer.
+
+One more wrinkle arises at generation time: at every step, the model has many plausible next words. Greedily picking the single highest-probability word at each step does not guarantee the highest-probability full sentence, because a slightly lower-probability choice early on might open up a much stronger continuation later.
+
+The problem of this lesson is: **given pairs of source and target sequences, how do we learn to generate the target one token at a time while looking back at the source at every step—and at test time, given only the source sequence, how do we search for a high-probability target sequence?**
+
+## Theory
+
+### Problem formulation
+
+Let the source sequence be $\mathbf{x} = (x_1, \dots, x_{L_x})$ and the target sequence be $\mathbf{y} = (y_1, \dots, y_{L_y})$, with lengths $L_x$ and $L_y$. The final target token $y_{L_y}$ is always a special end-of-sequence token `<EOS>`: the model decides when to stop by emitting `<EOS>`, so $L_y$ includes `<EOS>`.
+
+Just as in [Build Your First LLM](/en/llm/build-first-llm/), we factor the probability of the full target sequence using the chain rule of probability. The only change is that every factor is now conditioned on the source $\mathbf{x}$:
+
+$$
+p(\mathbf{y} \mid \mathbf{x}) = \prod_{i=1}^{L_y} p(y_i \mid y_{<i}, \mathbf{x})
+$$
+
+Here $y_{<i}$ denotes the target tokens preceding position $i$. A seq2seq model is therefore a **conditional language model**: it predicts the next token of the target sequence given both the target prefix generated so far **and** the entire source sequence.
+
+### Recurrent encoder–decoder
+
+Sutskever, Vinyals, and Le (2014) and Cho et al. (2014) introduced the recurrent **encoder–decoder** framework using two RNNs:
+
+1. **The encoder** reads $x_1, \dots, x_{L_x}$. Its final hidden state is a fixed-dimensional vector $\mathbf{c}$ representing the entire source sentence.
+2. **The decoder** generates $y_1, y_2, \dots$ conditioned on $\mathbf{c}$, one token at a time, feeding the just-generated token back in as the next step's input until it emits `<EOS>`.
+
+Both networks are trained jointly to maximize $\ln p(\mathbf{y} \mid \mathbf{x})$ across parallel sentence pairs. Sutskever et al. used a deep 4-layer LSTM with 1000 cells per layer. On the WMT'14 English-to-French translation task, an ensemble of 5 such models achieved a **BLEU** score of 34.8, outperforming a phrase-based statistical machine translation baseline at 33.3. BLEU measures n-gram overlap between the machine translation and human reference translations; higher is better. They also discovered a striking trick: **reversing the word order of the source sentence** boosted BLEU from 25.9 to 30.6. While acknowledging they did not have a complete theoretical explanation, they noted that reversing the source places the first few words of the source right next to the first few words of the target, shortening the minimal time lag and making optimization much easier.
+
+That trick pointed to a deeper structural issue: every bit of information in the source sentence had to squeeze through a single fixed-size vector $\mathbf{c}$. Whether a sentence had 5 words or 50 words, it was compressed into the exact same number of dimensions. Bahdanau, Cho, and Bengio (2015) argued that this fixed-length vector is an information **bottleneck**, and demonstrated it empirically: a standard RNN encoder–decoder's BLEU score drops sharply as sentences grow longer, whereas their attention-based model maintains its performance even on sentences of 50 words or more.
+
+### Attention: looking back at the source at every step
+
+Bahdanau et al. dropped the requirement of compressing the whole sentence into a single vector. Their encoder is a bidirectional RNN that produces a context-aware vector $\mathbf{h}_j$ for **every** source word $j$, capturing both that word and its surrounding context. Let $\mathbf{s}_{i-1}$ be the decoder's hidden state right before emitting $y_i$. At each target step $i$, the decoder performs three operations:
+
+$$
+e_{ij} = a(\mathbf{s}_{i-1}, \mathbf{h}_j), \qquad
+\alpha_{ij} = \frac{\exp(e_{ij})}{\sum_{k=1}^{L_x} \exp(e_{ik})}, \qquad
+\mathbf{c}_i = \sum_{j=1}^{L_x} \alpha_{ij} \mathbf{h}_j
+$$
+
+- **Score.** $e_{ij}$ measures "how relevant is source position $j$ for generating target word $i$?". The alignment function $a$ is a small MLP trained jointly with the rest of the model.
+- **Normalize.** A softmax over $j$ turns the raw scores into positive attention weights $\alpha_{ij}$ that sum to 1 across all source words.
+- **Aggregate.** $\mathbf{c}_i$ is the weighted average of the encoder states $\mathbf{h}_j$. This gives a dynamic summary of the source sentence **tailored specifically to step $i$**, replacing the single static vector $\mathbf{c}$.
+
+The encoder still encodes the source sentence into vectors; what changes is that the decoder is no longer forced to read a single fixed summary. Better yet, the weight matrix $\alpha$ is directly interpretable. When translating "the black cat" into "con mèo đen", a well-trained model produces an alignment table like this (illustrative numbers):
+
+| Target word | looks at "the" | looks at "black" | looks at "cat" |
+|---|---:|---:|---:|
+| con | 0.80 | 0.05 | 0.15 |
+| mèo | 0.05 | 0.10 | 0.85 |
+| đen | 0.02 | 0.90 | 0.08 |
+
+Each row sums to 1. The last two rows swap order relative to the main diagonal, reflecting how Vietnamese places adjectives after nouns. Bahdanau et al. plotted such alignment matrices from their real English–French model: the bright weights track the diagonal closely and veer off-diagonal wherever the two languages reorder phrases.
+
+### Transformer encoder–decoder and cross-attention
+
+The Transformer (Vaswani et al., 2017) keeps the encoder–decoder blueprint but replaces recurrence entirely with attention. The base architecture stacks 6 encoder layers and 6 decoder layers:
+
+- **Each encoder layer** contains a self-attention sub-layer followed by a feed-forward network, each wrapped with a residual connection and layer normalization. Encoder self-attention is **unmasked** (bidirectional): every source token attends to every other source token, both before and after it.
+- **Each decoder layer** contains three sub-layers: **causally masked** self-attention over the target tokens, followed by **cross-attention** attending to the encoder output, followed by a feed-forward network.
+
+Cross-attention uses the exact scaled dot-product attention formula you already know. The difference lies in **where the three inputs come from**. Let $\mathbf{H}_{\text{enc}} \in \mathbb{R}^{L_x \times D}$ be the output of the final encoder layer (one row per source position), and let $\mathbf{S} \in \mathbb{R}^{L_y \times D}$ be the decoder state (the output of the preceding masked self-attention sub-layer, one row per target position). With learnable projection matrices $\mathbf{W}^Q$, $\mathbf{W}^K$, and $\mathbf{W}^V$:
+
+$$
+\mathbf{Q} = \mathbf{S}\mathbf{W}^Q, \quad
+\mathbf{K} = \mathbf{H}_{\text{enc}}\mathbf{W}^K, \quad
+\mathbf{V} = \mathbf{H}_{\text{enc}}\mathbf{W}^V, \qquad
+\mathrm{Attn} = \mathrm{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d}}\right)\mathbf{V}
+$$
+
+- **Queries come from the decoder; keys and values come from the encoder.** Each target position "asks a question", and the source positions "provide the answer".
+- **The score matrix $\mathbf{Q}\mathbf{K}^\top$ has shape $L_y \times L_x$.** Row $i$ holds the scores of target position $i$ across all $L_x$ source positions; taking the row-wise softmax plays the exact same role as $\alpha_{ij}$ in Bahdanau attention.
+- **No causal mask.** The entire source sentence is already present from the beginning, so no source token is "in the future". Only the decoder's self-attention requires a causal mask.
+- **Every decoder layer reads the same top-level $\mathbf{H}_{\text{enc}}$**, using its own layer-specific projection matrices. The equation above shows a single head; in multi-head cross-attention with $H$ heads, each head projects down to $d = D/H$ dimensions and scales by $\sqrt{d}$.
+
+Vaswani et al. note that cross-attention directly mirrors the encoder–decoder attention of earlier seq2seq models, with two main differences: dot products replace the small alignment MLP $a$, and all positions are computed in parallel during training rather than step by step. Their big Transformer model reached 28.4 BLEU on WMT 2014 English-to-German translation.
+
+### Training with teacher forcing
+
+During training, we already know the ground-truth target sentence. We therefore feed the **ground-truth target shifted right by one position** (starting with a beginning-of-sequence token `<BOS>`) as the decoder input, while using the unshifted target ending with `<EOS>` as the training labels:
+
+| Position | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|
+| Decoder input | `<BOS>` | con | mèo | đen |
+| Target label to predict | con | mèo | đen | `<EOS>` |
+
+Feeding the ground-truth prefix as input at every step is called **teacher forcing**. Thanks to the causal mask in the decoder's self-attention, position $i$ can only see `<BOS>` and $y_1, \dots, y_{i-1}$, so **a single forward pass** computes all $L_y$ predictions simultaneously, just like training GPT. The training loss is the average cross-entropy across target positions:
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = -\frac{1}{L_y} \sum_{i=1}^{L_y} \ln p_{\boldsymbol{\theta}}(y_i \mid y_{<i}, \mathbf{x})
+$$
+
+In this training objective, $y_{<i}$ consists of **ground-truth tokens**. Over a mini-batch of sentence pairs, we average across the batch as well.
+
+### Exposure bias: training and inference do not match
+
+At inference time, we do not have the ground-truth target sentence. The decoder must feed back the tokens **it generated itself**: $y_{<i}$ now consists of model predictions rather than ground truth. Ranzato et al. (2016) called this train–test discrepancy **exposure bias**: during teacher-forced training, the model is only ever exposed to ground-truth prefixes and never practices continuing from a prefix containing its own mistakes. A single suboptimal token early on can push the prefix into a region the model never saw during training, causing errors to snowball.
+
+Teacher forcing itself is not a bug—it makes training fast, parallelizable, and stable. The issue is the mismatch between training and inference modes. One classic mitigation is **scheduled sampling** (Bengio et al., 2015): during training, randomly replace some ground-truth input tokens with tokens sampled from the model itself, gradually ramping up the replacement probability. How much exposure bias hurts in practice depends on the task: in our toy PyTorch script below, the reversal task is simple enough that the model never makes a first mistake.
+
+### Decoding: greedy and beam search
+
+Once the model is trained, we want to find a target sequence $\mathbf{y}$ that maximizes $p(\mathbf{y} \mid \mathbf{x})$. Exhaustive search is impossible: with a vocabulary of $32\,000$ tokens and a target length of 20, there are $32\,000^{20} \approx 10^{90}$ possible sequences.
+
+**Greedy decoding** picks the single highest-probability token at each step. It is fast, but an early commitment can never be revised.
+
+**Beam search** keeps the top $B$ partial hypotheses (the "beam") alive in parallel, where $B$ is the **beam width**. The raw score of a hypothesis is the sum of its token log-probabilities:
+
+$$
+\mathrm{score}(\mathbf{y}) = \sum_{i=1}^{L_y} \ln p(y_i \mid y_{<i}, \mathbf{x}) = \ln p(\mathbf{y} \mid \mathbf{x})
+$$
+
+The second equality follows because the log of a product is the sum of the logs. At each decoding step:
+
+1. Extend each hypothesis currently in the beam by every token in the vocabulary, adding that token's log-probability to the running score.
+2. Across all expanded candidates, keep only the top $B$ candidates with the highest scores.
+3. Move any candidate that just emitted `<EOS>` into a list of completed hypotheses. Stop when the active beam is empty or hits a maximum length limit.
+
+Setting $B = 1$ recovers greedy decoding. Sutskever et al. observed that $B = 1$ already worked reasonably well and $B = 2$ captured most of the benefit of beam search; Vaswani et al. used $B = 4$. Remember that beam search is still a heuristic search: it is not guaranteed to find the global maximum-probability sequence.
+
+**Length penalty.** Every additional token adds a log-probability $\ln p \le 0$ to the running sum, so longer sequences accumulate more negative terms. Unnormalized beam search therefore favors short, even truncated outputs. Wu et al. (2016) normalize the log-probability by a length penalty factor that grows with sequence length:
+
+$$
+s(\mathbf{y}) = \frac{\ln p(\mathbf{y} \mid \mathbf{x})}{\mathrm{lp}(\mathbf{y})}, \qquad
+\mathrm{lp}(\mathbf{y}) = \left(\frac{5 + |\mathbf{y}|}{5 + 1}\right)^{\alpha}
+$$
+
+- $|\mathbf{y}|$ is the number of tokens in the target hypothesis. Our implementation counts `<EOS>` in $|\mathbf{y}|$; the original paper leaves this detail implicit, and different libraries count slightly differently.
+- Setting $\alpha = 0$ gives $\mathrm{lp} = 1$, recovering unnormalized beam search. Larger values of $\alpha$ give stronger compensation to longer sequences.
+- There is no universally optimal $\alpha$. It is tuned on a validation set: Wu et al. used $\alpha = 0.2$ alongside an additional coverage penalty, whereas Vaswani et al. used $\alpha = 0.6$.
+
+:::note[Key takeaway]
+Seq2seq models learn $p(\mathbf{y} \mid \mathbf{x}) = \prod_i p(y_i \mid y_{<i}, \mathbf{x})$. The encoder reads the source sequence; the decoder generates one token at a time while attending back to the source—in a Transformer, via cross-attention with $\mathbf{Q}$ from the decoder, $\mathbf{K}$ and $\mathbf{V}$ from the encoder, and no causal mask. Models are trained with teacher forcing (shifted ground-truth targets) and run autoregressively at test time; the gap between the two is exposure bias. Beam search tracks the top $B$ hypotheses by summed log-probability, dividing by $\mathrm{lp}$ to avoid penalizing longer outputs.
+:::
+
+### T5: casting every task as text-to-text
+
+Raffel et al. (2020) pushed the seq2seq paradigm to its logical conclusion with **T5** (Text-to-Text Transfer Transformer): cast every NLP task as "text in, text out" simply by prepending a short **task prefix** to the input sequence. Examples directly from the paper:
+
+| Input string | Target string |
+|---|---|
+| translate English to German: That is good. | Das ist gut. |
+| cola sentence: The course is jumping well. | not acceptable |
+| stsb sentence1: The rhino grazed on the grass. sentence2: A rhino is grazing in a field. | 3.8 |
+
+Binary grammaticality classification outputs the literal words `"not acceptable"`; continuous semantic similarity regression outputs the character string `"3.8"`. One model architecture, one cross-entropy training loss, and one decoding procedure handle translation, classification, regression, and summarization alike. Specifying the task via natural-language text at the start of the input is a direct precursor to instruction prompting in [Prompt Engineering](/en/llm/prompt-engineering/).
+
+T5 uses a standard encoder–decoder Transformer trained with teacher forcing; its base version has 12 encoder layers and 12 decoder layers (about 220 million parameters). In the authors' systematic architecture comparison using a span-denoising pre-training objective, the encoder–decoder architecture outperformed decoder-only variants matched for computational cost across all downstream tasks tested (even though the encoder–decoder has twice as many parameters for the same FLOPs per token).
+
+### Comparison with decoder-only models
+
+GPT and modern families like LLaMA are **decoder-only**: there is no separate encoder and no cross-attention sub-layer. The input prompt and the generated output live end-to-end inside **a single sequence**, with causal masking applied at every position. Between the two extremes sits the **prefix LM**: a single stack of Transformer blocks where positions within the input prefix attend bidirectionally to one another, while output positions use causal masking.
+
+| Criterion | Encoder–decoder (T5) | Prefix LM | Decoder-only (GPT) |
+|---|---|---|---|
+| How the input attends | Bidirectionally, inside the encoder | Bidirectionally | Causally (left-to-right only) |
+| How the output attends | Causally, plus cross-attention to encoder | Causally over prefix and prior output | Causally over prefix and prior output |
+| Number of block stacks | Two (encoder + decoder) | One | One |
+
+Decoder-only models handle seq2seq tasks simply by treating the source sequence as the prompt prefix, just as you do whenever you ask an LLM to translate or summarize text. Encoder–decoder models remain a natural fit when input and output sequences are clearly separated, such as dedicated machine translation or speech-to-text systems.
+
+### Limitations
+
+- **Beam search optimizes for high probability, not engaging prose.** In open-ended text generation, Holtzman et al. (2020) showed that maximizing probability via greedy or beam search produces bland, repetitive text, motivating nucleus (top-$p$) sampling (see [Using Text Generation APIs](/en/llm/text-api/)).
+- **Very long source documents remain expensive.** Encoder self-attention computes $L_x \times L_x$ scores and cross-attention computes $L_y \times L_x$ scores per head at every layer.
+
+## Illustration
+
+The diagram below places the encoder and decoder side by side. Trace the arrows entering the cross-attention block: the query $\mathbf{Q}$ comes from the decoder's masked self-attention below, while the keys $\mathbf{K}$ and values $\mathbf{V}$ come from the top of the encoder.
+
+{/* FIG: the decoder looks back at the encoder via cross-attention, with Q from the decoder and K, V from the encoder. */}
+<EncoderDecoderFigure />
+
+The table below summarizes all three attention variants inside an encoder–decoder Transformer. The final row is where the two halves meet.
+
+| Attention type | Location | $\mathbf{Q}$ from | $\mathbf{K}, \mathbf{V}$ from | Causal mask? | Score matrix shape |
+|---|---|---|---|---|---|
+| Self-attention | Encoder | Source sequence | Source sequence | No | $L_x \times L_x$ |
+| Masked self-attention | Decoder | Target sequence | Target sequence | Yes | $L_y \times L_y$ |
+| Cross-attention | Decoder | Target sequence | Encoder output | No | $L_y \times L_x$ |
+
+## Code examples
+
+The code in this lesson was last tested in October 2026: the beam search cell with Python 3.14 and NumPy 2.4 (in Pyodide), and the Transformer cell with Python 3.14 and PyTorch 2.14 on CPU. The beam search cell runs right in your browser; the Transformer cell requires PyTorch and runs on your machine.
+
+### Greedy decoding and beam search in NumPy
+
+To see the search mechanics clearly without training a network, the cell below uses a toy "mock decoder" defined by a small transition probability table. Pretend the decoder has already read the source sentence. To keep the code under 40 lines, each next-token distribution depends only on the immediately preceding token; a real decoder conditions on the source sentence and the entire target prefix generated so far.
+
+| Previous token | Next token and probability |
+|---|---|
+| `<s>` (start) | the 0.5, a 0.4, `<eos>` 0.1 |
+| the | cat 0.34, dog 0.33, bird 0.33 |
+| a | bird 0.9, cat 0.1 |
+| cat, dog, flies | `<eos>` 1.0 |
+| bird | `<eos>` 0.52, flies 0.48 |
+
+Before running the code, calculate by hand: the sequence `"the cat"` has probability $0.5 \times 0.34 \times 1.0$, while `"a bird"` has probability $0.4 \times 0.9 \times 0.52$. Which sequence is more likely overall, and which one will greedy decoding pick?
+
+The script runs three configurations: greedy decoding ($B = 1$), unnormalized beam search with $B = 2$ ($\alpha = 0$), and length-normalized beam search with $B = 2$ and $\alpha = 0.6$. Each line prints the winning text, the raw sequence probability `p`, and the length-normalized score `s`.
+
+<PythonRunner code={beamCode} title="Greedy decoding and beam search on a toy probability table" />
+
+Reading the output:
+
+- **Greedy ($B = 1$) outputs `'the cat'`, $p = 0.170$.** At step 1 it picks `"the"` ($0.5 > 0.4$), which leads into a flat 3-way split (`"cat"`, `"dog"`, `"bird"` around 0.33 each), leaving the full sequence at $0.5 \times 0.34 = 0.170$.
+- **Beam search with $B = 2, \alpha = 0$ outputs `'a bird'`, $p = 0.187$.** Because it keeps `"a"` alive at step 1, it discovers the high-confidence continuation `"bird"` ($0.9$). That yields a higher-probability sequence that greedy decoding missed due to its myopic first step.
+- **Adding length penalty $\alpha = 0.6$ switches the winner to `'a bird flies'`, $p = 0.173$**, even though its raw probability is **lower** than `'a bird'` ($0.187$). Checking by hand (where length counts `<eos>`): `'a bird'` has $p = 0.1872$, $\ln p = -1.676$, divided by $\mathrm{lp} = (8/6)^{0.6} \approx 1.188$ to give $s = -1.410$; `'a bird flies'` has $p = 0.1728$, $\ln p = -1.756$, divided by $(9/6)^{0.6} \approx 1.275$ to give $s = -1.376$, which is higher.
+
+This toy table is constructed to illustrate the search mechanics, not to prove whether length penalty helps on a real translation dataset. Notice one implementation detail: active beam pruning during the loop ranks partial prefixes by raw log-probability, and only applies $\mathrm{lp}$ when selecting the winner among completed hypotheses. Consequently, beam search is never guaranteed to find the global maximizer of $s$.
+
+### A tiny Transformer encoder–decoder in PyTorch
+
+The script below trains an encoder–decoder Transformer to **reverse a 6-digit sequence**: source `9 7 9 6 0 9` becomes target `9 0 6 9 7 9`. This toy task exercises every piece of the seq2seq pipeline, and forces the decoder to rely on the encoder: the very first target token equals the very last source token, so the decoder cannot succeed without cross-attention.
+
+- **Model:** PyTorch's `nn.Transformer` with 2 encoder layers, 2 decoder layers, $D = 64$, 4 heads, and FFN dimension 128, plus shared token embeddings and learned positional embeddings. The vocabulary has 12 tokens: `<BOS>`, `<EOS>`, and the 10 digits `0`–`9`.
+- **Masking:** `generate_square_subsequent_mask` creates a float matrix with $-\infty$ above the main diagonal, passed as `tgt_mask` to mask the decoder's self-attention. Neither the encoder nor cross-attention receives a mask.
+- **Teacher forcing:** the `batch` helper builds `dec_in` as `<BOS>` followed by the reversed digits, and `dec_out` as the reversed digits followed by `<EOS>`, matching the shift-right table in the Theory section. Each step generates 64 fresh random sequences, training for 301 steps with AdamW.
+- **Evaluation on 500 unseen sequences** in two modes: exact 7-token match under teacher forcing (feeding ground-truth prefixes) versus autoregressive greedy decoding starting from `<BOS>` and appending one predicted token at a time.
+
+Instructions for installing CPU-only PyTorch are in [Build Your First LLM](/en/llm/build-first-llm/).
+
+<LocalCode
+  code={tinyTransformerCode}
+  title="Transformer encoder–decoder reversing digit sequences"
+  packages={['torch']}
+  hardware="CPU is sufficient, no GPU required. Takes 20 to 40 seconds on a dev laptop, or a couple of minutes on a slower machine"
+  sampleVaries={false}
+>
+
+```text
+step   0  loss 2.608
+step 100  loss 0.003
+step 200  loss 0.001
+step 300  loss 0.001
+exact match, teacher forcing: 1.000  greedy: 1.000
+src: 9 7 9 6 0 9
+out: 9 0 6 9 7 9 <EOS>
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **Step 0:** loss is 2.608, close to $\ln 12 \approx 2.485$, the cross-entropy of uniform guessing over 12 tokens.
+- **Step 100:** loss has already dropped to 0.003. Sequence reversal is a natural fit for cross-attention: target position $i$ simply learns to attend to source position $L_x + 1 - i$.
+- **Both evaluation modes achieve 1.000 exact match** across 500 unseen sequences, and the sample sequence is reversed cleanly, terminating with `<EOS>`. Here free greedy generation matches teacher forcing perfectly, so no exposure bias is visible—the task is simple enough that the model never makes an initial mistake. Do not conclude from this toy task that exposure bias never happens in real generation.
+
+Because the random seed is fixed, repeated runs on the same machine produce identical numbers; across different CPUs or PyTorch versions, intermediate numbers may vary slightly. On line 9, `CAUSAL = True` enables the decoder's causal mask. The first pitfall below shows what happens when you flip it to `False`.
+
+## Common pitfalls
+
+:::caution[Forgetting the decoder's causal mask and trusting training loss]
+Change `CAUSAL = False` in the PyTorch script and re-run it. In our test runs, training loss still drops to 0.001 by step 300, and teacher-forced exact match still hits 1.000. Yet when the model generates greedily on its own, exact-match accuracy collapses to about **0.02** (0.020 and 0.022 across two runs), and the sample output prints `<EOS> 0 6 9 7 9 <EOS>`—wrong on the very first token! Without a causal mask, when fed the ground-truth prefix during teacher forcing, position $i$ can peek at the true answer $y_i$ sitting at input slot $i + 1$ and copy it directly. During real autoregressive generation, there is no future token to copy. Always evaluate a seq2seq model by letting it **generate autoregressively**, never by training loss or teacher-forced accuracy alone.
+:::
+
+:::caution[Applying a causal mask to cross-attention]
+Cross-attention reads the source sentence, and the full source sentence is already available from the start. Masking future source positions only blinds the decoder to part of the input: in our reversal task, the very first target token needs to look at the **last** source token. In `nn.Transformer`, pass the causal mask to `tgt_mask` and leave `memory_mask` (the cross-attention mask) empty. Also keep the input sources straight: self-attention draws $\mathbf{Q}, \mathbf{K}, \mathbf{V}$ from the same sequence, whereas cross-attention draws $\mathbf{Q}$ from the decoder and $\mathbf{K}, \mathbf{V}$ from the encoder.
+:::
+
+:::caution[Forgetting to shift the decoder input right]
+If you pass the exact same unshifted target tensor as both the decoder input and the training labels, then even with a causal mask, position $i$ sees the target token $y_i$ sitting right at its own input slot $i$, and learns to copy rather than predict the next token. The decoder input must start with `<BOS>` and the target labels must end with `<EOS>`, just like `dec_in` and `dec_out` in the PyTorch script.
+:::
+
+:::caution[Assuming a wider beam always improves output quality]
+Beam search is an approximate search, and unnormalized log-probability inherently favors shorter outputs: in the NumPy cell, without length penalty, a two-word phrase beat a three-word phrase. A wider beam searches more aggressively for high **model score**, which can actually make overly short outputs win more often if length normalization is omitted. Nor is there a universal value for $\alpha$ in $\mathrm{lp}$: 0.6 was tuned by Vaswani et al. for their translation setup, so tune it on your own validation set.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Seq2seq models factor conditional probability as $p(\mathbf{y} \mid \mathbf{x}) = \prod_i p(y_i \mid y_{<i}, \mathbf{x})$: a language model conditioned on the source sequence, capable of producing outputs of arbitrary length and word order until emitting `<EOS>`.
+- Basic RNN encoder–decoders compress the entire source into one fixed vector and degrade on long sentences. Attention computes a step-specific weighted average of source states. In a Transformer, this becomes cross-attention: $\mathbf{Q}$ from the decoder, $\mathbf{K}$ and $\mathbf{V}$ from the encoder, score matrix of shape $L_y \times L_x$, and no causal mask.
+- Training uses teacher forcing (feeding ground-truth targets shifted right so all positions run in parallel), while inference uses autoregressive generation. The discrepancy between the two modes causes exposure bias; always evaluate models via free generation.
+- Beam search keeps the top $B$ partial hypotheses by summed log-probability, improving over greedy decoding while remaining heuristic, and divides by a length penalty $\mathrm{lp}(\mathbf{y}) = ((5 + |\mathbf{y}|)/6)^{\alpha}$ to avoid favoring short sequences. T5 unifies NLP tasks into text-to-text generation using task prefixes.
+
+**Further reading:**
+
+- Sutskever, I., Vinyals, O., Le, Q. V. (2014). [*Sequence to Sequence Learning with Neural Networks*](https://arxiv.org/abs/1409.3215), arXiv:1409.3215, Sections 2 and 3. The foundational LSTM seq2seq paper, including the source-reversal trick and beam-width experiments.
+- Bahdanau, D., Cho, K., Bengio, Y. (2015). [*Neural Machine Translation by Jointly Learning to Align and Translate*](https://arxiv.org/abs/1409.0473), ICLR 2015, Sections 3 and 5. Introduces attention for machine translation, with BLEU-vs-length curves and alignment heatmaps. Note that the paper writes $T_x$ for source length where this lesson writes $L_x$.
+- Vaswani, A. et al. (2017). [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762), NIPS 2017, Sections 3.1 and 3.2.3. The encoder–decoder Transformer and its three uses of attention. The paper writes $d_k$ for the key dimension where this lesson writes $d$.
+- Raffel, C. et al. (2020). [*Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer*](https://jmlr.org/papers/v21/20-074.html), *JMLR* 21(140), Sections 2.4 and 3.2. T5, task prefixes, and systematic comparisons between encoder–decoder, decoder-only, and prefix LM architectures.
+- Wu, Y. et al. (2016). [*Google's Neural Machine Translation System: Bridging the Gap between Human and Machine Translation*](https://arxiv.org/abs/1609.08144), arXiv:1609.08144, Section 7. Beam search with length and coverage penalties in a production translation system.
+
+<LessonProgress />

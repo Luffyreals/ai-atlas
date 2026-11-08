@@ -1,9 +1,9 @@
 # Packing: join documents, insert EOS, cut into L-token sequences, then mask
 import numpy as np
 
-docs = ["hà nội là thủ đô của việt nam một thành phố hơn nghìn năm tuổi",
-        "phở là món ăn nổi tiếng của việt nam",
-        "mua ngay giá rẻ bấm vào đây để nhận quà miễn phí"]
+docs = ["hanoi is the capital of vietnam a city over a thousand years old",
+        "pho is a famous traditional noodle soup of vietnam",
+        "buy now at cheap prices click here to get free gifts today"]
 L = 12
 toks = [d.split() + ["<eos>"] for d in docs]  # each word is one token
 print("lengths:", [len(t) for t in toks])

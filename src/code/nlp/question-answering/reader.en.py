@@ -1,4 +1,4 @@
-# QA trích xuất bằng DistilBERT fine-tune trên SQuAD 1.1: logit đầu/cuối
+# Extractive QA with DistilBERT fine-tuned on SQuAD 1.1: start/end logits
 import torch
 from transformers import AutoModelForQuestionAnswering, AutoTokenizer
 
@@ -15,7 +15,7 @@ context = (
 questions = [
     "When was Ha Long Bay first inscribed as a World Heritage Site?",
     "Which province is Ha Long Bay in?",
-    "How deep is the water in Ha Long Bay?",  # đoạn văn không nói
+    "How deep is the water in Ha Long Bay?",  # not in the passage
 ]
 
 
@@ -27,15 +27,15 @@ def answer(q, max_len=15):
     with torch.no_grad():
         out = model(**enc)
     s, e = out.start_logits[0], out.end_logits[0]
-    null = (s[0] + e[0]).item()  # điểm của [CLS]
-    s = s.masked_fill(~in_ctx, -1e4)  # chỉ chọn token của đoạn văn
+    null = (s[0] + e[0]).item()  # score of [CLS]
+    s = s.masked_fill(~in_ctx, -1e4)  # keep only context tokens
     e = e.masked_fill(~in_ctx, -1e4)
     score = s[:, None] + e[None, :]  # score[i, j] = s_i + e_j
     n = len(s)
     ok = torch.ones(n, n).triu().tril(max_len - 1).bool()
-    score = score.masked_fill(~ok, -1e4)  # bỏ j < i và span quá dài
+    score = score.masked_fill(~ok, -1e4)  # drop j < i and long spans
     i, j = divmod(int(score.argmax()), n)
-    p = s.softmax(0)[i] * e.softmax(0)[j]  # xác suất của span
+    p = s.softmax(0)[i] * e.softmax(0)[j]  # span probability
     a, b = int(offsets[i][0]), int(offsets[j][1])
     return context[a:b], p.item(), a, b, score[i, j].item(), null
 

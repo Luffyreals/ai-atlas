@@ -5,7 +5,7 @@ torch.manual_seed(0)
 
 
 class LoRALinear(nn.Module):
-    """h = W0 x + (alpha / r) B A x, W0 đóng băng."""
+    """h = W0 x + (alpha / r) B A x, W0 đóng băng."""  # data: vi
 
     def __init__(self, base, r=4, alpha=4):
         super().__init__()
@@ -19,8 +19,8 @@ class LoRALinear(nn.Module):
 
 
 def attention(d, ctx):
-    # Bốn phép chiếu của một lớp attention trong U-Net của Stable Diffusion
-    # v1: q từ ảnh (d chiều), k và v từ chữ (ctx chiều), out về lại d chiều
+    # Four projections of an attention layer in Stable Diffusion v1 U-Net:
+    # q from image (d dims), k and v from text (ctx dims), out back to d dims
     return nn.ModuleDict({"to_q": nn.Linear(d, d, bias=False),
                           "to_k": nn.Linear(ctx, d, bias=False),
                           "to_v": nn.Linear(ctx, d, bias=False),
@@ -36,14 +36,14 @@ def count(d, ctx):
     return att, full, lora
 
 
-att, full, lora = count(320, 768)  # cross-attention ở tầng 320 kênh
+att, full, lora = count(320, 768)  # cross-attention at a 320-channel stage
 print(f"cross-attn d=320: full {full}, LoRA r=4: {lora}")
-x = torch.randn(2, 4096, 320)  # 64 x 64 vị trí của latent, 2 ảnh
+x = torch.randn(2, 4096, 320)  # 64 x 64 latent positions, batch of 2 images
 print("same output at init:",
       torch.equal(att["to_q"](x), att["to_q"].base(x)))
 
-# U-Net SD v1 có 16 khối Transformer, mỗi khối 1 self-attn (ctx = d)
-# và 1 cross-attn (ctx = 768). Số kênh d của 16 khối:
+# SD v1 U-Net has 16 Transformer blocks, each with 1 self-attn (ctx = d)
+# and 1 cross-attn (ctx = 768). Channel widths d across the 16 blocks:
 widths = [320] * 2 + [640] * 2 + [1280] * 2 + [1280] + \
          [1280] * 3 + [640] * 3 + [320] * 3
 total = sum(count(d, d)[2] + count(d, 768)[2] for d in widths)

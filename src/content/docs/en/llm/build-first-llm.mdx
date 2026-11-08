@@ -1,0 +1,375 @@
+---
+title: Building Your First LLM
+description: Predict the next character in The Tale of Kieu. Cross-entropy and perplexity, a character bigram in NumPy, a tiny causal GPT in PyTorch, and why LLMs need so much data.
+quiz:
+  - question: 'On a test set, a character-level model assigns probability $0.25$ to the true character at every position. What is its perplexity?'
+    options: ['$0.25$', '$\ln 4 \approx 1.386$', '$4$', '$73$']
+    answer: 2
+    explanation: 'The loss at every position is $-\ln 0.25 = \ln 4 \approx 1.386$ nats, so the average loss is the same. Perplexity is $\exp(\ln 4) = 4$: the model is as uncertain as if it were choosing uniformly among 4 characters. $1.386$ is the cross-entropy before exponentiating, and $73$ is the perplexity of a uniform guesser over 73 characters—the baseline of an untrained model.'
+  - question: 'You train a character-level GPT on 2,000 characters of text. At step 100, the test loss is $2.4$. By step 1,000, the training loss drops to $0.05$ while the test loss climbs to $6.1$. What should you do?'
+    options:
+      - 'Train longer until the training loss reaches exactly 0'
+      - 'Add more training text, or apply early stopping around the step where validation loss is lowest'
+      - 'Increase the number of layers and hidden dimensions to make the model more expressive'
+      - 'Lower the temperature $T$ during text generation'
+    answer: 1
+    explanation: 'Falling training loss accompanied by rising test loss is classic overfitting: the model is memorizing those 2,000 characters. Adding training data and early stopping both address the root cause. Training longer or making the model larger only helps it memorize faster, and temperature only changes how you sample at generation time without altering the model or its test loss.'
+  - question: 'Someone forgets the causal mask when training a GPT, so position $t$ can attend to characters after it. What is most likely to happen?'
+    options:
+      - 'Training loss is much higher because the model is confused by too much information'
+      - 'The code crashes with a matrix shape mismatch error'
+      - 'Nothing changes, because attention automatically learns to ignore future positions'
+      - 'Training loss drops suspiciously low, but generated text is terrible'
+    answer: 3
+    explanation: 'The target for position $t$ is character $t + 1$, which is now sitting right in plain sight. The model quickly learns to copy that character, driving training loss near zero. At generation time, future characters do not exist yet, so the copying shortcut is useless. Because matrix shapes are unchanged, the code runs without raising any error—which is what makes this bug so dangerous.'
+  - question: 'Model A tokenizes by character and gets a test perplexity of $12$. Model B tokenizes by word and gets a test perplexity of $150$ on the exact same test text. Which conclusion is valid?'
+    options:
+      - 'They cannot be compared directly: the two models predict different token units with different numbers of choices per step'
+      - 'Model A is better because its perplexity is smaller'
+      - 'Model B is better because it predicts an entire word at each step'
+      - 'The two models are equally good because they were evaluated on the same test text'
+    answer: 0
+    explanation: 'Perplexity is computed per token. Because a word spans multiple characters, predicting a whole word is naturally harder than predicting a single character, making word-level perplexity much larger. To compare them fairly, convert both to the same unit—such as total negative log-likelihood over the entire passage (the number of tokens times the average per-token loss). Concluding that A is better simply because $12 < 150$ is a classic trap.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import SamplingViz from '@components/viz/SamplingViz.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import bigramCode from '@code/llm/build-first-llm/bigram.en.py?raw';
+import tinyGptCode from '@code/llm/build-first-llm/tiny-gpt.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand that a **language model** does just one core job: output a probability distribution for the next token (**next-token prediction**), and generate text by repeating that step in a loop.
+- Derive the **cross-entropy** loss function from the joint probability of a passage, and interpret **perplexity** as "the effective number of choices the model is torn between."
+- Implement a character-level **bigram** language model in NumPy, and read and run a tiny **decoder-only** GPT with a **causal mask** in PyTorch.
+- Spot overfitting when training a language model on a small dataset, and explain why LLMs require massive text corpora.
+
+## Prerequisites
+
+{/* List populated from roadmap.ts prerequisites. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+A **token** is the unit of text a model reads and writes: a character, a word, or a subword piece. A **tokenizer** maps text to a sequence of integer IDs in a **vocabulary** of size $V$. Each token ID is looked up as a vector called an **embedding**. **Self-attention** lets every position look at other positions: it scores relevance between pairs of positions, turns scores into weights via softmax, and takes a weighted average of the value vectors. A **Transformer block** combines self-attention and a small feed-forward network (MLP), each wrapped with a **residual connection** and **layer normalization**. The final output at each position is a vector of **logits** (one per vocabulary token); softmax converts logits into probabilities, and temperature $T$ sharpens or flattens the distribution, just as in [Using Text APIs](/en/llm/text-api/).
+:::
+
+## Intuition
+
+### The guessing game
+
+Cover the last word of this famous opening verse from *Truyện Kiều* (*The Tale of Kiều*) and try to guess it:
+
+> Trăm năm trong cõi người ...
+
+Anyone who grew up reading Vietnamese literature immediately fills in `"ta"`. Notice two things about how you just did that. First, you **used context**: seeing only the word `"người"` leaves many possibilities open, whereas seeing the whole five-word phrase narrows it right down. Second, your guess is **probabilistic, not absolute**: `"ta"` might get 95% of your belief, `"đời"` a few percent, and other words a tiny sliver.
+
+A **language model** plays this exact game. Given the text so far, it outputs a **probability distribution** over every token that could come next. To write new text, you sample one token from that distribution, append it to the text, and ask the model again. When ChatGPT answers your question, it generates its reply in this exact way, one token at a time.
+
+In this lesson, each **character** is a token. That lets us skip a separate tokenizer and keeps the vocabulary tiny: the first 24 lines of *Truyện Kiều*, lowercased, contain just 73 distinct characters—including spaces, punctuation, and newlines. Even at the character level, clear patterns emerge: in the first 20 lines, `"q"` is always followed by `"u"`, and a comma is always followed by a space or a newline. A model that only looks at **one** preceding character is called a **bigram** model. A GPT model looks back across a whole window of preceding characters.
+
+### Why build a toy LLM from scratch?
+
+We can group working with LLMs into four levels. This is AI Atlas's practical map for organizing the curriculum rather than a formal industry standard:
+
+| Level | What you do | What you need | Lessons in the roadmap |
+|---|---|---|---|
+| 1 | Call an existing LLM via an API | An API key, a few lines of code | [Using Text APIs](/en/llm/text-api/) |
+| 2 | Build prompts, RAG, and agents on top of an existing LLM | Your own data, system design | [Prompt Engineering](/en/llm/prompt-engineering/), [RAG and Modern Chatbots](/en/llm/rag-chatbot/), [Agents](/en/llm/agents/) |
+| 3 | Fine-tune or continue pre-training an LLM | Fine-tuning: thousands to hundreds of thousands of examples. Continued domain pre-training: typically billions of tokens. Both require GPUs | [The GPT Family and Multi-Task Fine-Tuning](/en/llm/gpt-family-finetuning/), [Model Evaluation and PEFT](/en/llm/evaluation-peft/) |
+| 4 | Pre-train from scratch | Hundreds of billions to tens of trillions of tokens, large GPU clusters | [Preparing Pre-Training Data](/en/llm/pretraining-data/), [The LLaMA Family](/en/llm/llama-family/) |
+
+Most day-to-day engineering work lives at Levels 1 and 2. In this lesson we build a miniature version of Level 4 so you can see every moving part inside an LLM—and understand firsthand why asking the same question twice can yield different answers, why a model can state falsehoods with complete confidence, and why training an LLM demands so much text.
+
+**The problem: starting from 20 lines of poetry, build a model that predicts the probability of the next character, score it with a single number on 4 held-out lines it has never seen, and use it to generate new verses.**
+
+## Theory
+
+### Language modeling: probability of the next token
+
+Write a passage as a sequence of tokens $x_1, x_2, \dots, x_L$, where $L$ is the **sequence length** (the number of tokens in the passage). Write $x_{<t}$ as shorthand for all tokens before position $t$, namely $x_1, \dots, x_{t-1}$. By the **chain rule of probability**, the joint probability of the entire sequence equals the product of the conditional probabilities of each token given its prefix:
+
+$$
+p(x_1, \dots, x_L) = \prod_{t=1}^{L} p(x_t \mid x_{<t})
+$$
+
+For example, $p(\text{trăm năm trong}) = p(\text{trăm}) \cdot p(\text{năm} \mid \text{trăm}) \cdot p(\text{trong} \mid \text{trăm năm})$. This identity holds for any probability distribution with no simplifying assumptions required. Thus, as long as you can predict the **next token**, you can assign a probability to any passage of text. Every autoregressive language model—from a bigram table to GPT—differs only in how it computes $p(x_t \mid x_{<t})$.
+
+At each position, a neural language model outputs a vector of **logits** $\mathbf{z} \in \mathbb{R}^V$ (one raw score per token in the vocabulary), and **softmax** turns those logits into probabilities:
+
+$$
+p_i = \frac{\exp(z_i)}{\sum_{j=1}^{V} \exp(z_j)}
+$$
+
+Denote the model's learnable **parameters** by $\boldsymbol{\theta}$ (the count table in a bigram model, or the weight matrices in a GPT). We write $p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$ when we want to emphasize that the predicted probabilities depend on $\boldsymbol{\theta}$.
+
+### Cross-entropy: scoring a language model
+
+A good language model assigns high probability to real text. We can turn that principle into a training loss in three short steps. Let the training corpus be $x_1, \dots, x_m$, where $m$ is the number of predicted positions (each position acts as one training example).
+
+**Step 1: probability of the whole corpus.** By the chain rule, the model assigns the training text the probability $\prod_{t=1}^{m} p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$, known as the **likelihood**. We want to find parameters $\boldsymbol{\theta}$ that maximize this product.
+
+**Step 2: take the logarithm.** Because $\ln$ is strictly increasing, the $\boldsymbol{\theta}$ that maximizes the likelihood also maximizes its log. And the logarithm turns a product into a sum:
+
+$$
+\ln \prod_{t=1}^{m} p_{\boldsymbol{\theta}}(x_t \mid x_{<t}) = \sum_{t=1}^{m} \ln p_{\boldsymbol{\theta}}(x_t \mid x_{<t})
+$$
+
+Taking logs also prevents numerical underflow: multiplying 659 probabilities of around $0.1$ gives $10^{-659}$, which is smaller than the smallest positive `float64` number ($\approx 5 \times 10^{-324}$) and rounds straight to `0.0`. Summing log-probabilities avoids underflow completely.
+
+**Step 3: negate and average.** Negate the sum to turn maximization into minimization (matching every loss function in Machine Learning), and divide by $m$ so the scale of the loss does not depend on the length of the corpus:
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = -\frac{1}{m} \sum_{t=1}^{m} \ln p_{\boldsymbol{\theta}}(x_t \mid x_{<t})
+$$
+
+This is the exact pre-training loss used by GPT-1 (Radford et al., 2018) and virtually every modern causal LLM. Each position $t$ contributes $-\ln p$, where $p$ is the probability the model assigned to the **true next token**:
+
+| $p$ assigned to true token | 1 | 0.5 | 0.1 | 1/73 | 0.01 |
+|---|---:|---:|---:|---:|---:|
+| $-\ln p$ (nats) | 0 | 0.693 | 2.303 | 4.290 | 4.605 |
+
+A confident, correct prediction ($p = 1$) incurs zero penalty; assigning a tiny probability to the true token incurs a steep penalty that shoots to $\infty$ as $p \to 0$. You can read $-\ln p$ as how **surprised** the model is when it sees the actual next token. Because we use the natural logarithm $\ln$ (as NumPy and PyTorch do), the unit of loss is **nats** (using $\log_2$ gives bits).
+
+**Why is this called cross-entropy?** Represent the true token at position $t$ as a one-hot vector $\mathbf{y}$ with $y_c = 1$ at the true token's index $c$ and $0$ everywhere else. The **cross-entropy** between $\mathbf{y}$ and the model's predicted distribution $\mathbf{p}$ is:
+
+$$
+\mathrm{CE}(\mathbf{y}, \mathbf{p}) = -\sum_{i=1}^{V} y_i \ln p_i = -\ln p_c
+$$
+
+Because $y_i = 0$ for every index except $c$, all other terms vanish, leaving $-\ln p_c$. Thus $\mathcal{L}$ is simply the average cross-entropy across all positions. In PyTorch, `nn.functional.cross_entropy` takes raw logits and true token indices, applies log-softmax internally, and computes this exact quantity.
+
+### Perplexity: translating loss into an effective number of choices
+
+A loss of 2.7 nats is hard to picture intuitively. **Perplexity** converts it into a more tangible scale:
+
+$$
+\mathrm{PPL} = \exp(\mathcal{L})
+$$
+
+To see what perplexity means, substitute $p_t = p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$ into the definition:
+
+$$
+\begin{aligned}
+\mathrm{PPL} &= \exp\!\left(-\frac{1}{m}\sum_{t=1}^{m} \ln p_t\right) \\
+&= \exp\!\left(\frac{1}{m}\sum_{t=1}^{m} \ln \frac{1}{p_t}\right) \\
+&= \left(\prod_{t=1}^{m} \frac{1}{p_t}\right)^{1/m}
+\end{aligned}
+$$
+
+The second line moves the minus sign inside the logarithm using $-\ln p = \ln(1/p)$. The third line uses $\exp\left(\frac{1}{m}\sum \ln a_t\right) = \left(\prod a_t\right)^{1/m}$, since the exponential of a sum is a product and dividing the exponent by $m$ takes the $m$-th root. Perplexity is therefore the **geometric mean** of the inverse probabilities $1/p_t$.
+
+Now suppose that at every step the model is equally torn among $K$ plausible tokens, one of which is the true token: then $p_t = 1/K$ everywhere, and $\mathrm{PPL} = K$. That gives us three rules of thumb:
+
+- **Perplexity is the effective branching factor**—the number of equally likely choices the model feels it is choosing among at each step. Lower is better, and the theoretical minimum is $1$ (always 100% certain and right).
+- **An untrained model** that guesses uniformly over all $V$ tokens has $\mathcal{L} = \ln V$ and $\mathrm{PPL} = V$. For our 73-character vocabulary, that baseline is $\ln 73 \approx 4.290$ nats and a perplexity of $73$.
+- **Perplexity is only comparable across models that share the exact same tokenizer and test set** (see the second callout in Common pitfalls).
+
+### The bigram model: count and divide
+
+The simplest language model looks at only **one** preceding token: $p(x_t \mid x_{<t}) \approx p(x_t \mid x_{t-1})$. With a vocabulary of $V$ characters, the entire model is a $V \times V$ table where row $i$ holds the probability distribution of the next character given that the current character is $i$.
+
+"Training" a bigram model is just counting pairs. Let $C_{ij}$ be the number of times character $j$ appears immediately after character $i$ in the training text. Normalizing each row gives:
+
+$$
+p(j \mid i) = \frac{C_{ij} + k}{\sum_{j'=1}^{V} C_{ij'} + kV}
+$$
+
+When $k = 0$, this is the raw relative frequency, which provably minimizes cross-entropy on the training set. However, $k = 0$ has a fatal flaw: any character pair that never appeared in training gets probability $0$, and a single unseen pair in the test set causes $-\ln 0 = \infty$ (infinite perplexity). Unseen pairs are common on small datasets: in our bigram code cell below, 26 out of the 130 character pairs in the test set never occurred in the training lines. **Add-$k$ smoothing** adds $k > 0$ "pseudo-counts" to every cell of the table. Because each row has $V$ cells, the row sum increases by $kV$, ensuring each row still sums to $1$.
+
+The trade-off of smoothing is that rare contexts get pulled strongly toward the uniform distribution. In our 20 training lines, `"q"` appears only 3 times, followed every single time by `"u"`. With $V = 73$ and $k = 0.1$, the denominator becomes $3 + 7.3 = 10.3$, pulling $p(\text{u} \mid \text{q}) = 3.1 / 10.3 \approx 0.301$—far below $1$. No single value of $k$ is optimal everywhere; our code uses $k = 0.1$.
+
+### GPT: a decoder-only Transformer
+
+Because a bigram model only remembers one character of context, it has no idea where it is in a line of verse. A GPT model computes $p(x_t \mid x_{<t})$ from a whole window of up to $L$ preceding tokens using a stack of Transformer blocks. From here on, $L$ denotes the model's **context window**—the maximum sequence length it can process at once.
+
+1. **Token and position embeddings.** Each token $x_t$ looks up a row in a $V \times D$ token embedding matrix, plus a row in an $L \times D$ learned positional embedding matrix so the model knows where each token sits in the sequence. This produces the initial hidden matrix $\mathbf{H} \in \mathbb{R}^{L \times D}$, with one row per position.
+2. **Transformer blocks.** Each block applies $\mathbf{H} \leftarrow \mathbf{H} + \mathrm{Attn}(\mathrm{LN}(\mathbf{H}))$ followed by $\mathbf{H} \leftarrow \mathbf{H} + \mathrm{MLP}(\mathrm{LN}(\mathbf{H}))$, where $\mathrm{LN}$ is layer normalization. The plus signs are residual connections: each block adds an update to the stream, allowing deep stacks of blocks to train cleanly.
+3. **Output head.** A final $\mathrm{LN}$ followed by a linear projection $D \to V$ produces a logit vector at **every** position in parallel.
+
+Placing layer normalization *before* attention and the MLP, plus a final layer norm at the end (Pre-LN), follows GPT-2 (Radford et al., 2019, Section 2.3); GPT-1 and the original Transformer placed layer norm after the residual addition.
+
+Whereas the original Transformer (Vaswani et al., 2017) had an encoder-decoder layout for machine translation, GPT drops the encoder and cross-attention altogether, keeping only a stack of causally masked self-attention blocks—hence the name **decoder-only**. GPT-1 (2018) used 12 blocks, $D = 768$, and a 512-token context window. Our toy GPT in this lesson uses 2 blocks, $D = 64$, and a context window of $L = 32$ characters, totaling roughly 112,000 parameters.
+
+**Causally masked self-attention.** Inside each attention head, the normalized hidden states $\mathbf{H}$ are multiplied by three learned projection matrices to produce **queries** $\mathbf{Q}$, **keys** $\mathbf{K}$, and **values** $\mathbf{V}$, each of shape $L \times d$ (note that bold $\mathbf{V}$ is the value matrix, not the scalar vocabulary size $V$). Then:
+
+$$
+\mathrm{Attn}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \mathrm{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d}} + \mathbf{M}\right)\mathbf{V},
+\qquad
+M_{ij} =
+\begin{cases}
+0, & j \le i \\
+-\infty, & j > i
+\end{cases}
+$$
+
+Walking through each piece:
+
+- **$\mathbf{Q}\mathbf{K}^\top$** is an $L \times L$ score matrix whose $(i, j)$ entry is the dot product between the query at position $i$ and the key at position $j$—measuring how much position $i$ attends to position $j$.
+- **Dividing by $\sqrt{d}$.** If query and key components have zero mean and unit variance, their dot product has variance $d$. Without scaling, large $d$ pushes dot products to large magnitudes where softmax saturates and gradients vanish. Dividing by $\sqrt{d}$ keeps the variance at $1$.
+- **Adding the causal mask $\mathbf{M}$.** Every future entry $j > i$ gets $-\infty$ added to its score. Because softmax is applied row by row and $\exp(-\infty) = 0$, future positions receive an attention weight of **exactly zero**, while weights on past and current positions $j \le i$ still sum to $1$. Row $i$ of the output is therefore a weighted average of the value rows at positions $1, \dots, i$ only.
+- **Multi-head attention.** $H$ attention heads run in parallel, each with dimension $d = D / H$, and their outputs are concatenated (unbolded $H$ is the number of heads, distinct from the bold hidden matrix $\mathbf{H}$). Our toy GPT uses $H = 4$ heads of dimension $d = 16$ each.
+
+On the first 4 characters of our poem (`"trăm"`), the causal mask restricts visibility as follows:
+
+| Position | sees `"t"` | sees `"r"` | sees `"ă"` | sees `"m"` |
+|---|---|---|---|---|
+| 1: `"t"` | yes | masked | masked | masked |
+| 2: `"r"` | yes | yes | masked | masked |
+| 3: `"ă"` | yes | yes | yes | masked |
+| 4: `"m"` | yes | yes | yes | yes |
+
+**The causal mask enables parallel training.** Take a slice of $L + 1$ characters from the corpus. Feed characters $1$ through $L$ as the input sequence, and use characters $2$ through $L + 1$ as the target labels. The logit vector at position $t$ predicts character $t + 1$, and thanks to the causal mask it has only seen characters $1, \dots, t$. Consequently, **a single forward pass** across the slice computes $L$ next-character predictions simultaneously—each with its own prefix properly masked—and $\mathcal{L}$ averages the loss across all $L$ positions at once. Without the mask, position $t$ could peek directly at the answer $x_{t+1}$.
+
+### Generating text
+
+Once a language model is trained, text generation is a simple loop:
+
+1. Feed the current context (up to the last $L$ tokens) into the model and take the logit vector at the final position.
+2. Divide the logits by temperature $T$, apply softmax, and sample one token from the resulting distribution.
+3. Append the sampled token to the context and repeat from step 1.
+
+Step 2 is the exact sampling pipeline from [Using Text APIs](/en/llm/text-api/), where you can also apply top-$k$ or top-$p$ truncation if desired. For a bigram model whose row is already a probability distribution $p_i$, we can treat $z_i = \ln p_i$ as the logits. Then $\exp(z_i / T) = p_i^{1/T}$, meaning temperature sampling simply raises each probability to the power $1/T$ and renormalizes. At $T = 0.5$, probabilities are squared, making high-probability transitions much more dominant over rare ones.
+
+:::note[Key takeaway]
+A language model predicts $p(x_t \mid x_{<t})$. Training minimizes cross-entropy $\mathcal{L} = -\frac{1}{m}\sum_t \ln p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$, and perplexity $\mathrm{PPL} = \exp(\mathcal{L})$ measures the effective number of choices per step (equal to $V$ for uniform guessing). A bigram model counts character pairs; a GPT stacks causally masked self-attention blocks so one forward pass yields $L$ next-token predictions in parallel. Text generation repeats: predict, sample, append.
+:::
+
+### Limitations
+
+- **Next-token prediction optimizes for plausibility, not truth.** The training loss only rewards assigning high probability to whatever token came next in the training corpus. A fluent, plausible-sounding falsehood can still receive high probability. [RLHF](/en/llm/rlhf/) and [RAG and Modern Chatbots](/en/llm/rag-chatbot/) explore ways to ground and align model outputs.
+- **Character-level tokenization makes sequences very long.** Production LLMs use subword tokenizers so each token carries more semantic weight (covered in the Tokenization lesson in the NLP part).
+- **Pre-training alone does not make an assistant.** Turning a base text-completion model into one that follows user instructions is the subject of [The GPT Family and Multi-Task Fine-Tuning](/en/llm/gpt-family-finetuning/).
+
+## Illustration
+
+The "sample one token" step is the only source of randomness in the generation loop. The interactive widget below (shared with [Using Text APIs](/en/llm/text-api/)) shows a model's 10 candidate tokens and fixed logits after a four-word prompt. Solid bars show the final probabilities after temperature and truncation; faded bars show the raw probabilities at $T = 1$. Drag the three sliders for $T$, top-$k$, and top-$p$, then click "Sample 1" or "Sample 100":
+
+1. At the default $T = 1$ with top-$k$ and top-$p$ off, the top token has probability $0.38$, and all 10 tokens have a non-zero chance of being picked.
+2. Drag $T$ down to $0.5$: the top token jumps to $0.60$, and the top three tokens absorb almost all the probability mass. That is what our bigram cell does at $T = 0.5$.
+3. Drag $T$ up to $1.5$: the top token drops to $0.29$ and the tail thickens. Click "Sample 100" and you will see tail tokens drawn regularly.
+4. Set top-$p$ to $0.9$: 5 tokens remain active at $T = 1$, 3 at $T = 0.5$, and 7 at $T = 1.5$. Drag $T$ all the way to $0$: only the single highest-logit token remains with probability $1$ (greedy decoding).
+
+Notice that dragging the sliders never changes the model itself—the underlying logits are frozen; only how you sample from them changes.
+
+{/* VIZ: model logits stay fixed; T sharpens or flattens the distribution, top-k and top-p truncate the tail and renormalize, and then one token is sampled. */}
+<SamplingViz />
+
+## Code examples
+
+The code in this lesson was last tested in October 2026: the bigram cell with Python 3.14 and NumPy 2.4 (in Pyodide), and the tiny GPT cell with Python 3.14 and PyTorch 2.14 on CPU. The bigram cell runs right in your browser; the GPT cell requires PyTorch and runs on your machine.
+
+Both cells use the same tiny corpus: the opening 24 lines of *Truyện Kiều*, taken from [Vietnamese Wikisource](https://vi.wikisource.org/w/index.php?title=Truy%E1%BB%87n_Ki%E1%BB%81u&oldid=205132) (revision of May 6, 2026, retrieved October 24, 2026; work in the public domain, transcription released under CC BY-SA 4.0). Each line of the Python string holds a two-line six–eight couplet separated by `" / "`. The code normalizes the text to Unicode NFC, lowercases it, and splits it into one verse line per line: 790 characters in total. Lines 1–20 (660 characters) form the training set, and lines 21–24 form the test set. The character vocabulary is built across all 24 lines so every character in the test set has a valid token ID.
+
+### Character bigram in NumPy
+
+The cell below counts character pairs on the training lines, applies add-$k$ smoothing with $k = 0.1$, prints the cross-entropy loss and perplexity on both splits, checks $p(\text{u} \mid \text{q})$, and generates two lines at $T = 1.0$ and two lines at $T = 0.5$.
+
+<PythonRunner code={bigramCode} title="Character bigram on 24 lines of The Tale of Kieu" />
+
+Walking through the output:
+
+- **Uniform baseline:** loss $4.290$, perplexity $73$.
+- **Train split:** loss $2.076$, perplexity $7.98$. **Test split:** loss $2.720$, perplexity $15.18$. Simply counting adjacent character pairs cuts the model's uncertainty on unseen lines from 73 choices down to about 15. Training loss is naturally lower because the count table was built directly from those lines—always look at the test split to judge how well the model generalizes.
+- **$p(\text{u} \mid \text{q}) = 0.301$**, matching our hand calculation in the Theory section.
+
+At $T = 1.0$, the generated lines contain gibberish clusters like `"ồĩầyộẳ"`. When the model lands on a rare character (such as `"ĩ"`, which appears only twice in training), its row is dominated by the $k = 0.1$ smoothing pseudo-counts, so the next character is drawn almost uniformly from all 73 characters. At $T = 0.5$, high-count pairs dominate and real Vietnamese words like `"trời"`, `"trông"`, and `"lặn"` appear. Even so, the lines have no coherent meaning and one line runs past 100 characters: a bigram only remembers a single preceding character, so it has no way of counting six-word or eight-word meter.
+
+### Tiny GPT in PyTorch
+
+This script builds the decoder-only GPT from the Theory section: 2 blocks, 4 heads, $D = 64$, $L = 32$. Each block uses `nn.TransformerEncoderLayer` with `norm_first=True`, giving the exact Pre-LN sequence of layer norm, attention, residual add, layer norm, MLP, residual add. Although PyTorch names this class `"EncoderLayer"`, passing a causal mask with no cross-attention makes it structurally identical to a GPT decoder block (aside from defaulting to ReLU instead of GELU). The causal mask is `torch.triu(..., 1)` of type `bool`, where `True` means **forbidden to attend**. The loop runs steps 0 through 300 with AdamW (301 parameter updates), sampling a batch of 32 windows of length 33 at each step. Every 50 steps it prints the current batch's training loss (computed before the step's weight update, so it fluctuates slightly) alongside the exact loss across all sliding windows of the test split. Finally, it generates 60 characters starting from `"trăm năm"` at $T = 0.8$.
+
+On Windows and macOS, `pip install torch` installs the lightweight CPU build by default. On Linux, `pip install torch` downloads the multi-gigabyte CUDA bundle; if you only want the CPU build on Linux, pass PyTorch's CPU wheel index:
+
+```sh
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+```
+
+<LocalCode
+  code={tinyGptCode}
+  title="Tiny GPT on 24 lines of The Tale of Kieu"
+  packages={['torch']}
+  hardware="CPU is plenty—no GPU needed. Takes ~20 seconds on a typical laptop, or a couple of minutes on a slower machine."
+  sampleVaries={false}
+>
+
+```text
+step 0: train 4.467, test 4.173
+step 50: train 1.770, test 2.613
+step 100: train 1.123, test 3.065
+step 150: train 0.548, test 3.744
+step 200: train 0.219, test 4.459
+step 250: train 0.211, test 5.031
+step 300: train 0.183, test 5.341
+trăm năm trong cõi người ta,
+chữ tài chữ mệnh khéo là ghéi ghét nha.
+```
+
+</LocalCode>
+
+Look closely at the progression across steps:
+
+- **Step 0:** both losses sit around $4.2$–$4.5$, right near the uniform baseline $\ln 73 = 4.290$. A freshly initialized model guesses nearly uniformly.
+- **Step 50:** test loss reaches $2.613$ (perplexity $\approx 13.6$), edging past the bigram model ($2.720$). Among the printed checkpoints, this is where the model generalizes best to unseen lines. (Treat the comparison as approximate: GPT evaluates overlapping 32-character windows so interior characters are scored multiple times, whereas the bigram scores each adjacent pair once.)
+- **From step 100 onward:** training loss keeps plunging down to $0.183$, while test loss **climbs steadily** to $5.341$. By step 200, test loss is already worse than uniform guessing ($4.290$); by step 300, test perplexity hits $\approx 209$—far worse than picking characters blindfolded out of 73! Because the model has become overconfident in the exact sequences it memorized, whenever the held-out poem takes a different turn, the model assigns a microscopic probability to the true character and suffers a massive $-\ln p$ penalty.
+- **The generated verse** recites the opening two lines of the training poem almost verbatim (with a small `"ghéi ghét nha"` slip where sampling at $T = 0.8$ drew a lower-probability character). The model is **reciting from memory**, not composing poetry.
+
+Exact numbers may vary slightly across CPU architectures or PyTorch versions, but the U-shaped test loss curve is unmistakable.
+
+### Why LLMs need so much data
+
+What you just watched is the exact same phenomenon as in [Overfitting and Underfitting](/en/ml/overfitting-underfitting/): there, a degree-15 polynomial threaded 16 noisy points with zero training MSE and a test MSE of 133. Here, a 112,000-parameter network is handed just 660 training characters—more than enough capacity to memorize the entire training string verbatim. Training loss goes down and down; test loss goes down and then shoots up.
+
+The remedies are the same ones from Machine Learning, scaled up to language modeling:
+
+- **More data.** This is the primary lever of modern LLMs. The largest GPT-2 model (Radford et al., 2019) had 1.5 billion parameters and was trained on roughly 40 GB of web text (WebText). Once the training corpus vastly exceeds what the weights can memorize verbatim, the only way for the model to drive cross-entropy down is to discover generalizable structure: spelling, syntax, facts, and reasoning patterns.
+- **Early stopping.** Save the checkpoint where loss on a dedicated **validation set** (separate from the final test set) reaches its minimum. Picking step 50 by peeking at the `test` column above would be "tuning on the test set," as warned against in [Overfitting and Underfitting](/en/ml/overfitting-underfitting/).
+- **Smaller models or stronger regularization.** Dropout and weight decay (the decoupled L2 penalty in AdamW, analogous to the penalty in [Ridge, Lasso, and Elastic Net](/en/ml/regularization/)) slow down memorization. Notice, however, that our tiny GPT already had AdamW's default `weight_decay=0.01` enabled and still memorized 660 characters with ease: regularization slows overfitting down, but it cannot substitute for data.
+
+You can verify the effect of adding data yourself: copy the full text of *Truyện Kiều* from the raw Wikisource page (append `&action=raw` to the URL and strip leading tabs and line-number templates like `{{số|5}}`) into `POEM`, change `cut` to `cut = int(len(text) * 0.9)`, and train for `range(1001)` steps. In our test run on the full poem, the gap between train and test loss nearly vanished (step 1,000: train $1.676$, test $1.732$; note that the test split is now different, so do not compare directly against the 24-line numbers above), and generated verses stopped copying whole lines verbatim.
+
+## Common pitfalls
+
+:::caution[Watching only the training loss]
+A smoothly falling training loss makes it look as if training is going great—yet in our GPT run, test loss simultaneously climbed from $2.613$ to $5.341$. Always log validation/test loss alongside training loss. And do not be fooled by fluent-looking samples alone: a model that has memorized its training set will produce flawless-looking quotes copied straight from training data.
+:::
+
+:::caution[Comparing perplexities across different tokenizers or test sets]
+Perplexity is a per-token average. A character-level model predicts one character per step while a word-level model predicts an entire word per step, so a word-level model will naturally have a much larger perplexity without being a worse model. Likewise, perplexities measured on two different test sets are not comparable. To compare models with different tokenizers on the same text, compare their total negative log-likelihood over the entire passage (or convert to bits per byte / bits per character).
+:::
+
+:::caution[Forgetting or inverting the causal mask]
+Without a causal mask, position $t$ can see target token $x_{t+1}$ directly, causing training loss to plummet to near zero while leaving the model helpless at generation time. Worse, matrix shapes remain identical, so PyTorch raises no error. Watch out for mask sign conventions too: in `nn.MultiheadAttention` (and `nn.TransformerEncoderLayer`), a boolean `attn_mask` uses `True` for positions that are **blocked** from attending (so you pass `torch.triu(..., 1)`), whereas `F.scaled_dot_product_attention`'s boolean `attn_mask` uses the opposite convention (`True` = allowed to attend). For a floating-point `attn_mask`, values are added to attention scores, so blocked entries must be `-inf`. A quick sanity check: change token $t + 1$ in the input tensor and verify that the output logits at positions $\le t$ do not change by a single bit.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- A causal language model predicts the probability distribution of the next token, $p(x_t \mid x_{<t})$. By the chain rule of probability, next-token prediction defines a probability over any text sequence. Generating text simply loops: predict logits, sample with temperature $T$, append the sampled token.
+- Training minimizes cross-entropy $\mathcal{L} = -\frac{1}{m}\sum_t \ln p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$, which is equivalent to maximizing the log-likelihood of the corpus. Perplexity $\mathrm{PPL} = \exp(\mathcal{L})$ is the effective number of equally likely choices per step ($V$ for uniform guessing). Only compare perplexities when both the tokenizer and test set are identical.
+- A bigram model counts adjacent pairs in a $V \times V$ table and needs smoothing for unseen pairs. A GPT is a decoder-only Transformer: token + positional embeddings, a stack of causally masked self-attention and MLP blocks, and a linear output head. The causal mask lets one forward pass compute $L$ predictions in parallel without leaking future tokens.
+- On 24 lines of poetry, our bigram reaches a test loss of $2.720$; our tiny GPT reaches $2.613$ at step 50 before overfitting to $5.341$ by step 300. LLMs require massive pre-training corpora so that learning general language structure beats memorizing training examples.
+
+**Further reading:**
+
+- Radford, A., Narasimhan, K., Salimans, T., Sutskever, I. (2018). [*Improving Language Understanding by Generative Pre-Training*](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf) (PDF), OpenAI technical report, Section 3.1. GPT-1: the autoregressive pre-training objective and decoder-only Transformer architecture.
+- Radford, A., Wu, J., Child, R., Luan, D., Amodei, D., Sutskever, I. (2019). [*Language Models are Unsupervised Multitask Learners*](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) (PDF), OpenAI technical report, Section 2. GPT-2: WebText dataset, byte-level BPE, Pre-LN placement, and model sizes.
+- Vaswani, A. et al. (2017). [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762), arXiv:1706.03762, Section 3.2. Scaled dot-product attention ($\sqrt{d}$ scaling) and multi-head attention.
+- Bengio, Y., Ducharme, R., Vincent, P., Jauvin, C. (2003). [*A Neural Probabilistic Language Model*](https://www.jmlr.org/papers/v3/bengio03a.html). *Journal of Machine Learning Research* 3, 1137–1155. The classic paper showing that neural networks with learned word embeddings generalize better than $n$-gram count tables.
+- Loshchilov, I., Hutter, F. (2019). [*Decoupled Weight Decay Regularization*](https://arxiv.org/abs/1711.05101). ICLR 2019, arXiv:1711.05101. The AdamW paper explaining why decoupling weight decay from adaptive gradients works better than standard L2 regularization in Adam.
+- Karpathy, A. [*nanoGPT*](https://github.com/karpathy/nanoGPT) (GitHub, MIT License). A clean ~300-line GPT implementation in PyTorch with a character-level Shakespeare example in the same spirit as this lesson. Note that the author marked `nanoGPT` deprecated in November 2025 in favor of its successor repo `nanochat`.
+
+<LessonProgress />

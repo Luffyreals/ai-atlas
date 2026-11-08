@@ -79,32 +79,32 @@ MVP chỉ được coi là xong khi **tất cả** mục dưới đây đều đ
 
 **Kỹ thuật**
 
-- [ ] `npm run build` thành công, không cảnh báo.
-- [ ] `npm run check` không lỗi kiểu.
-- [ ] Unit test và e2e test đều qua.
-- [ ] Không có link nội bộ hỏng.
-- [ ] Mỗi bài trong `roadmap.ts` có trạng thái `published` đều có file thật ở cả `vi/` và `en/`.
-- [ ] Quan hệ "cần biết trước" không trỏ tới bài không tồn tại trong `roadmap.ts` và không tạo vòng lặp.
+- [x] `npm run build` thành công, không cảnh báo.
+- [x] `npm run check` không lỗi kiểu.
+- [x] Unit test và e2e test đều qua.
+- [x] Không có link nội bộ hỏng.
+- [x] Mỗi bài trong `roadmap.ts` có trạng thái `published` đều có file thật ở cả `vi/` và `en/`.
+- [x] Quan hệ "cần biết trước" không trỏ tới bài không tồn tại trong `roadmap.ts` và không tạo vòng lặp.
 
 **Hiệu năng và trải nghiệm**
 
-- [ ] Lighthouse trên một trang bài học (điện thoại): Performance ≥ 90, Accessibility ≥ 95, SEO ≥ 95.
-- [ ] Mở trang bài học **không tải Pyodide**. Pyodide chỉ tải khi bấm "Chạy".
-- [ ] Màn hình 375px không bị cuộn ngang. Chế độ sáng và tối đều đọc rõ.
-- [ ] Dùng được bằng bàn phím: chạy code, làm quiz, đánh dấu đã học.
+- [x] Lighthouse trên một trang bài học (điện thoại): Performance ≥ 90, Accessibility ≥ 95, SEO ≥ 95.
+- [x] Mở trang bài học **không tải Pyodide**. Pyodide chỉ tải khi bấm "Chạy".
+- [x] Màn hình 375px không bị cuộn ngang. Chế độ sáng và tối đều đọc rõ.
+- [x] Dùng được bằng bàn phím: chạy code, làm quiz, đánh dấu đã học.
 
 **Nội dung**
 
-- [ ] 5 bài đều qua `content-reviewer`, không còn lỗi mức "Nghiêm trọng" hay "Nên sửa".
-- [ ] Mọi code ví dụ đã chạy thật, kết quả khớp lời giải thích.
-- [ ] Bài đã có bản en thì bản en khớp bản vi: cùng số heading, công thức, khối code, component. Bài chưa dịch hiện trang fallback (quyết định 30, 33).
-- [ ] Mọi nguồn tham khảo có thật, link mở được.
+- [x] 5 bài đều qua `content-reviewer`, không còn lỗi mức "Nghiêm trọng" hay "Nên sửa".
+- [x] Mọi code ví dụ đã chạy thật, kết quả khớp lời giải thích.
+- [x] Bài đã có bản en thì bản en khớp bản vi: cùng số heading, công thức, khối code, component. Bài chưa dịch hiện trang fallback (quyết định 30, 33).
+- [x] Mọi nguồn tham khảo có thật, link mở được.
 
 **Ra mắt**
 
-- [ ] Website chạy online, truy cập được từ điện thoại.
-- [ ] Mỗi trang có `title`, `description`, `hreflang` vi/en. Có `sitemap.xml`.
-- [ ] Chân trang ghi giấy phép nội dung (CC BY-NC-SA 4.0) kèm link tới trang giấy phép của Creative Commons. Repo là private nên không link tới file trong repo.
+- [x] Website chạy online, truy cập được từ điện thoại.
+- [x] Mỗi trang có `title`, `description`, `hreflang` vi/en. Có `sitemap.xml`.
+- [x] Chân trang ghi giấy phép nội dung (CC BY-NC-SA 4.0) kèm link tới trang giấy phép của Creative Commons. Repo là private nên không link tới file trong repo.
 
 ## 5. Các mốc
 

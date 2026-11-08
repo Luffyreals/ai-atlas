@@ -1,4 +1,4 @@
-# ViT tí hon và CNN nhỏ học phân loại chữ số 8x8 của load_digits.
+# Tiny ViT and small CNN trained to classify 8x8 digits from load_digits.
 import torch
 from torch import nn
 from sklearn.datasets import load_digits
@@ -14,8 +14,8 @@ Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.2, random_state=0)
 class TinyViT(nn.Module):
     def __init__(self, P=2, D=32, depth=2, heads=4):
         super().__init__()
-        N = (8 // P) ** 2                       # số patch
-        # Conv2d kernel = stride = P: cắt patch rồi chiếu tuyến tính
+        N = (8 // P) ** 2                       # number of patches
+        # Conv2d with kernel = stride = P: split patches and project linearly
         self.embed = nn.Conv2d(1, D, kernel_size=P, stride=P)
         self.cls = nn.Parameter(torch.zeros(1, 1, D))
         self.pos = nn.Parameter(torch.randn(1, N + 1, D) * 0.02)
@@ -30,10 +30,10 @@ class TinyViT(nn.Module):
         z = self.embed(x).flatten(2).transpose(1, 2)    # (B, N, D)
         z = torch.cat([self.cls.expand(len(z), -1, -1), z], dim=1)
         z = self.encoder(z + self.pos)
-        return self.head(z[:, 0])               # chỉ đọc token [CLS]
+        return self.head(z[:, 0])               # read only the [CLS] token
 
 
-cnn = nn.Sequential(                            # CNN nhỏ để so sánh
+cnn = nn.Sequential(                            # small CNN for comparison
     nn.Conv2d(1, 32, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
     nn.Conv2d(32, 48, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
     nn.Flatten(), nn.Linear(48 * 2 * 2, 10))

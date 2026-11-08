@@ -15,6 +15,7 @@ rất hài lòng, sẽ quay lại; bánh mì ngon, giá rẻ
 không gian sạch, nhân viên vui vẻ; lẩu ngon, phục vụ không chậm
 nhà vệ sinh sạch, phục vụ nhanh; rất ngon, rất đáng tiền
 hài lòng với đồ ăn; cơm tấm ngon tuyệt; giao nhanh, đồ ăn còn nóng"""
+# 18 câu chê để huấn luyện
 TRAIN_NEG = """đồ ăn không ngon, phục vụ chậm; không ngon chút nào
 phở không ngon, giá đắt; đồ ăn tệ, giá đắt; quán bẩn, bàn dính dầu
 phục vụ chậm, nhân viên cau có; quán không sạch; đồ ăn tệ, phục vụ chậm
@@ -27,18 +28,17 @@ nhân viên không vui vẻ; lẩu tệ, quán bẩn"""
 TEST_POS = """bún chả ngon, giá rẻ; bánh cuốn ngon, nhân viên vui vẻ
 đồ uống không tệ; giá không đắt, sẽ quay lại; nhân viên vui vẻ
 rất hài lòng với lẩu"""
+# 5 câu chê để kiểm tra
 TEST_NEG = """món này không ngon; quán không sạch, giá đắt
 bún chả không ngon, phục vụ chậm; cà phê không ngon, quá đắt
 giao chậm, quán bẩn"""
 NEW = ["đồ ăn ngon nhưng phục vụ chậm", "chẳng ngon gì cả",
        "ngon đến mức không muốn quay lại"]
 
-
 def load(pos, neg):
     pos = [s.strip() for s in pos.replace("\n", ";").split(";")]
     neg = [s.strip() for s in neg.replace("\n", ";").split(";")]
     return pos + neg, ["pos"] * len(pos) + ["neg"] * len(neg)
-
 
 X_train, y_train = load(TRAIN_POS, TRAIN_NEG)
 X_test, y_test = load(TEST_POS, TEST_NEG)

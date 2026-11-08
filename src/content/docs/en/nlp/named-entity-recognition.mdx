@@ -1,0 +1,379 @@
+---
+title: Named Entity Recognition (NER)
+description: Finding people, places, and organizations in a sentence. Sequence labeling, BIO tagging, CRFs, BERT token classification, subword label alignment, and entity-level F1.
+quiz:
+  - question: 'A 6-word sentence is assigned the tag sequence `O I-ORG I-ORG O B-LOC I-ORG`. Decoding with the convention used in this lesson (matching `conlleval`), which entities do you get?'
+    options:
+      - 'Two entities: ORG (words 2–3) and LOC (words 5–6)'
+      - 'Three entities: ORG (words 2–3), LOC (word 5), and ORG (word 6)'
+      - 'Cannot be decoded because the tag sequence is invalid'
+      - 'Two entities: LOC (word 5) and ORG (word 6); the first two I-ORG tags are dropped because there is no B-ORG'
+    answer: 1
+    explanation: 'Under the conlleval convention used in this lesson, an I- tag following O still opens a new entity, so words 2–3 form an ORG. At word 6, I-ORG has a different type from the open LOC span, so LOC closes at word 5 and a new ORG starts at word 6. The option "LOC (words 5–6)" is wrong because I- only extends an entity of the same type. Strict mode in seqeval discards all orphan I- tags—both the first two I-ORG tags and the I-ORG at word 6 (since it follows B-LOC)—leaving only LOC at word 5. Because the two conventions yield different scores, always state which one you use.'
+  - question: 'A test set has 10 gold entities. A model predicts 8 entities: 6 match both boundaries and type, 1 has the right type but misses the first word, and 1 has the wrong type. What are the entity-level precision, recall, and F1?'
+    options:
+      - '$P = 0.875$, $R = 0.7$, because the entity missing one word still has the right type'
+      - '$P = 0.6$, $R = 0.75$'
+      - '$P = 0.75$, $R = 0.6$, $F_1 = 0.8$'
+      - '$P = 0.75$, $R = 0.6$, $F_1 \approx 0.667$'
+    answer: 3
+    explanation: 'Entity-level evaluation requires an exact match on both boundaries and type, so only 6 predictions count as correct. $P = 6/8 = 0.75$ (divided by predicted entities), $R = 6/10 = 0.6$ (divided by gold entities), and $F_1 = 2 \cdot 6/(8 + 10) \approx 0.667$. An entity missing one word gets zero credit: it counts as both one false positive and one false negative. $F_1 = 0.8$ is a mistaken arithmetic calculation rather than the harmonic mean.'
+  - question: 'You fine-tune BERT for NER and assign labels to every subword by copying the word''s tag directly: all 5 pieces `V ##iet ##comb ##an ##k` of "Vietcombank" receive `B-ORG`. What happens?'
+    options:
+      - 'At decoding time, each piece opens a new ORG entity, turning one name into 5 entities; in the loss, this word also weighs 5 times as much as a single-piece word'
+      - 'Nothing bad; training is just slightly slower'
+      - 'PyTorch raises an error because the number of labels differs from the number of tokens'
+      - 'BERT cannot read `##` pieces and ignores them automatically'
+    answer: 0
+    explanation: 'Each B- tag opens a new entity span, so 5 consecutive B-ORG tags decode into 5 separate entities. If you propagate labels across subwords, continuation pieces must be converted to I-ORG. Furthermore, words split into many subwords (often rare proper nouns) contribute more terms to the cross-entropy loss than single-piece words. Original BERT scores only the first subword of each word; in PyTorch and Hugging Face, continuation subwords are assigned `-100` so the loss ignores them. Because every token still has a label entry, no shape error occurs.'
+  - question: 'On a test set, 85% of tokens have the gold tag O. A lazy model predicts O for every token. What are its token-level accuracy and entity-level F1?'
+    options:
+      - 'Accuracy 0.85, F1 0.85'
+      - 'Accuracy 0, F1 0'
+      - 'Accuracy 0.85, F1 0'
+      - 'Accuracy 0.15, F1 undefined'
+    answer: 2
+    explanation: 'Every O token is predicted correctly, giving a token-level accuracy of 0.85. Yet the model finds zero entities: recall is 0, so F1 is 0 (precision is $0/0$, which tools like seqeval define as 0). That is why NER reports entity-level F1: token accuracy rewards predicting O, which makes up the vast majority of running text.'
+  - question: 'An independent per-token classifier predicts `B-PER I-LOC I-LOC` for "Nguyễn Văn An". How does adding a CRF layer on top help?'
+    options:
+      - 'It sharpens each token''s softmax, making individual token predictions more confident'
+      - 'The CRF segments Vietnamese words before tagging'
+      - 'The CRF scores the entire tag sequence using learned transition scores between adjacent tags, so it learns that B-PER followed by I-LOC almost never occurs and picks the highest-scoring global path'
+      - 'The CRF converts BIO into BIOES so it knows where entities end'
+    answer: 2
+    explanation: 'An independent classifier chooses each token''s tag in isolation, so nothing stops it from pairing B-PER with I-LOC. A linear-chain CRF adds a transition score $A_{y_{i-1}, y_i}$ for each adjacent tag pair and finds the globally best tag sequence via the Viterbi algorithm. Because the transition score from B-PER to I-LOC is strongly negative, the path B-PER I-PER I-PER wins as long as its emission scores are reasonable. A CRF does not segment words or change the tagging scheme.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import bioEvalCode from '@code/nlp/named-entity-recognition/bio-eval.en.py?raw';
+import nerPipelineCode from '@code/nlp/named-entity-recognition/ner-pipeline.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand **named entity recognition** (NER) as a **sequence labeling** problem, and explain why looking up a name dictionary is not enough.
+- Encode entity spans with BIO tags, explain why the `B-` prefix is needed, and decode a tag sequence back into entity spans.
+- Explain the core idea behind linear-chain CRFs, how BERT performs token classification, and how subword label alignment uses `-100`.
+- Compute entity-level precision, recall, and F1, and explain why token-level accuracy makes a model look better than it really is.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+## Intuition
+
+### Who, where, and which organization
+
+Read the following Vietnamese sentence:
+
+> Ông Nguyễn Văn An đến Hà Nội làm việc cho Vietcombank từ tháng 3/2024.
+> *(Mr. Nguyễn Văn An came to Hanoi to work for Vietcombank starting in March 2024.)*
+
+You can spot the key pieces right away: `"Nguyễn Văn An"` is a **person**, `"Hà Nội"` is a **location**, `"Vietcombank"` is an **organization**, and `"tháng 3/2024"` is a **date**. Phrases that name specific real-world objects like these are called **named entities**. Finding them—with the exact boundaries and the right category—is the job of NER.
+
+This task sits underneath a huge range of applications. News sites tag people and companies in every article. Banks extract applicant names and addresses from forms. Question-answering systems use entity types to know that a *"who"* question expects a person as its answer.
+
+### Is looking up a name dictionary enough?
+
+The first idea everyone thinks of is to compile lists of person names, place names, and company names, then match them against the text. Such a list is called a **gazetteer**. Gazetteers are useful, but they break down in three ways:
+
+- **Same string, different entity type.** In `"đến Hà Nội"` ("came to Hanoi"), `"Hà Nội"` is a location. In `"Chị Mai chuyển từ Bia Hà Nội sang Vinamilk"` ("Ms. Mai moved from Hanoi Beer to Vinamilk"), `"Hà Nội"` is part of the company name `"Bia Hà Nội"`. A static lookup list ignores context.
+- **Names that collide with common words.** Many Vietnamese given names are also everyday words: *Mai* ("tomorrow"), *Lan* ("orchid"), *Hoa* ("flower"), *An* ("peace"), *Hải* ("sea"). `"Chị Mai"` ("Ms. Mai") is a person, whereas `"sáng mai"` ("tomorrow morning") is not. `"Ông An"` ("Mr. An") is a person, whereas `"bình an"` ("peaceful") is not.
+- **New names appear every day.** New startups, newly famous people, new product lines—a static dictionary is always out of date.
+
+The real clue lies in the **surrounding context**: honorifics like `"Ông"` or `"Chị"` right before a name, verbs like `"làm việc cho"` ("works for"), or prepositions like `"đến"` ("to"). A model needs to read the whole sentence to decide for each word.
+
+### One tag per word
+
+If we attach a tag to every word indicating which entity it belongs to, we can read the entities right back out. However, an entity can span multiple words, and two entities of the same type can sit right next to each other—as in the sports headline `"Trận Việt Nam Thái Lan"` ("The Vietnam–Thailand match"). Our tags must carry enough information to tell **where each entity begins**.
+
+The problem of this lesson is: **assign a tag to every word in a sentence so that we can recover all entities with their exact boundaries and types, and then measure how many entities the model truly found.**
+
+## Theory
+
+### Entity types
+
+Every NER dataset defines its own inventory of entity types. The most widely used English benchmark is **CoNLL-2003** (Tjong Kim Sang and De Meulder, 2003), built from Reuters news stories with four types:
+
+| Type | Meaning | Examples |
+|---|---|---|
+| `PER` | Person | Nguyễn Văn An, Angela Merkel |
+| `LOC` | Location | Hà Nội, Mekong River |
+| `ORG` | Organization | Vietcombank, United Nations |
+| `MISC` | Miscellaneous proper name | World Cup, nationalities such as German |
+
+The English portion of CoNLL-2003 contains roughly 203,000 training tokens and 23,500 annotated entities. For Vietnamese, two landmark shared tasks established standard benchmarks (Nguyễn Thị Minh Huyền et al., 2018): **VLSP 2016** (CoNLL-style column format with pre-segmented words) and **VLSP 2018** (raw text with XML tags, including nested entities). Both use `PER`, `LOC`, and `ORG` as their core types alongside a smaller `MISC` category.
+
+What about `"tháng 3/2024"`? The four CoNLL types do not cover dates or numbers. Other corpora, such as OntoNotes, add `DATE`, `TIME`, `MONEY`, and more. Choosing an entity inventory is a design decision driven by your application; this lesson uses `PER`, `LOC`, and `ORG` across all examples.
+
+### NER as sequence labeling
+
+Let a sentence be a sequence of words $\mathbf{x} = (x_1, \dots, x_L)$ of length $L$. NER assigns a tag $y_i$ to each word $x_i$, producing a tag sequence $\mathbf{y} = (y_1, \dots, y_L)$ of the exact same length. This setup is called **sequence labeling**: the output has the same length as the input and aligns with it one-to-one. Part-of-speech tagging (noun, verb, adjective, …) has the exact same structure, unlike machine translation in [Seq2Seq](/en/llm/seq2seq/), where input and output lengths and word orders differ.
+
+### BIO tagging
+
+The most naive tagging scheme labels each word directly with its entity type: `PER`, `LOC`, or `O` (*outside* any entity). Try that on our sports headline:
+
+| Word | Trận | Việt | Nam | Thái | Lan |
+|---|---|---|---|---|---|
+| Type only | O | LOC | LOC | LOC | LOC |
+| BIO | O | B-LOC | I-LOC | B-LOC | I-LOC |
+
+Here country names are labeled as locations (some annotation guidelines label national sports teams as `ORG`; either way, the two adjacent names share the same type). The "Type only" row cannot distinguish two separate entities `"Việt Nam"` + `"Thái Lan"` from a single four-word entity `"Việt Nam Thái Lan"`. What was lost is **where each entity starts**.
+
+**BIO tagging** fixes this by pairing a prefix with the entity type:
+
+- `B-X` (*begin*): the first word of an entity of type `X`.
+- `I-X` (*inside*): a subsequent word of the currently open entity of type `X`.
+- `O` (*outside*): not part of any entity.
+
+With $K$ entity types, the tag set has $2K + 1$ tags. CoNLL-2003 has $K = 4$, giving $2(4) + 1 = 9$ tags. The scheme originated in base noun-phrase chunking (Ramshaw and Marcus, 1995). Two historical variants are worth distinguishing: in **IOB1** (used in the original CoNLL-2003 data files), every word inside an entity takes `I-`, and `B-` is used *only* on the first word of the second entity when two same-type entities touch; in **IOB2** (used in this lesson and almost all modern libraries), every entity starts with `B-`. Today, "BIO" almost always means IOB2.
+
+A more expressive variant is **BIOES** (also called IOBES), which adds `E-X` for the *end* word of a multi-word entity and `S-X` for a *single-word* entity: `"Nguyễn Văn An"` becomes `B-PER I-PER E-PER`, and `"Vietcombank"` becomes `S-ORG`. Lample et al. (2016) used BIOES but noted that it did not significantly outperform BIO in their experiments.
+
+**Decoding tags back into spans:** scan the tag sequence from left to right. A `B-X` tag opens a new entity of type `X`. An `I-X` tag extends the currently open entity if its type is also `X`. An `O` tag—or an `I-` tag of a different type—closes the open entity. One edge case occurs in model predictions even though it never appears in valid IOB2 gold data: an `I-X` tag that does not immediately follow `B-X` or `I-X` (for example, right at the start of a sentence, after `O`, or after a different type). We call this an **orphan `I-`**. This lesson follows the convention of the official CoNLL evaluation script `conlleval` and the default mode of the Python library `seqeval`: an orphan `I-X` **opens a new entity of type `X`**. By contrast, `seqeval`'s strict mode rejects orphan `I-` tags. Because the two rules can produce different F1 scores, always state which convention you use.
+
+### From hand-crafted features to CRFs
+
+Before deep learning, a typical NER system described each word with hand-engineered **features**: is the word capitalized, does it contain digits, does it appear in a gazetteer, what is the previous word (`"Ông"`, `"tại"`, `"công ty"`), what is the next word? A statistical model then learned which features signal which tags.
+
+If you classify **each word independently**, the model can output illegal tag transitions such as `O I-PER` or `B-PER I-LOC` because it has no visibility into neighboring tag decisions. Earlier sequence models such as HMMs and MEMMs scored whole tag sequences, but HMMs required generative independence assumptions while MEMMs suffered from the label bias problem. The linear-chain **conditional random field** (CRF) of Lafferty, McCallum, and Pereira (2001) scores the **entire tag sequence** jointly while avoiding both pitfalls. For NER, the score of a tag sequence $\mathbf{y}$ given input $\mathbf{x}$ is the sum of two terms:
+
+$$
+s(\mathbf{x}, \mathbf{y}) = \sum_{i=1}^{L} \psi_i(y_i) + \sum_{i=2}^{L} A_{y_{i-1}, y_i}
+$$
+
+- $\psi_i(y_i)$ is the **emission (local) score**: how compatible word $i$ (and its surrounding input context) is with tag $y_i$.
+- $A_{y_{i-1}, y_i}$ is the **transition score** from a learned matrix $\mathbf{A}$, with one entry per `(previous tag, current tag)` pair. When trained on IOB2 data, the entry for `(O, I-PER)` learns a strongly negative value because `I-PER` never follows `O` in the training set.
+
+The sequence score is converted into a probability via a softmax over **all** $K'^L$ possible tag sequences $\mathbf{y}'$:
+
+$$
+p(\mathbf{y} \mid \mathbf{x}) = \frac{\exp s(\mathbf{x}, \mathbf{y})}{\sum_{\mathbf{y}'} \exp s(\mathbf{x}, \mathbf{y}')}
+$$
+
+Although the number of candidate tag sequences grows exponentially with sentence length $L$ ($9^{20}$ sequences for a 20-word sentence with 9 tags), the Markov structure—where transitions depend only on adjacent tags $(y_{i-1}, y_i)$—allows exact dynamic programming in $O(L K'^2)$ time. During training, the denominator is computed with the **forward algorithm**; at inference time, the highest-scoring sequence is found with the **Viterbi algorithm**. To forbid a transition outright, you can set its entry in $\mathbf{A}$ to $-\infty$ so that $\exp s = 0$ for any path using it.
+
+In 2016, Lample et al. replaced hand-crafted features with a **BiLSTM** (a bidirectional recurrent network reading the sentence in both directions) to compute $\psi_i$, while keeping the CRF layer on top. Their **BiLSTM-CRF** model reached 90.94 F1 on English CoNLL-2003 without any gazetteers.
+
+### Token classification with BERT
+
+With [BERT](/en/nlp/bert/), the architecture becomes simpler still. Feed the sentence into BERT and you get a contextual vector $\mathbf{h}_i \in \mathbb{R}^{D}$ for **every** token $i$, where $D$ is the hidden size and self-attention has already mixed information from the entire sentence in both directions. (Note: in this section, the index $i$ runs over BERT's subword tokens rather than whitespace words; the next section explains how to bridge the two.) On top of $\mathbf{h}_i$, place a single shared linear layer:
+
+$$
+\mathbf{z}_i = \mathbf{W} \mathbf{h}_i + \mathbf{b}, \qquad
+p(y_i = k \mid \mathbf{x}) = \mathrm{softmax}(\mathbf{z}_i)_k
+$$
+
+Here $\mathbf{W} \in \mathbb{R}^{K' \times D}$ and $\mathbf{b} \in \mathbb{R}^{K'}$ are the newly added parameters for $K' = 2K + 1$ BIO tags, producing a logit vector $\mathbf{z}_i$ at each position. This setup—an independent classifier on top of each token vector—is called **token classification**. During fine-tuning, both BERT and the linear head are updated together by minimizing the average cross-entropy over the set of labeled positions $\mathcal{M}$:
+
+$$
+\mathcal{L} = -\frac{1}{|\mathcal{M}|} \sum_{i \in \mathcal{M}} \ln p(y_i \mid \mathbf{x})
+$$
+
+Devlin et al. (2019) used this exact linear head **without** a CRF and achieved 92.4 F1 (BERT-base) and 92.8 F1 (BERT-large) on the CoNLL-2003 test set. Why is a CRF less critical here? Because each $\mathbf{h}_i$ already attends to the entire sentence, indirectly informing position $i$ about what tags its neighbors are likely to take and making `O I-PER` mistakes much rarer—rarer, though not impossible, as our second code cell will show.
+
+### Aligning labels with subwords
+
+NER datasets annotate labels at the **word** level, whereas BERT operates on **subwords**. As covered in [Tokenization](/en/nlp/tokenization/), WordPiece splits unfamiliar words into multiple subword pieces, prefixing continuation pieces with `##`. Here is how the tokenizer of the BERT model in our code cell splits `"Nguyen Thi Lan works for Vietcombank"` (taken from an actual run):
+
+| Token | `[CLS]` | `Ng` | `##uy` | `##en` | `T` | `##hi` | `La` | `##n` | `works` | `for` | `V` | `##iet` | `##comb` | `##an` | `##k` | `[SEP]` |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Word index | – | 0 | 0 | 0 | 1 | 1 | 2 | 2 | 3 | 4 | 5 | 5 | 5 | 5 | 5 | – |
+| Label | -100 | B-PER | -100 | -100 | I-PER | -100 | I-PER | -100 | O | O | B-ORG | -100 | -100 | -100 | -100 | -100 |
+
+Six words become 16 tokens. Following original BERT and the standard Hugging Face token-classification recipe, **only the first subword of each word receives the word's BIO tag**. All continuation subwords (`##...`) and special tokens (`[CLS]`, `[SEP]`) are assigned `-100`. Why `-100`? Because PyTorch's `CrossEntropyLoss` has an `ignore_index` parameter whose default value is `-100`: any position carrying `-100` is excluded from $\mathcal{M}$ and contributes zero to the loss and gradients.
+
+Why not copy the word's label onto all of its subwords?
+
+- **Copying `B-ORG` verbatim** onto all 5 pieces of `"Vietcombank"` means every piece starts a new entity at decoding time, turning one company name into five separate entities.
+- **Copying and converting continuation pieces to `I-ORG`** produces valid BIO sequences, but a 5-piece word now contributes 5 terms to the loss while `"for"` contributes only 1. Rare proper nouns—the exact words NER cares about most—get chopped into the most pieces, skewing the training loss relative to word-level evaluation.
+- **Evaluation is word-level.** We need exactly one tag prediction per word, and the first subword is the natural place to read it.
+
+Keep one consequence in mind: if a model was trained with `-100` on continuation pieces, its predictions on `##` subwords **were never supervised during training**. At inference time, read the tag from the first subword of each word.
+
+:::note[Key takeaway]
+NER assigns a BIO tag to each word. BERT does this with a shared linear layer on top of each token's contextual vector. Place each word's label on its first subword, and set continuation subwords and special tokens to `-100` so the cross-entropy loss ignores them.
+:::
+
+### Entity-level evaluation
+
+A predicted entity counts as correct only on an **exact match** with a gold entity: identical start word, identical end word, and identical entity type. This is the official scoring rule of CoNLL-2003 and `seqeval`. Let $N_{\text{pred}}$ be the number of predicted entities, $N_{\text{gold}}$ the number of gold entities, and $N_{\text{ok}}$ the number of exact matches:
+
+$$
+P = \frac{N_{\text{ok}}}{N_{\text{pred}}}, \qquad
+R = \frac{N_{\text{ok}}}{N_{\text{gold}}}, \qquad
+F_1 = \frac{2PR}{P + R}
+$$
+
+**Precision** $P$ asks: among the entities the model predicted, what fraction is completely right? **Recall** $R$ asks: among the true entities in the text, what fraction did the model find? $F_1$ is their harmonic mean. Substituting $P$ and $R$ and canceling $N_{\text{ok}}$ gives a handy shortcut formula:
+
+$$
+F_1 = \frac{2 \cdot \frac{N_{\text{ok}}}{N_{\text{pred}}} \cdot \frac{N_{\text{ok}}}{N_{\text{gold}}}}{\frac{N_{\text{ok}}}{N_{\text{pred}}} + \frac{N_{\text{ok}}}{N_{\text{gold}}}}
+= \frac{2 N_{\text{ok}}}{N_{\text{pred}} + N_{\text{gold}}}
+$$
+
+(Multiply numerator and denominator by $N_{\text{pred}} N_{\text{gold}} / N_{\text{ok}}$: the numerator becomes $2 N_{\text{ok}}$ and the denominator becomes $N_{\text{gold}} + N_{\text{pred}}$.)
+
+Exact-match scoring is unforgiving. If the model predicts `"Văn An"` instead of `"Nguyễn Văn An"`, it is penalized **twice**: once as a false-positive prediction (hurting $P$) and once as a missed gold entity (hurting $R$). At the token level, that same mistake is only 1 or 2 wrong tags out of 14. Worse still, most tokens in running text are `O`, so a dummy model that predicts `O` everywhere achieves high token accuracy while finding zero entities. Our first code cell computes both metrics side by side.
+
+### Challenges in Vietnamese
+
+- **Syllables vs. words.** Written Vietnamese puts spaces between syllables: `"Hà Nội"` is two syllables forming one word. Many Vietnamese datasets and models (such as PhoBERT by Nguyen and Nguyen, 2020) operate on **word-segmented** text where `"Hà_Nội"` is joined by an underscore. Any segmentation error cascades directly into an entity boundary error. For simplicity, the examples in this lesson tag at the syllable level.
+- **Capitalization is less reliable.** Vietnamese capitalizes the first syllable of a sentence, honorifics and titles (`"Ông"`, `"Chủ tịch"`), and many non-entities. Conversely, social media text often omits both capitalization and diacritics (`"di ha noi voi lan"`), causing models trained on formal news text to drop sharply in recall.
+- **Ambiguity with common words**, as seen in the Intuition section (`"Mai"`, `"An"`), which becomes even harder when diacritics are stripped.
+
+### Limitations
+
+- **Nested entities.** `"Đại học Quốc gia Hà Nội"` ("Vietnam National University, Hanoi") is an `ORG` containing a `LOC` (`"Hà Nội"`). Flat BIO tagging can only represent one layer, so CoNLL-style corpora annotate only the outermost span.
+- **Domain shift.** A model trained on Reuters news does not know drug names or electronic part numbers. Moving to a new domain requires new labeled data; see the third caution box under Common pitfalls.
+- **Recognition is not linking.** NER spots the string `"Vietcombank"`, but does not link it to a unique identifier in a knowledge base. Resolving mentions to canonical entities is a separate task called **entity linking**.
+
+## Illustration
+
+The table below shows the first sentence from our code cell, comparing the gold BIO tags against a hypothetical model prediction. Look at `"Nguyễn"` and `"Văn"`: the predicted span starts just one syllable too late.
+
+| Word | Gold tag | Predicted tag | Match? |
+|---|---|---|---|
+| Ông | O | O | ✓ |
+| Nguyễn | **B-PER** | **O** | ✗ |
+| Văn | **I-PER** | **B-PER** | ✗ |
+| An | I-PER | I-PER | ✓ |
+| đến | O | O | ✓ |
+| Hà | B-LOC | B-LOC | ✓ |
+| Nội | I-LOC | I-LOC | ✓ |
+| làm | O | O | ✓ |
+| việc | O | O | ✓ |
+| cho | O | O | ✓ |
+| Vietcombank | B-ORG | B-ORG | ✓ |
+| từ | O | O | ✓ |
+| tháng | O | O | ✓ |
+| 3/2024 | O | O | ✓ |
+
+At the token level, 12 out of 14 tags match ($\approx 0.86$ accuracy). At the entity level, the gold tags decode to three entities: `PER` `"Nguyễn Văn An"`, `LOC` `"Hà Nội"`, and `ORG` `"Vietcombank"`. The predicted tags decode to `PER` `"Văn An"`, `LOC` `"Hà Nội"`, and `ORG` `"Vietcombank"`. Because `"Văn An"` does not exactly match `"Nguyễn Văn An"`, only 2 of the 3 gold entities are found, and the person named Nguyễn Văn An is counted as **completely missed**.
+
+The fourth sentence in the code cell shows why the `B-` prefix is essential when two same-type entities touch. Here the hypothetical model forgets to use `B-LOC` on `"Thái"`:
+
+| Word | Trận | Việt | Nam | Thái | Lan | … | Mỹ | Đình |
+|---|---|---|---|---|---|---|---|---|
+| Gold tag | O | B-LOC | I-LOC | **B-LOC** | I-LOC | … | B-LOC | I-LOC |
+| Predicted tag | O | B-LOC | I-LOC | **I-LOC** | I-LOC | … | O | O |
+
+Changing a single tag on `"Thái"` merges the two countries into one four-syllable entity `"Việt Nam Thái Lan"`. Both gold entities (`"Việt Nam"` and `"Thái Lan"`) count as missed, and `"Việt Nam Thái Lan"` counts as a false positive.
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the BIO evaluation cell on Python 3.14 in Pyodide (pure Python), and the BERT cell on Python 3.14, `transformers` 5.22, and PyTorch 2.14 on CPU. The first cell runs directly in your browser and is independent of the second cell, which runs on your machine.
+
+The first cell implements BIO span decoding following the `conlleval` convention from the Theory section and evaluates four Vietnamese sentences. Each entity is represented as a tuple `(type, start, end)` with an exclusive `end` index, just like Python slices. That makes exact-match evaluation a single set intersection: `G & P`.
+
+<PythonRunner code={bioEvalCode} title="BIO decoding, entity-level F1, and token-level accuracy" />
+
+Reading the output:
+
+- **Sentence 1** (boundary error): prints `missed: PER Nguyễn Văn An` and `wrong: PER Văn An`, matching our walkthrough in the Illustration section.
+- **Sentence 2** (boundary and type error): the model tags `"Hà Nội"` as a location, missing the enclosing organization `"Bia Hà Nội"`—the exact context trap that trips up a gazetteer.
+- **Sentence 3** (orphan `I-`): the prediction starts with `I-ORG` right after `O`. Under the `conlleval` rule it still opens an `ORG` span, but yields `"hàng Ngoại thương"` (missing `"Ngân"`), so it is still wrong.
+- **Sentence 4** (missing `B-`): all three gold entities are missed (the two adjacent country names merge into `"Việt Nam Thái Lan"`, and `"Mỹ Đình"` is missed entirely).
+
+Across all four sentences there are 11 gold entities, 9 predicted entities, and 5 exact matches. Thus $P = 5/9 \approx 0.556$, $R = 5/11 \approx 0.455$, and $F_1 = 2 \cdot 5 / (9 + 11) = 0.500$, matching the `entity` line. Meanwhile, token-level accuracy is $34/43 \approx 0.791$: it sounds as if the model is nearly 80% accurate, even though it misses more than half the entities. The final line shows a dummy model that predicts `O` for every token: it still gets `0.488` token accuracy while finding zero entities. These four toy sentences are packed with names; in typical news or web text where `O` tokens make up 85–90% of the corpus, the gap between token accuracy and entity F1 is even wider.
+
+Try editing the first sentence's predicted tags in the cell so they match the gold tags and re-run: the `missed` and `wrong` lines for sentence 1 disappear, and `correct` climbs to 6.
+
+The second cell runs a pretrained BERT NER checkpoint: [`dslim/bert-base-NER`](https://huggingface.co/dslim/bert-base-NER). Per its model card, this is `bert-base-cased` (Devlin et al., 2019) fine-tuned on English CoNLL-2003 (`PER`, `LOC`, `ORG`, `MISC`). The script first prints raw subword-level predictions, then compares two subword aggregation strategies.
+
+<LocalCode
+  code={nerPipelineCode}
+  title="BERT NER pipeline: per-subword tags vs. entity aggregation"
+  packages={['transformers', 'torch']}
+  hardware="CPU is sufficient. The first run downloads about 433 MB of weights; subsequent runs take roughly a minute on a development laptop, mostly spent loading libraries and weights"
+  sampleVaries={false}
+>
+
+```text
+B-PER  1.000 Sun
+I-PER  0.581 ##dar
+I-PER  1.000 Pi
+I-PER  0.997 ##cha
+I-PER  0.595 ##i
+B-PER  0.999 Ng
+I-PER  0.973 ##uy
+B-PER  0.991 ##en
+I-PER  0.999 T
+I-PER  0.957 ##hi
+I-PER  0.990 La
+--- simple
+PER  0.834 [ 0, 13) Sundar Pichai
+PER  0.986 [18, 22) Nguy
+PER  0.977 [22, 32) en Thi Lan
+ORG  0.978 [40, 51) Vietcombank
+LOC  0.999 [62, 67) Hanoi
+LOC  1.000 [85, 91) Berlin
+--- first
+PER  1.000 [ 0, 13) Sundar Pichai
+PER  0.996 [18, 32) Nguyen Thi Lan
+ORG  0.993 [40, 51) Vietcombank
+LOC  0.999 [62, 67) Hanoi
+LOC  1.000 [85, 91) Berlin
+```
+
+</LocalCode>
+
+Alongside the lines above, `transformers` prints a brief weight-loading report noting that two `bert.pooler` parameters are `UNEXPECTED`. Because the pooler is used for sequence classification rather than token classification, that notice is benign.
+
+Reading the output:
+
+- **Unaggregated subwords** (`aggregation_strategy="none"`) returns every non-`O` subword token (the script prints the first 11). Notice how `"Nguyen"` is split into `Ng ##uy ##en`, and the final piece `##en` is assigned `B-PER`—a nonsensical `B-` tag in the middle of a single word. Because the checkpoint was trained with the first-subword `-100` recipe from the BERT paper, its predictions on `##` continuation pieces were never supervised; the model card explicitly notes that subword pieces can receive erratic entity tags.
+- **`simple` aggregation** groups consecutive tokens strictly by **each subword's predicted tag**. Because `##en` has `B-PER`, it opens a brand-new entity mid-word, splitting one person into two broken spans: `"Nguy"` and `"en Thi Lan"`. Under entity-level F1, that single subword glitch costs two errors.
+- **`first` aggregation** uses the tag predicted on the **first subword** of each word, matching how the model was trained. Now `"Nguyen Thi Lan"` is recovered cleanly as a single `PER` entity. All other entities keep the same boundaries and types, with slightly cleaner confidence scores.
+- The bracketed numbers `[start, end)` are character offsets into the original `text` string (`text[18:32]` is `"Nguyen Thi Lan"`), and the score is the mean softmax probability across the tokens (or words) forming the entity.
+
+Inference is deterministic, so re-running on the same setup gives the exact same output. Try replacing `text` with a Vietnamese sentence containing diacritics: because this checkpoint was trained on English news, it will miss most entities—see the third caution box below.
+
+## Common pitfalls
+
+:::caution[Reporting token accuracy instead of entity-level F1]
+Most tokens in natural text are `O`, and a boundary error only flips one or two tokens. In our first code cell, token accuracy is 0.791 while entity F1 is only 0.500, and predicting `O` everywhere still scores 0.488 accuracy. Always evaluate NER with exact-match entity-level precision, recall, and F1 using `seqeval` or `conlleval`, and state whether orphan `I-` tags use default (`conlleval`) or strict mode.
+:::
+
+:::caution[Reading predictions on every subword or using `simple` aggregation]
+When a model is trained with `-100` on continuation subwords, the tags it emits on `##` pieces are unsupervised noise. Our BERT example showed `##en` receiving `B-PER`, causing `simple` aggregation to slice `"Nguyen Thi Lan"` in half. In Hugging Face pipelines, pass `aggregation_strategy="first"` (or align predictions yourself using `word_ids()` from the fast tokenizer). Always match your inference aggregation rule to how subword labels were aligned during training.
+:::
+
+:::caution[Using an English or formal-news NER model on Vietnamese or noisy social text]
+`dslim/bert-base-NER` was trained on English Reuters news: it does not know Vietnamese honorifics like `"Ông"` or `"Chị"`, and its English WordPiece vocabulary shatters accented Vietnamese words into tiny pieces. Even a Vietnamese NER model trained on formal newswire will degrade sharply on lowercase, unaccented chat messages. Pick a backbone and training set that match your target language and domain (such as VLSP benchmarks for Vietnamese), and measure entity F1 on a small hand-labeled sample from your own traffic before deploying.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- NER locates phrases naming people, places, organizations, and more with exact boundaries and types. It is formulated as sequence labeling: one tag per word. Gazetteers alone fail because entity types depend on context and names collide with common words.
+- BIO tagging uses `B-X`, `I-X`, and `O` ($2K + 1$ tags); the `B-` prefix separates adjacent entities of the same type. Decoding requires choosing a convention for orphan `I-` tags.
+- Linear-chain CRFs score the entire tag sequence using emission scores plus a transition matrix, preventing illegal tag transitions; BiLSTM-CRF replaces manual features with a bidirectional recurrent encoder. BERT needs only a linear layer on top of each token vector, placing each word's label on its first subword and `-100` on continuation pieces.
+- Evaluate NER with exact-match entity-level F1, $F_1 = 2 N_{\text{ok}} / (N_{\text{pred}} + N_{\text{gold}})$. Token-level accuracy is inflated by the overwhelming majority of `O` tokens.
+
+**Further reading:**
+
+- Nguyễn Thị Minh Huyền, Ngô Thế Quyền, Vũ Xuân Lương, Trần Mai Vũ, Nguyễn Thị Thu Hiền (2018). [*VLSP Shared Task: Named Entity Recognition*](https://vjs.ac.vn/jcc/article/view/13161), *Journal of Computer Science and Cybernetics* 34(4), pp. 283–294. Describes the datasets, annotation guidelines, and system results for the VLSP 2016 and 2018 Vietnamese NER shared tasks.
+- Jurafsky, D., Martin, J. H. (2026 draft). [*Speech and Language Processing*](https://web.stanford.edu/~jurafsky/slp3/), 3rd edition, Chapter 18 "Sequence Labeling for Parts of Speech and Named Entities". Covers sequence labeling, BIO tagging, CRFs, Viterbi decoding, and NER evaluation.
+- Tjong Kim Sang, E. F., De Meulder, F. (2003). [*Introduction to the CoNLL-2003 Shared Task: Language-Independent Named Entity Recognition*](https://aclanthology.org/W03-0419/), CoNLL 2003, Sections 2 and 4. Introduces the standard benchmark, IOB1 tagging, and exact-match entity evaluation.
+- Lafferty, J., McCallum, A., Pereira, F. (2001). [*Conditional Random Fields: Probabilistic Models for Segmenting and Labeling Sequence Data*](https://repository.upenn.edu/cis_papers/159), ICML 2001. The original CRF paper; the emission-plus-transition decomposition in this lesson is the standard neural specialization of their general feature-function formulation.
+- Lample, G., et al. (2016). [*Neural Architectures for Named Entity Recognition*](https://aclanthology.org/N16-1030/), NAACL 2016, Section 2. BiLSTM-CRF with character embeddings, explaining why transition scores matter and comparing BIO against BIOES.
+- Devlin, J., et al. (2019). [*BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding*](https://aclanthology.org/N19-1423/), NAACL 2019, Section 5.3. Fine-tuning BERT on CoNLL-2003 using the first-subword classifier without a CRF.
+- Hugging Face. [*Token classification*](https://huggingface.co/docs/transformers/tasks/token_classification), `transformers` documentation. Step-by-step guide to fine-tuning NER models, aligning subword labels with `word_ids()` and `-100`, and evaluating with `seqeval`.
+
+<LessonProgress />

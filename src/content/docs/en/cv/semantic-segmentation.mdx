@@ -1,0 +1,347 @@
+---
+title: 'Semantic Segmentation: FCN, UNet, FPN, DeepLab, HRNet'
+description: A self-driving car must know whether each pixel is road, person, or car. Per-pixel classification, cross-entropy, IoU, mIoU, and FCN, UNet, FPN, DeepLab, HRNet.
+quiz:
+  - question: 'A street scene has 4 classes: road (60% of pixels), sky (25%), building (13%), and pedestrian (2%). A model predicts every pixel correctly except pedestrian pixels, which it assigns entirely to the road class. Which statement is true?'
+    options:
+      - 'Pixel accuracy is 0.98, so the model is good enough for a self-driving car'
+      - 'Pixel accuracy is 0.98, but the pedestrian IoU is 0, so mIoU cannot exceed 0.75'
+      - 'mIoU is also around 0.98, because only 2% of pixels are wrong'
+      - 'The road class still has IoU equal to 1, because every true road pixel is predicted correctly'
+    answer: 1
+    explanation: 'mIoU averages the IoU of all 4 classes with equal weight. The pedestrian class has IoU = 0 and the other three classes have IoU at most 1, so mIoU is at most $3/4 = 0.75$. Even the road IoU is below 1: its denominator is the union, which includes the 2% of pedestrian pixels falsely predicted as road, giving $0.60/0.62 \approx 0.97$. Pixel accuracy masks this failure because the pedestrian class is tiny.'
+  - question: 'A $3 \times 3$ convolution has dilation rate $r = 4$. What spatial region does this kernel span on the input feature map, and how many weights does it have (1 input channel, 1 output channel, ignoring bias)?'
+    options:
+      - 'Spans $3 \times 3$, 9 weights, because the dilation rate only changes the stride'
+      - 'Spans $12 \times 12$, 144 weights'
+      - 'Spans $9 \times 9$, still 9 weights'
+      - 'Spans $9 \times 9$, 81 weights'
+    answer: 2
+    explanation: 'The effective kernel size is $k + (k-1)(r-1) = 3 + 2 \cdot 3 = 9$: between any two adjacent weights there are $r - 1 = 3$ skipped cells. The number of weights remains $3 \cdot 3 = 9$, because atrous convolution only spreads out the sampling locations without adding parameters. Dilation rate is not stride: the output keeps its spatial resolution.'
+  - question: 'In the PyTorch UNet example, block `d2` receives the channel concatenation of `u2(m)` (32 channels) and `e2` (32 channels), giving 64 input channels. If you replace channel concatenation with element-wise addition as in FPN, how many input channels must `d2` take?'
+    options:
+      - '32'
+      - '64'
+      - '16'
+      - 'They cannot be added, because the two feature maps have different spatial resolutions'
+    answer: 0
+    explanation: 'Element-wise addition preserves the channel count: adding two 32-channel tensors produces 32 channels, not 64. They can be added because both feature maps have shape $16 \times 16$ with 32 channels. Concatenation keeps the two sources separate so the next layer can learn how to mix them, at the cost of doubling the input channels.'
+  - question: 'You resize an image and its integer label mask (0 = background, 1 = car, 2 = person) from $512 \times 512$ down to $256 \times 256$ before training. Which interpolation method is right for the mask?'
+    options:
+      - 'Bilinear interpolation, because it produces the smoothest result'
+      - 'Bilinear interpolation followed by rounding to the nearest integer'
+      - 'Averaging each $2 \times 2$ block'
+      - 'Nearest-neighbor interpolation, so every pixel keeps an actual class ID'
+    answer: 3
+    explanation: 'Class labels are discrete IDs, not brightness values. Interpolating or averaging along a boundary between background (0) and person (2) yields 1—meaning "car", a class that is not even present there—and rounding cannot undo that mistake. Images can be resized with bilinear interpolation, but label masks must use nearest-neighbor. Note that this is different from bilinearly upsampling $K$-channel logit maps before taking argmax, as the NumPy code cell does.'
+  - question: 'Your upsampling layer is a transposed convolution with kernel size 3 and stride 2. The output shows a faint checkerboard pattern. Which fix addresses the root cause?'
+    options:
+      - 'Increase the learning rate so the network learns to erase the pattern faster'
+      - 'Upsample by 2x with bilinear (or nearest-neighbor) interpolation, followed by a standard $3 \times 3$ convolution'
+      - 'Stack a second transposed convolution with kernel size 3 and stride 2'
+      - 'Change the stride to 3 so the kernel size and stride are equal'
+    answer: 1
+    explanation: 'Because kernel size 3 is not divisible by stride 2, some output pixels sum contributions from two input cells while adjacent pixels receive input from only one: uneven overlap creates a checkerboard pattern. Interpolating first and then applying a regular convolution treats every pixel uniformly. Stacking another mismatched layer makes the artifact worse, and stride 3 upsamples by 3x rather than 2x.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import metricsCode from '@code/cv/semantic-segmentation/metrics.en.py?raw';
+import unetCode from '@code/cv/semantic-segmentation/tiny-unet.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Formulate **semantic segmentation**: assigning a class label to every pixel, producing an $H \times W \times K$ output trained with **per-pixel cross-entropy**.
+- Compute per-class **IoU** (intersection over union), **mIoU**, and **pixel accuracy**, and explain why pixel accuracy is misleading under class imbalance.
+- Explain how five classic families—FCN, UNet, FPN, DeepLab, and HRNet—resolve the tension between "what" (semantics) and "where" (location), and compute the receptive field of a **dilated convolution**.
+- Distinguish bilinear upsampling from **transposed convolution**, and diagnose checkerboard artifacts.
+
+## Prerequisites
+
+{/* List populated from prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+[Image Classification with CNNs](/en/cv/cnn-image-classification/) showed how stacking convolutions and pooling shrinks spatial resolution while increasing channel depth, reducing a $224 \times 224$ image to a $7 \times 7$ grid in the final stage. Recall that the spatial output size of a convolutional layer is $\lfloor (H + 2p - k)/s \rfloor + 1$ for kernel size $k$, padding $p$, and stride $s$.
+:::
+
+## Intuition
+
+### From "what is in this image" to "what is this pixel"
+
+An image classifier looks at a street photo and says: "car." For a self-driving car, that answer is useless. The vehicle needs to know **where the car is, how far the drivable road extends, and which exact pixels mark the curb**. A radiologist reading a CT scan faces the same need: knowing "there is a tumor" is not enough; measuring its volume requires tracing its exact boundary.
+
+Semantic segmentation answers that question for **every single pixel**: this pixel is road, that pixel is pedestrian, the one above is sky. The output is a color-coded map of the exact same height and width as the input image. Note that two pedestrians standing side by side are painted with the exact same "person" color: semantic segmentation does not separate individual instances of the same class. Telling individual objects apart is the job of [Instance and Universal Segmentation](/en/cv/instance-universal-segmentation/).
+
+### The tension between "what" and "where"
+
+Suppose you take a classification CNN and strip off its final linear layer. You immediately hit two opposing problems:
+
+- **Deep layers are spatially coarse.** After five 2x downsampling stages, the feature grid is $1/32$ the size of the image. Each cell on a $7 \times 7$ grid corresponds to a $32 \times 32$ pixel patch: it knows "there is a cat here," but has lost where the cat's ear ends and the background begins.
+- **Shallow layers are semantically blind.** Feature maps in the first few layers preserve crisp edges and exact pixel coordinates, but their small receptive fields only see local edges and color blobs—not enough context to tell a cat from a dog.
+
+Think of two maps: a world atlas tells you which country you are in, but cannot show you a back alley. A neighborhood street map shows every alley, but without the atlas you have no idea which country the neighborhood belongs to. A good navigator uses **both**.
+
+All five architectures in this lesson are five distinct ways to fuse those two sources of information. Our central question is: **how do we build a network that takes an $H \times W$ image and predicts a class for every pixel—simultaneously accurate in meaning and crisp along boundaries—and how do we evaluate it fairly even on tiny classes?**
+
+## Theory
+
+### Problem formulation
+
+An input image is $\mathbf{X} \in \mathbb{R}^{H \times W \times C}$ as before, and there are $K$ classes (including background). The ground truth is an integer **mask** $\mathbf{M}$ of size $H \times W$, where each entry $M_{ij} \in \{0, 1, \dots, K-1\}$ is the true class of the pixel at row $i$, column $j$.
+
+The network outputs a 3D tensor of scores $\mathbf{S} \in \mathbb{R}^{H \times W \times K}$: every pixel gets $K$ logits, one per class. Applying softmax **independently at each pixel** along the channel axis converts those $K$ logits into class probabilities:
+
+$$
+p_{ijk} = \frac{e^{S_{ijk}}}{\sum_{c=0}^{K-1} e^{S_{ijc}}}
+$$
+
+The predicted class at pixel $(i, j)$ is the class with the highest probability: $\hat{y}_{ij} = \arg\max_k p_{ijk}$.
+
+Compared to whole-image classification, only one thing has changed: instead of **one** $K$-dimensional logit vector for the entire image, we produce $H \cdot W$ such vectors. Every pixel is its own miniature classification problem.
+
+### Loss function: per-pixel cross-entropy
+
+Because every pixel is a classification problem, we compute the cross-entropy loss at each pixel and average over the entire image:
+
+$$
+\mathcal{L} = -\frac{1}{HW} \sum_{i=1}^{H} \sum_{j=1}^{W} \ln p_{i j M_{ij}}
+$$
+
+Reading from the inside out: $p_{ijM_{ij}}$ is the probability the network assigns to the **true class** $M_{ij}$ at pixel $(i, j)$. Taking $-\ln$ yields a loss near 0 when that probability is close to 1, and a huge penalty when it is close to 0. Dividing by $HW$ makes the loss scale-invariant with respect to image resolution. On a mini-batch of images, PyTorch's `F.cross_entropy` averages over all pixels of all images in the batch (the original FCN paper summed instead of averaging, which differs only by a constant factor).
+
+This formula has an immediate consequence: **classes with many pixels dominate the sum**. If 80% of an image is background, a network can drive the loss down dramatically just by getting background pixels right. UNet addresses this by multiplying each pixel's loss by a spatial weight $w_{ij}$ that is much larger on rare classes and along the thin border separating touching cells.
+
+### Evaluation metrics: pixel accuracy, IoU, and mIoU
+
+The simplest metric is **pixel accuracy**: the fraction of pixels predicted correctly.
+
+$$
+\text{acc} = \frac{\text{number of pixels with } \hat{y}_{ij} = M_{ij}}{HW}
+$$
+
+It suffers from the exact same flaw as unweighted pixel loss. In the NumPy code cell below, a $64 \times 64$ synthetic image has 3,323 background pixels, 709 circle pixels, and just 64 pixels belonging to a small square. A model that **completely misses the square** still achieves a pixel accuracy of $4,032 / 4,096 \approx 0.984$.
+
+**IoU** fixes this by evaluating **each class separately**. Let $A_k$ be the set of pixels predicted as class $k$, and $B_k$ be the set of pixels whose true class is $k$:
+
+$$
+\text{IoU}_k = \frac{|A_k \cap B_k|}{|A_k \cup B_k|} = \frac{\text{TP}_k}{\text{TP}_k + \text{FP}_k + \text{FN}_k}
+$$
+
+The numerator is the intersection: pixels rightly predicted as $k$ (true positives, TP). The denominator is the union, which decomposes into three disjoint sets: true positives ($\text{TP}_k$), pixels falsely predicted as $k$ (false positives, $\text{FP}_k$), and true class-$k$ pixels missed by the model (false negatives, $\text{FN}_k$). IoU equals 1 when the predicted and true regions match perfectly, and 0 when they do not overlap at all. It penalizes **both** over-prediction and under-prediction.
+
+For the model that misses the small square: the square class has $\text{TP} = 0$, so $\text{IoU} = 0$. The background class has $\text{TP} = 3,323$, and the 64 square pixels misclassified as background count as false positives for background, giving $\text{IoU}_\text{bg} = 3,323 / 3,387 \approx 0.981$.
+
+**mIoU** (mean IoU) is the unweighted average of $\text{IoU}_k$ across all $K$ classes, giving **every class equal weight** regardless of how many pixels it occupies:
+
+$$
+\text{mIoU} = \frac{1}{K} \sum_{k=0}^{K-1} \text{IoU}_k
+$$
+
+Now the model that missed the square gets $\text{mIoU} = (0.981 + 1 + 0)/3 \approx 0.660$—a sharp drop from 0.984. That is why mIoU is the primary benchmark metric in semantic segmentation (FCN calls it "mean IU"). Across a multi-image test set, the standard protocol is to **accumulate** total TP, FP, and FN over all test images before dividing, as our PyTorch code cell does.
+
+:::note[Key takeaway]
+Every pixel is a classification problem: $K$ logits, per-pixel softmax, and cross-entropy averaged over all pixels. Always evaluate with per-class IoU and mIoU rather than pixel accuracy alone, because tiny classes barely move pixel accuracy even when completely missed.
+:::
+
+### FCN: turning a classifier into a fully convolutional network
+
+FCN (Long, Shelhamer, and Darrell, 2015) launched modern deep semantic segmentation with three ideas:
+
+**Idea 1: replace fully connected layers with convolutions.** A fully connected layer that takes a $7 \times 7 \times 512$ feature map is mathematically identical to a convolutional layer whose kernel size is $7 \times 7$. Rewritten as a convolution, the network no longer requires a fixed input image size. Feed in a larger image, and instead of a single logit vector you get a spatial **grid** of logit vectors—one prediction per region. Because every layer is now convolutional, the architecture is called a **fully convolutional network**. Finally, a $1 \times 1$ convolution projects the channel dimension to $K$ classes (21 for PASCAL VOC: 20 object classes plus background).
+
+**Idea 2: in-network upsampling.** Because a VGG-16 backbone shrinks spatial dimensions by a factor of 32 along each side—a ratio called the **output stride**—its coarse score grid must be upsampled 32x back to the original resolution. FCN uses a transposed convolution initialized to bilinear interpolation (explained next). This baseline is called FCN-32s, and its predicted object boundaries are noticeably blobby.
+
+**Idea 3: skip connections from shallower pools.** FCN-16s takes the feature map from `pool4` (output stride 16), passes it through a $1 \times 1$ convolution to get $K$ score channels, and **adds** it element-wise to the 2x-upsampled scores from the final layer before upsampling the sum by 16x. FCN-8s repeats the trick one stage earlier with `pool3` (output stride 8). Deep layers supply "what," while shallow layers refine "where."
+
+### Upsampling: bilinear interpolation and transposed convolution
+
+There are three standard ways to enlarge a coarse $h \times w$ feature grid to $sh \times sw$:
+
+- **Nearest-neighbor interpolation:** each coarse cell is simply copied into an $s \times s$ block. Fast, but produces blocky, stair-stepped boundaries.
+- **Bilinear interpolation:** each new pixel is a weighted average of the 4 nearest coarse cells, with weights proportional to proximity—interpolating linearly along rows first and then along columns. Boundaries are much smoother, and there are zero learnable parameters.
+- **Transposed convolution** (sometimes called "deconvolution"): each input value multiplies a **learnable** $k \times k$ kernel and "stamps" that weighted kernel onto the output grid at intervals of $s$ pixels, summing wherever stamps overlap. In PyTorch (with `output_padding=0`), the output size is $(h - 1)s - 2p + k$. Choosing $k = s = 2$ and $p = 0$ gives $(h-1) \cdot 2 + 2 = 2h$—an exact 2x upsampling with non-overlapping stamps, as used in UNet and our PyTorch script.
+
+Transposed convolution has a well-known pitfall analyzed by Odena, Dumoulin, and Olah (2016): **checkerboard artifacts**. When the kernel size $k$ is not divisible by the stride $s$ (for example, $k = 3, s = 2$), adjacent stamps overlap **unevenly**: along each axis, every other output pixel sums contributions from two input cells while its neighbors receive input from only one. In 2D this uneven overlap forms a checkerboard grid, and stacking multiple such layers amplifies the pattern. Their recommended fix: **upsample first** using deterministic interpolation (nearest-neighbor or bilinear), then apply a standard $3 \times 3$ convolution. Choosing $k$ divisible by $s$ helps, though learned weights can still drift into uneven patterns.
+
+### UNet: a symmetric U-shaped encoder-decoder
+
+UNet (Ronneberger, Fischer, and Brox, 2015) was designed for biomedical microscopy, where training sets often contain only a few dozen labeled images and boundaries between touching cells are just a couple of pixels wide. Its architecture has two symmetric halves:
+
+- **Contracting path (encoder):** repeatedly applies "two $3 \times 3$ convolutions + ReLU, followed by $2 \times 2$ max pooling." Every time spatial resolution is halved, the number of channels doubles: 64, 128, 256, 512, 1024.
+- **Expansive path (decoder):** repeatedly applies "2x upsampling via $2 \times 2$ transposed convolution (halving the channels), **channel concatenation** with the matching feature map from the contracting path, and two $3 \times 3$ convolutions." A final $1 \times 1$ convolution maps the features to $K$ class logits.
+
+Two design choices distinguish UNet from FCN: **symmetry** and **concatenation**. FCN has a paper-thin decoder that only sums $K$-channel score maps. UNet has a full multi-layer decoder whose channel capacity mirrors the encoder, and at every scale it **concatenates** the full multi-channel feature maps from the encoder rather than collapsing them to $K$ channels first. These **skip connections** shuttle fine spatial details straight across the U from encoder to decoder, bypassing the $8 \times 8$ bottleneck at the bottom.
+
+The original UNet paper used **unpadded** convolutions, shrinking the feature map by 2 pixels at every layer (a $572 \times 572$ input produced a $388 \times 388$ output mask, requiring encoder features to be center-cropped before concatenation). Modern implementations almost universally use `padding=1` so spatial dimensions match cleanly at every level, just like our PyTorch code cell.
+
+### FPN: feature pyramid networks
+
+FPN (Lin et al., 2017) was originally created for object detection across multiple scales, and consists of three pathways:
+
+1. **Bottom-up pathway:** a standard CNN backbone producing feature maps at output strides 4, 8, 16, and 32.
+2. **Top-down pathway:** starting from the coarsest, deepest map, progressively upsamples features by 2x using nearest-neighbor interpolation.
+3. **Lateral connections:** the backbone map at the matching resolution passes through a $1 \times 1$ convolution to set its channel count to a fixed $d = 256$, and is **added** element-wise to the upsampled map. A $3 \times 3$ convolution then smooths the sum to reduce aliasing from upsampling.
+
+The result is a **feature pyramid** in which every level has both high semantic richness and its own spatial resolution. Panoptic FPN (Kirillov et al., 2019) attaches a lightweight semantic segmentation head on top of this pyramid. Compared to UNet, FPN uses **element-wise addition** with a fixed 256-channel width, making it much lighter in memory and compute than concatenating 512+ channels.
+
+### DeepLab: downsample less, dilate the kernel instead
+
+The DeepLab family (Chen et al.) takes a fundamentally different route: instead of downsampling by 32x and trying to recover lost detail later, **stop downsampling so aggressively in the first place**. Removing the stride from the last one or two stages keeps the backbone at output stride 16 or 8. However, removing stride means subsequent $3 \times 3$ kernels cover a smaller physical region of the image. How can a $3 \times 3$ kernel keep a wide receptive field without adding parameters or pooling?
+
+**Dilated convolution** (also called **atrous convolution**, from the French *à trous* meaning "with holes") is the answer. Written in 1D for clarity, following DeepLabv3 (2017):
+
+$$
+y[i] = \sum_{t} x[i + r \cdot t]\, w[t]
+$$
+
+Here $w[t]$ is the $t$-th kernel weight, and the **dilation rate** $r$ is the stride between sampled input locations. Setting $r = 1$ recovers a standard convolution; setting $r = 2$ inserts one skipped cell between adjacent weights.
+
+**Effective kernel size.** A kernel of size $k$ has $k - 1$ gaps between adjacent weights, and each gap skips $r - 1$ cells. The total span covered by the kernel is therefore:
+
+$$
+k_\text{eff} = k + (k - 1)(r - 1)
+$$
+
+For $k = 3$: $r = 2$ gives $k_\text{eff} = 5$, $r = 6$ gives 13, and $r = 18$ gives 37—all while keeping just $3 \times 3 = 9$ learnable weights.
+
+**Cumulative receptive field.** For stacked stride-1 layers, each layer $\ell$ expands the receptive field by $k_{\text{eff},\ell} - 1$ pixels along each dimension. Starting from 1 pixel:
+
+$$
+R = 1 + \sum_{\ell} (k_{\text{eff},\ell} - 1)
+$$
+
+Three standard $3 \times 3$ layers give $R = 1 + 2 + 2 + 2 = 7$. Three $3 \times 3$ layers with dilation rates $r = 1, 2, 4$ give $R = 1 + 2 + 4 + 8 = 15$ with the exact same number of parameters. The receptive field grows exponentially rather than linearly, without losing spatial resolution.
+
+**ASPP.** Because objects appear at many scales, a single dilation rate is not enough. **ASPP** (Atrous Spatial Pyramid Pooling) runs multiple branches **in parallel** on the top feature map and concatenates their outputs. In DeepLabv3 at output stride 16, ASPP combines one $1 \times 1$ convolution, three $3 \times 3$ convolutions with dilation rates 6, 12, and 18, and an **image-level feature** branch (global average pooling followed by a $1 \times 1$ conv and bilinear upsampling). The global branch has a specific motivation: when the dilation rate approaches the size of the feature map, the 8 outer weights of a $3 \times 3$ kernel fall into zero-padded borders, degenerating the filter into a $1 \times 1$ convolution; global pooling restores full-image context.
+
+DeepLabv3+ (Chen et al., 2018) adds a lightweight UNet-style decoder on top of DeepLabv3 to sharpen object boundaries, marrying the two paradigms.
+
+### HRNet: never throw away high resolution
+
+Every architecture above follows a "downsample first, recover later" pipeline. HRNet (*High-Resolution Network*, Wang et al., 2020) asks: why lose high-resolution representations in the first place?
+
+HRNet maintains a high-resolution stream (at $1/4$ image resolution) **all the way from input to output**. Each stage adds a new, lower-resolution parallel stream, eventually running four streams side by side at $1/4, 1/8, 1/16$, and $1/32$ resolution with $C, 2C, 4C$, and $8C$ channels. Repeated **multi-scale fusion** modules exchange information across all streams: higher-resolution streams downsample via strided $3 \times 3$ convolutions, lower-resolution streams upsample via bilinear interpolation and $1 \times 1$ convolutions, and each stream sums all incoming signals. For semantic segmentation, HRNetV2 bilinearly upsamples all three lower-resolution streams to $1/4$ resolution and concatenates them with the high-resolution stream.
+
+Returning to our map analogy: UNet studies the world atlas first and then works its way down to the street map; HRNet spreads all four maps out on the table at once and cross-references them continuously.
+
+### Limitations
+
+- **Does not separate touching instances.** Two people standing shoulder to shoulder form a single connected "person" blob. Counting and separating individual instances is covered in [Instance and Universal Segmentation](/en/cv/instance-universal-segmentation/).
+- **CNN-centric architectures.** Transformer-based segmentation models (such as Mask2Former) appear in the next lesson; how Transformers process images is covered in [Image Classification with Transformers](/en/cv/vision-transformer/).
+- **Pixel-level annotations are expensive.** Tracing polygonal masks takes far more human effort than tagging whole images. [Data Augmentation in CV](/en/cv/image-augmentation/) and [Self-Supervised Learning in Vision](/en/cv/self-supervised-learning/) explore how to learn effectively when labeled masks are scarce.
+
+## Illustration
+
+The diagram below shows our miniature two-stage UNet from the PyTorch code cell. Focus on the two dashed horizontal arrows: they carry the $32 \times 32$ and $16 \times 16$ feature maps directly from the contracting path to the expansive path, bypassing the $8 \times 8$ bottleneck at the bottom of the U.
+
+{/* FIG: UnetFigure
+    Idea: the contracting path reduces spatial resolution and doubles channels, while the symmetric expansive path restores resolution; skip connections carry fine spatial details directly across each level.
+    Blocks and arrows: U-shaped layout read from top-left down to the bottom bottleneck and up to top-right. Left: "image 32×32×1" → block e1 (32×32, 16 ch) → max pool → e2 (16×16, 32 ch) → max pool → bottom mid (8×8, 64 ch). Right: mid → upsample (2×2 transposed conv) → concat with e2 → d2 (16×16, 32 ch) → upsample → concat with e1 → d1 (32×32, 16 ch) → 1×1 conv → "mask 32×32, 3 classes". Two dashed horizontal arrows from e1 to d1 and e2 to d2 are the focal point (accent color).
+    Labels: "Input image", "Contracting path", "Expansive path", "Skip connection (concat)", "2×2 max pooling", "2× upsample", "Output mask"; each block labeled with shape, e.g. "16×16, 32 ch".
+    Caption: Each step down halves the spatial side and doubles channels; skip connections concatenate encoder features into the decoder, so block d2 receives $32 + 32 = 64$ input channels. Shapes match the PyTorch code cell. */}
+
+The table below compares all five families around a single question: how does each architecture preserve or recover spatial resolution while combining "what" with "where"?
+
+| Criterion | FCN (2015) | UNet (2015) | FPN (2017) | DeepLab v3/v3+ (2017–2018) | HRNet (2020) |
+|---|---|---|---|---|---|
+| Resolution path | Downsample 32x, upsample in one or three steps | Symmetric step-by-step downsampling and upsampling | Downsample, then top-down pyramid stage by stage | Downsample only 8x or 16x | Keep $1/4$ stream throughout alongside lower streams |
+| Fusing detail & context | Add $K$-channel score maps from `pool3`, `pool4` | Concatenate full encoder feature maps at each scale | $1 \times 1$ conv + element-wise addition ($d = 256$) | Dilated convs & multi-rate ASPP; v3+ adds decoder | Repeated multi-scale cross-stream fusion |
+| Upsampling operator | Transposed conv (bilinearly initialized) | $2 \times 2$ transposed conv | Nearest-neighbor | Bilinear interpolation | Bilinear interpolation |
+| Key strength | Simple; directly reuses classification backbones | Crisp boundaries; works well with few training images | Lightweight multi-scale features shared with detection | Large receptive field & multi-scale context | High-resolution stream stays sharp and semantically rich |
+| Trade-off | Blobby object boundaries | High memory footprint at wide, high-res levels | Needs an extra head for segmentation | Heavy compute at $1/8$ resolution | Multiple parallel branches cost memory and FLOPs |
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the NumPy cell with Python 3.14 and NumPy 2.4 (in Pyodide); the PyTorch script with Python 3.14 and PyTorch 2.15 on CPU. The NumPy cell runs directly in your browser, while the PyTorch script runs on your local machine. The two cells are independent.
+
+### IoU, mIoU, and upsampling in NumPy
+
+The cell below creates a $64 \times 64$ ground-truth mask with three classes: background (0), a circle of radius 15 (1), and a small $8 \times 8$ square (2). The `report` function builds a $K \times K$ **confusion matrix** using `np.bincount`, where entry $(i, j)$ counts pixels of true class $i$ predicted as class $j$. The diagonal gives TP; column sums minus TP give FP; row sums minus TP give FN. We evaluate four synthetic "models":
+
+- `all bg`: predicts background for every pixel.
+- `no square`: predicts everything perfectly except missing the entire square.
+- Simulated networks with output stride $s = 4$ and $s = 8$: averages the one-hot ground-truth mask inside each $s \times s$ cell to form coarse class scores, upsamples those scores back to $64 \times 64$ using nearest-neighbor (`nearest`) or bilinear interpolation (`bilin`), and takes `argmax`.
+
+<PythonRunner code={metricsCode} title="IoU, mIoU, pixel accuracy, and upsampling" />
+
+Reading the output:
+
+- **`all bg`:** achieves 0.811 pixel accuracy simply because background makes up 81% of the image, but mIoU is only 0.270.
+- **`no square`:** pixel accuracy is 0.984, square IoU is 0, and mIoU is 0.660—matching our hand calculation in the Theory section. The worst possible failure on a small object is almost invisible in pixel accuracy.
+- **Output stride 4:** bilinear upsampling reaches 0.925 mIoU versus 0.771 for nearest-neighbor. Nearest-neighbor turns the circle's curved boundary into blocky steps (circle IoU 0.854 vs. 0.972).
+- **Output stride 8:** because the $8 \times 8$ square straddles multiple coarse $8 \times 8$ grid cells, background pixels outnumber square pixels in every single cell. Both upsampling methods get an IoU of 0 on the square, even while pixel accuracy stays high at 0.942 and 0.974. **Information lost in a coarse grid cannot be recovered by any interpolation formula.** That is why FCN, UNet, and FPN inject shallow features via skip connections, and why DeepLab and HRNet keep higher feature resolution.
+
+Notice that this cell interpolates continuous **score maps** for the 3 classes before taking `argmax`, just like FCN. Never bilinearly interpolate integer class IDs directly (see Common pitfalls).
+
+### A tiny UNet in PyTorch
+
+The script below generates 512 training images and 128 test images of size $32 \times 32$ (seed 0). Each noisy grayscale image contains one circle and one square drawn with the **exact same brightness**, forcing the network to segment by shape rather than simple thresholding. The model is the two-level UNet shown in the Illustration section, upsampling via `ConvTranspose2d(..., 2, 2)` (kernel size equals stride, avoiding uneven overlap). The script trains the model twice from the exact same random seed—once with skip connections enabled (`skip=True`), and once with skip connections zeroed out (`skip=False`)—and reports test pixel accuracy, per-class IoU, and mIoU. For CPU PyTorch installation instructions, see [Build Your First LLM](/en/llm/build-first-llm/).
+
+<LocalCode
+  code={unetCode}
+  title="Two-level UNet segmenting circles and squares"
+  packages={['torch', 'numpy']}
+  hardware="CPU is sufficient. Takes 1 to 2 minutes for both training runs on a development machine"
+>
+
+```text
+skip=True: acc 0.987, IoU [0.996 0.879 0.83 ], mIoU 0.902
+skip=False: acc 0.953, IoU [0.983 0.676 0.46 ], mIoU 0.706
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **With skip connections (`skip=True`):** reaches 0.902 mIoU on the 128 unseen test images (0.879 on circles, 0.83 on squares). After 20 epochs, our miniature UNet cleanly separates two shapes of identical intensity based purely on geometry.
+- **Without skip connections (`skip=False`):** identical architecture and random seed, except the decoder receives zeros instead of encoder features. mIoU drops to 0.706, and square IoU plunges to 0.46. Because all spatial information is forced through the $8 \times 8$ bottleneck, sharp corners and boundaries blur out—confirming our theoretical motivation.
+- **Pixel accuracy** barely dips from 0.987 to 0.953, once again hiding a nearly 20-point drop in mIoU.
+
+Even with fixed seeds, numbers may differ in the second or third decimal place across machines due to multi-threaded floating-point reduction order on CPU (running with 4 threads on our test machine gave 0.908 and 0.704 mIoU). The large gap between having and omitting skip connections always holds.
+
+## Common pitfalls
+
+:::caution[Reporting pixel accuracy as your primary metric]
+Pixel accuracy is dominated by majority background classes. In our NumPy example, a model that completely erases the square still scores 0.984 pixel accuracy. In autonomous driving scenes, pedestrians, traffic signs, and poles occupy only a few percent of pixels yet carry the highest safety stakes. Always report **per-class IoU** and mIoU by accumulating TP, FP, and FN across the entire evaluation set before dividing. If a class is absent from both ground truth and prediction ($0/0$), exclude it from the mean rather than counting it as 0 or 1.
+:::
+
+:::caution[Resizing integer label masks with bilinear interpolation]
+A segmentation mask contains **discrete class IDs**, not continuous intensities. Downsampling or rotating a mask with bilinear interpolation produces fractional numbers along boundaries, and rounding does not fix it: between background (0) and square (2), interpolation invents a halo of class 1 ("circle"). Always use **nearest-neighbor interpolation** for masks (e.g., `F.interpolate(..., mode="nearest")` or `InterpolationMode.NEAREST` in torchvision). And whenever data augmentation flips, crops, or warps an input image, apply the exact same spatial transform to its mask.
+:::
+
+:::caution[Assuming upsampling alone recovers fine spatial detail]
+Bilinear interpolation and transposed convolution can only redistribute information already present in the coarse grid. At output stride 8, our $8 \times 8$ square vanished under both upsampling methods. Recovering small objects and crisp edges requires feeding high-resolution features into the decoder (UNet skip connections, FPN lateral connections, DeepLabv3+ decoder) or maintaining high resolution throughout the network (HRNet).
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Semantic segmentation classifies every pixel: the network outputs $H \times W \times K$ logits, applies softmax per pixel, and trains with per-pixel cross-entropy averaged over the image.
+- Evaluate with $\text{IoU}_k = \text{TP}_k / (\text{TP}_k + \text{FP}_k + \text{FN}_k)$ and mIoU (the unweighted mean across classes). Pixel accuracy is dominated by large background classes and hides complete failures on small objects.
+- The central trade-off: deep layers know "what" but are coarse; shallow layers know "where" but lack semantics. FCN sums coarse and shallow score maps; UNet builds a symmetric decoder with full-channel skip concatenations; FPN builds a top-down pyramid with $1 \times 1$ lateral additions; DeepLab reduces downsampling and expands receptive fields via dilated convolutions ($k_\text{eff} = k + (k-1)(r-1)$) and multi-rate ASPP; HRNet maintains a high-resolution branch throughout the entire network.
+- Bilinear upsampling is parameter-free; transposed convolution is learnable, but produces checkerboard artifacts when kernel size is not divisible by stride.
+
+**Further reading:**
+
+- Long, J., Shelhamer, E., Darrell, T. (2015). [*Fully Convolutional Networks for Semantic Segmentation*](https://arxiv.org/abs/1411.4038), arXiv:1411.4038, Sections 3, 4, and 5. Shows how to convert classification networks into FCNs, add skips, and define standard segmentation metrics.
+- Ronneberger, O., Fischer, P., Brox, T. (2015). [*U-Net: Convolutional Networks for Biomedical Image Segmentation*](https://arxiv.org/abs/1505.04597), arXiv:1505.04597, Section 2 and Figure 1. Concise paper where Figure 1 alone specifies the full architecture; Section 3 introduces border-weighted loss maps.
+- Lin, T.-Y. et al. (2017). [*Feature Pyramid Networks for Object Detection*](https://arxiv.org/abs/1612.03144), arXiv:1612.03144, Section 3. Explains the bottom-up, top-down, and lateral pathways in a single page.
+- Chen, L.-C., Papandreou, G., Schroff, F., Adam, H. (2017). [*Rethinking Atrous Convolution for Semantic Image Segmentation*](https://arxiv.org/abs/1706.05587), arXiv:1706.05587, Section 3; and Chen, L.-C. et al. (2018). [*Encoder-Decoder with Atrous Separable Convolution for Semantic Image Segmentation*](https://arxiv.org/abs/1802.02611), arXiv:1802.02611. Dilated convolution, ASPP, and the DeepLabv3+ decoder.
+- Wang, J. et al. (2020). [*Deep High-Resolution Representation Learning for Visual Recognition*](https://arxiv.org/abs/1908.07919), arXiv:1908.07919, Sections 3 and 4. The HRNet architecture and its V1, V2, and V2p output heads.
+- Odena, A., Dumoulin, V., Olah, C. (2016). [*Deconvolution and Checkerboard Artifacts*](https://distill.pub/2016/deconv-checkerboard/), Distill. Interactive diagrams showing why uneven kernel overlap creates checkerboard patterns and how resize-convolution avoids them.
+
+<LessonProgress />

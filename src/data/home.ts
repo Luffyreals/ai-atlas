@@ -178,7 +178,7 @@ export const HOME = {
         'AI Atlas began as a course syllabus for learning AI. I rearranged its sessions into one map, so anyone can see what to learn first, what comes next, and why.',
         'Each lesson is written in Vietnamese first, then translated into English. Every code example is run, every source is real.',
         'The site is free and needs **no account**. Your progress is kept in your own browser and sent nowhere.',
-        'The first lesson is now open: [Introduction to Machine Learning](lesson:ml/ml-overview). See you there.',
+        'The first lesson is now open: [Getting Started: Google Colab and Kaggle](lesson:python/colab-kaggle). See you there.',
       ],
     },
     signName: { vi: 'Luffyreals', en: 'Luffyreals' },

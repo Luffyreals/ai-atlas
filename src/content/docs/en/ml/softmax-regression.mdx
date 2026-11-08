@@ -39,7 +39,7 @@ import softmaxNumpyCode from '@code/ml/softmax-regression/softmax-numpy.en.py?ra
 import softmaxGdCode from '@code/ml/softmax-regression/softmax-gd.en.py?raw';
 import boundaryCode from '@code/ml/softmax-regression/boundary.en.py?raw';
 
-## Objectives
+## Goals
 
 After this lesson, you will be able to:
 
@@ -282,7 +282,7 @@ The final layer of nearly all deep classification networks is mathematically ide
 - **Enforces mutual exclusivity.** Multi-label problems where instances belong to multiple categories simultaneously should not use softmax.
 - **Probabilities may be miscalibrated.** Models with identical accuracy can output markedly different probability distributions depending on regularization and optimization duration.
 
-## Visualization
+## Illustration
 
 The table below takes the logits of our iris flower, $\mathbf{z} = (-3.0, 1.8, 1.2)$, scales them by factor $c$ (equivalent to temperature $T = 1/c$), and computes softmax probabilities:
 
@@ -303,7 +303,7 @@ Observations from top to bottom:
 
 This clarifies why weight inflation increases model overconfidence: doubling weights doubles logits, sharpening probabilities toward 0 and 1 without shifting boundaries.
 
-## Code Examples
+## Code examples
 
 The three cells below run independently. The first relies solely on NumPy. The second and third load scikit-learn (and Matplotlib for the third).
 
@@ -336,7 +336,7 @@ The visualization highlights piecewise linear decision boundaries: straight segm
 
 The test confusion matrix confirms a single misclassification: one virginica flower with slender dimensions (5.6 cm $\times$ 1.4 cm) misclassified as versicolor (assigned 0.593 versicolor vs. 0.405 virginica). The classification report details per-class precision, recall, and F1 alongside macro and weighted averages (matching at 0.978 due to balanced test splits), as covered in [Model Evaluation](/en/ml/classification-metrics/).
 
-## Common Pitfalls
+## Common pitfalls
 
 :::caution[Implementing Softmax Without Max-Subtraction]
 Computing `np.exp(z) / np.exp(z).sum()` succeeds on small values but catastrophically emits `nan` once any logit exceeds ~710. This frequently crashes training mid-run as weights grow. Always subtract `z.max()` before exponentiating. When computing log-probabilities $\ln\hat{y}$, avoid taking `np.log` of softmax probabilities directly; utilize numerically stable implementations like `scipy.special.log_softmax`.
@@ -350,13 +350,13 @@ Softmax enforces mutual exclusivity across classes: probabilities must sum to 1,
 In our second code cell, the custom GD model outputted 0.771 for versicolor whereas regularized scikit-learn outputted 0.654 for the exact same sample, despite identical 44/45 classification accuracy. Regularization strength and training duration scale logit magnitudes and shift probability extremes without moving decision boundaries. Always assess calibration on a validation set before using output probabilities as automated operational thresholds.
 :::
 
-## Quick Check
+## Quick check
 
 {/* Questions defined in the `quiz` frontmatter field. */}
 
 <Quiz />
 
-## Summary and Further Reading
+## Summary and further reading
 
 **Key Takeaways:**
 

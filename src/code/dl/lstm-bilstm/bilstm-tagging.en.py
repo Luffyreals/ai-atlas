@@ -2,13 +2,13 @@ import torch
 from torch import nn
 
 torch.manual_seed(0)
-L, D_H = 12, 32  # độ dài chuỗi, chiều trạng thái mỗi chiều
+L, D_H = 12, 32  # sequence length, hidden dimension per direction
 
 
 def make_batch(n):
-    # Dãy chữ số ngẫu nhiên. Nhãn tại t: chữ số kế tiếp có lớn hơn không?
+    # Random digit sequences. Label at t: is the next digit larger?
     x = torch.randint(0, 10, (n, L))
-    y = (x[:, 1:] > x[:, :-1]).long()  # L - 1 nhãn, vị trí cuối bỏ qua
+    y = (x[:, 1:] > x[:, :-1]).long()  # L - 1 labels, last position ignored
     return x, y
 
 
@@ -18,12 +18,12 @@ class Tagger(nn.Module):
         self.emb = nn.Embedding(10, 16)
         self.lstm = nn.LSTM(16, D_H, batch_first=True,
                             bidirectional=bidirectional)
-        k = 2 if bidirectional else 1  # BiLSTM ghép hai trạng thái
+        k = 2 if bidirectional else 1  # BiLSTM concatenates both states
         self.out = nn.Linear(k * D_H, 2)
 
     def forward(self, x):
         H, _ = self.lstm(self.emb(x))  # H: (n, L, k * D_H)
-        return self.out(H)[:, :-1]  # một logit cho mỗi vị trí
+        return self.out(H)[:, :-1]  # logits for each labeled position
 
 
 x_test, y_test = make_batch(2000)

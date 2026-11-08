@@ -346,7 +346,7 @@ Now find the best line yourself, by hand. The figure below is a scatter plot of 
 {/* VIZ: the best line is the line with the smallest MSE. */}
 <LinearFitViz />
 
-## Code example
+## Code examples
 
 The three code cells below redo the steps above in Python. Each cell builds the apartment table itself, so you can run them in any order. The second cell takes longer the first time, because your browser has to download scikit-learn as well.
 
@@ -386,7 +386,7 @@ Adding just one point out of 11 cuts the slope by more than half: $w$ drops from
 
 So plot your data and check any points that lie far from the crowd before you fit a model.
 
-## Common mistakes
+## Common pitfalls
 
 :::caution["Linear" does not mean you can only draw straight lines]
 "Linear" here means linear **in the parameters**: the prediction is a sum of features times weights, and what the features are is up to you. Add a column $x^2$ to $\mathbf{X}$, and the model $\hat{y} = w_1x + w_2x^2 + b$ is a curve in $x$, but it is still linear in $w_1$, $w_2$, $b$, so the normal equation still solves it. By contrast, $\hat{y} = e^{wx}$ is not linear in $w$, so you cannot solve it this way.

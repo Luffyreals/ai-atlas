@@ -1,0 +1,371 @@
+---
+title: Using Text Generation APIs
+description: Call an LLM from Python through an OpenAI-compatible API. Roles in messages, tokens and cost, temperature, top-k, top-p, streaming, retries on error, and JSON output.
+quiz:
+  - question: 'Two tokens have logits that differ by 1. At $T = 1$, the probability of the larger token is $e$ times that of the smaller token. If you lower the temperature to $T = 0.5$, what is this ratio?'
+    options: ['$e$', '$\sqrt{e}$', '$e^2$', '$e/2$']
+    answer: 2
+    explanation: 'The ratio of the two probabilities is $\exp((z_i - z_j)/T)$, since the softmax denominators cancel out. With $z_i - z_j = 1$ and $T = 0.5$, the ratio is $\exp(2) = e^2 \approx 7.39$: a lower temperature amplifies differences. $\sqrt{e}$ is the result at $T = 2$, where the distribution is flatter. The relative order of the two tokens never changes for any $T > 0$.'
+  - question: 'At step A, the top token has probability 0.95. At step B, the model is uncertain: the top 30 tokens each have probability 0.031. With top-p $= 0.9$, how many tokens are kept at each step?'
+    options: ['A keeps 1, B keeps 30', 'A keeps 5, B keeps 5', 'Both keep 1', 'Both keep 30']
+    answer: 0
+    explanation: 'Top-p takes the smallest set whose cumulative probability is at least $0.9$. At step A, the top token alone has $0.95$, so only 1 token is kept. At step B, the first 29 tokens only sum to $29 \times 0.031 = 0.899 < 0.9$, so the 30th token must be included to reach $0.93$. The number of kept tokens adapts to the model''s certainty. Keeping the same number of tokens at every step (the second option) is what top-k does.'
+  - question: 'A chatbot has a 30-token system prompt. Each question is 40 tokens, and each answer is 60 tokens. The program resends the full history on every turn. How many input tokens are sent on turn 4?'
+    options: ['40', '70', '340', '370']
+    answer: 3
+    explanation: 'Turn 4 sends the system prompt (30), three previous turns each consisting of a question and an answer ($3 \times 100 = 300$), plus the new question (40): a total of 370. 70 only sends the system prompt and the new question, dropping the three previous turns so the model knows nothing about the earlier conversation. 40 drops the system prompt as well. 340 forgets the system prompt, which is sent on every turn.'
+  - question: 'Your program calls the API and raises `AuthenticationError` (status 401). What should you do?'
+    options:
+      - 'Increase `max_retries` to 10 so the SDK retries more times'
+      - 'Check your API key and `OPENAI_BASE_URL`, because retrying will not help'
+      - 'Wait a minute and run it again, because the server is overloaded'
+      - 'Lower `temperature` to 0'
+    answer: 1
+    explanation: 'Status 401 means the server rejected the key: the key is wrong, has been revoked, or belongs to a different provider than `OPENAI_BASE_URL`. This error does not resolve on its own, so the SDK does not retry it, and adding more retries only wastes time. Waiting and retrying is for transient errors such as 429 or 503.'
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import SamplingViz from '@components/viz/SamplingViz.astro';
+import samplingCode from '@code/llm/text-api/sampling.en.py?raw';
+import chatCode from '@code/llm/text-api/chat.en.py?raw';
+import extractJsonCode from '@code/llm/text-api/extract-json.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Call a **large language model (LLM)** from Python through an OpenAI-compatible API using a `messages` list with the `system`, `user`, and `assistant` roles.
+- Explain why the API does not remember past turns of a conversation, and why token costs grow rapidly as a conversation gets longer.
+- Compute softmax with temperature, top-k, and top-p (nucleus sampling) by hand, and explain how each parameter reshapes the next-token distribution.
+- Write production-ready code: let the SDK retry transient errors with backoff, catch the remaining errors, parse JSON output safely, and understand how streaming works.
+
+## Prerequisites
+
+{/* List populated from prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+This lesson uses Python **functions** (`def`), **lists**, and **dictionaries** (dicts), along with `try`/`except` blocks for error handling. Each turn in a conversation is a dict such as `{"role": "user", "content": "..."}`, and the entire conversation is a list of such dicts. You should also be comfortable running a `.py` file from the command line.
+:::
+
+## Intuition
+
+Suppose you want your Python program to answer questions, summarize text, or extract structured details from customer reviews. You do not need to train a model yourself: providers like OpenAI, Google, and Groq already run LLMs on their servers. Your program sends text over the network to their **API** (application programming interface) and receives the text generated by the model. AI Atlas divides working with LLMs into four levels: calling an existing model via an API, building prompts/RAG/agents on top of an existing model, fine-tuning, and pre-training from scratch. This lesson starts at the first level.
+
+Try calling the API a few times and you will notice three surprising things:
+
+- **The model forgets immediately.** You ask "What is a token?", and then follow up with "Give an example". If your second call only sends the second sentence, the model has no idea what "an example" refers to. It is like texting someone who loses their memory after every reply: you have to paste the entire conversation history into every new message.
+- **Same question, different answer each time.** The model writes one piece of text at a time, and each piece is **randomly sampled** from a probability distribution. Specific parameters let you dial that randomness up or down.
+- **You pay by the piece of text.** Those pieces are called **tokens**. Providers charge and enforce limits by token count, counting both the tokens you send in and the tokens the model writes out.
+
+The problem this lesson solves is: **send the exact context the model needs over the API, understand how the model picks each token and which parameters control that choice, and write code that survives network glitches, rate limits, and malformed outputs.**
+
+## Theory
+
+### A single API call
+
+This lesson uses the `openai` Python library—an **SDK** (software development kit provided by the vendor)—and the **Chat Completions** endpoint (an endpoint is a specific API address that performs a specific action). OpenAI recommends the Responses API for new applications, but continues to support Chat Completions long-term, and Gemini, Groq, and Ollama all offer this exact OpenAI-compatible endpoint. By changing only the address (`base_url`), API key, and model name, the exact same code runs across multiple providers.
+
+A single call sends two main pieces of data: the model name and a `messages` list. Each item in `messages` has a **role** and content:
+
+| Role | Written by | Purpose |
+|---|---|---|
+| `system` | You, the developer | Sets the persona, tone, and rules: "You are a teaching assistant. Answer briefly." Called the **system prompt** |
+| `user` | The end user | Questions or requests |
+| `assistant` | The model, in earlier turns | Previous replies from the model, sent back so the model "remembers" |
+
+In the two-turn conversation from the second code example, the second turn sends the following list:
+
+| Role | Content |
+|---|---|
+| `system` | You are a teaching assistant. Answer briefly in English. |
+| `user` | What is a token in a language model? Answer in two sentences. |
+| `assistant` | (the reply from turn one, saved by your program) |
+| `user` | Give an example with an English sentence. |
+
+Thanks to the first three rows, "Give an example" makes sense. The API is **stateless**: the server stores nothing between calls, so everything the model needs to know must be included in `messages`.
+
+For newer models, OpenAI renames the `system` role to `developer`, but Gemini, Groq, and Ollama still use `system`, so the code in this lesson uses `system`.
+
+There are three fields in the response you will read most often: `choices[0].message.content` holds the text the model wrote; `choices[0].finish_reason` tells you why the model stopped (`"stop"` when it finished naturally, `"length"` when it hit the token ceiling); and `usage` reports the input and output token counts.
+
+### Tokens and cost
+
+A **token** is the unit of text a model reads and writes. It is neither strictly a word nor a character: a common word may be a single token, while a rare word is split into several tokens. Every model has a **context window**: the maximum total number of input plus output tokens allowed in a single call.
+
+Providers charge per token, usually with two separate prices: **input tokens** (the prompt, including conversation history) and **output tokens** (the completion). Because history is resent on every turn, the cost of a long conversation grows faster than you might expect. Let $s$ be the number of tokens in the system prompt, $q$ the tokens in each question, and $a$ the tokens in each answer. On turn $r$, you send the system prompt, $r - 1$ earlier turns (each containing one question and one answer), and the new question. Let $N_r$ be the number of input tokens on this turn:
+
+$$
+N_r = s + (r - 1)(q + a) + q
+$$
+
+Now sum from turn 1 to turn $R$. The terms $s$ and $q$ each appear $R$ times. The middle term requires summing $0 + 1 + \dots + (R - 1) = \frac{R(R - 1)}{2}$:
+
+$$
+\sum_{r=1}^{R} N_r = R(s + q) + (q + a)\,\frac{R(R - 1)}{2}
+$$
+
+The final term contains $R^2$: total input tokens grow **quadratically** with the number of turns. With $s = 20$ and $q = a = 50$: turn 1 sends 70 tokens, turn 10 sends 970 tokens, and all 10 turns combined send $10 \cdot 70 + 100 \cdot 45 = 5200$ input tokens. That is why production chatbots trim or summarize older history.
+
+**The `max_tokens` parameter** sets a ceiling on how many tokens the model may write in a single call. This cap limits cost, but it **does not** make the model write more concisely: if the model hits the ceiling, its sentence is cut off mid-thought and `finish_reason` becomes `"length"`. If you want a short answer, ask for it in the prompt. OpenAI has renamed this parameter to `max_completion_tokens`, which also counts the hidden reasoning tokens of **reasoning models** (models that think through multiple internal steps before answering). Ollama only lists the old name; OpenAI and Groq still accept the old name as deprecated (though OpenAI's reasoning models reject it). For broad compatibility, the code in this lesson omits this cap and lets the provider use its default.
+
+### How the model chooses the next token
+
+An LLM generates text one token at a time. At each step, it reads all preceding tokens and outputs one raw score for **every** token in its vocabulary, called a **logit**. Let the vocabulary be $\mathcal{V}$ with $V$ tokens, and let the logit of token $i$ be $z_i$. The larger the logit, the better that token fits as the next token according to the model.
+
+For example, after the prompt "The weather today is very", suppose the model only considers 10 candidates (for simplicity, treat each word as a single token):
+
+| Token | nice | hot | cold | cool | sunny | humid | clear | windy | wet | dark |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Logit $z_i$ | 3.0 | 2.6 | 2.0 | 1.5 | 1.1 | 0.6 | 0.1 | −0.4 | −1.0 | −1.6 |
+
+**Step 1: turn logits into probabilities with softmax.** Logits can be negative and do not sum to 1, so they are not probabilities yet. The **softmax** function takes $\exp$ of each logit (making it strictly positive) and divides by the sum (so the results add up to 1):
+
+$$
+p_i = \frac{\exp(z_i)}{\sum_{j=1}^{V} \exp(z_j)}
+$$
+
+**Step 2: divide logits by temperature $T$ before softmax.** This is the `temperature` knob:
+
+$$
+p_i(T) = \frac{\exp(z_i / T)}{\sum_{j=1}^{V} \exp(z_j / T)}, \qquad T > 0
+$$
+
+Setting $T = 1$ recovers the standard softmax from Step 1. To see what $T$ does, compare the probabilities of two tokens $i$ and $j$. Because both fractions share the same denominator, the denominators cancel, and $\exp(x) / \exp(y) = \exp(x - y)$ gives:
+
+$$
+\frac{p_i(T)}{p_j(T)} = \frac{\exp(z_i / T)}{\exp(z_j / T)} = \exp\!\left(\frac{z_i - z_j}{T}\right)
+$$
+
+This formula reveals three properties:
+
+- **The ranking never changes.** If $z_i > z_j$, the ratio is greater than 1 for every $T > 0$. Temperature never promotes a lower-ranked token above a higher-ranked one.
+- **$T < 1$ amplifies differences, making the distribution sharper.** The tokens "nice" and "hot" differ by 0.4 logits. At $T = 1$, "nice" is $e^{0.4} \approx 1.49$ times as likely as "hot"; at $T = 0.5$, it is $e^{0.8} \approx 2.23$ times as likely. As $T \to 0$, the token with the largest logit takes nearly all the probability mass: the model almost always picks it, which is called **greedy decoding**.
+- **$T > 1$ shrinks differences, making the distribution flatter.** Rare tokens get a bigger chance: replies become more varied, but also more likely to drift off topic.
+
+For the 10 logits above (numbers from the first code cell):
+
+| $T$ | nice | hot | cold | Top-p 0.9 keeps |
+|---:|---:|---:|---:|---:|
+| 0.5 | 0.599 | 0.269 | 0.081 | 3 tokens |
+| 1 | 0.382 | 0.256 | 0.140 | 5 tokens |
+| 1.5 | 0.286 | 0.219 | 0.147 | 7 tokens |
+
+**Step 3 (optional): trim the tail with top-k.** A real vocabulary has tens or hundreds of thousands of tokens. Each token in the long tail has a tiny probability, but together the tail can add up to a noticeable sum, so every now and then a nonsensical token gets drawn. **Top-k** keeps only the $k$ most probable tokens (the set $\mathcal{V}_k$), sets all other tokens to probability 0, and **renormalizes** so the kept probabilities sum to 1:
+
+$$
+p_i^{(k)} =
+\begin{cases}
+\dfrac{p_i}{\sum_{j \in \mathcal{V}_k} p_j}, & i \in \mathcal{V}_k \\[6pt]
+0, & i \notin \mathcal{V}_k
+\end{cases}
+$$
+
+With $k = 3$ at $T = 1$: the top three tokens sum to $0.382 + 0.256 + 0.140 = 0.778$; dividing each by this sum gives $0.491$, $0.329$, and $0.180$.
+
+**Step 3' (optional): trim the tail with top-p.** Holtzman et al. (2020) proposed this method after observing that both extremes fail: always picking the most likely token produces flat, repetitive text, whereas sampling from the full vocabulary occasionally wanders into the nonsensical tail. Top-k cuts off the tail, but $k$ is fixed: when the model is very certain, $k = 3$ still keeps two nearly absurd tokens; when the model is torn between dozens of reasonable choices, $k = 3$ throws almost all of them away. **Top-p**, also called **nucleus sampling**, sorts tokens by decreasing probability and takes the **smallest set** $\mathcal{V}_p$ whose cumulative probability meets or exceeds the threshold $p$:
+
+$$
+\sum_{i \in \mathcal{V}_p} p_i \ \ge\ p
+$$
+
+and then renormalizes just like top-k (note that the threshold $p$ has no subscript, unlike the individual token probabilities $p_i$). At $T = 1$, the cumulative sums are $0.382$; $0.638$; $0.778$; $0.864$; $0.921$. The first four tokens only reach $0.864 < 0.9$, so the fifth token must be included: top-p $0.9$ keeps 5 tokens. The table above shows that the same $0.9$ threshold keeps 3, 5, or 7 tokens depending on how sharp the distribution is. The kept set **adapts**: fewer tokens when the model is confident, more tokens when it is uncertain.
+
+**Step 4: sample one token** from the final distribution, append it to the text, and repeat from the beginning for the next token.
+
+:::note[Key takeaway]
+Logits → divide by $T$ → softmax → (top-k or top-p trims the tail and renormalizes) → sample one token. $T$ never changes the token ranking, only the sharpness: small $T$ makes the distribution sharp and close to picking the top token; large $T$ makes it flat and more diverse. Top-k keeps a fixed number of tokens; top-p keeps a dynamic number of tokens based on the model's certainty.
+:::
+
+**In the API.** Chat Completions supports `temperature` (from 0 to 2 on OpenAI) and `top_p`, but **not** `top_k`. OpenAI recommends tuning one or the other, not both, since both reshape the distribution and their combined effect is hard to predict. Setting `temperature=0` is well suited for information extraction, though it does not guarantee identical output on every run: OpenAI notes that determinism is not guaranteed, and Groq internally converts `0` to `1e-8`.
+
+### Streaming
+
+Because the model generates one token at a time, you do not have to wait for the entire reply before displaying it. When you set `stream=True`, the API yields a sequence of **chunks** over time, each carrying a few new tokens in `choices[0].delta.content`. Total generation time is nearly the same, but the first words appear almost immediately instead of several seconds later. The snippet below reuses `client`, `MODEL`, and `messages` from the conversation example in the Code examples section:
+
+```python
+stream = client.chat.completions.create(model=MODEL, messages=messages,
+                                        stream=True)
+for chunk in stream:
+    # empty choices: usage chunk (when include_usage is on), or on some providers
+    if not chunk.choices:
+        continue
+    text = chunk.choices[0].delta.content
+    if text:  # the first and last chunks may carry no text
+        print(text, end="", flush=True)  # flush: print right away, do not buffer
+```
+
+If you need token counts while streaming, pass `stream_options={"include_usage": True}`: the token usage arrives in a final chunk whose `choices` list is empty, and if the stream drops mid-way you may never receive that chunk. The SDK also **does not automatically retry** an interrupted stream: whatever chunks you already received remain partial.
+
+### Errors, rate limits, and retries
+
+Any call over a network can fail. All exceptions raised by the SDK inherit from `openai.APIError`. Here are the ones you will encounter most often:
+
+| HTTP status | Exception class | Common cause | Retried by SDK? |
+|---|---|---|---|
+| — | `APIConnectionError` (subclass `APITimeoutError`) | Could not reach the server, or the request timed out | Yes |
+| 400 | `BadRequestError` | Invalid request, such as a parameter the provider does not support | No |
+| 401 | `AuthenticationError` | Wrong or missing API key, or a key for a different provider | No |
+| 403 | `PermissionDeniedError` | Your key does not have access to that model or feature | No |
+| 404 | `NotFoundError` | Wrong model name or wrong `base_url` | No |
+| 429 | `RateLimitError` | Exceeded a **rate limit** (requests or tokens per minute/day) | Yes |
+| ≥ 500 | `InternalServerError` | Server-side failure | Yes |
+
+Every error with an HTTP status code inherits from `APIStatusError` and exposes a `status_code` attribute. The SDK also retries two less common status codes: 408 (request timeout) and 409 (conflict). The general rule is: **only retry transient errors** (network failures, 408, 409, 429, ≥ 500). Errors 400–404 mean the request itself is broken, so retrying will fail every time.
+
+Retrying immediately is usually counterproductive because an overloaded server will only get more overloaded. The standard solution is **exponential backoff**: double the wait time after each failure, cap it at a maximum, and subtract a random offset called **jitter** so that many clients failing at the same moment do not all knock on the server's door in lockstep. In `openai` 3.37, the SDK waits roughly 0.5, 1, 2, 4, and up to 8 seconds between attempts, applies up to 25% random jitter, and honors the server's `Retry-After` response header if present (unless it exceeds 120 seconds, in which case it raises immediately).
+
+You do not need to write this retry loop yourself. `OpenAI(max_retries=...)` sets the maximum number of retries (default 2; set 0 to disable), and `OpenAI(timeout=...)` sets the per-call timeout (default 10 minutes).
+
+### JSON output
+
+When your program needs to process the model's answer, you usually want structured data such as JSON rather than free-form prose. There are three levels of enforcement, from loose to strict:
+
+1. **Prompt instruction only:** "Return only a JSON object with two keys…". Easiest to use, but the model occasionally adds conversational filler or wraps the JSON in a Markdown code block.
+2. **JSON mode:** `response_format={"type": "json_object"}` guarantees that the returned string is valid JSON, but **does not** guarantee that it contains the exact keys you asked for. You must still describe the desired keys in the prompt, and the word "JSON" must appear somewhere in `messages` (OpenAI returns an error if it is missing).
+3. **Structured outputs:** `{"type": "json_schema", ...}` guarantees that the output matches a provided schema when `strict` is enabled. OpenAI recommends this whenever the model supports it.
+
+Support varies across providers, and JSON output can still be truncated mid-string if the response hits the token ceiling. Therefore, regardless of which level you use, always parse the result with `json.loads` inside a `try`/`except` block.
+
+### Limitations
+
+- **Each "OpenAI-compatible" provider omits certain features.** Sending an unsupported field may be silently ignored or trigger a 400 error (see the provider table in Code examples).
+- **Replies can be dead wrong while sounding completely confident.** The [Prompt Engineering](/en/llm/prompt-engineering/) and [RAG and Modern Chatbots](/en/llm/rag-chatbot/) lessons cover ways to reduce this.
+- **The code here runs in the command line.** Streaming replies to a web interface is covered in [Building UIs with Gradio and Streamlit](/en/llm/gradio-streamlit/).
+- **This lesson treats logits as given.** [Building Your First LLM](/en/llm/build-first-llm/) builds a small model from scratch and shows how logits are computed.
+
+## Illustration
+
+The chart below shows the next-token probability distribution after "The weather today is very", using the 10 logits from the Theory section. Solid bars show the final probabilities; faded bars behind them show the probabilities before tail truncation. Three sliders adjust $T$, $k$, and $p$. "Sample 1" draws a single token and appends it to the sentence; "Sample 100" counts how many times each token is drawn across 100 trials. Try these steps:
+
+1. Initially, $T = 1$, and both top-k and top-p are off: "nice" has 0.38, "hot" has 0.26, "cold" has 0.14, and all 10 tokens have a non-zero chance. Click "Sample 100" a few times: "nice" wins most often, but every now and then tail tokens like "wet" or "dark" still show up.
+2. Drag top-k down to 3: seven tokens are marked as filtered out, and the remaining three are renormalized to 0.49, 0.33, and 0.18.
+3. Reset top-k to 10 and drag top-p to 0.9: 5 tokens remain, and "nice" becomes 0.41. Keep top-p at 0.9 and lower $T$ to 0.5: only 3 tokens remain. Raise $T$ to 1.5: 7 tokens remain.
+4. Drag $T$ all the way to 0: "nice" gets probability 1 and every other token is eliminated. "Sample 100" picks "nice" all 100 times: that is greedy decoding.
+
+Applying temperature first, then top-k, then top-p in the interactive chart is an illustrative convention. API providers may apply these steps in a different order.
+
+{/* VIZ: T sharpens or flattens the distribution without changing ranks; top-k and top-p trim the tail and renormalize (top-p keeps a T-dependent count); then sample. */}
+<SamplingViz />
+
+## Code examples
+
+The code in this lesson was last tested in October 2026 with Python 3.14 and `openai` 3.37. The first cell runs right in your browser using NumPy with no network calls. The next two cells call a real API and run on your machine: you will need a provider API key and three environment variables.
+
+### Setup: providers and environment variables
+
+The code in this lesson does not hardcode a provider or model name. Instead, it reads three **environment variables**: `OPENAI_API_KEY` (your key), `OPENAI_BASE_URL` (the API address; leave unset to use OpenAI), and `LLM_MODEL` (the model name). Choose a provider, create an API key on their dashboard, and pick a chat model name from their documentation (model names change frequently, so we do not hardcode one here). All three variables must match the same provider: sending a Groq key to OpenAI's server yields a 401 error, and sending one provider's model name to another usually yields a 404 error.
+
+| Provider | `OPENAI_BASE_URL` | Free tier | Notes |
+|---|---|---|---|
+| [OpenAI](https://developers.openai.com/api/docs/guides/text) | leave unset | Not listed here; see [pricing page](https://developers.openai.com/api/docs/pricing) | Reasoning models reject `max_tokens` (use `max_completion_tokens`) and only accept the default `temperature`; remove `temperature` if you get a 400 error |
+| [Google Gemini](https://ai.google.dev/gemini-api/docs/openai) | `https://generativelanguage.googleapis.com/v1beta/openai/` | Has a Free tier; quotas are per project, so adding keys does not raise quota ([pricing page](https://ai.google.dev/gemini-api/docs/pricing)) | OpenAI library compatibility is still in beta. Gemini 2.5 Pro and Gemini 3 always think before answering: a small token ceiling can produce an empty reply |
+| [Groq](https://console.groq.com/docs/openai) | `https://api.groq.com/openai/v1` | Has a Free Plan ([rate limits](https://console.groq.com/docs/rate-limits)) | Returns 400 if you pass `logprobs` or `logit_bias`; `n` must be 1; converts `temperature=0` to `1e-8` |
+| [Ollama](https://docs.ollama.com/api/openai-compatibility) (local) | `http://localhost:11434/v1/` | Runs locally on your hardware, no per-token charges | An API key is required by the SDK but ignored by Ollama: set `ollama`. Download a model first with `ollama pull` |
+
+Providers also differ in their support for JSON mode and **embeddings** (vectors that represent the meaning of text, used in [RAG and Modern Chatbots](/en/llm/rag-chatbot/)):
+
+| Provider | JSON mode | Embeddings |
+|---|---|---|
+| OpenAI | `json_object` and `json_schema` | Yes |
+| Gemini | Compatibility docs only show `parse()` examples | Yes, `/embeddings` on the same `base_url` |
+| Groq | `json_object` on all models (prompt must contain "JSON"); `json_schema` on select models | Not listed on the Models page |
+| Ollama | Supports `response_format` | Yes, `/v1/embeddings`; pull an embedding model first with `ollama pull` |
+
+Last verified: October 2026. Pricing and rate limits change frequently, so specific numbers are omitted.
+
+Set the environment variables in the same terminal window where you will run the code. They only persist for that session; if you open a new terminal window, set them again.
+
+<Tabs syncKey="os">
+<TabItem label="macOS, Linux (bash)">
+
+```sh
+export OPENAI_API_KEY="<your-key>"
+export OPENAI_BASE_URL="<provider-api-url>"
+export LLM_MODEL="<model-name>"
+pip install openai
+```
+
+</TabItem>
+<TabItem label="Windows (PowerShell)">
+
+```powershell
+$env:OPENAI_API_KEY = "<your-key>"
+$env:OPENAI_BASE_URL = "<provider-api-url>"
+$env:LLM_MODEL = "<model-name>"
+pip install openai
+```
+
+</TabItem>
+</Tabs>
+
+If you use OpenAI directly, omit the `OPENAI_BASE_URL` line. Never hardcode your API key inside a `.py` file: source files are easy to share or push to Git by mistake, whereas environment variables stay local. Run each script with `python filename.py`; on Windows, if non-ASCII characters print garbled, run `python -X utf8 filename.py`.
+
+### Sampling tokens with NumPy
+
+This cell reproduces the Theory calculations on the 10 logits for "The weather today is very": softmax with temperature at three values of $T$, top-k with $k = 3$, and 1000 tokens sampled with top-p $0.9$.
+
+<PythonRunner code={samplingCode} title="Softmax with temperature, top-k, and top-p" />
+
+The first three lines match the table in the Theory section: top-p $0.9$ keeps 3, 5, and then 7 tokens as $T$ increases from 0.5 to 1.5. The top-k line outputs 0.491, 0.329, 0.18, and 0 from the fourth token onward. With top-p $0.9$ at $T = 1$, the five kept tokens have probabilities 0.415, 0.278, 0.153, 0.093, and 0.062; across 1000 draws, they are picked 386, 287, 172, 96, and 59 times, closely tracking their probabilities. The last five tokens are never drawn because their probabilities were set to 0.
+
+### Two-turn conversation
+
+This script sends two questions where the second only makes sense in light of the first. The `ask` function appends the user's question to `messages`, calls the API, and appends the model's reply back to `messages` with the `assistant` role.
+
+<LocalCode code={chatCode} title="Two-turn conversation" packages={['openai']} />
+
+When you run the script, check the parenthesized line after each answer. The input token count on turn two is noticeably larger than on turn one, because turn two resends both the question and the answer from turn one. `finish_reason` is normally `stop`. Try adding `max_tokens=20` to the call to trigger `length`: the reply gets cut off mid-sentence. The `or ""` fallback guards against `content` being `None`, which can happen if a reasoning model spends its entire token budget on hidden thinking tokens. Try replacing `messages=messages` with `messages=[messages[0], messages[-1]]` (sending only the system prompt and the newest question): on turn two, the model no longer knows what "an example" refers to.
+
+### Extracting JSON with retries and error handling
+
+The final script puts everything together for a practical task: reading a customer review and returning a JSON object with its overall sentiment and mentioned aspects. We set `temperature=0` because this is an extraction task. The client is configured with `max_retries=4` and `timeout=30`. The system prompt explicitly includes the word "JSON", as required by JSON mode.
+
+<LocalCode code={extractJsonCode} title="Extracting JSON from a review" packages={['openai']} />
+
+When everything succeeds, the script prints a JSON object with the two keys `sentiment` and `aspects`. The `except` clauses are ordered from most specific to most general: `RateLimitError` is a subclass of `APIStatusError`, so it must come first. The `APIStatusError` branch prints the server's error payload (`e.body`). Try setting an invalid `LLM_MODEL` to see the 404 branch, or point `OPENAI_BASE_URL` at an unused local port such as `http://127.0.0.1:9/v1`: the SDK retries 4 times with increasing delays before printing the connection error message. If your provider returns a 400 error complaining about `response_format` or `temperature`, remove that line: the prompt already asks for JSON, and `json.loads` still validates the output.
+
+## Common pitfalls
+
+:::caution[Hardcoding API keys in source files and pushing to Git]
+A key written in your code travels with every copy of the file: chat messages to friends, public Git repositories, even screenshots. Automated bots continuously scan GitHub for leaked keys and spend your credits within seconds. Always read keys from environment variables as shown in this lesson. If you ever leak a key, log into your provider's dashboard immediately to revoke it and generate a new one; deleting the Git commit is not enough, because the key may already have been scraped and still lives in commit history, forks, or caches.
+:::
+
+:::caution[Assuming the API remembers the conversation]
+If you only send the newest question, the model treats you like a stranger on every turn. You must maintain the `messages` list yourself and resend the entire list on each call. Consequently, input tokens, cost, and latency grow with history length, and once the history exceeds the context window, the request fails. Long conversations need a strategy to trim or summarize older turns.
+:::
+
+:::caution[Retrying every error, or stacking your own retry loop on top of the SDK]
+Errors 400, 401, 403, and 404 never fix themselves; retrying them only wastes time and quota. A 429 error caused by an exhausted billing balance or spending cap will not resolve by waiting either, even though the SDK retries it like any other 429. For genuine transient errors, the SDK already retries twice with exponential backoff. If you wrap the call in your own 5-attempt `for` loop without setting `max_retries=0`, a single failure can balloon into 15 requests, making rate-limit trouble much worse.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Calling an LLM means sending `model` and a `messages` list (`system`, `user`, `assistant` roles) to an API. Because the API is stateless, you resend the conversation history on every turn, and cumulative input tokens grow quadratically with the number of turns. Inspect `content`, `finish_reason`, and `usage` in the response.
+- The model outputs a logit $z_i$ for each token; probabilities are $p_i(T) = \exp(z_i/T) / \sum_j \exp(z_j/T)$. Smaller $T$ sharpens the distribution, larger $T$ flattens it, and the token ranking never changes. Top-k keeps $k$ tokens, while top-p keeps the smallest set with cumulative probability $\ge p$, before renormalizing and sampling. OpenAI-compatible APIs expose `temperature` and `top_p`, not `top_k`.
+- `max_tokens` is a cost ceiling, not a conciseness knob. `stream=True` yields text incrementally; interrupted streams are not automatically retried.
+- Only retry transient errors (network, 408, 409, 429, ≥ 500) using exponential backoff with jitter, which the SDK handles via `max_retries`. Always parse JSON output with `json.loads` inside `try`/`except`, and keep API keys in environment variables.
+
+**Further reading:**
+
+- OpenAI (2026). [*Text generation*](https://developers.openai.com/api/docs/guides/text) and [*Error codes*](https://developers.openai.com/api/docs/guides/error-codes). Official guides covering `messages`, roles, the Responses API, and handling 429 errors.
+- OpenAI (2026). [*openai-python* v3.37.0](https://github.com/openai/openai-python/tree/v3.37.0), README sections on error handling, retries, timeouts, and streaming. Documentation for the exact SDK version used in this lesson.
+- Holtzman, A., Buys, J., Du, L., Forbes, M., Choi, Y. (2020). [*The Curious Case of Neural Text Degeneration*](https://arxiv.org/abs/1904.09751). ICLR 2020, Sections 3 and 6. The paper that introduced top-p (nucleus sampling) and compared it against greedy decoding, beam search, top-k, and temperature.
+- Fan, A., Lewis, M., Dauphin, Y. (2018). [*Hierarchical Neural Story Generation*](https://aclanthology.org/P18-1082/). ACL 2018. One of the earliest works using top-k sampling for neural story generation.
+- Hinton, G., Vinyals, O., Dean, J. (2015). [*Distilling the Knowledge in a Neural Network*](https://arxiv.org/abs/1503.02531), Section 2. Introduces softmax with temperature $T$ for knowledge distillation, using the exact same formula as sampling `temperature`.
+
+<LessonProgress />

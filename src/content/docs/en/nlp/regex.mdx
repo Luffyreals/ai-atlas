@@ -1,0 +1,341 @@
+---
+title: Regular Expressions (Regex)
+description: Extracting phone numbers, emails, and dates from Vietnamese messages. Character classes, quantifiers, anchors, groups, greedy vs. lazy matching, lookarounds, Python's re module, and the limits of regex.
+quiz:
+  - question: 'You run `re.findall(r"\d{2}/\d{2}/\d{4}", "Hạn 5/11/2026 và 15/11/2026")`. What does it return?'
+    options:
+      - '`[''5/11/2026'', ''15/11/2026'']`'
+      - '`[''15/11/2026'']`'
+      - '`[]`, because the pattern has no `\b` at the ends'
+      - '`[''05/11/2026'', ''15/11/2026'']`'
+    answer: 1
+    explanation: '`\d{2}` requires two consecutive digits before the first `/`. The date "5/11/2026" has only one leading digit, so it fails to match, and regex never pads zeros on its own. Omitting `\b` does not prevent matches; it only allows the pattern to match inside a longer run of digits. To match single-digit days as well, write `\d{1,2}`, as in the `DATE` pattern in this lesson.'
+  - question: 'On the string `Anh nói "chào" rồi "tạm biệt"`, what does the pattern `".*"` (double quote, dot, star, double quote) match?'
+    options:
+      - 'A single span: `"chào" rồi "tạm biệt"`'
+      - 'Two separate spans: `"chào"` and `"tạm biệt"`'
+      - 'Only `"chào"`, because regex stops at the first closing quote it sees'
+      - 'Nothing, because `.` does not match double quotes'
+    answer: 0
+    explanation: '`.*` is greedy: it swallows everything to the end of the string and then backtracks character by character until the trailing `"` in the pattern can match—which happens at the very last quote in the string. The result is a single match from the first quote to the last quote. To get two separate quoted strings, use the lazy quantifier `".*?"` or the negated class `"[^"]*"`. The dot `.` matches any character except a newline, quotes included.'
+  - question: 'In Python 3, what does `re.findall(r"[a-zA-Z]+", "Đà Lạt")` return?'
+    options:
+      - '`[''Đà'', ''Lạt'']`'
+      - '`[''Lạt'']`'
+      - '`[''L'', ''t'']`'
+      - '`[]`'
+    answer: 2
+    explanation: 'The ranges `a-z` and `A-Z` cover only the 52 unaccented ASCII letters. Because "Đ", "à", and "ạ" fall outside those ranges, "Đà" produces no match at all and "Lạt" is split into `"L"` and `"t"`. For Vietnamese text, use `\w+`: in Python 3, `\w` matches all Unicode word characters, returning `[''Đà'', ''Lạt'']`.'
+  - question: 'Why is it impossible to write a pure regular expression (in the formal mathematical sense) that matches all and only strings of arbitrarily nested HTML `<div>...</div>` tags?'
+    options:
+      - 'Because regex runs too slowly on long documents'
+      - 'Because Python''s `re` module does not support `<` and `>`'
+      - 'Because HTML contains Unicode characters that regex cannot read'
+      - 'Because matching opening and closing tags requires counting an unbounded nesting depth, whereas a finite automaton has only finitely many states'
+    answer: 3
+    explanation: 'To verify that every `<div>` is closed by a matching `</div>`, a machine must track how many tags are currently open. Because nesting depth can be 1, 10, or 1,000,000, no finite automaton with a fixed number of states can count high enough: this is a fundamental expressiveness limit, not a speed issue. Use a proper HTML parser for nested markup.'
+  - question: 'The pattern `(a+)+$` is run against a string of $n$ letters `a` followed by `!`. Suppose each additional `a` doubles the runtime, and 24 `a`s take about 1.7 seconds. Roughly how long will 30 `a`s take?'
+    options:
+      - 'Still about 1.7 seconds, because the pattern is already compiled'
+      - 'About 2 seconds, because the string is only slightly longer'
+      - 'About 2 minutes'
+      - 'It never terminates'
+    answer: 2
+    explanation: 'Adding 6 more `a`s doubles the runtime 6 times: $1.7 \times 2^6 \approx 109$ seconds, or nearly 2 minutes. The runtime grows exponentially because there are $2^{n-1}$ ways to partition $n$ letters `a` across the nested quantifiers, and when the final `$` fails on `!`, the backtracking engine tries every single partition before giving up. Pre-compiling the pattern does not change this search tree. Rewriting the pattern as `a+$` runs instantaneously.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import extractCode from '@code/nlp/regex/extract.en.py?raw';
+import pitfallsCode from '@code/nlp/regex/pitfalls.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand a **regular expression** (regex) as a concise specification of a set of strings, and read its core building blocks: character classes, quantifiers, anchors, groups, greedy vs. lazy matching, and lookarounds.
+- Write regex patterns to extract Vietnamese mobile phone numbers, email addresses, and dates from Vietnamese text, and mask or reformat them with `re.sub`.
+- Use Python's `re` module effectively (`search`, `findall`, `sub`, `compile`, flags, raw strings) and explain why `\w` handles accented Vietnamese letters properly whereas `[a-zA-Z]` breaks them apart.
+- Recognize when regex is the wrong tool: arbitrarily nested structures like HTML, and patterns susceptible to catastrophic backtracking.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In Python 3, a **string** (`str`) is a sequence of Unicode characters: `len("phở")` is 3, `s.split()` splits on whitespace, and `s.replace(a, b)` replaces fixed substrings. Inside a regular string literal, a backslash `\` starts an **escape sequence**: `"\n"` is a single newline character, and `"\b"` is a single backspace character. A **raw string** `r"..."` leaves every `\` literal, so `r"\n"` is the two characters `\` and `n`—which is why regex patterns in Python should almost always be written as raw strings.
+:::
+
+## Intuition
+
+### A classified ad and three things to extract
+
+Suppose you have thousands of Vietnamese classified ads like the one below, and you need to pull out every phone number, email address, and date. Or the flip side: you need to **redact** phone numbers and emails before feeding the text into a language model training run, because they are personally identifiable information (as discussed in [Pretraining Data Preparation](/en/llm/pretraining-data/)).
+
+> Bán xe Wave 2019, giá 12 triệu. Gọi anh Nam 0912 345 678 hoặc chị Lan +84987654321. Email: nam.nguyen@gmail.com. Xem xe từ 05/11/2026 đến 15/11/2026. STK 1903456789123 không phải số điện thoại.
+>
+> *(Selling a 2019 Wave motorbike, price 12 million. Call Nam at 0912 345 678 or Lan at +84987654321. Email: nam.nguyen@gmail.com. Viewings from 05/11/2026 to 15/11/2026. Bank acct 1903456789123 is not a phone number.)*
+
+(All numbers, names, and emails in this lesson are fictitious.) Your eyes spot the phone numbers immediately—not because you have memorized those exact numbers, but because you recognize their **shape**: "starts with `0` or `+84`, followed by 9 digits, optionally separated by spaces or dots." You cannot list every possible phone number in a lookup table, but you can describe the pattern they share.
+
+### Trying with basic string methods
+
+With ordinary string methods, you might split on spaces and keep tokens made of digits. That immediately breaks on `"0912 345 678"`, which gets chopped into three separate pieces `"0912"`, `"345"`, and `"678"`. It also grabs false hits like `"2019"` (the model year), `"12"` (the price), and `"1903456789123"` (the bank account number), while missing `"+84987654321"` because `+` is not a digit. Every edge case demands another `if` branch, and your script quickly turns into a fragile tangle of ad-hoc checks.
+
+### A mini-language for describing text shapes
+
+A regular expression is a compact notation designed specifically to express rules like "`0` or `+84`, then one digit from `3, 5, 7, 8, 9`, then 8 more digits, optionally separated by spaces or dots." You write the pattern once, and virtually every programming language, text editor, and command-line search tool (`grep`, `ripgrep`) understands it.
+
+Regex has been part of natural language processing from the very beginning. Joseph Weizenbaum's 1966 chatbot ELIZA was essentially a cascade of regex-style pattern substitutions: match `"I need X"` and reply `"What would it mean to you if you got X?"`. And today, modern subword tokenizers—including GPT-2 and GPT-4—still run a regex pre-tokenizer to split raw text into coarse chunks before applying Byte Pair Encoding ([Tokenization](/en/nlp/tokenization/)).
+
+**The problem for this lesson: describe the shape of phone numbers, emails, and dates as regex patterns, use them to extract, mask, and reformat matches in Vietnamese text, and understand where regex patterns fail.**
+
+## Theory
+
+### Patterns and matches
+
+A regular expression is a **pattern** string. A regex engine scans text from left to right looking for substrings that **match** the pattern. In Python:
+
+```python
+import re
+re.search(r"Wave", "Bán xe Wave 2019")  # matches "Wave" at index 7
+```
+
+The simplest pattern is plain text: `Wave` matches the exact substring `"Wave"`. The expressive power comes from **metacharacters**: `. ^ $ * + ? { } [ ] \ | ( )`. To match one of these characters literally, escape it with a backslash: `\.` matches a literal period, and `\+` matches a literal plus sign (which is why our phone pattern writes `\+84`).
+
+### Character classes: one position, many choices
+
+A **character class** `[...]` matches **a single character** chosen from the set inside the brackets:
+
+| Pattern | Matches one character | Example match |
+|---|---|---|
+| `[35789]` | any one of the five digits 3, 5, 7, 8, 9 | `9` in `"0912"` |
+| `[0-9]` | any digit from 0 to 9 (`-` denotes a range) | `2` |
+| `[^>]` | any character **except** `>` (a leading `^` negates the class) | `b` in `<b>` |
+| `[ .]` | a space or a literal period (inside `[...]`, `.` loses its wildcard meaning) | the space in `"0912 345"` |
+
+Frequently used character classes have shorthand escapes, where the uppercase letter is the negation of the lowercase letter:
+
+| Shorthand | Meaning in Python 3 (`str` mode) | Negation |
+|---|---|---|
+| `\d` | any Unicode decimal digit, including `0-9` | `\D` |
+| `\w` | any **word character**: any Unicode letter or digit, plus `_` | `\W` |
+| `\s` | any whitespace character: space, tab, newline, etc. | `\S` |
+| `.` | any character except newline (`\n`) | |
+
+The `\w` row is critical when working with Vietnamese. In Python 3, on `str` patterns, `\w` matches every character that Unicode classifies as alphanumeric, plus the underscore `_`. That means `"ở"`, `"à"`, `"ộ"`, and `"đ"` are all `\w` characters. By contrast, `[a-zA-Z]` contains only the 52 unaccented ASCII letters and slices `"Phở"` down to `"Ph"`. Many English-centric textbooks (including Jurafsky & Martin) define `\w` as shorthand for `[a-zA-Z0-9_]`; in Python 3, that equivalence holds only when you pass the `re.ASCII` flag.
+
+### Quantifiers: how many repetitions
+
+A **quantifier** sits immediately after a character, character class, or group and specifies how many times that element may repeat:
+
+| Quantifier | Repetitions | Example |
+|---|---|---|
+| `*` | 0 or more times | `[0-9]*` matches even the empty string |
+| `+` | 1 or more times | `[0-9]+` matches `"2019"` |
+| `?` | 0 or 1 time (optional) | `[ .]?` allows an optional space or dot |
+| `{3}` | exactly 3 times | `\d{3}` matches `"345"` |
+| `{1,2}` | between 1 and 2 times | `\d{1,2}` matches both `"5"` and `"05"` |
+
+A quantifier applies only to the **single atom immediately preceding it**: `ha+` matches `"haaa"`, whereas on `"hahaha"` it matches three separate `"ha"` tokens. To repeat a multi-character sequence, wrap it in parentheses: `(ha)+`.
+
+### Anchors and boundaries: matching a position
+
+An **anchor** consumes zero characters; it only asserts that the engine is currently sitting at a specific **position**:
+
+- `^` matches the start of the string, and `$` matches the end of the string (with `re.MULTILINE`, they also match the start and end of each line).
+- `\b` is a **word boundary**: the zero-width position between a `\w` character and a non-`\w` character (or the start/end of the string). Thus `\bxe\b` matches `"xe"` in `"Bán xe Wave"` but does not match inside `"xem"`. Because Python 3's `\w` is Unicode-aware, `\b` works properly around Vietnamese words too: `\bHà\b` matches `"Hà"` in `"Hà Nội"`.
+
+### Groups, alternation, and backreferences
+
+The pipe `|` means "or" and has the lowest precedence of any regex operator: `\+84|0` matches either `"+84"` or `"0"`. Parentheses serve two purposes:
+
+1. **Grouping**, so a quantifier or `|` applies to a sub-expression without leaking out: `(?:\+84|0)` scopes the `|` to just the country-code prefix.
+2. **Capturing** the matched substring for later extraction or replacement. `(\d{1,2})` is a **capturing group**, numbered starting from 1 in left-to-right order of its opening parenthesis.
+
+When you only need grouping without capturing, write `(?:...)`—a **non-capturing group**. To give a group a readable name, write `(?P<day>...)`.
+
+Capturing groups can be referenced inside `re.sub` replacement strings using **backreferences** `\1`, `\2`, `\3`. With the date pattern `\b(\d{1,2})/(\d{1,2})/(\d{4})\b`, the replacement `r"\3-\2-\1"` turns `"05/11/2026"` into `"2026-11-05"`: group 3 (year), hyphen, group 2 (month), hyphen, group 1 (day).
+
+### Greedy vs. lazy matching
+
+By default, quantifiers (`*`, `+`, `?`, `{m,n}`) are **greedy**: they match **as much text as possible**, backtracking only as far as needed to let the rest of the pattern succeed. Watch what happens when we run `<.*>` on the HTML snippet `<b>Phở</b> và <i>bún chả</i>`:
+
+- `<` matches the very first `<`.
+- `.*` greedily swallows **the entire remainder** of the string.
+- `>` now needs to match, so the engine backtracks one character from the end, immediately finding the final `>` of `</i>`. Match complete!
+
+Instead of matching `<b>`, `<.*>` matches the **entire string** from the first `<` to the last `>`. Appending `?` to a quantifier makes it **lazy** (non-greedy): `*?`, `+?`, `??` match **as few characters as possible**, expanding one character at a time until the next part of the pattern can match. Thus `<.*?>` stops at the **nearest** `>`, extracting each tag individually. Better still, a negated character class `<[^>]+>` states directly "one or more characters that are not `>`," which can never cross a closing bracket and avoids backtracking altogether.
+
+### Lookaround: checking neighbors without consuming them
+
+Sometimes you need to check what sits immediately before or after a match without including those neighboring characters in the match itself. **Lookarounds** are zero-width assertions that test the surrounding context:
+
+| Syntax | Name | Succeeds when |
+|---|---|---|
+| `(?=...)` | positive lookahead | the text immediately following matches `...` |
+| `(?!...)` | negative lookahead | the text immediately following does **not** match `...` |
+| `(?<=...)` | positive lookbehind | the text immediately preceding matches `...` |
+| `(?<!...)` | negative lookbehind | the text immediately preceding does **not** match `...` |
+
+In our classified ad, the 13-digit bank account number `1903456789123` contains the 10-digit substring `"0345678912"`, which has the exact shape of a Vietnamese mobile number. To reject substrings embedded inside longer numbers, our phone pattern begins with `(?<!\d)` and ends with `(?!\d)`: neither the character before nor the character after the match may be a digit. Why not use `\b`? Because `\b` requires a transition between `\w` and `\W`, and `+` in `"+84"` is already a non-word character (`\W`): between a space and `+`, both sides are `\W`, so `\b\+84` would fail to match `"+84987654321"`. Note that Python's `re` requires lookbehind patterns to have a fixed width: `(?<!\d)` is valid, whereas `(?<!\d+)` raises an error.
+
+### Python's `re` module
+
+| Function | What it does | Return value |
+|---|---|---|
+| `re.search(p, s)` | find the **first** match anywhere in `s` | `Match` object or `None` |
+| `re.match(p, s)` | try to match **only at the start** of `s` | `Match` object or `None` |
+| `re.fullmatch(p, s)` | require the **entire string** `s` to match | `Match` object or `None` |
+| `re.findall(p, s)` | find all non-overlapping matches | list of strings (or list of group tuples if `p` has capturing groups) |
+| `re.finditer(p, s)` | iterator over all non-overlapping matches | iterator of `Match` objects (with `.start()`, `.end()`, `.group()`) |
+| `re.sub(p, r, s)` | replace every match with `r` (`r` may use `\1` or be a function) | new string |
+| `re.split(p, s)` | split `s` wherever `p` matches | list of substrings |
+| `re.compile(p, flags)` | compile `p` once for repeated reuse | `Pattern` object providing all the methods above |
+
+Two behaviors frequently trip people up. First, `re.findall` changes its return type when your pattern contains capturing groups: with 0 groups it returns full match strings, with 1 group it returns a list of that group's strings, and with 2+ groups it returns a list of tuples. Second, `re.match(r"\d+", "Giá 12 triệu")` returns `None` because `"Giá"` at index 0 is not a digit—use `re.search` to look anywhere in the string.
+
+Common **flags**: `re.IGNORECASE` (case-insensitive matching), `re.MULTILINE` (`^` and `$` match line boundaries), `re.DOTALL` (`.` matches newlines too), `re.ASCII` (`\w`, `\d`, `\b`, `\s` match ASCII only), and `re.VERBOSE` (allows whitespace and `#` comments inside a multi-line pattern).
+
+### The mathematical view: a regex defines a set of strings
+
+Why are they called "regular" expressions? Let $\Sigma$ be a finite alphabet of characters, and let $\Sigma^*$ denote the set of all finite strings over $\Sigma$, including the empty string $\varepsilon$. Every formal regular expression $r$ denotes a set of strings $L(r) \subseteq \Sigma^*$—the language of strings that match $r$ in full.
+
+Kleene (1951; reprinted 1956) defined regular expressions inductively: the base cases are single characters $a \in \Sigma$ (matching `"a"`), the empty string $\varepsilon$, and the empty set $\varnothing$; complex expressions are built from three operations:
+
+$$
+\begin{aligned}
+L(r_1 r_2) &= \lbrace uv : u \in L(r_1),\ v \in L(r_2) \rbrace \\
+L(r_1 \mid r_2) &= L(r_1) \cup L(r_2) \\
+L(r^*) &= \lbrace \varepsilon \rbrace \cup L(r) \cup L(rr) \cup L(rrr) \cup \cdots
+\end{aligned}
+$$
+
+- **Concatenation** ($r_1 r_2$): a string from $L(r_1)$ followed immediately by a string from $L(r_2)$.
+- **Union / alternation** ($r_1 \mid r_2$): a string matching either $r_1$ or $r_2$.
+- **Kleene star** ($r^*$): zero or more concatenations of strings from $L(r)$.
+
+Every other standard operator is syntactic sugar: $r^+$ is $r r^*$, $r?$ is $r \mid \varepsilon$, `[357]` is $3 \mid 5 \mid 7$, and `\d{3}` is `\d\d\d`. A subset of $\Sigma^*$ that can be built this way is called a **regular language**. Kleene's theorem proves that regular languages are **precisely** the languages recognizable by a **finite automaton**—an abstract machine with a fixed, finite number of states that reads one character at a time.
+
+Historically, Ken Thompson (1968) compiled regular expressions into finite automata inside the QED text editor, simulating all active states in lockstep so matching ran in time linear in the text length. QED's descendant `ed` popularized the command `g/re/p` ("globally search for a regular expression and print"), giving birth to the Unix tool `grep`. As Russ Cox (2007) recounts, however, many later regex engines—including Python's `re`, Perl, JavaScript, and PCRE—switched to a **backtracking** implementation because backtracking makes it easy to support non-regular extensions like backreferences `(\w+) \1`. The Limitations section below shows the price of that design choice.
+
+:::note[Key takeaway]
+A regular expression specifies the shape of a set of strings. Character classes select **one** character, quantifiers specify **how many times** it repeats, anchors and lookarounds test **positions** without consuming text, and parentheses group sub-expressions and capture substrings for `\1` backreferences. Quantifiers are greedy by default; append `?` to make them lazy. In Python 3, `\w` is Unicode-aware and matches accented Vietnamese letters, whereas `[a-zA-Z]` is ASCII-only. Always write regex patterns as raw strings `r"..."`.
+:::
+
+### Limitations
+
+- **Arbitrarily nested structures.** Matching opening `<div>` tags with their corresponding closing `</div>` tags requires counting how many tags are currently open. Because nesting depth can be arbitrarily large while a finite automaton has only finitely many states, the language of balanced parentheses or nested HTML tags is not regular. For HTML, JSON, or source code, use a real parser (`html.parser`, `BeautifulSoup`, `json`), reserving regex for flat text tasks like stripping simple tags in the second code cell.
+- **Catastrophic backtracking.** Because Python's `re` engine searches by depth-first backtracking, ambiguous nested quantifiers like `(a+)+$` can take $O(2^n)$ time when a match fails at the end of a string of $n$ letters `a`: before giving up on `"aaaa...!"`, the engine tries all $2^{n-1}$ ways of slicing the `a`s into inner `a+` groups. On our test machine with Python 3.14, 24 `a`s take ~1.7 seconds, and each additional `a` doubles the wait. Exposing a vulnerable regex to untrusted user input on a server creates a **Regular Expression Denial of Service (ReDoS)** vulnerability. Fix it by eliminating nested quantifiers that can match the same characters (`(a+)+` simplifies to `a+`), using possessive quantifiers or atomic groups where needed, or bounding input length.
+- **Regex checks surface shape, not real-world validity.** Our date pattern happily matches `"31/02/2026"` and `"99/99/2026"`. Every pattern trades off **false positives** (matching things it shouldn't) against **false negatives** (missing valid variations). Tightening a pattern to reduce false positives almost always increases false negatives.
+- **Vietnamese word segmentation needs more than regex.** `\w+` splits `"Hà Nội"` at the space into two syllables `"Hà"` and `"Nội"`, even though `"Hà Nội"` is a single compound word. [Tokenization](/en/nlp/tokenization/) picks up right where regex leaves off.
+
+## Illustration
+
+The table below breaks down the Vietnamese mobile phone pattern from the first code cell line by line, in the exact order the regex engine evaluates it. The two rightmost columns show what each piece matches on the two phone numbers in our classified ad. Notice the "empty" cells: lookarounds and optional `?` quantifiers can succeed while consuming zero characters.
+
+| Pattern piece | Meaning | In `0912 345 678` | In `+84987654321` |
+|---|---|---|---|
+| `(?<!\d)` | not preceded by a digit | empty (position check) | empty (position check) |
+| `(?:\+84\|0)` | `+84` or `0` (non-capturing group) | `0` | `+84` |
+| `[35789]` | first digit of a Vietnamese mobile prefix | `9` | `9` |
+| `\d{2}` | two more prefix digits | `12` | `87` |
+| `[ .]?` | optional space or dot separator | space | empty |
+| `\d{3}` | three middle digits | `345` | `654` |
+| `[ .]?` | optional space or dot separator | space | empty |
+| `\d{3}` | final three digits | `678` | `321` |
+| `(?!\d)` | not followed by a digit | empty (position check) | empty (position check) |
+
+On the bank account number `1903456789123`, the substring `"0345678912"` satisfies every middle row of the table—but fails the very first row `(?<!\d)` because `"0"` is immediately preceded by the digit `"9"`.
+
+The date pattern is shorter and uses three capturing groups. The table below shows what each group captures on `"05/11/2026"`, and how the replacement string `r"\3-\2-\1"` reassembles them into ISO format:
+
+| Pattern piece | Meaning | Matched text | Group |
+|---|---|---|---|
+| `\b` | word boundary | empty | |
+| `(\d{1,2})` | 1 or 2 digits: day | `05` | `\1` |
+| `/` | literal slash | `/` | |
+| `(\d{1,2})` | 1 or 2 digits: month | `11` | `\2` |
+| `/` | literal slash | `/` | |
+| `(\d{4})` | 4 digits: year | `2026` | `\3` |
+| `\b` | word boundary | empty | |
+
+Substituting `r"\3-\2-\1"` produces `"2026"` + `"-"` + `"11"` + `"-"` + `"05"`, or `"2026-11-05"`.
+
+## Code examples
+
+The code in this lesson was last tested in November 2026 with Python 3.14 (bundled in Pyodide). Both cells use only the Python standard library (`re` and `unicodedata`), run directly in the page, and are self-contained.
+
+### Extracting, masking, and reformatting
+
+The cell below compiles our three patterns, extracts phone numbers, emails, and dates from the classified ad, shows what happens when the lookaround guards are removed, and then masks phone numbers and converts dates to `yyyy-mm-dd` format. Note how `PHONE` is written as adjacent raw string literals across five lines: Python automatically concatenates adjacent string literals at compile time, letting us comment each clause cleanly.
+
+<PythonRunner code={extractCode} title="Extracting phone numbers, emails, and dates, then masking" />
+
+Reading the output:
+
+- **`phones`** finds the exact two phone numbers, `'0912 345 678'` and `'+84987654321'`. Neither the year `2019` nor the bank account number sneaks in.
+- **`emails`** returns `['nam.nguyen@gmail.com']`. The sentence-ending period right after `.com` is excluded because `(?:\.[\w-]+)+` requires at least one word character or hyphen after every dot.
+- **`dates`** returns a list of 3-tuples `[('05', '11', '2026'), ('15', '11', '2026')]` rather than full strings, because `DATE` contains three capturing groups.
+- **`no guard`**: dropping `(?<!\d)` and `(?!\d)` causes the pattern to pull a third false-positive match `'0345678912'` out of the middle of the bank account number.
+- **Final line**: two `sub` calls replace both phone numbers with `<PHONE>` and reformat both dates to `2026-11-05` and `2026-11-15`.
+
+### Accented letters, greedy vs. lazy, and a tiny tokenizer
+
+The second cell demonstrates common Vietnamese and HTML pitfalls: `[a-zA-Z]` vs. `\w` on accented text, the `re.ASCII` flag, decomposed Unicode (NFD), greedy vs. lazy matching on HTML tags, and a compact regex word/punctuation tokenizer.
+
+<PythonRunner code={pitfallsCode} title="Accented letters, greedy vs. lazy, and a tiny regex tokenizer" />
+
+Reading the output line by line:
+
+- **First three lines:** `[a-zA-Z]+` chops `"Phở Hà Nội ngon quá!"` into `['Ph', 'H', 'N', 'i', 'ngon', 'qu']`. Using `\w+` keeps all five Vietnamese syllables intact: `['Phở', 'Hà', 'Nội', 'ngon', 'quá']`. Passing `flags=re.ASCII` reverts `\w` to ASCII-only, reproducing the broken first line.
+- **`3 4 2`:** The precomposed string `"hòa"` has 3 characters. When converted to NFD, the grave accent becomes a separate **combining character**, increasing `len(nfd)` to 4. Because combining marks are not `\w` characters, `\w+` splits `"hòa"` into 2 pieces (`'ho'` and `'a'`). Text scraped from the web or PDFs often contains NFD strings that look identical on screen; [Text Normalization](/en/nlp/text-normalization/) shows how to normalize to NFC before running regexes.
+- **Three HTML lines:** Greedy `<.*>` returns one giant string spanning from the first `<` to the last `>`. Lazy `<.*?>` stops at each `>`, returning `['<b>', '</b>', '<i>', '</i>']`. And `re.sub(r"<[^>]+>", "", html)` strips all tags cleanly, leaving `"Phở và bún chả"`.
+- **Last two lines:** The pattern `\w+|[^\w\s]` is a classic baseline tokenizer: match either a run of word characters or a single non-word, non-whitespace punctuation character. On `"Giá 12.000đ, rẻ quá!"`, it splits the price into `'12'`, `'.'`, `'000đ'`. Placing a number branch `\d+(?:[.,]\d+)*` **first** in the alternation keeps `'12.000'` together and separates the currency unit `'đ'`. Alternation order matters: at each position, Python's `re` tries branches from left to right and takes the first branch that matches.
+
+## Common pitfalls
+
+:::caution[Writing regex patterns as regular strings instead of raw strings]
+In an ordinary Python string literal, `"\b"` is the ASCII backspace character (byte `0x08`), not the two-character regex escape `\b`. Consequently, `re.findall("\bHà\b", "Hà Nội")` silently returns `[]`, whereas `re.findall(r"\bHà\b", "Hà Nội")` returns `['Hà']`. And for unrecognized escapes like `"\d"`, Python 3.12+ emits a `SyntaxWarning: "\d" is an invalid escape sequence` that will eventually become a `SyntaxError`. Make it a reflex: **always** prefix regex strings with `r"..."`.
+:::
+
+:::caution[Using `[a-zA-Z]` on Vietnamese text]
+As the second code cell showed, `[a-zA-Z]` matches only the 52 unaccented Latin letters and shreds Vietnamese words at every vowel with a diacritic or `"đ"`. Use `\w` (or `[^\W\d_]` if you want Unicode letters only, excluding digits and `_`). Conversely, note that Python 3's `\d` matches decimal digits across all Unicode scripts (such as Devanagari `३४`); if you strictly want ASCII digits `0-9`, write `[0-9]` or pass `re.ASCII`.
+:::
+
+:::caution[Confusing `re.match` with `re.search`, and forgetting how capturing groups affect `re.findall`]
+`re.match` only checks the **very beginning** of the string, so `re.match(r"\d+", "Giá 12 triệu")` returns `None`. Use `re.search` to find a match anywhere in the string, or `re.fullmatch` when validating that an entire input string matches a pattern from start to finish. Also remember that adding parentheses `(...)` to group a sub-pattern changes `re.findall` from returning full matches to returning only the captured groups—use non-capturing `(?:...)` whenever you just want grouping.
+:::
+
+:::caution[Assuming a pattern is complete because it matches your happy-path examples]
+Our date pattern matches `"31/02/2026"` and `"99/99/2026"` (false positives) while missing `"5-11-2026"` and `"Nov 5, 2026"` (false negatives). Our phone pattern ignores landlines and returns `[]` on valid formatting variations like `"+84 912 345 678"`, `"0912-345-678"`, `"091 234 5678"`, or `"84912345678"`. Always test your regex on **negative examples** that should not match, and delegate semantic validation (like checking whether a calendar date actually exists via `datetime.date(year, month, day)`) to regular Python code after extraction.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- A regular expression specifies the **surface shape** of a set of strings. Character classes (`[...]`, `\d`, `\w`, `\s`, `.`) pick one character; quantifiers (`*`, `+`, `?`, `{m,n}`) specify repetition counts; anchors (`^`, `$`, `\b`) and lookarounds (`(?=...)`, `(?<!...)`) test positions without consuming characters; and groups `(...)` scope operators and capture substrings for `\1` backreferences.
+- Quantifiers are greedy by default; append `?` for lazy matching, or use negated character classes like `[^>]+` to avoid backtracking altogether.
+- In Python, always write patterns as raw strings `r"..."`, pre-compile reusable patterns with `re.compile`, and pick the right function (`search`, `match`, `fullmatch`, `findall`, `sub`). Python 3's `\w` is Unicode-aware and handles accented Vietnamese characters, provided the text has been normalized to NFC first.
+- Regex cannot count unbounded nesting depth (use a real parser for HTML/JSON), can suffer exponential catastrophic backtracking on ambiguous nested quantifiers like `(a+)+`, and does not understand semantics—always test for both false positives and false negatives.
+
+**Further reading:**
+
+- Jurafsky, D., Martin, J. H. (2026). [*Speech and Language Processing*](https://web.stanford.edu/~jurafsky/slp3/), 3rd ed. draft (Aug 19, 2026), Chapter 2 "Words and Tokens", Section 2.6. Introduces regular expressions for NLP, false positives vs. false negatives, ELIZA substitutions, and GPT-2's pre-tokenization regex. Note that the textbook defines `\w` in ASCII mode (`[a-zA-Z0-9_]`), unlike Python 3's Unicode default.
+- Python Software Foundation. [*`re` — Regular expression operations*](https://docs.python.org/3.14/library/re.html), Python 3.14 documentation. Complete syntax reference, flags, and Unicode behavior of `\w`, `\d`, and `\b`.
+- Kuchling, A. M. [*Regular Expression HOWTO*](https://docs.python.org/3.14/howto/regex.html), Python 3.14 documentation. A gentle tutorial walking from basic character matching to groups, lookarounds, and common pitfalls.
+- Cox, R. (2007). [*Regular Expression Matching Can Be Simple And Fast*](https://swtch.com/~rsc/regexp/regexp1.html). Explains why backtracking regex engines can take exponential time on pathological patterns and how Thompson's NFA simulation guarantees linear time.
+- Thompson, K. (1968). [*Regular expression search algorithm*](https://doi.org/10.1145/363347.363387). *Communications of the ACM* 11(6): 419–422. The classic paper compiling regular expressions into finite automata, building on Kleene, S. C. (1951), [*Representation of Events in Nerve Nets and Finite Automata*](https://www.rand.org/pubs/research_memoranda/RM704.html), RAND RM-704.
+
+<LessonProgress />

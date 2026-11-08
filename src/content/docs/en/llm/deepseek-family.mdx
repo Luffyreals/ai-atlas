@@ -1,0 +1,382 @@
+---
+title: The DeepSeek Family
+description: 'DeepSeek-V3 has 671 billion parameters yet activates only 37 billion per token. MoE with shared experts, MLA compressing the KV cache, bias-based load balancing, plus GRPO and R1.'
+quiz:
+  - question: 'An MoE layer has 8 experts, and each token selects 2. You split each expert into 4 smaller experts (each with one-quarter of the hidden dimension) and let each token select 8. What changes?'
+    options:
+      - 'Compute per token increases by $4\times$, because each token runs 8 experts instead of 2'
+      - 'Total parameters and compute per token stay the same; the number of possible expert combinations jumps from $\binom{8}{2} = 28$ to $\binom{32}{8} = 10\,518\,300$'
+      - 'Total parameters increase by $4\times$, because the number of experts increases by $4\times$'
+      - 'Nothing changes, because 8 small experts combined equal the exact same 2 large experts as before'
+    answer: 1
+    explanation: 'Each small expert is one-quarter the size of an old expert, so 32 small experts have the same total parameter count as 8 old experts, and running 8 small experts costs the same compute as running 2 old experts. The first option forgets that each expert shrank by $4\times$. What changes is combinatorial flexibility: a token can now assemble any 8 fine-grained sub-specialties rather than being forced to take all 4 quarters of just 2 coarse experts.'
+  - question: 'Model A uses GQA with 8 K/V heads, each of dimension $d = 128$. Model B uses MLA with $d_c = 512$ and $d^R = 64$. Both models have the same number of layers and store 2 bytes per number. How does Model B''s per-token KV cache compare to Model A''s?'
+    options:
+      - 'B is larger, because $d_c = 512$ is larger than $d = 128$'
+      - 'They are equal, because both have the same number of layers and bytes per number'
+      - 'B is about $3.6\times$ smaller: 576 numbers per layer versus $2\,048$ numbers'
+      - 'B is 93.3% smaller, as reported in the DeepSeek-V2 paper'
+    answer: 2
+    explanation: 'Per layer, A stores K and V across 8 heads: $2 \cdot 8 \cdot 128 = 2\,048$ numbers. B stores only the compressed latent vector and the decoupled RoPE key: $512 + 64 = 576$ numbers. The ratio is $2\,048 / 576 \approx 3.6$. Comparing $d_c$ directly to $d$ compares a whole layer''s latent vector against a single head, forgetting that GQA stores both K and V across 8 heads. The 93.3% figure compares DeepSeek-V2 against DeepSeek 67B (a dense MHA model), not against arbitrary GQA configurations.'
+  - question: 'In DeepSeek-V3, expert 5 is overloaded, so its bias $b_5$ is decreased by $\gamma$. Suppose a token''s affinity scores $s_i$ have not changed. On the next step, this token still selects the exact same two experts as before, including expert 5. What happens to its gating weight $g_5$?'
+    options:
+      - 'It stays unchanged, because gating weights are computed from the original scores $s_5$; the bias only determines which experts are selected'
+      - 'It decreases by $\gamma$, because the bias decreased by $\gamma$'
+      - 'It becomes 0, because an overloaded expert is locked out for the next step'
+      - 'It increases to compensate for tokens that switched away to other experts'
+    answer: 0
+    explanation: 'The bias is added to the score only when ranking experts to pick the top-$K$. The gating weight uses the original unbiased affinity $s_i$, normalized across the selected experts. Since the selected set of experts and their $s_i$ values are unchanged, $g_5$ is unchanged. The second option confuses the routing bias with a term in the layer output. The bias reduces how many tokens pick expert 5, without altering the output computation for tokens that still pick it.'
+  - question: 'You train with GRPO using group size $G = 8$. A prompt is too easy: all 8 sampled responses are correct and receive reward 1. What does this prompt contribute to the policy update?'
+    options:
+      - 'A large update, because all 8 responses received positive reward and get strongly reinforced'
+      - 'It pushes the model down, because the group advantage is negative'
+      - 'The program crashes with a division-by-zero error, so the prompt must be discarded'
+      - 'Almost nothing: every advantage is 0, leaving only the KL penalty term active'
+    answer: 3
+    explanation: 'The advantage is the reward minus the group mean, divided by the group standard deviation. When every response in the group gets the same score, the numerator is 0, so every $A_i = 0$ and the clipped surrogate term vanishes. GRPO learns strictly from relative differences within the group, so a uniformly high reward provides zero learning signal. Because the denominator is also 0, implementations add a tiny epsilon for numerical stability, as in our code cell.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import MoeFigure from '@components/figures/MoeFigure.astro';
+import moeRoutingCode from '@code/llm/deepseek-family/moe-routing.en.py?raw';
+import grpoAdvantageCode from '@code/llm/deepseek-family/grpo-advantage.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Understand **Mixture of Experts** (MoE): how a **router** selects a few **experts** per token, and DeepSeekMoE's two refinements—**fine-grained expert segmentation** and **shared experts**—while distinguishing total parameters from activated parameters.
+- Understand how **MLA** (multi-head latent attention) shrinks the KV cache via **low-rank compression**, in contrast to GQA's **head sharing**, and compute the per-token KV cache size.
+- Grasp the three techniques DeepSeek-V3 uses to lower training cost—**auxiliary-loss-free load balancing** via bias terms, **multi-token prediction** (MTP), and FP8 mixed precision—and interpret the "$5.576M" cost figure accurately.
+- Derive the group-normalized **advantage** of **GRPO** (Group Relative Policy Optimization) and understand how DeepSeek-R1-Zero learns long chains of reasoning purely from **rule-based rewards**.
+
+## Prerequisites
+
+{/* List taken from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In [The LLaMA Family](/en/llm/llama-family/), each Transformer block contains an attention layer and a **feed-forward network** (FFN), and GQA shrinks the KV cache by letting multiple query heads share a single K, V head. The GRPO section at the end of this lesson builds on PPO, the KL penalty, and the reference model $\pi_{\text{ref}}$ from [RLHF](/en/llm/rlhf/).
+:::
+
+## Intuition
+
+### A hospital with hundreds of specialists
+
+In December 2024, DeepSeek released the technical report for DeepSeek-V3: a 671-billion-parameter model that activates only 37 billion parameters for any given token. How can a model be huge in capacity yet small in per-token compute?
+
+Picture a large hospital. No patient visits every department: the reception desk routes you to the few specialists best suited for your case. The hospital employs hundreds of doctors, but each visit only uses the time of a handful.
+
+In an MoE layer, the patient is the token, the reception desk is the router, and each doctor is an FFN expert. DeepSeek adds two twists to this hospital: **many narrow sub-specialties** instead of a few broad departments, so each case can assemble a custom team more flexibly; and **a general practitioner whom every patient sees**, so the specialists do not waste capacity re-learning basic common sense.
+
+### Four bottlenecks
+
+DeepSeek retains the Transformer backbone from the LLaMA lesson. Each paper in the series targets a specific bottleneck:
+
+| Bottleneck | DeepSeek's approach | Paper |
+|---|---|---|
+| Compute per token | MoE with fine-grained experts and shared experts | DeepSeekMoE, V2, V3 |
+| KV cache memory during generation | Multi-head Latent Attention (MLA) | V2, V3 |
+| Training cost | Bias-based load balancing, MTP, FP8 training | V3 |
+| Teaching reasoning | GRPO and rule-based rewards | DeepSeekMath, R1 |
+
+Most of these ideas build on prior work cited directly by the authors: sparsely gated MoE layers date back to Shazeer et al. (2017), and GRPO is a critic-free variant of PPO. DeepSeek's contribution lies in refining, combining, and scaling them up in open-weight models.
+
+The problem of this lesson is: **how can a model pack hundreds of billions of parameters while spending only a fraction of compute per token, keeping its KV cache small, and training economically—and how can we teach it to reason when we only know whether its final answer is right or wrong?**
+
+## Theory
+
+### MoE: each token runs only a few experts
+
+In a standard Transformer block, after attention, each token vector $\mathbf{u}$ passes through a single FFN with a residual connection: $\mathbf{h} = \mathbf{u} + \mathrm{FFN}(\mathbf{u})$. An MoE layer replaces that single FFN with many FFNs, each called an expert. Following DeepSeek-V3's notation, a layer has $N_s$ shared experts and $N_r$ routed experts:
+
+$$
+\mathbf{h} = \mathbf{u} + \sum_{i=1}^{N_s} \mathrm{FFN}^{(s)}_i(\mathbf{u}) + \sum_{i=1}^{N_r} g_i\, \mathrm{FFN}^{(r)}_i(\mathbf{u})
+$$
+
+Read each term: $\mathbf{u}$ is the residual connection; the first sum runs over the shared experts, which **always execute** for every token without consulting the router; the second sum runs over the routed experts, each weighted by its **gating weight** (gate) $g_i$.
+
+**The router scores experts.** Each routed expert has a learnable centroid vector $\mathbf{e}_i$, acting as its "specialty profile". The **affinity** score between token $\mathbf{u}$ and expert $i$ is $s_i = \mathrm{softmax}_i(\mathbf{u}^\top \mathbf{e}_i)$ in DeepSeekMoE and V2: a larger dot product means a stronger match.
+
+**Keep only the top-$K_r$.** The gating weight is non-zero only for the $K_r$ highest-scoring experts:
+
+$$
+g_i =
+\begin{cases}
+s_i, & s_i \in \mathrm{TopK}\big(\{s_j \mid 1 \le j \le N_r\},\, K_r\big) \\
+0, & \text{otherwise}
+\end{cases}
+$$
+
+Here $\mathrm{TopK}(\cdot, K_r)$ denotes the set of the $K_r$ largest affinity scores. Any expert with $g_i = 0$ is skipped completely, so each token only executes $N_s + K_r$ FFNs even though the layer holds $N_s + N_r$ FFNs in total. Model capacity (parameter count) scales with $N_r$, whereas compute per token scales only with $K_r$.
+
+In DeepSeek-V3: $N_s = 1$, $N_r = 256$, and $K_r = 8$, meaning each token runs 9 out of the 257 experts in each MoE layer. Across the entire model there are 671 billion parameters, of which 37 billion (about 5.5%) are activated per token. Why is 5.5% larger than $9/257 \approx 3.5\%$? Because the attention layers, token embeddings, output head, and the first three dense blocks are used by every token. Keep in mind that **all 671 billion** parameters must still sit in GPU memory, because a batch of tokens can route to any of the 256 experts.
+
+**Fine-grained expert segmentation.** Earlier MoE designs like GShard (Lepikhin et al., 2020) routed each token to 2 out of a small number of full-sized FFN experts. DeepSeekMoE (Dai et al., 2024) argued that when experts are coarse and few, each expert is forced to bundle unrelated knowledge together. Their fix: slice each expert into 4 smaller experts (reducing the FFN hidden dimension to one-quarter) and activate $4\times$ as many experts per token. Total parameters and per-token FLOPs **remain identical**, but combinatorial flexibility explodes: choosing 2 out of 16 coarse experts gives $\binom{16}{2} = 120$ combinations, whereas choosing 8 out of 64 quarter-sized experts gives $\binom{64}{8} = 4\,426\,165\,368$ combinations (the paper's exact example).
+
+**Shared experts.** Every token needs some common linguistic and world knowledge. Without a dedicated home for that common knowledge, many routed experts end up redundantly learning copies of the same basics, wasting parameter capacity. DeepSeekMoE dedicates $N_s$ shared experts that process every token unconditionally, and reduces the number of active routed experts by $N_s$ so total compute stays constant.
+
+The paper reports that DeepSeekMoE 16B matches LLaMA 2 7B in quality while using only about 40% of the compute.
+
+### Load balancing: from auxiliary loss to bias
+
+Left to itself, a learned router easily falls into **routing collapse**: a few experts get picked early on, receive more gradient updates, get better faster, and attract even more tokens—leaving the remaining experts under-trained. Worse, when experts are distributed across GPUs, the GPU holding a popular expert becomes a straggler bottleneck.
+
+**The old way: auxiliary loss.** DeepSeekMoE and V2 added a load-balancing **auxiliary loss** to the training objective. The penalty grows when an expert both receives a high fraction of tokens and gets high average router probability, pushing the router toward uniform load. The catch, as noted in the V3 report: making the auxiliary loss strong enough to balance traffic hurts language modeling quality. [Wang et al. (2024)](https://arxiv.org/abs/2408.15664), the paper introducing V3's method, explain that auxiliary-loss gradients interfere with the primary next-token prediction gradients.
+
+**V3's way: a per-expert bias term.** Each routed expert maintains a scalar bias $b_i$ that is added to the affinity score **only when selecting** the top-$K_r$ experts:
+
+$$
+g'_i =
+\begin{cases}
+s_i, & s_i + b_i \in \mathrm{TopK}\big(\{s_j + b_j \mid 1 \le j \le N_r\},\, K_r\big) \\
+0, & \text{otherwise}
+\end{cases}
+\qquad
+g_i = \frac{g'_i}{\sum_{j=1}^{N_r} g'_j}
+$$
+
+Notice three critical details:
+
+1. **The bias only affects which experts win the top-$K_r$ selection.** The unnormalized gate $g'_i$ uses the original unbiased affinity $s_i$. Here $b_i$ is a routing threshold offset, not a linear layer bias.
+2. **Gates are normalized** over the selected experts so the $K_r$ active gates sum to 1. V3 also switches the affinity function from softmax to sigmoid: $s_i = \sigma(\mathbf{u}^\top \mathbf{e}_i)$.
+3. **$b_i$ is not trained by gradient descent.** At the end of each training step, the system counts how many tokens across the batch routed to each expert: if expert $i$ is overloaded, $b_i$ is decremented by $\gamma$; if underloaded, $b_i$ is incremented by $\gamma$. The hyperparameter $\gamma$ is the bias update speed (V3 sets $\gamma = 0.001$).
+
+Think of it like adjustable signs at supermarket checkout lanes: lower the sign on crowded lanes and raise it on empty ones. That nudges which lane new shoppers pick without changing how the cashier rings up their items, and without injecting noisy auxiliary gradients into the model weights.
+
+V3 still retains a tiny **sequence-wise** balance loss with coefficient $0.0001$ to discourage extreme imbalance within any single sequence, and restricts each token to routing to at most 4 compute nodes to bound cross-node communication.
+
+### MLA: compressing the KV cache
+
+In [The LLaMA Family](/en/llm/llama-family/), we saw that the per-token KV cache costs $2 \cdot N_{\text{layer}} \cdot H_{\text{kv}} \cdot d \cdot s$ bytes, where $s$ is the number of bytes per number (not to be confused with the router affinity $s_i$ above). GQA reduces $H_{\text{kv}}$ by making groups of heads **share** keys and values. DeepSeek-V2's MLA takes a different route: **low-rank compression**.
+
+Let $\mathbf{h}_t \in \mathbb{R}^{D}$ be the attention input for token $t$ (distinct from the MoE output $\mathbf{h}$ above) in a layer with $H$ heads of dimension $d$. MLA projects $\mathbf{h}_t$ down into a single low-dimensional **latent vector** $\mathbf{c}_t$ of dimension $d_c$, and reconstructs all heads' keys and values from $\mathbf{c}_t$:
+
+$$
+\mathbf{c}_t = \mathbf{W}^{DKV}\mathbf{h}_t, \qquad
+\mathbf{k}_t = \mathbf{W}^{UK}\mathbf{c}_t, \qquad
+\mathbf{v}_t = \mathbf{W}^{UV}\mathbf{c}_t
+$$
+
+Here $\mathbf{W}^{DKV} \in \mathbb{R}^{d_c \times D}$ is the down-projection matrix, $\mathbf{W}^{UK}, \mathbf{W}^{UV} \in \mathbb{R}^{Hd \times d_c}$ are the up-projection matrices, and $d_c \ll Hd$. During inference, **we only cache $\mathbf{c}_t$**. Better yet, because matrix multiplication is associative, $\mathbf{W}^{UK}$ can be absorbed into the query projection matrix and $\mathbf{W}^{UV}$ into the output projection matrix at inference time, so we never even materialize the full uncompressed keys and values out of the cache.
+
+**The RoPE complication.** RoPE multiplies queries and keys by position-dependent rotation matrices. Because a position-dependent rotation matrix sits between the query projection and $\mathbf{W}^{UK}$—and matrix multiplication does not commute—we can no longer absorb $\mathbf{W}^{UK}$ into the query matrix if RoPE is applied to $\mathbf{k}_t$. V2 solves this with **decoupled RoPE**: it computes a small separate key of dimension $d^R$ dedicated solely to carrying RoPE positional information, shared across all heads, and caches it alongside $\mathbf{c}_t$. The per-token KV cache footprint is therefore:
+
+$$
+(d_c + d^R) \cdot N_{\text{layer}} \cdot s \ \text{bytes}
+$$
+
+Compared to GQA, the per-layer factor $2 H_{\text{kv}} d$ is replaced by $d_c + d^R$. In V2, the authors set $d_c = 4d$ and $d^R = d/2$, storing $4.5d$ numbers per layer—equivalent in memory to GQA with just $2.25$ K/V groups—while reporting stronger modeling quality than standard MHA in their ablations.
+
+**Plugging in V3's dimensions** ($H = 128$, $d = 128$, $d_c = 512$, $d^R = 64$, 61 layers):
+
+- **MLA:** $(512 + 64) \cdot 61 = 35\,136$ numbers per token. At 2 bytes per number (BF16), that is about 69 KiB per token—even smaller than the 128 KiB per token of the much smaller Llama 3 8B model from the previous lesson.
+- **Uncompressed MHA with the same 128 heads:** $2 \cdot 128 \cdot 128 \cdot 61 = 1\,998\,848$ numbers per token, roughly $57\times$ larger.
+
+Note that $57\times$ is the paper-and-pencil ratio against 128-head MHA on the same 61 layers. The headline figure "reduces KV cache by 93.3%" in the V2 abstract comes from a different comparison: **DeepSeek-V2 versus DeepSeek 67B**, their earlier dense model.
+
+### Cheaper training: MTP, FP8, and the cost figure
+
+**MTP (Multi-Token Prediction).** Standard language modeling trains each position to predict only the single next token. V3 attaches an extra MTP module (a single Transformer block sharing the main model's embedding table and output head) so that each position also predicts the **second future token**. According to the report, this densifies the training signal and helps the model pre-plan its representations. At inference time, the MTP module can simply be **discarded** with zero overhead, or repurposed to draft tokens for speculative decoding—where the report notes the second predicted token is accepted 85–90% of the time, yielding a $1.8\times$ decoding speedup.
+
+**FP8 mixed-precision training.** Most large matrix multiplications during V3 training run in 8-bit floating point (FP8), while sensitive accumulations and master weights remain in higher precision. To prevent underflow and overflow, activations and weights use fine-grained tile-wise and block-wise scaling factors. On two smaller ablation scales (16B and 228B), the report measures a relative loss error against BF16 training that stays consistently below 0.25%. (For quantization fundamentals, see [Model Evaluation and PEFT](/en/llm/evaluation-peft/).)
+
+**Reading the training cost table.** Table 1 of the V3 technical report breaks down the compute budget:
+
+| Metric | Pre-training | Context extension | Post-training | Total |
+|---|---:|---:|---:|---:|
+| H800 GPU hours | $2\,664\text{K}$ | $119\text{K}$ | $5\text{K}$ | $2\,788\text{K}$ |
+| USD (assuming \$2 / GPU hour) | \$5.328M | \$0.238M | \$0.01M | \$5.576M |
+
+Two caveats must always accompany the \$5.576M number: \$2 per GPU hour is a **hypothetical rental price**, and the report explicitly states that these hours cover **only the final official training run** of V3, **excluding** all prior research, architecture ablations, and data experiments. It is not the total cost of building DeepSeek-V3.
+
+### GRPO: dropping the critic and comparing within a group
+
+**The bottleneck in PPO.** The **advantage** $A$ measures how much better or worse a response's reward is compared to expected performance: a positive advantage boosts the response's probability, while a negative advantage suppresses it. As we saw in [RLHF](/en/llm/rlhf/), PPO trains a separate **value function** (critic) network to estimate that baseline expectation. Because the critic is typically another model of comparable size to the policy, it adds substantial memory and compute overhead. DeepSeekMath (Shao et al., 2024) notes a second issue: in LLM alignment, the reward is usually assigned only at the final token, making it difficult to train an accurate per-token value function.
+
+**The idea of GRPO.** For each prompt $\mathbf{x}$, sample a **group** of $G$ responses $\mathbf{y}_1, \dots, \mathbf{y}_G$ from the old policy $\pi_{\text{old}}$ and score them to get rewards $r_1, \dots, r_G$. Instead of asking a learned critic for the baseline, use the group's own mean and standard deviation:
+
+$$
+A_i = \frac{r_i - \mathrm{mean}(r_1, \dots, r_G)}{\mathrm{std}(r_1, \dots, r_G)}
+$$
+
+It works like grading on a curve inside a classroom: what matters is not your raw score in isolation, but how many standard deviations you sit above or below the class average on that specific question.
+
+**Deriving the advantage for binary right/wrong rewards.** Suppose $r_i \in \{0, 1\}$ and the fraction of correct responses in the group is $p$, with $0 < p < 1$. We can derive the exact values in three steps:
+
+**Step 1: mean.** The average of a list of 0s and 1s is simply the fraction of 1s: $\mu = p$.
+
+**Step 2: standard deviation.** The variance is the mean of $r^2$ minus $\mu^2$. Because $r \in \{0, 1\}$, we have $r^2 = r$, so the mean of $r^2$ is also $p$. Thus the variance is $p - p^2 = p(1-p)$, and $\sigma = \sqrt{p(1-p)}$.
+
+**Step 3: substitute.** Let $A_{+}$ be the advantage of a correct response ($r = 1$) and $A_{-}$ be the advantage of an incorrect response ($r = 0$):
+
+$$
+\begin{aligned}
+A_{+} &= \frac{1 - p}{\sqrt{p(1-p)}} = \sqrt{\frac{1-p}{p}} \\
+A_{-} &= \frac{0 - p}{\sqrt{p(1-p)}} = -\sqrt{\frac{p}{1-p}}
+\end{aligned}
+$$
+
+Each line simplifies by writing $1 - p = \sqrt{1-p}\cdot\sqrt{1-p}$ (first line) or $p = \sqrt{p}\cdot\sqrt{p}$ (second line) and canceling with the denominator. For $G = 8$ with 3 correct responses ($p = 3/8$), each correct response gets $\sqrt{5/3} \approx 1.291$ and each incorrect response gets $-\sqrt{3/5} \approx -0.775$. **The rarer a correct answer is in the group, the larger its positive advantage.** Conversely, if $p = 0$ or $p = 1$ (every response in the group is wrong, or every response is right), the numerator is 0 for all responses and the group yields zero learning signal.
+
+**The GRPO objective.** Following the R1 paper's sequence-level notation, the policy $\pi_{\boldsymbol{\phi}}$ is updated to **maximize**:
+
+$$
+\mathcal{J}(\boldsymbol{\phi}) = \mathbb{E}\left[\frac{1}{G}\sum_{i=1}^{G}\Big(\min\big(\rho_i A_i,\ \mathrm{clip}(\rho_i, 1-\epsilon, 1+\epsilon)\, A_i\big) - \beta\, k_i\Big)\right],
+\qquad
+\rho_i = \frac{\pi_{\boldsymbol{\phi}}(\mathbf{y}_i \mid \mathbf{x})}{\pi_{\text{old}}(\mathbf{y}_i \mid \mathbf{x})}
+$$
+
+The expectation runs over prompts $\mathbf{x}$ and groups of responses sampled from $\pi_{\text{old}}$. Here $\rho_i$ is the probability ratio between the new and old policies, $\epsilon$ is the clipping range, and $\beta$ is the KL penalty coefficient. Taking the $\min$ ensures that when $A_i > 0$, pushing $\rho_i$ above $1+\epsilon$ yields no extra gain, and when $A_i < 0$, pushing $\rho_i$ below $1-\epsilon$ yields no extra gain either. The $\min(\cdot, \mathrm{clip})$ term is the exact PPO clipped surrogate from the RLHF lesson; the difference is that $A_i$ comes from the group statistics rather than a critic network. (DeepSeekMath writes this objective at the token level, where every token in response $i$ shares the same group advantage $A_i$.)
+
+**Direct KL penalty in the objective.** Instead of subtracting the KL penalty from the reward before computing advantages (as in standard RLHF), GRPO subtracts a per-sample KL estimator $k_i$ directly in the objective (following [Schulman, 2020](http://joschu.net/blog/kl-approx.html)):
+
+$$
+k_i = \frac{\pi_{\text{ref}}(\mathbf{y}_i \mid \mathbf{x})}{\pi_{\boldsymbol{\phi}}(\mathbf{y}_i \mid \mathbf{x})} - \ln\frac{\pi_{\text{ref}}(\mathbf{y}_i \mid \mathbf{x})}{\pi_{\boldsymbol{\phi}}(\mathbf{y}_i \mid \mathbf{x})} - 1
+$$
+
+Two mathematical properties make $k_i$ ideal here. **Non-negativity:** letting $z$ denote the probability ratio $\pi_{\text{ref}} / \pi_{\boldsymbol{\phi}}$, the function $z - \ln z - 1$ has derivative $1 - 1/z$, which is negative for $z < 1$ and positive for $z > 1$, so its global minimum occurs at $z = 1$ where it equals $1 - 0 - 1 = 0$. **Unbiasedness** (when responses are sampled from $\pi_{\boldsymbol{\phi}}$): taking the expectation over $\mathbf{y} \sim \pi_{\boldsymbol{\phi}}$, the first term sums to $\sum_{\mathbf{y}} \pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x}) = 1$; the middle term flips sign to become $\mathbb{E}\big[\ln\frac{\pi_{\boldsymbol{\phi}}}{\pi_{\text{ref}}}\big] = D_{\mathrm{KL}}(\pi_{\boldsymbol{\phi}} \,\|\, \pi_{\text{ref}})$; and subtracting 1 leaves the exact KL divergence $D_{\mathrm{KL}}$.
+
+Compare this with [DPO](/en/llm/dpo/): DPO eliminates the online reinforcement learning loop entirely, whereas GRPO **keeps** online RL sampling and exploration while eliminating the critic model.
+
+### DeepSeek-R1: learning to reason from right and wrong
+
+**R1-Zero.** The R1 paper took DeepSeek-V3-Base (the raw pre-trained base model) and ran GRPO **directly**, skipping supervised fine-tuning (SFT) altogether. The prompt template only specified structural tags: place the reasoning process inside `<think>...</think>` tags, followed by the final answer. The reward signal was purely **rule-based**:
+
+- **Accuracy reward.** Math problems with deterministic answers required the final answer in a specified box format so a parser could verify it; coding problems were graded by compiling and running against unit tests.
+- **Format reward.** Checked whether the model enclosed its thinking trace properly inside the `<think>` tags.
+
+Both rewards were combined with equal weight. The authors explicitly avoided using a neural reward model for reasoning tasks because neural reward models are vulnerable to reward hacking under large-scale RL. Deterministic verification rules are much harder to game than a learned reward model (such as the length-biased RM we saw in the RLHF lesson), though they only apply to tasks with **verifiable answers**.
+
+The paper's reported result: pass@1 accuracy on the AIME 2024 math competition rose from 15.6% to 77.9% over the course of RL training (with the reference model $\pi_{\text{ref}}$ reset to the latest policy every 400 steps). As training progressed, generated reasoning traces grew longer and the model spontaneously learned to double-check its work and backtrack—behaviors never demonstrated to it via SFT. The authors famously dubbed the point where an intermediate checkpoint paused mid-solution to re-evaluate its approach an "aha moment".
+
+**Why full DeepSeek-R1 was still needed.** Despite its strong math scores, R1-Zero's reasoning traces were hard to read, frequently mixed English and Chinese within a single thought, and performed poorly on general non-reasoning tasks like creative writing or open-ended Q&A. The full DeepSeek-R1 model therefore used a four-stage pipeline:
+
+1. **Cold-start SFT** on **a few thousand** curated long chain-of-thought examples with clean, readable formatting.
+2. **Reasoning-oriented RL** via GRPO, adding a **language consistency reward** measured as the fraction of words in the target language within the reasoning trace.
+3. **Rejection sampling and SFT:** sample many responses from the RL checkpoint, filter for correct and readable ones, and combine them with general non-reasoning SFT data for a second round of SFT.
+4. **Second-stage RL** across all task types to align helpfulness and harmlessness, combining rule-based rewards on reasoning tasks with preference reward models on general prompts.
+
+Finally, the authors distilled R1's reasoning traces into smaller dense models based on Qwen and Llama (which use dense GQA architectures rather than V3's MoE). Model weights for V3, R1, and the distilled variants are hosted on Hugging Face; note that code licenses, weight licenses, and base-model licenses (for the Qwen/Llama distillations) differ, so check each model card before deployment.
+
+### Timeline
+
+Dates below reflect the initial arXiv submission of each paper.
+
+| Date | Paper | Key contribution |
+|---|---|---|
+| Jan 11, 2024 | DeepSeekMoE | Fine-grained expert segmentation and shared experts |
+| Feb 5, 2024 | DeepSeekMath | Group Relative Policy Optimization (GRPO) |
+| May 7, 2024 | DeepSeek-V2 | Multi-head Latent Attention (MLA), device-limited routing |
+| Dec 27, 2024 | DeepSeek-V3 | Auxiliary-loss-free bias load balancing, MTP, FP8 training |
+| Jan 22, 2025 | DeepSeek-R1 | R1-Zero pure-RL reasoning and the multi-stage R1 pipeline |
+| Dec 2, 2025 | [DeepSeek-V3.2](https://arxiv.org/abs/2512.02556) | Out of scope for this lesson |
+
+All R1 metrics cited in this lesson follow the January 4, 2026 revision of the paper (published in *Nature*, 2025).
+
+:::note[Key takeaway]
+MoE scales total parameters with $N_r$ and per-token compute with $K_r$, while all parameters must still reside in memory. V3's load-balancing bias $b_i$ only affects top-$K_r$ selection, keeping auxiliary-loss noise out of the gradients. MLA caches $(d_c + d^R)$ numbers per layer. GRPO drops the critic and normalizes rewards within each group of $G$ sampled responses: $A_i = (r_i - \text{mean})/\text{std}$, yielding zero signal when all responses in the group tie.
+:::
+
+### Limitations
+
+- **Conceptual scope.** Expert parallelism, dual-pipe computation–communication overlap, and low-level FP8 kernel details are outside our scope; multi-GPU serving is covered in [Deploying LLMs: Multi-GPU and Distributed Serving](/en/llm/llm-deployment/). Benchmark numbers cited are as reported by the authors at publication time.
+- **Rule-based rewards require verifiable answers.** Open-ended writing and general chat still rely on learned reward models or human preferences (see [RLHF](/en/llm/rlhf/)). The R1 paper itself notes limitations in structured output formatting, tool use, and occasional "overthinking" on simple queries.
+
+## Illustration
+
+The diagram below traces a single token through a DeepSeek-style MoE layer. Compare the two expert banks: the shared expert is always active, whereas in the routed bank only the top-$K_r$ experts selected by the router light up.
+
+{/* FIG: each token executes the shared expert plus only the few routed experts chosen by the router. */}
+<MoeFigure />
+
+The table below compares the three architectural generations side by side. Look at the activation ratio row: as total parameter count grew from 16B to 671B, the fraction of parameters activated per token shrank from 17.1% down to 5.5%. (R1 is omitted from the table because it uses the exact V3 architecture.)
+
+| Specification | DeepSeekMoE 16B (2024) | DeepSeek-V2 (2024) | DeepSeek-V3 (2024) |
+|---|---:|---:|---:|
+| Total parameters | 16.4B | 236B | 671B |
+| Activated per token | 2.8B | 21B | 37B |
+| Activation ratio | 17.1% | 8.9% | 5.5% |
+| Layers | 28 | 60 | 61 |
+| Shared + routed experts per MoE layer | $2 + 64$ | $2 + 160$ | $1 + 256$ |
+| Active routed experts per token ($K_r$) | 6 | 6 | 8 |
+| Attention mechanism | Standard MHA | MLA | MLA |
+| Pre-training tokens | 2T | 8.1T | 14.8T |
+
+## Code examples
+
+The code in this lesson was last tested in October 2026 with Python 3.14 and NumPy 2.4 (in Pyodide). Both cells run directly in your browser with no external dependencies.
+
+### Top-K routing and bias-based load balancing
+
+The cell below simulates a batch of $B = 64$ tokens routing across $N_r = 8$ experts, with each token choosing $K_r = 2$. Affinity scores are sigmoids of random Gaussian logits (seed 0), except Expert 0 receives a $+1.0$ boost before the sigmoid so the router initially favors it heavily. The `route` function picks the top-$K_r$ experts using the biased score $s_i + b_i$, but computes the normalized gating weights from the original unbiased $s_i$, just like DeepSeek-V3. It then runs 200 bias adjustment steps with update rate $\gamma = 0.01$.
+
+This is a toy simulation: "overloaded" simply means receiving more than the uniform batch average of 16 tokens, and the raw affinities $s_i$ are held fixed across steps (whereas during real training, $s_i$ evolves as the model weights update).
+
+<PythonRunner code={moeRoutingCode} title="Top-K routing and auxiliary-loss-free load balancing" />
+
+Reading the output:
+
+- **`step 0`**: across $64 \times 2 = 128$ total expert selections, a balanced load is 16 per expert. With zero bias, favored Expert 0 grabs 42 tokens while Expert 2 gets only 6.
+- **`step 199`**: the load settles to `[18 16 18 16 15 16 15 14]`, oscillating tightly around 16 because the bias steps by a fixed $\gamma = 0.01$ each iteration.
+- **`bias`**: Expert 0's bias has been pushed down to $-0.17$, while under-selected experts had their biases raised (up to $+0.13$ for Expert 2).
+- **`gates of token 0`**: $0.454$ and $0.546$, summing to 1.0 and computed purely from the unbiased affinities $s_i$.
+- **`experts per token: 2 2`**: every token still activates exactly 2 experts, keeping per-token compute constant.
+
+### GRPO advantage on a group
+
+The cell below computes GRPO advantages for a group of $G = 8$ responses with binary rewards ($1$ for correct, $0$ for wrong). A small `eps = 1e-8` is added to the standard deviation in the denominator to prevent division by zero when all rewards tie. Note that `np.std` divides by $G$ by default, matching our population variance derivation in the Theory section.
+
+<PythonRunner code={grpoAdvantageCode} title="GRPO group-normalized advantage" />
+
+Reading the output:
+
+- **Group with 3 correct answers**: each correct response gets $+1.291$ and each wrong response gets $-0.775$, matching $\sqrt{5/3}$ and $-\sqrt{3/5}$ from our derivation. The advantages have mean 0.0 and standard deviation 1.0.
+- **Rarer correct answers get a larger boost**: when only 1 out of 8 is correct, that single winner gets $+2.646$ ($\sqrt{7}$); when 7 out of 8 are correct, the winners get only $+0.378$ while the lone mistake gets penalized by $-2.646$.
+- **All wrong**: every advantage is 0.0, providing zero gradient signal from the reward.
+- **Scaling rewards by 10**: the advantages are completely invariant (`True`), because both numerator and denominator scale by 10. Only relative standing within the group matters.
+
+## Common pitfalls
+
+:::caution[Thinking a 671B MoE model fits in the memory of a 37B model]
+37 billion is the number of parameters **activated** per token, which governs FLOPs per token. GPU memory must still hold all 671 billion parameters across the cluster, and routing tokens across devices incurs communication overhead—which is why V2 and V3 cap the number of devices or nodes each token can route to. Likewise, "fine-grained expert segmentation" does not mean adding more total parameters: slicing each expert into 4 quarters while activating $4\times$ as many keeps total parameters and compute unchanged.
+:::
+
+:::caution[Reading "$5.576M" as the total cost of creating DeepSeek-V3]
+That figure multiplies $2.788$ million H800 GPU hours by a **hypothetical** \$2/hour rental rate for **the final official training run only**, excluding prior research, ablations, and salaries. Similarly, always check the baseline behind relative percentages: V2's "93.3% KV cache reduction" compares DeepSeek-V2 against their earlier dense DeepSeek 67B model, not against GQA in general.
+:::
+
+:::caution[Thinking GRPO drops reinforcement learning, or that rule-based rewards work everywhere]
+GRPO is still an online reinforcement learning algorithm that samples groups of responses and scores each one—it only drops the separate critic network. Because a group where all responses tie (all 0s or all 1s) produces zero advantage, training prompts must sit at an intermediate difficulty where the model succeeds some of the time. Moreover, rule-based rewards only work when correctness can be checked automatically (math, code, format). And R1-Zero did not learn to reason "from scratch": it started from DeepSeek-V3-Base, which had already been pre-trained on 14.8 trillion tokens.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- MoE layers run $N_s$ shared experts plus $K_r$ out of $N_r$ routed experts per token. DeepSeekMoE slices experts into finer segments to increase combinatorial flexibility and isolates shared experts to capture common knowledge. Total parameters scale with $N_r$, per-token compute scales with $K_r$, and all weights must still reside in memory.
+- DeepSeek-V3 balances expert load using a per-expert bias $b_i$ applied only during top-$K_r$ selection, avoiding noisy auxiliary-loss gradients, alongside MTP and FP8 training. The \$5.576M figure reflects hypothetical GPU rental for the final training run alone.
+- MLA compresses keys and values into a low-rank latent vector $\mathbf{c}_t$ plus a small decoupled RoPE key, caching $(d_c + d^R)$ numbers per layer instead of GQA's $2 H_{\text{kv}} d$.
+- GRPO eliminates the critic by normalizing rewards within each group of $G$ sampled responses. R1-Zero learned extended chain-of-thought reasoning purely from rule-based rewards via GRPO; full R1 added cold-start SFT and multi-stage training to improve readability and general capability.
+
+**Further reading:**
+
+- DeepSeek-AI (2025). [*DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning*](https://arxiv.org/abs/2501.12948), arXiv:2501.12948 (revised Jan 4, 2026; published in *Nature* 645, 633–638, 2025), Section 2. Covers GRPO, rule-based rewards, and R1-Zero in a concise 15-minute read.
+- Dai, D., Deng, C., Zhao, C., et al. (2024). [*DeepSeekMoE: Towards Ultimate Expert Specialization in Mixture-of-Experts Language Models*](https://arxiv.org/abs/2401.06066), arXiv:2401.06066, Figure 2 and Section 3. Subfigures (a), (b), and (c) walk step by step through fine-grained expert segmentation and shared experts (where the paper's $mN$, $mK$, and $K_s$ correspond to our $N_s + N_r$, $N_s + K_r$, and $N_s$).
+- DeepSeek-AI (2024). [*DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model*](https://arxiv.org/abs/2405.04434), arXiv:2405.04434, Section 2.1 and Table 1. Introduces MLA, decoupled RoPE, and the KV cache comparison table (where $n_h$, $d_h$, and $d_h^R$ correspond to our $H$, $d$, and $d^R$).
+- DeepSeek-AI (2024). [*DeepSeek-V3 Technical Report*](https://arxiv.org/abs/2412.19437), arXiv:2412.19437, Section 1 (cost table), 2.1.2, 2.2, and 3.3. Covers bias-based load balancing, MTP, and FP8 mixed-precision training.
+- Wang, L., Gao, H., Zhao, C., Sun, X., Dai, D. (2024). [*Auxiliary-Loss-Free Load Balancing Strategy for Mixture-of-Experts*](https://arxiv.org/abs/2408.15664), arXiv:2408.15664. The original paper proposing the bias-based load balancing adopted in V3.
+- Shao, Z., Wang, P., Zhu, Q., et al. (2024). [*DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models*](https://arxiv.org/abs/2402.03300), arXiv:2402.03300, Section 4.1. Introduces GRPO with token-level notation ($q$, $o_i$, and $\theta$ corresponding to our $\mathbf{x}$, $\mathbf{y}_i$, and $\boldsymbol{\phi}$).
+- Shazeer, N., Mirhoseini, A., Maziarz, K., et al. (2017). [*Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer*](https://arxiv.org/abs/1701.06538), arXiv:1701.06538. The foundational sparsely gated top-$k$ MoE paper.
+
+<LessonProgress />

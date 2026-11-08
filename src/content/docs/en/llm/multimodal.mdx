@@ -1,0 +1,325 @@
+---
+title: Multimodal LLMs
+description: An LLM only reads sequences of vectors—so how can it answer questions about images? Slicing images into patches, LLaVA-style projectors, Llama 3.2 cross-attention, and Chameleon unified tokens.
+quiz:
+  - question: 'A LLaVA-style model takes $336 \times 336$ images with $14 \times 14$ patches, placing 576 image tokens into the sequence per image. You swap in a vision encoder that takes $672 \times 672$ images, still with $14 \times 14$ patches. Which statement is true?'
+    options:
+      - 'The number of image tokens doubles ($1\,152$), because each image side doubled'
+      - 'The number of image tokens quadruples ($2\,304$), and the number of position pairs scored by self-attention among the image tokens increases by $16\times$'
+      - 'The number of image tokens stays at 576, because the projector always compresses to the LLM''s hidden dimension'
+      - 'The number of image tokens quadruples, and the attention cost among them also increases by only $4\times$'
+    answer: 1
+    explanation: '$N = (H/P)(W/P)$: both height and width double, so $N = 48 \cdot 48 = 2\,304$ ($4\times$ as many tokens). Self-attention scores every pair of positions, scaling as $L^2$, so the attention work among image tokens grows by $4^2 = 16\times$. The projector changes the feature dimension of each token ($D_v \to D$), not the number of tokens $N$.'
+  - question: 'You have a pre-trained CLIP vision encoder and a pre-trained text-only LLM, plus a few hundred thousand image–caption pairs. Following Stage 1 of LLaVA, which component do you update?'
+    options:
+      - 'The entire LLM, so it learns to read visual vectors'
+      - 'The vision encoder, so it outputs vectors matching the LLM''s hidden dimension'
+      - 'All three components together, so images and text align as tightly as possible'
+      - 'Only the projector, while keeping both the vision encoder and the LLM frozen'
+    answer: 3
+    explanation: 'Both large backbones are already strong at their jobs: the CLIP encoder produces semantic visual features, and the LLM already knows language. Stage 1 only needs to train a lightweight "translator" (the projector) to map visual features into the LLM''s embedding space. The LLM weights are unfrozen only in Stage 2, while LLaVA keeps the vision encoder frozen across both stages.'
+  - question: 'A team wants to add vision capabilities to their existing text LLM under two strict constraints: scores on text-only benchmarks must not change at all, and image tokens must not consume slots in the text context window. Which architecture satisfies both?'
+    options:
+      - 'Insert cross-attention layers that attend to visual features while keeping the base LLM frozen, as in the Llama 3 vision experiments and the Llama 3.2 Vision release'
+      - 'Concatenate image tokens into the sequence and fine-tune the full LLM, as in Stage 2 of LLaVA'
+      - 'Concatenate image tokens into the sequence, freeze the LLM, and train only the projector'
+      - 'Train an early-fusion unified-token model from scratch like Chameleon'
+    answer: 0
+    explanation: 'Cross-attention injects image information through keys and values from the side, so the text sequence length $L$ does not grow; freezing the base LLM weights guarantees text-only behavior is untouched when cross-attention is bypassed. Concatenating tokens with a frozen LLM satisfies the first constraint, but still consumes $N$ context slots per image. Unfreezing the LLM can alter text-only scores, and Chameleon also places image tokens directly into the main sequence.'
+  - question: 'An image of a chessboard contains many identical white square patches at different locations. In a Vision Transformer (ViT), after the linear projection $\mathbf{x}_i \mathbf{E}$, all of those identical patches produce the exact same vector. What allows the model to know where each patch sits?'
+    options:
+      - 'Each spatial slot uses its own separate projection matrix $\mathbf{E}$'
+      - 'The LLM''s projector re-sorts the tokens spatially'
+      - 'A position embedding $\mathbf{p}_i$ is added to each patch''s projected vector'
+      - 'Nothing extra is needed: self-attention inherently knows the order of input tokens'
+    answer: 2
+    explanation: 'Every patch shares the exact same projection matrix $\mathbf{E}$, so two identical patches produce identical $\mathbf{x}_i \mathbf{E}$ vectors—as verified in our NumPy code cell. ViT adds a learnable position embedding $\mathbf{p}_i$ to each patch vector so the model can tell locations apart. Self-attention by itself is permutation-equivariant: shuffling the input tokens without position embeddings simply shuffles the outputs. And the projector only maps dimensions token by token.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import MultimodalFigure from '@components/figures/MultimodalFigure.astro';
+import patchifyCode from '@code/llm/multimodal/patchify.en.py?raw';
+import projectorCode from '@code/llm/multimodal/projector.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Understand how a Vision Transformer turns an image into a sequence of tokens: slicing into **patches**, projecting linearly, and adding position embeddings, with $N = (H/P)(W/P)$ image tokens.
+- Describe the standard **multimodal** LLM blueprint—**vision encoder** $\to$ **projector** $\to$ LLM—and LLaVA's two-stage training recipe: which modules stay **frozen** and which are updated.
+- Compare three ways of connecting vision to an LLM: sequence concatenation (LLaVA), **cross-attention** adapters (Llama 3.2 Vision), and early-fusion discrete tokens from scratch (Chameleon).
+- Implement patch slicing in NumPy, plus patch embedding and a two-layer MLP projector in PyTorch, verifying token counts and gradient flow.
+
+## Prerequisites
+
+{/* List taken from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+Because the dedicated computer vision lessons on Vision Transformer, CLIP, and LLaVA are not yet published, here is the background this lesson uses. A **Vision Transformer** (ViT) slices an image into small non-overlapping squares called **patches**, projects each patch into a vector, and feeds the resulting sequence into a standard Transformer just like a sentence of words. **CLIP** trains an image encoder and a text encoder jointly via **contrastive learning**: across a batch of `(image, caption)` pairs, it pulls matching image and text vectors together and pushes mismatched pairs apart, so CLIP's visual features are already aligned with natural language concepts. On the LLM side, as in [The LLaMA Family](/en/llm/llama-family/), each text token becomes a $D$-dimensional embedding vector, and the Transformer blocks operate purely on that sequence of vectors. To let an LLM "see" an image, we turn the image into a sequence of $D$-dimensional vectors and feed them in alongside the text tokens—the core idea of LLaVA.
+:::
+
+## Intuition
+
+### LLMs only read sequences of vectors
+
+In [Image and Video Generation APIs](/en/llm/image-video-api/), you sent an image alongside a question and the model answered "there is a red square in the center". That lesson noted that the provider converts the image into visual tokens under the hood. This lesson opens that box.
+
+Each type of data (text, image, audio, video) is called a **modality**; a model that processes multiple modalities is **multimodal**.
+
+Here is the key insight: a Transformer block does not care where its input vectors came from. It takes a sequence of $D$-dimensional vectors and outputs a sequence of $D$-dimensional vectors. If you can turn an image into a sequence of $D$-dimensional vectors that describe its contents, a Transformer can read them right away.
+
+Picture a jigsaw puzzle. Slice an image into a regular grid of squares and read the squares left to right, top to bottom, like words on a page. Each square is a "word", and the whole image becomes a "sentence": a $224 \times 224$ image cut into $16 \times 16$ squares yields a 196-word sentence. That is a Vision Transformer (ViT).
+
+### Two jobs and a translator
+
+First, each square's vector must carry **high-level meaning**: if a patch shows a cat's ear, its vector should encode "cat ear", not just raw RGB pixel values. That is the job of a pre-trained vision encoder, most commonly taken from CLIP.
+
+Second, because the vision encoder and the LLM were trained separately, they "speak different languages": the vision encoder outputs $D_v$-dimensional vectors in its own feature space, whereas the LLM expects $D$-dimensional vectors in its token embedding space. We need a lightweight **translator** in the middle: the **projector**.
+
+Once we have visual vectors, how do we hand them to the LLM? Think of three ways to give illustrations to someone reading a book:
+
+- **Paste the pictures right onto the pages**, inline with the text: simple, though the pictures take up page space. That is LLaVA's sequence concatenation approach.
+- **Lay the pictures on the desk next to the book**, letting the reader glance over every few paragraphs: the book itself stays the same length, though the reader needs extra "side-glancing" machinery. That is the cross-attention approach of Llama 3.2 Vision.
+- **Write both pictures and words in a single shared alphabet** from day one, so a single reader can both read and write either modality seamlessly. That is Chameleon.
+
+The problem of this lesson is: **how do we convert an image into a sequence of vectors that speak the same "language" as an LLM's token embeddings, where do we plug those vectors in, and which weights do we train so the LLM can answer questions about images without forgetting how to read text?**
+
+## Theory
+
+### Notation
+
+An input image has height $H$, width $W$ (in pixels), and $C$ color channels ($C = 3$ for RGB). Note that in this lesson $H$ denotes image height, not the number of attention heads as in the LLaMA lesson; similarly, the italic scalar $W$ (width) is distinct from the bold projection matrix $\mathbf{W}$ in Step 4, and $H$ is distinct from the visual hidden matrix $\mathbf{H}_v$. Each square patch has side length $P$, giving $N$ patches per image. The vision encoder outputs vectors of dimension $D_v$, the LLM uses embedding dimension $D$, and the combined sequence read by the LLM has length $L$.
+
+### Step 1: slicing an image into patches
+
+Divide the image into non-overlapping $P \times P$ squares. Vertically there are $H/P$ rows of patches, and horizontally there are $W/P$ columns of patches, so the total number of patches is their product:
+
+$$
+N = \frac{H}{P} \cdot \frac{W}{P} = \frac{HW}{P^2}
+$$
+
+This requires $H$ and $W$ to be divisible by $P$ (if not, the image is resized, cropped, or padded first). Each patch contains $P \cdot P$ pixels with $C$ channels per pixel, so flattening a patch yields a row vector $\mathbf{x}_i \in \mathbb{R}^{P^2 C}$.
+
+Notice that $P$ sits in the denominator and is squared: **halving the patch size $P$—or doubling both image dimensions $H$ and $W$—quadruples the number of image tokens $N$**.
+
+### Step 2: patch embedding
+
+Each flattened patch is multiplied by **a single shared** learnable matrix $\mathbf{E}$, and then a position vector is added:
+
+$$
+\mathbf{z}_i = \mathbf{x}_i\,\mathbf{E} + \mathbf{p}_i,
+\qquad
+\mathbf{E} \in \mathbb{R}^{(P^2 C) \times D_v}
+$$
+
+Here $\mathbf{x}_i$ is the row vector of patch $i$, $\mathbf{z}_i \in \mathbb{R}^{D_v}$ is the resulting patch token, and $\mathbf{p}_i$ is the learnable **position embedding** for slot $i$ (playing the exact same role as positional vectors in [Build Your First LLM](/en/llm/build-first-llm/)).
+
+Why use a single shared matrix $\mathbf{E}$ for every patch? For the same reason a text LLM uses a single token embedding table across all sequence positions: the word "cat" maps to the same base vector whether it appears at the start or end of a sentence. Consequently, two identical patches at opposite corners of an image produce the exact same $\mathbf{x}_i\mathbf{E}$ (as our NumPy cell verifies), making $\mathbf{p}_i$ essential for telling spatial locations apart. ViT numbers patches in raster order and uses standard 1D learnable position embeddings; Dosovitskiy et al. tested 2D-aware position embeddings and found no significant gain. ViT also prepends a learnable **class token** (like BERT's `[CLS]`) and runs the sequence through a stack of standard Transformer encoder blocks. Beyond the initial patch slicing, ViT bakes in almost no image-specific inductive bias—spatial relationships are learned entirely from data via self-attention.
+
+In code, "slice into non-overlapping $P \times P$ patches and multiply each by $\mathbf{E}$" is mathematically identical to a 2D **convolution** (`nn.Conv2d`) with kernel size $P \times P$ and stride $P$. Passing the embedded patches through the vision encoder produces $\mathbf{Z}_v \in \mathbb{R}^{N \times D_v}$, where each row is a context-enriched feature vector for one patch.
+
+### Step 3: why start from a CLIP vision encoder
+
+CLIP (Radford et al., 2021) was trained on 400 million `(image, text)` pairs collected from the internet. Given a batch of $N_b$ pairs, CLIP computes the cosine similarity between all $N_b$ image embeddings and all $N_b$ text embeddings to form an $N_b \times N_b$ similarity matrix whose main diagonal holds the true pairs, then minimizes symmetric cross-entropy across rows and columns to maximize diagonal scores relative to off-diagonal mismatches. Because CLIP's visual features were trained directly to align with natural language descriptions, they provide a head start for connecting to an LLM. LLaVA uses CLIP's pre-trained ViT-L/14 encoder ($14 \times 14$ patches). Keep in mind that CLIP itself only **scores** image–text similarity; it cannot generate text.
+
+### Step 4: the projector and the LLM input sequence
+
+The original LLaVA (Liu et al., 2023) bridges the vision encoder to the LLM using a single linear projection matrix:
+
+$$
+\mathbf{H}_v = \mathbf{Z}_v\,\mathbf{W},
+\qquad
+\mathbf{W} \in \mathbb{R}^{D_v \times D}
+$$
+
+Each $D_v$-dimensional row of $\mathbf{Z}_v$ is mapped to a $D$-dimensional row matching the LLM's token embedding dimension. (The paper writes $\mathbf{H}_v = \mathbf{W}\mathbf{Z}_v$ using column vectors; we use row vectors to match standard PyTorch tensor shapes `(batch, N, D)`.) The authors intentionally chose a simple linear layer for rapid prototyping. LLaVA-1.5 (Liu et al., 2023) upgraded the projector to a **two-layer MLP** and reported stronger multimodal alignment:
+
+$$
+\mathbf{H}_v = \phi\big(\mathbf{Z}_v\,\mathbf{W}_1 + \mathbf{b}_1\big)\,\mathbf{W}_2 + \mathbf{b}_2
+$$
+
+where $\phi$ is a non-linear **activation function**. While the paper simply refers to a "two-layer MLP", the official LLaVA-1.5 codebase uses GELU (`mlp2x_gelu`: Linear $\to$ GELU $\to$ Linear), which we follow in our PyTorch example.
+
+In the simplest layout (and in our code), the projected visual tokens $\mathbf{H}_v$ are concatenated right in front of the text token embeddings $\mathbf{H}_t$ to form a single unified sequence:
+
+$$
+\begin{bmatrix} \mathbf{H}_v \\ \mathbf{H}_t \end{bmatrix}
+\in \mathbb{R}^{L \times D},
+\qquad
+L = N + L_{\text{text}}
+$$
+
+Here $\mathbf{H}_t$ has $L_{\text{text}}$ rows corresponding to the text prompt tokens. (During training, LLaVA randomly places the image either before or after the first user question.) From this point onward, the LLM runs as usual, autoregressively predicting the next token, with the cross-entropy training loss computed only on the assistant's answer tokens.
+
+**Image token count is a real compute and memory cost.** Because self-attention scores all pairs of positions in the sequence, its work scales as $L^2$. A 50-token text question paired with 576 image tokens produces a sequence of length $626$, requiring $626^2 \approx 392\,000$ attention pairs per head per layer—compared to just $50^2 = 2\,500$ for text alone. Every image token also occupies a slot in the context window and adds an entry to the KV cache.
+
+| Image resolution $H \times W$ | Patch size $P$ | Image tokens $N$ | Where it appears |
+|---|---:|---:|---|
+| $224 \times 224$ | 16 | 196 | ViT-B/16 in the original ViT paper |
+| $224 \times 224$ | 14 | 256 | CLIP ViT-L/14 at 224px; also the base patch count in the Llama 3 vision experiments |
+| $336 \times 336$ | 14 | 576 | CLIP ViT-L/14 at 336px, used in LLaVA-1.5 |
+| $448 \times 448$ | 14 | $1\,024$ | Doubling both sides of the 224px / $P=14$ setup quadruples $N$ |
+
+### LLaVA's two-stage training
+
+| Stage | Training data | Vision encoder | Projector | LLM |
+|---|---|---|---|---|
+| 1. Feature alignment | 595K filtered image–caption pairs from CC3M (Conceptual Captions) | Frozen | Trainable | Frozen |
+| 2. End-to-end instruction tuning | LLaVA-Instruct-158K: multi-turn conversation, detailed description, complex reasoning | Frozen | Trainable | Trainable |
+
+**Stage 1: pre-training for feature alignment.** Each image–caption pair is formatted as a single-turn conversation ("Describe this image briefly" $\to$ original caption). Only the projector weights are updated. The authors describe this as training a compatible "visual tokenizer" for the frozen LLM: teaching the translator while holding both endpoints fixed.
+
+**Stage 2: visual instruction tuning.** The vision encoder stays frozen, while both the projector and the LLM (Vicuna) are updated on multimodal instruction-following data. This extends the **instruction tuning** paradigm from [GPT Family and Multi-Task Fine-Tuning](/en/llm/gpt-family-finetuning/) to vision. Remarkably, the 158K examples in LLaVA-Instruct were generated by **text-only GPT-4**, which was fed human captions and object bounding-box coordinates as symbolic text and asked to write rich Q&A pairs about the scene.
+
+LLaVA-1.5 keeps this exact two-stage schedule, upgrading to the two-layer MLP projector, $336 \times 336$ input resolution, and additional academic VQA datasets in Stage 2.
+
+### Cross-attention: Llama 3.2 Vision
+
+Whereas LLaVA splices visual tokens **into** the main token sequence, cross-attention keeps the image **on the side**. Let $\mathbf{X} \in \mathbb{R}^{L \times D}$ be the text token representations at a given layer of the LLM, and let $\mathbf{Z} \in \mathbb{R}^{N \times D_v}$ be the encoded visual features. A cross-attention layer computes:
+
+$$
+\begin{aligned}
+\mathbf{Q} &= \mathbf{X}\mathbf{W}_Q, \quad \mathbf{K} = \mathbf{Z}\mathbf{W}_K, \quad \mathbf{V} = \mathbf{Z}\mathbf{W}_V \\
+\mathrm{CrossAttn}(\mathbf{X}, \mathbf{Z}) &= \mathrm{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d}}\right)\mathbf{V}
+\end{aligned}
+$$
+
+Queries come from the text tokens, while keys and values come from the image patches (exactly like the encoder–decoder cross-attention in [Sequence-to-Sequence Models](/en/llm/seq2seq/)); $d$ is the per-head dimension. The attention score matrix has shape $L \times N$: each text token attends across all $N$ image patches. The output has $L$ rows—matching the text length—so the main sequence never grows by a single token.
+
+Let's keep three primary sources clear:
+
+- **The Llama 3 paper, Section 7** (Grattafiori et al., 2024) describes **vision experiments** that were still under development at the time. They used a ViT-H/14 vision encoder (630M parameters, contrastively pre-trained on 2.5B image–text pairs at $224 \times 224$ resolution = 256 patches, and scaled to up to four $336 \times 336$ tiles during adapter training). Cross-attention layers were inserted after every fourth self-attention layer of the LLM (adding ~100B parameters on the 405B model). During adapter training, the authors updated the vision encoder and cross-attention layers while **intentionally keeping the base LLM parameters frozen** (Sections 1 and 7).
+- **The Llama 3.2 Vision model card** (Meta, released September 25, 2024) documents the released 11B and 90B models: built on top of text-only Llama 3.1 by adding a separately trained set of cross-attention image adapter layers, pre-trained on 6 billion image–text pairs.
+- **Meta's Llama 3.2 release post** (September 25, 2024) confirms for the released models that training updated the image encoder and adapter weights while intentionally freezing the language-model parameters, so text-only capabilities remain completely unchanged and the Vision models serve as a drop-in replacement for Llama 3.1.
+
+The Llama 3 paper highlights four advantages of this design: vision and language teams can develop independently; it avoids the complexities of joint multimodal pre-training; text-only performance is **guaranteed not to regress** because the LLM backbone is untouched; and high-resolution image tokens never pass through the heavy FFN layers of the main LLM, saving compute.
+
+### Early fusion: Chameleon
+
+Chameleon (Chameleon Team, 2024) takes the opposite philosophical extreme: no separate vision encoder at all. Instead, a learned image tokenizer **quantizes** a $512 \times 512$ image into $1\,024$ discrete tokens (vector quantization into a discrete **codebook** of $8\,192$ visual codes, distinct from weight quantization in the PEFT lesson). Those $8\,192$ image token IDs live directly inside a single shared vocabulary of $65\,536$ tokens alongside BPE text tokens. A single decoder-only Transformer is trained **from scratch** with next-token prediction over interleaved text and image tokens, enabling it to both **read and generate** images and text in any order. The authors call this **early fusion**, in contrast to **late-fusion** models that bolt a separate modality encoder onto an LLM, such as Flamingo (Alayrac et al., 2022) or LLaVA. The trade-offs noted by the authors: end-to-end mixed-modal training requires careful architectural stabilization to prevent divergence, and discrete image tokenizers struggle with heavy OCR / small text inside images.
+
+:::note[Key takeaway]
+An image becomes $N = HW/P^2$ patch tokens; a projector maps their dimension $D_v \to D$. LLaVA concatenates projected image tokens directly into the LLM input sequence, Llama 3.2 Vision lets text tokens attend to image features from the side via cross-attention while keeping the base LLM frozen, and Chameleon discretizes images into the same vocabulary as text from scratch.
+:::
+
+### Limitations
+
+- **This lesson focuses on image-in, text-out.** Native image generation only appears briefly in Chameleon; calling image and video generation models via API is covered in [Image and Video Generation APIs](/en/llm/image-video-api/).
+- **Serving multimodal models at scale** (where hundreds of visual tokens expand the prefill and KV cache) connects directly to [Deploying LLMs: Multi-GPU and Distributed Serving](/en/llm/llm-deployment/).
+- **Training a lightweight projector while freezing the backbone** shares the exact parameter-efficient spirit of LoRA in [Model Evaluation and PEFT](/en/llm/evaluation-peft/).
+
+## Illustration
+
+The diagram below shows LLaVA's sequence concatenation pipeline, which our PyTorch code cell also implements. Look at where the visual tokens and text tokens meet: once the projector maps visual features to dimension $D$, both modalities are simply $D$-dimensional vectors lined up in a single sequence.
+
+{/* FIG: an image passes through the vision encoder and projector to become visual tokens, sitting in the same sequence as the LLM's text tokens. */}
+<MultimodalFigure />
+
+The table below compares all three paradigms side by side. The "What gets trained" column reflects each model's published recipe.
+
+| Criterion | LLaVA (sequence concatenation) | Llama 3.2 Vision (cross-attention) | Chameleon (early fusion) |
+|---|---|---|---|
+| What an image becomes | Continuous CLIP features passed through a projector | Continuous vision-encoder features | Discrete token IDs from a learned codebook |
+| Where image tokens live | Inside the main sequence, taking $N$ slots | Outside the main sequence, read via cross-attention | Inside the main sequence ($1\,024$ tokens per $512 \times 512$ image) |
+| What gets trained | Projector (Stage 1), then projector + LLM (Stage 2); vision encoder frozen | Cross-attention adapter + vision encoder; base LLM frozen | Entire Transformer from scratch |
+| Can generate images? | No | No | Yes |
+| Main strength | Simple, cheap to graft onto an existing LLM | Preserves 100% of text-only capability; text length $L$ does not grow | Reads and generates interleaved text and images natively |
+| Main trade-off | Visual tokens consume context window and $O(L^2)$ self-attention | Adds substantial new parameters in cross-attention layers | Harder to stabilize during pre-training; discrete tokenizer loses fine text detail |
+
+## Code examples
+
+The code in this lesson was last tested in October 2026: the NumPy cell with Python 3.14 and NumPy 2.4 (in Pyodide), and the PyTorch cell with Python 3.14 and PyTorch 2.14 on CPU. The NumPy cell runs directly in your browser; the PyTorch cell runs on your machine.
+
+### Slicing patches in NumPy
+
+The cell below takes a synthetic $32 \times 32 \times 3$ image (seed 0), slices it into $8 \times 8$ patches, projects each patch with a shared matrix $\mathbf{E}$ into a $D_v = 64$-dimensional vector, and prints patch token counts across several standard resolutions. The `reshape`-then-`transpose` idiom splits each spatial axis into `(num_patches, patch_pixels)`.
+
+<PythonRunner code={patchifyCode} title="Slicing an image into patches and projecting to tokens" />
+
+Reading the output:
+
+- **`patches: (16, 192)`:** $N = (32/8)^2 = 16$ patches, each flattened to $8 \cdot 8 \cdot 3 = 192$ numbers.
+- **Next two `True` lines:** patch 0 is the top-left $8 \times 8$ square, and patch 1 is the square immediately to its right—confirming row-major raster order.
+- **`tokens: (16, 64)`:** the projection matrix $\mathbf{E}$ has $192 \cdot 64 = 12\,288$ parameters, shared across all 16 patches.
+- **`same token at two places: True`:** copying the top-left $8 \times 8$ patch into the bottom-right corner produces the exact same projected vector at both ends of the sequence. Without position embeddings $\mathbf{p}_i$, the model cannot tell where either patch came from.
+- **Final table:** matches the table in the Theory section, plus an extra row for $P = 8$: halving the patch size from 16 to 8 on a $224 \times 224$ image quadruples the token count from 196 to 784.
+
+### Patch embedding and projector in PyTorch
+
+The script below builds a miniature Stage-1 LLaVA pipeline in PyTorch: an `nn.Conv2d` layer acts as the vision encoder's patch embedding, an `nn.Embedding` table acts as the LLM's token embedding layer, and both are frozen just like in LLaVA Stage 1. Between them sits a trainable two-layer MLP projector ($64 \to 128 \to 128$). The script verifies that `Conv2d` with `kernel_size=stride=P` equals explicit patch unfolding plus matrix multiplication, concatenates the 256 projected visual tokens with 10 text tokens, and runs a dummy backward pass to verify where gradients land. Instructions for installing CPU-only PyTorch are in [Build Your First LLM](/en/llm/build-first-llm/).
+
+<LocalCode
+  code={projectorCode}
+  title="Visual tokens, MLP projector, and combined LLM sequence"
+  packages={['torch']}
+  hardware="CPU is sufficient. Runs in a few seconds on a dev laptop"
+  sampleVaries={false}
+>
+
+```text
+image tokens: (2, 256, 64)
+conv == unfold + matmul: True
+sequence for the LLM: (2, 266, 128)
+grad in projector: True
+grad in patch_embed: False
+patch_embed: 37696 params, 0 trainable
+projector: 24832 params, 24832 trainable
+text_embed: 128000 params, 0 trainable
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **`(2, 256, 64)`:** each $224 \times 224$ image with $P = 14$ yields $N = 16 \cdot 16 = 256$ visual tokens of dimension $D_v = 64$.
+- **`conv == unfold + matmul: True`:** confirms that `Conv2d(3, 64, kernel_size=14, stride=14)` computes the exact same result as slicing $14 \times 14$ patches and multiplying by $\mathbf{E}$ in Step 2.
+- **`(2, 266, 128)`:** after the projector, each visual token has dimension $D = 128$ matching the text embeddings, and the combined sequence has length $L = 256 + 10 = 266$.
+- **Gradients and trainable parameters:** only the projector receives gradients and has trainable parameters ($64 \cdot 128 + 128 + 128 \cdot 128 + 128 = 24\,832$), matching LLaVA's Stage 1 feature-alignment setup.
+
+In a full-scale model, $D$ is several thousand (e.g., $D = 4\,096$ in Llama 3 8B), the LLM has billions of parameters, and the projector remains a tiny fraction of the total parameter count.
+
+## Common pitfalls
+
+:::caution[Thinking the LLM "sees" raw pixels, or that the projector translates images into English words]
+The LLM only ever sees the sequence of feature vectors emitted by the vision encoder; any visual detail discarded by the vision encoder is gone forever. The Llama 3 report notes that contrastive vision encoders often lose fine-grained spatial localization, and the Chameleon paper notes that discrete image tokenizers struggle with dense text inside images. Nor does the projector output discrete words—it maps continuous vectors from $\mathbb{R}^{D_v}$ to $\mathbb{R}^{D}$. Always verify model answers carefully on tasks involving tiny text (OCR), fine spatial counting, or subtle visual details.
+:::
+
+:::caution[Confusing patch size P with patch count N, or assuming higher resolution is free]
+A smaller patch size $P$ means a **larger** token count $N$: halving $P$ or doubling image height and width quadruples $N$ and increases self-attention pairs among image tokens by $16\times$. Higher resolution helps the model read small details, but directly consumes context length, KV cache memory, and API token billing. Also remember that most pre-trained vision encoders expect a fixed base resolution (such as $336 \times 336$ in LLaVA-1.5), resizing or tiling larger images to fit.
+:::
+
+:::caution[Mixing up which modules are frozen across architectures]
+LLaVA **freezes the vision encoder**, training the projector in Stage 1 and the projector + LLM in Stage 2. The Llama 3 vision experiments and the released Llama 3.2 Vision models do the opposite: they **freeze the base LLM**, training the vision encoder and cross-attention adapters so text-only capabilities never regress. Also keep experimental details separate from production releases: specifics like "cross-attention after every fourth layer" and ViT-H/14 come from Section 7 of the Llama 3 paper (vision experiments), whereas the Llama 3.2 Vision model card does not disclose every internal layer count. Finally, always check language support in the model card: the Llama 3.2 Vision model card notes that while text-only supports eight languages, **image+text tasks are officially supported in English only**.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- LLMs operate on sequences of vectors. A Vision Transformer slices an image into $N = HW/P^2$ patches, projects each patch with a shared matrix $\mathbf{E}$, and adds position embeddings $\mathbf{p}_i$. Image token count $N$ is a real runtime cost: it consumes context window slots and scales self-attention pairs as $O(L^2)$.
+- The standard multimodal blueprint connects Vision Encoder (often from CLIP) $\to$ Projector ($D_v \to D$) $\to$ LLM. LLaVA concatenates visual tokens directly into the sequence ($L = N + L_{\text{text}}$) and trains in two stages: projector-only alignment first, followed by joint projector + LLM visual instruction tuning, keeping the vision encoder frozen throughout.
+- Llama 3.2 Vision injects visual features via cross-attention layers (queries from text, keys and values from image patches), leaving text sequence length unchanged and keeping the base LLM frozen so text-only performance is preserved.
+- Chameleon quantizes images into discrete codebook tokens inside a single shared vocabulary ($1\,024$ tokens per $512 \times 512$ image) and trains a unified Transformer from scratch to both read and generate interleaved text and images.
+
+**Further reading:**
+
+- Dosovitskiy, A. et al. (2021). [*An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale*](https://arxiv.org/abs/2010.11929), arXiv:2010.11929, Section 3.1. Concise explanation of patch slicing and position embeddings in ViT.
+- Radford, A. et al. (2021). [*Learning Transferable Visual Models From Natural Language Supervision*](https://arxiv.org/abs/2103.00020), arXiv:2103.00020, Section 2.3 and Figure 3. CLIP's contrastive training objective in ~10 lines of NumPy-style pseudocode.
+- Liu, H., Li, C., Wu, Q., Lee, Y. J. (2023). [*Visual Instruction Tuning*](https://arxiv.org/abs/2304.08485), arXiv:2304.08485, Sections 3 and 4; and Liu, H., Li, C., Li, Y., Lee, Y. J. (2023). [*Improved Baselines with Visual Instruction Tuning*](https://arxiv.org/abs/2310.03744), arXiv:2310.03744, Section 3. LLaVA's architecture, GPT-4-generated instruction data, two-stage training, and LLaVA-1.5's MLP projector.
+- Grattafiori, A., Dubey, A., Jauhri, A. et al. (2024). [*The Llama 3 Herd of Models*](https://arxiv.org/abs/2407.21783), arXiv:2407.21783, Section 7 ("Vision Experiments"). Rationale for cross-attention adapters and experimental architecture details.
+- Meta (2024). [*Llama 3.2 Vision: model card*](https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/MODEL_CARD_VISION.md); and Meta (Sep 25, 2024). [*Llama 3.2: Revolutionizing edge AI and vision with open, customizable models*](https://ai.meta.com/blog/llama-3-2-connect-2024-vision-edge-mobile-devices/), Meta AI blog. Details on the released 11B/90B Vision models, cross-attention adapter training, and frozen LLM backbone.
+- Chameleon Team (2024). [*Chameleon: Mixed-Modal Early-Fusion Foundation Models*](https://arxiv.org/abs/2405.09818), arXiv:2405.09818, Section 2.1. Discrete image tokenization and unified early-fusion pre-training.
+
+<LessonProgress />

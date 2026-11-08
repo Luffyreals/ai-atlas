@@ -1,0 +1,368 @@
+---
+title: 'Word2Vec (CBOW, Skip-gram), GloVe, FastText'
+description: Learn word vectors by predicting neighboring words. Skip-gram, CBOW, negative sampling, GloVe, FastText with character n-grams, vector analogies, and bias.
+quiz:
+  - question: 'You train SGNS with $k = 3$. After one gradient descent step on a single true pair (mèo, con) plus 3 negative samples, which vectors change?'
+    options:
+      - 'Every row of $\mathbf{C}$, because the softmax denominator sums over the entire vocabulary'
+      - 'Only the target vector of "mèo" and the context vector of "con"'
+      - 'The target vector of "mèo", the context vector of "con", and the context vectors of the 3 negative samples'
+      - 'Only the target vector of "mèo"; the context table stays fixed'
+    answer: 2
+    explanation: 'The loss for one pair depends only on $\mathbf{w}$, $\mathbf{c}_{\text{pos}}$, and the $k$ vectors $\mathbf{c}_{\text{neg},i}$, so only those vectors get a nonzero gradient: $k + 2 = 5$ vectors in total. That is the exact savings compared with full softmax, where the denominator includes every word so every row of the context table receives a gradient. The context table is learned too, not fixed.'
+  - question: 'According to Levy and Goldberg (2014), when SGNS with $k = 5$ (under unsmoothed unigram negative sampling) reaches its optimum, $\mathbf{w} \cdot \mathbf{c} = \mathrm{PMI}(w, c) - \ln 5$, where PMI uses $\ln$. For a pair of words that occur independently ($\mathrm{PMI} = 0$), what probability $\sigma(\mathbf{w} \cdot \mathbf{c})$ does the model assign to "true pair"?'
+    options:
+      - '$0.5$, because $\mathrm{PMI} = 0$ means no information'
+      - '$1/6$, because $\sigma(-\ln 5) = 1/(1 + 5)$'
+      - '$0$, because independent words never form a true pair'
+      - '$5/6$, because there are 5 negative samples per positive sample'
+    answer: 1
+    explanation: '$\mathbf{w} \cdot \mathbf{c} = 0 - \ln 5$, and $\sigma(-\ln 5) = 1/(1 + e^{\ln 5}) = 1/6$. Intuitively, for every true pair there are 5 fake pairs, and if the two words are independent then the pair $(w, c)$ appears in the true data at the exact same rate it is drawn at random. So out of every 6 times the model sees this pair, on average only 1 is real. $0.5$ holds only when $k = 1$.'
+  - question: 'A Word2Vec model and a FastText model are both trained on word-segmented Vietnamese text (syllables joined by `_`). The word `nhà_sử_học` (historian) never appeared in the training data. What happens?'
+    options:
+      - 'Both models automatically average the vectors of the syllables nhà, sử, and học'
+      - 'Neither model can produce a vector for this word'
+      - 'FastText finds the closest known word by spelling and copies its vector'
+      - 'Word2Vec has no vector; FastText sums the vectors of the word''s character n-grams, many of which were seen in `nhà_thơ`, `văn_học`, etc.'
+    answer: 3
+    explanation: 'Word2Vec looks up whole words in a table, so an unseen word has no row. FastText represents a word as the sum of its character n-gram vectors (3 to 6 characters, with `<` and `>`), so it can always compose a vector, and n-grams like `<nhà_` and `học>` have already been trained on other words. Neither model splits by syllable automatically or searches for the closest spelling.'
+  - question: 'You look up the Word2Vec vector for "đường" in two sentences: "mẹ mua một cân đường" (mom bought a kilo of sugar) and "con đường này rất đẹp" (this road is very pretty). How do the two vectors compare?'
+    options:
+      - 'They are identical, because each word in the vocabulary has only a single vector'
+      - 'They differ, because the contexts of the two sentences differ'
+      - 'They differ with CBOW, but are identical with skip-gram'
+      - 'Each equals the average of the other words'' vectors in its sentence'
+    answer: 0
+    explanation: 'Word2Vec, GloVe, and FastText produce static embeddings: once trained, the model is a lookup table with one row per word, shared across all sentences. The vector for "đường" is a blend of its "sugar" and "road" senses. Context shapes the vectors during training, not at lookup time. Only contextual embeddings like BERT give different vectors for the two sentences.'
+  - question: 'You take the vector for "vua" (king), subtract "đàn_ông" (man), add "phụ_nữ" (woman) to get $\mathbf{v}$, and search the entire vocabulary for the word with the highest cosine with $\mathbf{v}$. The top match is "vua". Which conclusion makes the most sense?'
+    options:
+      - 'The model is broken and needs to be retrained from scratch'
+      - 'Adding and subtracting vectors is meaningless when measured with cosine'
+      - 'This is normal: $\mathbf{v}$ stays very close to the input word, so standard evaluation excludes the three input words from the candidate list'
+      - 'The word "nữ_hoàng" (queen) is definitely missing from the vocabulary'
+    answer: 2
+    explanation: 'The difference between "phụ_nữ" and "đàn_ông" is typically small relative to the vector for "vua", so $\mathbf{v}$ remains right next to "vua". Mikolov et al. (2013b) explicitly note that they exclude the input words from the search. Only after excluding them does "nữ_hoàng" have a chance to rank first. This is also why analogy results should not be read as proof that the model "understands" relations.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import skipgramCode from '@code/nlp/word2vec-glove-fasttext/skipgram-ns.en.py?raw';
+import fasttextCode from '@code/nlp/word2vec-glove-fasttext/fasttext-ngrams.en.py?raw';
+import Word2VecFigure from '@components/figures/Word2VecFigure.astro';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand the core idea of **Word2Vec**: learning dense embeddings through a pretext prediction task, with its two architectures **skip-gram** and **CBOW** (continuous bag-of-words).
+- Derive the loss function and gradients of **negative sampling** (skip-gram with negative sampling, SGNS), and explain why it is vastly cheaper than softmax over the entire vocabulary.
+- Read the objective of **GloVe** and explain how **FastText** composes word vectors from **character n-grams**, including for **out-of-vocabulary** (unseen) words.
+- Recognize the limitations of these static embeddings: vector **analogies** are less magical than advertised, embeddings inherit social **biases** from training data, and each word gets only a single vector regardless of how many senses it has.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+This lesson uses a very simple **one-layer neural network**: multiplying an input vector by a weight matrix, with no activation function in between. When the input is the **one-hot** vector of a word (all zeros except a single 1 at that word's index), multiplying by a matrix $\mathbf{W}$ simply selects one row of $\mathbf{W}$—so an "embedding layer" is really just a lookup table. The **sigmoid** function $\sigma(z) = 1/(1 + e^{-z})$ maps any real number into $(0, 1)$, serving as the probability for a yes/no question. **Softmax** turns a vector of scores (logits) into a probability distribution over many choices. **Cross-entropy** is the average of $-\ln$ of the probability the model assigns to the correct answer; it is the loss $\mathcal{L}$ we minimize with [gradient descent](/en/ml/gradient-descent/), subtracting $\eta$ times the gradient at each step.
+:::
+
+## Intuition
+
+### From counting to predicting
+
+In [Vector Semantics and Embeddings](/en/nlp/vector-semantics-embeddings/), you met the **distributional hypothesis**: words with similar meanings appear in similar contexts. The approach there was **counting**: build a word–context matrix, reweight with PPMI, and compress with SVD.
+
+Word2Vec (Mikolov et al., 2013) takes a different path: **predicting**. Read the following sentence with a blank:
+
+> Sáng nay tôi ăn một bát \_\_\_\_ nóng hổi. *(This morning I ate a piping hot bowl of \_\_\_\_.)*
+
+You might guess "phở", "bún", "cháo" (porridge), or perhaps "cơm" (rice). You would not guess "mèo" (cat) or "trà" (tea). To guess well, you have to know that *phở*, *bún*, and *cháo* are the same kind of thing: hot dishes served in a bowl. A model that practices making such guesses across billions of sentences is forced to place *phở*, *bún*, and *cháo* in the same region of vector space, even though nobody ever told it "*phở* is a food."
+
+### A pretext task, a real product
+
+The twist in Word2Vec is that we **do not care** how good the model is at guessing words. The prediction task is just an excuse. What we keep after training is the **table of vectors** the model used to make its guesses. There are two ways to frame the question:
+
+- **CBOW:** given the surrounding words ("một", "bát", "nóng", "hổi"), predict the center word ("phở").
+- **Skip-gram:** given the center word ("phở"), predict each surrounding word one at a time.
+
+The training data is raw text requiring no human labels: every sentence automatically supplies (target, context) pairs to predict. This paradigm is called **self-supervised** learning.
+
+The problem of this lesson is: **from raw text, learn a $d$-dimensional vector for each word so that words sharing similar contexts get nearby vectors, and do so cheaply enough to scale to billions of words.**
+
+## Theory
+
+### Skip-gram: problem formulation
+
+Walk along the text. At each position, call the word there the **target word** $w$. The words within $s$ positions to its left or right are **context words** $c$ (a $\pm s$ window, say $s = 2$). In the sentence "tôi ăn một bát phở nóng hổi", the target word "phở" yields four pairs: (phở, một), (phở, bát), (phở, nóng), and (phở, hổi).
+
+Let $V$ be the vocabulary of $|V|$ words. Every word is given **two** $d$-dimensional vectors:
+
+- $\mathbf{w}$ when it acts as a target word, stored as a row of $\mathbf{W} \in \mathbb{R}^{|V| \times d}$;
+- $\mathbf{c}$ when it acts as a context word, stored as a row of $\mathbf{C} \in \mathbb{R}^{|V| \times d}$.
+
+Notation note: in this lesson $\mathbf{w}$ denotes the **target word vector**, not a generic weight vector as in the ML lessons. Why two vectors per word? A word rarely appears right next to itself. If each word had only one vector, the score of a word with itself would be $\mathbf{w} \cdot \mathbf{w} = \lVert\mathbf{w}\rVert^2$, which is always positive and grows with vector length, pushing the model to believe every word frequently co-occurs with itself. Using two separate tables removes that constraint.
+
+Original skip-gram defines the probability of "seeing $c$ near $w$" via a softmax over the entire vocabulary:
+
+$$
+p(c \mid w) = \frac{\exp(\mathbf{c} \cdot \mathbf{w})}{\sum_{c' \in V} \exp(\mathbf{c}' \cdot \mathbf{w})}
+$$
+
+The numerator is large when $\mathbf{c}$ and $\mathbf{w}$ point in the same direction. The denominator sums over every word $c'$ so the probabilities add up to 1. The loss is cross-entropy: the sum of $-\ln p(c \mid w)$ over all pairs extracted from the text.
+
+### Why softmax over the full vocabulary is expensive
+
+The denominator requires $|V|$ dot products, and its gradient touches **every** row of $\mathbf{C}$ for **every single pair**. Mikolov et al. (2013b) trained on a billion words of news text with a vocabulary of 692,000 words, noting bluntly that because the cost scales with $|V|$—typically $10^5$ to $10^7$—the full softmax is "impractical." One way to cut the cost is **hierarchical softmax**, which arranges the vocabulary as a binary tree so each word only evaluates about $\log_2 |V|$ nodes. The more widely used alternative, and the focus of this lesson, is negative sampling.
+
+### Negative sampling: turning it into a yes/no question
+
+Replace the question "out of 692,000 words, which word appears next to *phở*?" with a much simpler one: **"is the pair (phở, bát) a real pair from the text, or a randomly fabricated pair?"** That is binary classification, so we use a sigmoid:
+
+$$
+P(+ \mid w, c) = \sigma(\mathbf{c} \cdot \mathbf{w})
+$$
+
+Here $+$ means "real pair." The probability that the pair is fake is $1 - \sigma(\mathbf{c} \cdot \mathbf{w}) = \sigma(-\mathbf{c} \cdot \mathbf{w})$.
+
+For each real pair $(w, c_{\text{pos}})$, we randomly draw $k$ words $c_{\text{neg},1}, \dots, c_{\text{neg},k}$ as **negative samples**, treating the pairs $(w, c_{\text{neg},i})$ as fake. The loss for one real pair together with its $k$ fake pairs is:
+
+$$
+\mathcal{L} = -\ln \sigma(\mathbf{c}_{\text{pos}} \cdot \mathbf{w}) - \sum_{i=1}^{k} \ln \sigma(-\mathbf{c}_{\text{neg},i} \cdot \mathbf{w})
+$$
+
+- The first term is small when $\sigma(\mathbf{c}_{\text{pos}} \cdot \mathbf{w})$ is close to 1: the model believes the real pair is real.
+- Each term in the sum uses $\sigma(-z) = 1 - \sigma(z)$, the probability of being fake. It is small when the model believes the randomly paired words are fake.
+- Each pair now needs only $k + 1$ dot products instead of $|V|$. With $|V| = 692\,000$ and $k = 5$, that is $692\,000 / 6 \approx 115\,000$ times fewer operations.
+
+**How are negative samples drawn?** Mikolov et al. tested several distributions and found that the unigram frequency **raised to the $3/4$ power** works best:
+
+$$
+P_{\text{neg}}(c) = \frac{\mathrm{count}(c)^{3/4}}{\sum_{c' \in V} \mathrm{count}(c')^{3/4}}
+$$
+
+The $3/4$ exponent pulls frequent words down and boosts rare words up. For instance, if "của" (of) appears 500 times more often than "phở", it is sampled only $500^{3/4} \approx 106$ times more often. As for $k$, the paper recommends 5 to 20 for small datasets, and just 2 to 5 for large datasets.
+
+### Deriving the gradients step by step
+
+**Step 1: derivative of $\ln \sigma$.** The derivative of the sigmoid is $\sigma'(z) = \sigma(z)\,(1 - \sigma(z))$. By the chain rule for $\ln$:
+
+$$
+\frac{d}{dz} \ln \sigma(z) = \frac{\sigma'(z)}{\sigma(z)} = 1 - \sigma(z)
+$$
+
+For $\ln \sigma(-z)$, the inner derivative of $-z$ is $-1$, so:
+
+$$
+\frac{d}{dz} \ln \sigma(-z) = -\bigl(1 - \sigma(-z)\bigr) = -\sigma(z)
+$$
+
+where the last equality uses $1 - \sigma(-z) = \sigma(z)$.
+
+**Step 2: dot product with respect to each vector.** For $z = \mathbf{c} \cdot \mathbf{w}$, the gradient with respect to $\mathbf{c}$ is $\mathbf{w}$, and with respect to $\mathbf{w}$ is $\mathbf{c}$.
+
+**Step 3: combine.** Each term of $\mathcal{L}$ has a leading minus sign, so we flip the sign from Step 1 and multiply by Step 2:
+
+$$
+\begin{aligned}
+\frac{\partial \mathcal{L}}{\partial \mathbf{c}_{\text{pos}}} &= \bigl[\sigma(\mathbf{c}_{\text{pos}} \cdot \mathbf{w}) - 1\bigr]\,\mathbf{w} \\
+\frac{\partial \mathcal{L}}{\partial \mathbf{c}_{\text{neg},i}} &= \sigma(\mathbf{c}_{\text{neg},i} \cdot \mathbf{w})\,\mathbf{w} \\
+\frac{\partial \mathcal{L}}{\partial \mathbf{w}} &= \bigl[\sigma(\mathbf{c}_{\text{pos}} \cdot \mathbf{w}) - 1\bigr]\,\mathbf{c}_{\text{pos}} + \sum_{i=1}^{k} \sigma(\mathbf{c}_{\text{neg},i} \cdot \mathbf{w})\,\mathbf{c}_{\text{neg},i}
+\end{aligned}
+$$
+
+The third line sums both contributions because $\mathbf{w}$ appears in every term.
+
+**Step 4: read what the update does.** Gradient descent updates $\mathbf{c}_{\text{pos}} \leftarrow \mathbf{c}_{\text{pos}} - \eta\,\partial\mathcal{L}/\partial\mathbf{c}_{\text{pos}}$. Because $\sigma(\cdot) - 1$ is always negative, this step **adds** a multiple of $\mathbf{w}$ to $\mathbf{c}_{\text{pos}}$, pulling the true context vector closer to the target word. Conversely, each $\mathbf{c}_{\text{neg},i}$ has a multiple of $\mathbf{w}$ **subtracted** from it, pushing it away. The strength of the pull or push is proportional to how wrong the model currently is: a true pair whose $\sigma$ is already near 1 barely moves.
+
+:::note[Key takeaway]
+SGNS turns "predict the context word out of the whole vocabulary" into "distinguish the true pair from $k$ random noise pairs," with negatives drawn according to $\mathrm{count}^{3/4}$. Each update touches only $k + 2$ vectors: pulling $\mathbf{c}_{\text{pos}}$ toward $\mathbf{w}$, pushing the $\mathbf{c}_{\text{neg},i}$ away, and moving $\mathbf{w}$ in response to both.
+:::
+
+### CBOW: predicting the center word from the average context
+
+CBOW swaps the roles. At position $t$, it **averages** the vectors of the context words, letting $\mathcal{C}_t$ denote their positions:
+
+$$
+\mathbf{h}_t = \frac{1}{|\mathcal{C}_t|} \sum_{j \in \mathcal{C}_t} \mathbf{w}_{j}
+$$
+
+Here $\mathbf{w}_j$ is the row of $\mathbf{W}$ for the word at position $j$: the surrounding words are now the inputs. The model then scores the center word with $\sigma(\mathbf{c}_t \cdot \mathbf{h}_t)$, where $\mathbf{c}_t$ is the row of $\mathbf{C}$ for the center word, again paired with $k$ negative samples. The gradients take the exact same form as above with $\mathbf{h}_t$ in place of $\mathbf{w}$, and the gradient on $\mathbf{h}_t$ is divided equally among the context words.
+
+Averaging discards word order, which is why the model is called a "bag-of-words." Each position makes only one prediction instead of $2s$, so CBOW trains faster. In the comparison table of [Mikolov et al. (2013a)](https://arxiv.org/abs/1301.3781) using 1000-dimensional vectors trained on 6 billion words, skip-gram answered 66.1% of semantic analogy questions correctly versus 57.3% for CBOW, whereas CBOW edged ahead on syntactic questions (68.9% vs. 65.1%).
+
+The figure in the Illustration section places the two architectures side by side on the same sentence.
+
+### Practical details that make Word2Vec work well
+
+- **Subsampling frequent words.** A pair like (phở, của) carries little information because "của" (of) appears next to almost everything. Mikolov et al. discard each occurrence of word $w$ with probability $1 - \sqrt{\tau / P(w)}$, where $P(w)$ is the word's relative frequency and $\tau \approx 10^{-5}$. A word making up 1% of the corpus is dropped about 96.8% of the time. Training speeds up several-fold, and representations for rare words improve.
+- **Dynamic window size and which table to keep.** At each word, the actual window radius is sampled uniformly from $1$ to $s$ (Mikolov et al., 2013a), weighting closer words more heavily than distant ones. After training, people typically keep $\mathbf{W}$ and discard $\mathbf{C}$.
+
+### SGNS is implicitly factorizing a shifted PMI matrix
+
+Word2Vec looks completely different from the PPMI + SVD pipeline of the previous lesson. Levy and Goldberg (2014) showed that the two are much closer than they appear. When negative samples are drawn from the **unsmoothed** unigram distribution (without the $3/4$ power) and the dimension $d$ is large enough, SGNS reaches its global optimum when:
+
+$$
+\mathbf{w} \cdot \mathbf{c} = \mathrm{PMI}(w, c) - \ln k
+$$
+
+Here PMI is defined with the natural logarithm $\ln$ because the sigmoid uses $e$; the previous lesson used $\log_2$, which differs only by a constant scale factor. When negatives are drawn according to $\mathrm{count}^{3/4}$ as in actual Word2Vec, $P(c)$ inside PMI is replaced by the **smoothed** $0.75$-power context distribution—matching the context smoothing in [Vector Semantics and Embeddings](/en/nlp/vector-semantics-embeddings/) ([Levy, Goldberg, and Dagan, 2015](https://aclanthology.org/Q15-1016/)).
+
+In other words, $\mathbf{W}\mathbf{C}^\top$ tries to reconstruct the PMI matrix **shifted down** by $\ln k$. Word2Vec is implicitly factorizing a co-occurrence matrix, just as SVD does explicitly. The difference lies in how errors are weighted—SGNS cares much more about frequent pairs than rare ones—and in never having to materialize the $|V| \times |V|$ matrix. Motivated by this result, Levy and Goldberg proposed **Shifted PPMI**, $\max(\mathrm{PMI} - \ln k, 0)$, followed by truncated SVD.
+
+### GloVe: weighted regression on log co-occurrence counts
+
+GloVe (Pennington, Socher, and Manning, 2014) goes the other way: count first, then learn vectors by gradient descent. Let $X_{ij}$ be the number of times word $j$ appears in the window around word $i$ across the entire corpus. GloVe fits vectors whose dot product approximates $\ln X_{ij}$ via **weighted least squares** (the paper calls the objective $J$):
+
+$$
+\mathcal{L}_{\text{GloVe}} = \sum_{i, j : X_{ij} > 0} f(X_{ij}) \bigl(\mathbf{w}_i \cdot \mathbf{c}_j + b_i + b'_j - \ln X_{ij}\bigr)^2
+$$
+
+- $b_i$ and $b'_j$ are scalar biases for each word, absorbing how frequent word $i$ or word $j$ is on its own.
+- The sum runs only over nonzero cells $X_{ij} > 0$, since $\ln 0$ is undefined. (The paper writes the sum over all cells with $f(0) = 0$, which is equivalent.) Depending on vocabulary and corpus size, 75–95% of the cells are zero, so this sum is sparse.
+- The weighting function is $f(x) = (x / x_{\max})^{3/4}$ for $x < x_{\max}$ and $1$ for $x \ge x_{\max}$, with $x_{\max} = 100$. A pair seen once gets weight $0.03$, seen 10 times gets $0.18$, and seen 100 or more times gets $1$. Rare, noisy pairs have little influence, while ultra-frequent pairs are capped so they cannot dominate.
+
+GloVe's final word representation sums the two tables, $\mathbf{W} + \mathbf{C}$. The motivating idea behind GloVe is **ratios** of co-occurrence probabilities: in the paper's example, "solid" appears near "ice" about 8.9 times more often than near "steam," whereas "water" (related to both) has a ratio near 1. The vector difference $\mathbf{w}_{\text{ice}} - \mathbf{w}_{\text{steam}}$ is designed to capture that log ratio.
+
+### FastText: a word is the sum of its character pieces
+
+Word2Vec and GloVe treat each word as an atomic symbol. `nhà_thơ` (poet) and `nhà_báo` (journalist) share a prefix, yet their vectors share no parameters—and an unseen word gets no vector at all. FastText (Bojanowski et al., 2017) fixes this:
+
+1. Add boundary markers `<` at the start and `>` at the end of the word to distinguish prefixes and suffixes from interior substrings.
+2. Extract all character n-grams of length 3 to 6. The word `nhà` produces `<nh`, `nhà`, `hà>`, `<nhà`, `nhà>`, and `<nhà>`.
+3. Include the whole word itself as a special token (if it is in the vocabulary).
+4. Assign each n-gram $g$ a vector $\mathbf{z}_g$. Represent a word by the **sum** of its n-gram vectors, and train with the SGNS objective.
+
+To avoid storing a lookup table for tens of millions of distinct n-grams, FastText **hashes** each n-gram into one of $K$ buckets using the FNV-1a hash function, with $K = 2 \times 10^6$. Two different n-grams may collide in the same bucket; the model accepts that small amount of noise in exchange for a fixed memory footprint.
+
+The payoff: rare words borrow statistical strength from character pieces shared with common words, and an out-of-vocabulary word still gets a vector by summing its n-grams. The paper highlights Finnish, where nouns have 15 cases, and evaluates across morphologically rich languages such as German, Czech, and Russian, where the gains are largest.
+
+**What about Vietnamese?** Honestly, the gain is smaller if you tokenize by whitespace. Vietnamese writes each syllable separated by spaces and does not inflect word endings for tense or number. When tokenized by whitespace, each token is a short syllable (typically 1 to 7 letters), so 3–6 character n-grams mostly just repeat the syllable itself. FastText helps much more when the text has been **word-segmented** with syllables joined by `_` (see [Tokenization](/en/nlp/tokenization/)): `nhà_văn` (writer), `nhà_thơ` (poet), and `nhà_báo` (journalist) then share pieces like `<nhà_`, matching how Vietnamese builds compound words. FastText also helps with typos, proper names, and loanwords. Two Vietnamese-specific traps to watch out for:
+
+- **Unaccented text is a completely different character sequence.** `"người"` and `"nguoi"` share only a single n-gram, `<ng`, so FastText cannot automatically bridge accented and unaccented text. Restore diacritics first, or train on matching text.
+- **The same accented letter can have multiple Unicode encodings.** Precomposed NFC and decomposed NFD forms of `"người"` differ character by character, yielding different n-grams. Always normalize Unicode first (see [Text Normalization](/en/nlp/text-normalization/)).
+
+You do not need to train from scratch to try it: [Grave et al. (2018)](https://aclanthology.org/L18-1550/) released pretrained FastText vectors for 157 languages, including Vietnamese (`cc.vi.300.bin`, [download page](https://fasttext.cc/docs/en/crawl-vectors.html), CC BY-SA 3.0 license). They were trained on Common Crawl and Wikipedia with 300 dimensions, CBOW, and character n-grams of length 5. The Vietnamese text was segmented with **UETsegmenter** beforehand, so the vocabulary contains compound tokens like `nhà_văn`.
+
+### Vector analogies and their limits
+
+The most famous Word2Vec example claims that the vector closest to $\mathbf{w}_{\text{king}} - \mathbf{w}_{\text{man}} + \mathbf{w}_{\text{woman}}$ is $\mathbf{w}_{\text{queen}}$. Formally, an analogy question "$a$ is to $b$ as $a^*$ is to ?" is answered by:
+
+$$
+b^* = \operatorname*{arg\,max}_{x \notin \{a, b, a^*\}} \cos\bigl(\mathbf{w}_x,\ \mathbf{w}_b - \mathbf{w}_a + \mathbf{w}_{a^*}\bigr)
+$$
+
+The intuition is that $\mathbf{w}_{\text{woman}} - \mathbf{w}_{\text{man}}$ captures a "gender direction," and adding that offset to "king" lands near "queen." Two caveats are essential (see also the first box under Common pitfalls):
+
+- **The input words must be excluded.** The constraint $x \notin \{a, b, a^*\}$ is not a minor implementation detail. Mikolov et al. (2013b) explicitly state that the three input words are filtered out of the search. Without that filter, the nearest neighbor is usually one of the input words itself (Jurafsky and Martin, SLP3).
+- **It works well only on certain relation types.** Capital–country, pluralization, and comparative adjectives work well; many other semantic relations score much worse.
+
+### Bias in embeddings
+
+Because embeddings learn from human-written text, they absorb human stereotypes. [Bolukbasi et al. (2016)](https://proceedings.neurips.cc/paper/2016/hash/a486cd07e4ac3d270571622f4f316ec5-Abstract.html) examined Word2Vec vectors trained on Google News and found analogies such as "man : computer programmer :: woman : homemaker." They showed that gender bias aligns closely with a direction in vector space and proposed projecting gender-neutral words orthogonal to that direction. However, [Gonen and Goldberg (2019)](https://aclanthology.org/N19-1061/) demonstrated that this projection acts like "lipstick on a pig": the bias remains encoded in how words cluster around one another. Debiasing embeddings remains an open problem (SLP3, Section 5.8).
+
+If you use embeddings in a resume screener or scoring pipeline, these biases flow directly into downstream decisions. Measure bias on your own data before trusting the model.
+
+### Static versus contextual
+
+All three methods in this lesson produce **static embeddings**: exactly one vector per word type, shared across every sentence. "Đường" in "một cân đường" (a kilo of sugar) and in "con đường" (the road) gets the exact same vector—a compromise between its senses. **Contextual embeddings** compute a fresh vector for each token occurrence from the entire sentence; [BERT](/en/nlp/bert/) shows how that works.
+
+### Limitations
+
+- **One vector for all senses** (above). Contextual models in [BERT](/en/nlp/bert/) address polysemy.
+- **Unseen words:** Word2Vec and GloVe have no vector; FastText composes one from character n-grams (second code cell).
+- **Dataset biases** are baked into the geometry, and vector analogies can amplify them.
+- **No word order.** Within a window, words before and after the target are treated symmetrically. And if you represent a sentence by averaging its word vectors, "dog bites cat" and "cat bites dog" get the exact same vector.
+
+## Illustration
+
+The figure below places the two Word2Vec architectures side by side on the same sentence. Follow the direction of the arrows: CBOW averages four surrounding context words into a single vector to predict the center word, whereas skip-gram starts from the center word and makes four separate predictions.
+
+{/* FIG: CBOW pools context words to predict the center word; skip-gram uses the center word to predict each context word, on the same sentence. */}
+<Word2VecFigure />
+
+The table below compares the three methods along the same axes.
+
+| Criterion | Word2Vec (SGNS) | GloVe | FastText |
+|---|---|---|---|
+| Trains on | Individual (target, context) pairs while scanning text | Full-corpus co-occurrence count matrix $X_{ij}$ | Individual pairs, like SGNS |
+| Objective | Binary classification of real vs. noise pairs via sigmoid | Weighted least squares on $\ln X_{ij}$ | Same as SGNS, but word vector is the sum of n-gram vectors |
+| Unit with a vector | Word | Word | Character n-grams of length 3–6 (plus whole word) |
+| Unseen words | No vector | No vector | Sum of the word's character n-gram vectors |
+| Connection to PMI | Implicitly factorizes $\mathrm{PMI} - \ln k$ | Explicitly fits $\ln X_{ij}$ | Same as SGNS |
+
+## Code examples
+
+The code in this lesson was last tested in November 2026 with Python 3.14 and NumPy 2.4 (the versions bundled in Pyodide). Both cells run independently right on the page: each cell imports its own dependencies and generates its own data.
+
+### Skip-gram with negative sampling in NumPy
+
+The cell below builds a small synthetic Vietnamese **corpus**: 180 sentences generated from three sentence templates, one per semantic category. Animals (*mèo*, *chó*, *gà*, *vịt* — cat, dog, chicken, duck) appear with the classifier "con"; dishes (*phở*, *bún*, *cháo*, *cơm* — noodle soups, porridge, rice) appear with "bát" (bowl); drinks (*trà*, *sữa*, *bia*, *nước* — tea, milk, beer, water) appear with "ly" (glass). The vocabulary has 40 words, and a $\pm 2$ window produces 2604 (target, context) pairs. The model uses $d = 10$ dimensions, $k = 3$ negative samples drawn from $\mathrm{count}^{3/4}$, and trains with mini-batch gradient descent (batch size 64, $\eta = 0.03$, 13 epochs). The line `gw` computes $\partial\mathcal{L}/\partial\mathbf{w}$, and the three `np.add.at` lines subtract $\eta$ times the three gradients from $\mathbf{C}$ (positive contexts), $\mathbf{C}$ (negative samples), and $\mathbf{W}$. Gradients across pairs in a batch are **summed** rather than averaged; `np.add.at` accumulates properly when the same word appears multiple times in a batch.
+
+<PythonRunner code={skipgramCode} title="Skip-gram with negative sampling on a small Vietnamese corpus" />
+
+Reading the output:
+
+- **Loss drops from 2.751 to 1.132.** At initialization all vectors are near 0, so every dot product is near 0 and $\sigma \approx 0.5$. The loss for one true pair plus 3 negatives is then $4 \ln 2 \approx 2.77$, matching the initial value (the printed number is the running average during epoch 0, so it is already slightly below 2.77).
+- **Loss does not reach 0—and should not.** Negative samples are drawn at random, so occasionally a "negative" sample happens to be a valid context word. Words like "một" (a/one) appear with every group, so the model cannot drive the probability of every pair containing "một" to zero.
+- **Nearest neighbors match the semantic groups:** "mèo" (cat) is closest to vịt (0.99), gà (0.98), chó (0.97); "phở" is closest to cơm (0.99), cháo (0.99), bún (0.96); "trà" (tea) is closest to bia (0.96), nước (0.96), sữa (0.95). Nobody told the model which words are animals or foods—it inferred the clusters purely from shared contexts.
+- **cos(mèo, phở) = 0.28,** much lower than within-group cosines but still positive because both share words like "một" in their contexts ("nuôi một con mèo", "ăn một bát phở").
+
+Try changing the random seed in `default_rng(0)`. The exact numbers shift, but the three groups still separate cleanly: with seeds 1 and 2, every top-3 neighbor still belongs to the same category. (This synthetic corpus is deliberately clean; real text takes millions of sentences to produce comparable structure. We also skip subsampling here because the corpus is tiny.)
+
+### FastText-style character n-grams and unseen words
+
+The second cell does two things. First, it lists all 3–6 character n-grams of a word, including the `<` and `>` boundary markers. Second, it demonstrates the **mechanism** for composing a vector for an unseen word: hashing each n-gram with 32-bit FNV-1a into 10,000 buckets, each holding a 300-dimensional vector, and summing them up. Important caveat: **the n-gram vectors here are random numbers** (with a fixed seed), not trained weights. This cell illustrates the composition mechanism, not trained semantics.
+
+<PythonRunner code={fasttextCode} title="FastText-style character n-grams and vectors for unseen words" />
+
+Reading the output:
+
+- **`"nhà"` has 6 n-grams:** `<nh`, `nhà`, `hà>`, `<nhà`, `nhà>`, `<nhà>`. The syllable is so short that the 5-character n-gram already spans the entire word plus both boundary markers—a common occurrence with Vietnamese syllables.
+- **`nhà_văn` has 22 n-grams.** It shares 6 n-grams with `nhà_thơ` and `nhà_báo` (`<nh`, `<nhà`, `<nhà_`, `hà_`, `nhà`, `nhà_`), shares 1 with `văn_học` (`văn`), and shares none with `con_mèo`.
+- **Cosine tracks the number of shared pieces even with random vectors:** 0.35 with `nhà_thơ`, 0.27 with `nhà_báo`, 0.05 with `văn_học`, and -0.00 (effectively 0) with `con_mèo`. Because independent 300-dimensional random vectors are nearly orthogonal, the cosine roughly equals the fraction of shared n-grams ($6/22 \approx 0.27$) plus random noise.
+
+In a real FastText model, the n-gram vectors are trained. The piece `<nhà_` appears in `nhà_thơ` (poet) and `nhà_báo` (journalist), but also in `nhà_cửa` (house) and `nhà_máy` (factory), so it learns a blend of those usages; the remaining pieces (`_văn>`, `văn`) steer the sum toward literature. As a result, an unseen compound still gets a sensible starting vector—far better than nothing, though not as sharp as a vector trained on many direct occurrences. (The `fasttext` library averages the n-gram vectors rather than summing them; cosine similarity is identical either way since scaling does not change direction.)
+
+## Common pitfalls
+
+:::caution[Reading vector analogies as proof that the model "understands"]
+"King − man + woman = queen" is famous because it was cherry-picked. The search always excludes the three query words, and accuracy drops sharply on many other relation types. To evaluate embeddings for your problem, test them on your actual downstream task (classification, retrieval) rather than a handful of analogy puzzles.
+:::
+
+:::caution[Comparing vectors across two different training runs]
+Two runs of Word2Vec—even on the exact same corpus with different random seeds—produce arbitrarily rotated vector spaces. The cosine between the vector for "mèo" from run 1 and the vector for "mèo" from run 2 is meaningless. Only compare vectors **within the same model** (or after explicitly learning an alignment matrix between spaces). In the first code cell, changing the seed changes every individual coordinate while preserving relative neighbor relationships like "mèo is closer to chó than to phở."
+:::
+
+:::caution[Using pretrained Vietnamese vectors with mismatched tokenization]
+Vectors trained on syllable-split text have entries for `"nhà"` and `"văn"` but not `"nhà_văn"`, and vice versa. For example, `cc.vi.300` was trained on text segmented with UETsegmenter: looking up `"nhà văn"` syllable by syllable returns the separate vectors for `"nhà"` and `"văn"`, not the compound `"nhà_văn"`. Mismatched Unicode normalization (NFD vs. NFC) or tone-mark placement rules (`hòa` vs. `hoà`) will also cause lookups to miss. Always preprocess your text with the exact same pipeline used to build the pretrained vectors: same Unicode form, same word segmenter, same casing.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` field of the frontmatter. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Word2Vec learns embeddings through a self-supervised prediction task on raw text. Skip-gram predicts surrounding context words from the center word; CBOW predicts the center word from the average of the context words. Each word has two vectors: $\mathbf{w}$ (as target) and $\mathbf{c}$ (as context).
+- Full softmax costs $|V|$ operations per pair. Negative sampling replaces it with binary classification between the true pair and $k$ noise pairs drawn from $\mathrm{count}^{3/4}$: $\mathcal{L} = -\ln\sigma(\mathbf{c}_{\text{pos}} \cdot \mathbf{w}) - \sum_i \ln\sigma(-\mathbf{c}_{\text{neg},i} \cdot \mathbf{w})$. The gradient pulls true contexts closer and pushes negative samples away.
+- SGNS implicitly factorizes the shifted PMI matrix $\mathrm{PMI} - \ln k$; GloVe explicitly fits $\ln X_{ij}$ via weighted least squares with weights $f(X_{ij})$. FastText represents each word as the sum of its 3–6 character n-gram vectors, enabling vectors for unseen words; for Vietnamese, it helps most when text is word-segmented first.
+- All three produce static embeddings: one vector per word type, carrying dataset biases, with vector analogies holding reliably only for certain relations. Contextual embeddings in [BERT](/en/nlp/bert/) resolve polysemy by computing a vector per occurrence.
+
+**Further reading:**
+
+- Jurafsky, D., Martin, J. H. (Aug 2026 draft). [*Speech and Language Processing*, Chapter 5 "Embeddings"](https://web.stanford.edu/~jurafsky/slp3/5.pdf) (PDF), Sections 5.5 to 5.8. Thorough walkthrough of Word2Vec, plus discussions of analogies and bias. (Earlier drafts numbered this Chapter 6.)
+- Mikolov, T., Sutskever, I., Chen, K., Corrado, G., Dean, J. (2013b). [*Distributed Representations of Words and Phrases and their Compositionality*](https://arxiv.org/abs/1310.4546), NeurIPS 2013, Section 2. Introduces negative sampling, the $3/4$-power unigram distribution, and subsampling. (The paper writes $v_{w_I}$ and $v'_{w_O}$ where this lesson writes $\mathbf{w}$ and $\mathbf{c}$.)
+- Pennington, J., Socher, R., Manning, C. D. (2014). [*GloVe: Global Vectors for Word Representation*](https://aclanthology.org/D14-1162/), EMNLP 2014, Section 3. The weighted least-squares objective and the ice/steam probability ratio example. (The paper writes $\tilde{w}_j$ for the context vector.)
+- Bojanowski, P., Grave, E., Joulin, A., Mikolov, T. (2017). [*Enriching Word Vectors with Subword Information*](https://arxiv.org/abs/1607.04606), TACL 5, Section 3.2. FastText's character n-gram model.
+- Levy, O., Goldberg, Y. (2014). [*Neural Word Embedding as Implicit Matrix Factorization*](https://proceedings.neurips.cc/paper/2014/hash/b78666971ceae55a8e87efb7cbfd9ad4-Abstract.html), NeurIPS 2014, Section 3. Proves that SGNS factorizes a shifted PMI matrix, connecting this lesson to the previous one. (The paper writes $\log$ for the natural logarithm.)
+
+<LessonProgress />

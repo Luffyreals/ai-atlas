@@ -8,7 +8,7 @@ END = "_"  # ký hiệu cuối âm tiết
 
 
 def merge(symbols, pair):
-    """Thay mọi chỗ hai ký hiệu kề nhau bằng pair bởi một ký hiệu gộp."""
+    # Thay mọi chỗ hai ký hiệu kề nhau bằng pair bởi một ký hiệu gộp.
     out, i = [], 0
     while i < len(symbols):
         if tuple(symbols[i:i + 2]) == pair:

@@ -1,16 +1,16 @@
-# Nhận dạng thực thể bằng BERT đã fine-tune trên CoNLL-2003
+# Named entity recognition with BERT fine-tuned on CoNLL-2003
 from transformers import pipeline
 
 text = ("Sundar Pichai met Nguyen Thi Lan at the Vietcombank office "
         "in Hanoi before flying to Berlin.")
 ner = pipeline("ner", model="dslim/bert-base-NER")
 
-# Không gộp: mỗi token (kể cả mảnh ## của WordPiece) một nhãn B-/I-
+# No aggregation: each token (including WordPiece ## pieces) gets B-/I-
 for tok in ner(text, aggregation_strategy="none")[:11]:
     print(f"{tok['entity']:6} {tok['score']:.3f} {tok['word']}")
 
-# Gộp token thành thực thể theo hai cách:
-# "simple" gộp theo nhãn của từng token, "first" lấy nhãn subword đầu
+# Group tokens into entities in two ways:
+# "simple" groups by each token's tag; "first" uses the first subword's tag
 for strategy in ["simple", "first"]:
     print("---", strategy)
     for ent in ner(text, aggregation_strategy=strategy):

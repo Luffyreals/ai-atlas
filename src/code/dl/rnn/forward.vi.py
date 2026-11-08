@@ -12,7 +12,7 @@ b_y = np.zeros(1)
 
 
 def rnn_forward(xs):
-    """Chạy RNN trên chuỗi xs (L hàng, d_x cột), trả về mọi h_t."""
+    # Chạy RNN trên chuỗi xs (L hàng, d_x cột), trả về mọi h_t.
     h = np.zeros(d_h)  # h_0 = 0
     hs = []
     for x_t in xs:  # đọc lần lượt từng bước

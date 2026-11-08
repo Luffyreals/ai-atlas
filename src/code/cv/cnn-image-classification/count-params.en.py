@@ -1,6 +1,6 @@
 from torchvision import models
 
-# weights=None: chỉ dựng kiến trúc, trọng số ngẫu nhiên, không tải gì
+# weights=None: build architecture only, random weights, no download
 names = ["alexnet", "vgg16", "resnet18", "resnet50", "mobilenet_v2",
          "mobilenet_v3_small", "efficientnet_b0"]
 for name in names:

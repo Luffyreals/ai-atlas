@@ -1,0 +1,412 @@
+---
+title: 'Training Neural Networks: Vanishing/Exploding Gradients, BatchNorm, Dropout'
+description: 'Why deep networks are hard to train: backpropagation, gradient checking, vanishing and exploding gradients, Xavier/He initialization, BatchNorm, Dropout, weight decay.'
+quiz:
+  - question: 'A 7-layer network uses sigmoid in every hidden layer. Suppose every weight along a path equals 1. Compared to $\delta$ at layer 7, how large can $\delta$ at layer 1 be at most?'
+    options: ['$1\times$, because the weights equal 1', '$0.25^{6} \approx 2.4 \times 10^{-4}\times$', '$0.25^{7} \approx 6.1 \times 10^{-5}\times$', '$0.5^{6} \approx 1.6 \times 10^{-2}\times$']
+    answer: 1
+    explanation: 'Moving backward from layer 7 to layer 1 takes 6 steps, and each step multiplies by the weight (1) and by $\sigma''(z) \le 0.25$. The largest possible product is $0.25^{6}$. Unit weights cannot save the signal because the sigmoid derivative itself shrinks it by at least a factor of 4 at every layer. The exponent 7 confuses the number of layers with the number of backward steps.'
+  - question: 'A hidden layer has 512 input neurons and uses ReLU. Under He initialization, what is the standard deviation of its weights?'
+    options: ['$\sqrt{1/512} \approx 0.044$', '$1$', '$\sqrt{2/512} = 0.0625$', '$2/512 \approx 0.0039$']
+    answer: 2
+    explanation: 'He initialization sets the variance to $2/n_{\text{in}}$, so the standard deviation is $\sqrt{2/512} = \sqrt{1/256} = 1/16 = 0.0625$. The factor of 2 compensates for ReLU zeroing out roughly half of its inputs. $\sqrt{1/512}$ is Xavier variance when $n_{\text{in}} = n_{\text{out}}$, suited for tanh. $2/512$ is the variance before taking the square root.'
+  - question: 'A Dropout layer has $p = 0.2$ (drop probability). During training, a neuron has activation $a = 3$ and is kept. Under inverted dropout, what value is passed forward? What about at inference time?'
+    options:
+      - 'Training $3.75$, inference $3$'
+      - 'Training $3$, inference $2.4$'
+      - 'Training $2.4$, inference $3$'
+      - 'Training $3.75$, inference $3.75$'
+    answer: 0
+    explanation: 'Inverted dropout divides kept activations by the keep probability $1 - p = 0.8$: $3 / 0.8 = 3.75$. That keeps the expected value at $0.8 \times 3.75 = 3$, so at inference time the Dropout layer does nothing and passes $3$ through unchanged. Keeping $3$ during training and multiplying by $0.8$ at inference is the original paper''s formulation, not inverted dropout.'
+  - question: 'You run gradient checking on a 2-layer MLP: the relative error for $\mathbf{W}^{[2]}$ and $\mathbf{b}^{[2]}$ is around $10^{-11}$, while for $\mathbf{W}^{[1]}$ and $\mathbf{b}^{[1]}$ it is around $0.7$. Where is the bug most likely located?'
+    options:
+      - 'The finite-difference step size $h$ is too small'
+      - 'The formula $\boldsymbol{\delta}^{[2]} = a^{[2]} - y$ is wrong'
+      - 'The computation of $\boldsymbol{\delta}^{[1]}$, for example forgetting to multiply by $g''(\mathbf{z}^{[1]})$'
+      - 'The loss function is implemented incorrectly'
+    answer: 2
+    explanation: 'Because layer-2 gradients match, both $\boldsymbol{\delta}^{[2]}$ and the loss function are correct. Layer-1 gradients differ only in how $\boldsymbol{\delta}^{[2]}$ is propagated back into $\boldsymbol{\delta}^{[1]}$. The first code cell produces this exact symptom when you remove the $g''$ factor. If $h$ were too small, every parameter would suffer, not just layer 1.'
+  - question: 'You train a network with BatchNorm and then run inference one image at a time (batch size 1) while forgetting to call `model.eval()`. What happens at the BatchNorm layer?'
+    options:
+      - 'Nothing bad, because BatchNorm always uses running averages'
+      - 'The batch mean equals that single image''s value, so $\hat{z} = 0$ (PyTorch raises an error when each channel has only a single value)'
+      - 'BatchNorm automatically falls back to $\gamma = 1$, $\beta = 0$'
+      - 'The predictions are still correct, just slower'
+    answer: 1
+    explanation: 'In training mode, BatchNorm normalizes using the mean and variance of the current batch. With a batch of size 1, $z - \mu_B = 0$, wiping out the signal completely. PyTorch''s `BatchNorm1d` refuses a 1-sample batch in training mode and raises an error. Running averages are used only in `eval()` mode.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import backpropCode from '@code/dl/training-neural-networks/backprop-check.en.py?raw';
+import gradDepthCode from '@code/dl/training-neural-networks/grad-depth.en.py?raw';
+import bnDropoutCode from '@code/dl/training-neural-networks/bn-dropout.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Derive **backpropagation** for a 2-layer MLP in matrix form using the error signal $\boldsymbol{\delta}^{[l]}$, and verify it with **gradient checking**.
+- Explain why gradients **vanish** or **explode** in deep networks, and how **Xavier** and **He** initialization largely prevent both.
+- Understand what **BatchNorm** and **Dropout** do during training versus inference, and why calling `model.eval()` is essential.
+- Know when to apply weight decay, **early stopping**, and **gradient clipping**.
+
+## Prerequisites
+
+{/* List taken from prerequisites in roadmap.ts. Do not write manual links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+[Neural Networks](/en/dl/neural-networks/) introduced the notation $\mathbf{z}^{[l]} = \mathbf{W}^{[l]}\mathbf{a}^{[l-1]} + \mathbf{b}^{[l]}$, $\mathbf{a}^{[l]} = g(\mathbf{z}^{[l]})$, and $\mathbf{a}^{[0]} = \mathbf{x}$; we keep that notation here and write $n^{[l]}$ for the number of neurons in layer $l$. For optimization, this lesson only needs mini-batch **gradient descent** ([Gradient Descent](/en/ml/gradient-descent/)). **SGD with momentum** accumulates past gradients into a "velocity" to roll smoothly through bumpy loss landscapes, while **Adam** divides each parameter's step by a running average of its recent gradient magnitudes so every parameter gets an adaptive learning rate.
+:::
+
+## Intuition
+
+You already know forward propagation: feed $\mathbf{x}$ in, pass through each layer, and get $\hat{y}$. To learn, gradient descent needs the derivative of the loss $\mathcal{L}$ with respect to **every** parameter. Even a modest network for $8 \times 8$ digit images with three hidden layers of 256 neurons already has roughly 150,000 parameters.
+
+### The naive way: nudging one parameter at a time
+
+In the Gradient Descent lesson, you estimated a slope by nudging a parameter slightly and recomputing the loss. With 150,000 parameters, a single update step would require at least 150,000 forward passes — far too slow. We need a way to compute **all** 150,000 derivatives at the cost of just a couple of forward passes. That algorithm is backpropagation.
+
+### A game of telephone
+
+Backpropagation passes "blame" backward from the output layer to the input layer: the output layer measures its error, reports it to the layer before it, which reports to the layer before that. At every handoff, the message gets **multiplied** by a factor determined by that layer.
+
+Think of a game of telephone across 10 people. If each person whispers at a quarter of the previous person's volume, the 10th person hears $0.25^{10} \approx 10^{-6}$ of the original voice — practically silence. If each person shouts twice as loud as the last, the 10th person gets blasted at $2^{10} = 1024$ times the original volume. Only when every person speaks at roughly the same volume does the message arrive intact.
+
+Deep neural networks face the exact same problem. If early layers receive tiny gradients, their weights barely move (**vanishing gradients**); if they receive huge gradients, their weights take wild leaps until floating-point numbers overflow (**exploding gradients**). On top of that, a large network has enough capacity to memorize the training set, so we also need tools to prevent overfitting.
+
+The goal of this lesson is to **compute gradients for all parameters efficiently, keep gradient signals from vanishing or exploding across many layers, and prevent large networks from memorizing the training data.**
+
+## Theory
+
+### The chain rule along a computation chain
+
+Start with a toy network that has just one scalar neuron per layer:
+
+$$
+x \;\to\; z_1 = w_1 x \;\to\; a_1 = g(z_1) \;\to\; z_2 = w_2 a_1 \;\to\; \mathcal{L}(z_2)
+$$
+
+To find how much $\mathcal{L}$ changes when we nudge $w_1$, we follow the chain: changing $w_1$ changes $z_1$, which changes $a_1$, which changes $z_2$, which changes $\mathcal{L}$. The **chain rule** says the overall rate of change is the product of the local rates of change along each link:
+
+$$
+\frac{\partial\mathcal{L}}{\partial w_1}
+= \frac{\partial\mathcal{L}}{\partial z_2}\cdot\frac{\partial z_2}{\partial a_1}\cdot\frac{\partial a_1}{\partial z_1}\cdot\frac{\partial z_1}{\partial w_1}
+= \frac{\partial\mathcal{L}}{\partial z_2}\cdot w_2 \cdot g'(z_1)\cdot x
+$$
+
+Each factor comes from a single link: $z_2 = w_2 a_1$ gives $\partial z_2/\partial a_1 = w_2$; $a_1 = g(z_1)$ gives $\partial a_1/\partial z_1 = g'(z_1)$; $z_1 = w_1 x$ gives $\partial z_1/\partial w_1 = x$.
+
+Notice that computing $\partial\mathcal{L}/\partial w_2 = \frac{\partial\mathcal{L}}{\partial z_2}\cdot a_1$ also needs $\frac{\partial\mathcal{L}}{\partial z_2}$. The upstream prefix of the chain is **shared**. So we work from the end back to the beginning, caching the intermediate derivative at each layer so the layer before it can reuse it. That is the entire secret of backpropagation.
+
+### Backpropagation for a 2-layer MLP
+
+Now consider a real 2-layer MLP on a single sample $(\mathbf{x}, y)$ with $y \in \{0, 1\}$:
+
+$$
+\begin{aligned}
+\mathbf{z}^{[1]} &= \mathbf{W}^{[1]}\mathbf{x} + \mathbf{b}^{[1]}, & \mathbf{a}^{[1]} &= g(\mathbf{z}^{[1]}) \\
+z^{[2]} &= \mathbf{W}^{[2]}\mathbf{a}^{[1]} + b^{[2]}, & a^{[2]} &= \sigma(z^{[2]}) = \hat{y}
+\end{aligned}
+$$
+
+Here $\mathbf{x}$ has $n$ features and the hidden layer has $n^{[1]}$ neurons, so $\mathbf{W}^{[1]}$ has shape $n^{[1]} \times n$. The output layer has a single sigmoid neuron, so $\mathbf{W}^{[2]}$ has shape $1 \times n^{[1]}$. The loss function is binary cross-entropy:
+
+$$
+\mathcal{L} = -\left[y\ln a^{[2]} + (1 - y)\ln\left(1 - a^{[2]}\right)\right]
+$$
+
+The central quantity is **$\boldsymbol{\delta}^{[l]} = \partial\mathcal{L}/\partial\mathbf{z}^{[l]}$**: how sensitive the loss is to the pre-activations of layer $l$. It is the "blame" passed backward, and $\boldsymbol{\delta}^{[l]}$ has the exact same shape as $\mathbf{z}^{[l]}$.
+
+**Step 1: $\delta$ at the output layer.** Differentiate $\mathcal{L}$ with respect to $a^{[2]}$ and combine over a common denominator:
+
+$$
+\frac{\partial\mathcal{L}}{\partial a^{[2]}} = -\frac{y}{a^{[2]}} + \frac{1 - y}{1 - a^{[2]}} = \frac{a^{[2]} - y}{a^{[2]}\left(1 - a^{[2]}\right)}
+$$
+
+The derivative of the sigmoid is $\sigma'(z) = \sigma(z)\left(1 - \sigma(z)\right)$, so $\partial a^{[2]}/\partial z^{[2]} = a^{[2]}\left(1 - a^{[2]}\right)$. Multiplying the two factors cancels the denominator cleanly:
+
+$$
+\delta^{[2]} = a^{[2]} - y
+$$
+
+Remarkably simple: prediction minus true label. Sigmoid paired with binary cross-entropy (and softmax paired with multi-class cross-entropy) always yields this clean cancellation, which is one reason they are standard partners.
+
+**Step 2: gradients of the output layer.** The $j$-th entry of $\mathbf{W}^{[2]}$ enters $z^{[2]}$ only through the term $W^{[2]}_{j}a^{[1]}_j$, so $\partial z^{[2]}/\partial W^{[2]}_j = a^{[1]}_j$. Multiplying by $\delta^{[2]}$ via the chain rule and arranging into a row vector gives:
+
+$$
+\frac{\partial\mathcal{L}}{\partial\mathbf{W}^{[2]}} = \delta^{[2]}\,\mathbf{a}^{[1]\top}, \qquad \frac{\partial\mathcal{L}}{\partial b^{[2]}} = \delta^{[2]}
+$$
+
+**Step 3: propagate $\delta$ back to the hidden layer.** Hidden neuron $j$ affects $\mathcal{L}$ through $a^{[1]}_j$, which enters $z^{[2]}$ with weight $W^{[2]}_j$. Thus $\partial\mathcal{L}/\partial a^{[1]}_j = W^{[2]}_j\,\delta^{[2]}$. When the next layer has multiple neurons, $a^{[1]}_j$ feeds into all of them, so we sum the blame across all outgoing paths: $\sum_i W^{[2]}_{ij}\delta^{[2]}_i$, which is the $j$-th entry of $\mathbf{W}^{[2]\top}\boldsymbol{\delta}^{[2]}$. Finally, stepping backward through the activation function multiplies by $g'(z^{[1]}_j)$:
+
+$$
+\boldsymbol{\delta}^{[1]} = \left(\mathbf{W}^{[2]\top}\boldsymbol{\delta}^{[2]}\right) \odot g'\!\left(\mathbf{z}^{[1]}\right)
+$$
+
+The symbol $\odot$ denotes elementwise multiplication, because each neuron applies its own activation function independently.
+
+**Step 4: gradients of the hidden layer.** Repeat Step 2 with $\mathbf{x}$ playing the role of $\mathbf{a}^{[1]}$:
+
+$$
+\frac{\partial\mathcal{L}}{\partial\mathbf{W}^{[1]}} = \boldsymbol{\delta}^{[1]}\,\mathbf{x}^\top, \qquad \frac{\partial\mathcal{L}}{\partial\mathbf{b}^{[1]}} = \boldsymbol{\delta}^{[1]}
+$$
+
+Here $\boldsymbol{\delta}^{[1]}$ is an $n^{[1]} \times 1$ column and $\mathbf{x}^\top$ is a $1 \times n$ row, so their product is an $n^{[1]} \times n$ matrix — matching the shape of $\mathbf{W}^{[1]}$. Checking matrix dimensions like this is the fastest way to catch a missing transpose.
+
+:::note[Key takeaway]
+For an $N_L$-layer network, after running the forward pass and caching all $\mathbf{z}^{[l]}$ and $\mathbf{a}^{[l]}$:
+
+$$
+\begin{aligned}
+\boldsymbol{\delta}^{[l]} &= \left(\mathbf{W}^{[l+1]\top}\boldsymbol{\delta}^{[l+1]}\right) \odot g'\!\left(\mathbf{z}^{[l]}\right) \\
+\frac{\partial\mathcal{L}}{\partial\mathbf{W}^{[l]}} &= \boldsymbol{\delta}^{[l]}\,\mathbf{a}^{[l-1]\top}, \qquad \frac{\partial\mathcal{L}}{\partial\mathbf{b}^{[l]}} = \boldsymbol{\delta}^{[l]}
+\end{aligned}
+$$
+
+Start from $\boldsymbol{\delta}^{[N_L]}$ at the output layer and step backward down to $l = 1$. For a mini-batch of $B$ samples, average the gradients across the $B$ samples.
+:::
+
+The computational cost of backpropagation is roughly twice that of a forward pass, regardless of parameter count. The trade-off is memory: every intermediate activation $\mathbf{a}^{[l]}$ must be kept in memory until the backward pass reaches layer $l$, which is why training a neural network uses far more memory than running inference. Frameworks like PyTorch, TensorFlow, and JAX automate this via autograd, executing these exact equations under the hood.
+
+### Gradient checking with finite differences
+
+Hand-coded backpropagation is notorious for subtle bugs — a missing transpose or a dropped $g'$ factor — where the code still runs and the loss still creeps downward. To catch bugs, recompute each derivative numerically using the **central difference** with a small step $h$:
+
+$$
+\frac{\partial\mathcal{L}}{\partial\theta_k} \approx \frac{\mathcal{L}(\theta_k + h) - \mathcal{L}(\theta_k - h)}{2h}
+$$
+
+In the numerator, only $\theta_k$ is nudged while all other parameters stay fixed. The central difference has truncation error of order $h^2$, far more accurate than the one-sided difference $\left(\mathcal{L}(\theta_k + h) - \mathcal{L}(\theta_k)\right)/h$ (error of order $h$). In 64-bit floating-point arithmetic, $h \approx 10^{-5}$ is the sweet spot: making $h$ much smaller amplifies floating-point rounding error in the subtraction.
+
+Compare the backprop gradient $\mathbf{g}$ against the numerical gradient $\mathbf{g}_{\text{num}}$ using **relative error**, which is scale-invariant:
+
+$$
+\text{relative error} = \frac{\lVert\mathbf{g} - \mathbf{g}_{\text{num}}\rVert}{\lVert\mathbf{g}\rVert + \lVert\mathbf{g}_{\text{num}}\rVert}
+$$
+
+A relative error around $10^{-7}$ or smaller means your backprop is right; $10^{-2}$ or larger almost certainly indicates a bug. Because each parameter requires two forward passes, run gradient checking only on a tiny network with a few samples, then turn it off for real training.
+
+### Vanishing and exploding gradients
+
+Unroll the recurrence for $\boldsymbol{\delta}^{[l]}$ from the output layer all the way back to layer 1. Each backward step multiplies $\boldsymbol{\delta}$ by $\mathbf{W}^{[l+1]\top}$ and by $g'(\mathbf{z}^{[l]})$. In a 1-neuron-per-layer chain, this product is easy to see:
+
+$$
+\delta^{[1]} = \delta^{[N_L]}\prod_{l=2}^{N_L} w_l\, g'\!\left(z^{[l-1]}\right)
+$$
+
+This is a product of $N_L - 1$ factors. If each factor is around $0.25$, ten layers give $0.25^{9} \approx 3.8 \times 10^{-6}$; if each is around 2, ten layers give $2^{9} = 512$. A long product of numbers either shrinks exponentially toward 0 or blows up exponentially; only when the factors stay right around 1 does the signal preserve its scale. Because the weight gradient is $\boldsymbol{\delta}^{[l]}\mathbf{a}^{[l-1]\top}$, the earliest layers suffer the most.
+
+- **Vanishing gradients:** early layers barely update. Training loss crawls or plateaus even though the final layers are still changing.
+- **Exploding gradients:** a massive update step hurls parameters far across the space, causing the loss to spike and overflow into `inf` or `nan`.
+
+**Why sigmoid is prone to vanishing gradients.** Write $a = \sigma(z) \in (0, 1)$; then $\sigma'(z) = a(1 - a)$. This quadratic in $a$ peaks at $a = 1/2$ (i.e., $z = 0$):
+
+$$
+\sigma'(z) = a(1 - a) \le \frac{1}{2}\cdot\frac{1}{2} = \frac{1}{4}
+$$
+
+Every sigmoid layer shrinks $\delta$ by at least a factor of 4 unless the weights are large enough to compensate. Worse, when $|z|$ is large, sigmoid **saturates**: $a$ approaches 0 or 1, and $\sigma'$ approaches 0. Tanh has $\tanh'(0) = 1$, which helps near 0, but it still saturates in the tails. ReLU has derivative 1 on the entire positive half-line, so it does not shrink the signal on its own; with ReLU, everything comes down to the **weights** — that is, how we initialize them.
+
+### Xavier and He initialization
+
+**Never initialize all weights to zero.** If every weight in a layer starts at the same value, every neuron in that layer computes the exact same activation, receives the exact same $\delta$, and undergoes the exact same update. They remain identical clones forever, reducing a 256-neuron layer to a single effective neuron. Random initialization is needed for **symmetry breaking**. The remaining question is what standard deviation to use.
+
+**Preserving variance across layers.** Consider $z_i = \sum_{j=1}^{n_{\text{in}}} W_{ij}a_j$, where $n_{\text{in}}$ is the number of inputs to the layer. Assume the weights $W_{ij}$ are independent with mean 0 and variance $s^2$, and independent of the activations $a_j$. Each product $W_{ij}a_j$ has variance $s^2\,\mathbb{E}[a_j^2]$, and the variance of a sum of independent terms is the sum of their variances:
+
+$$
+\mathrm{Var}(z_i) = n_{\text{in}}\, s^2\, \mathbb{E}\!\left[a_j^2\right]
+$$
+
+To keep the signal from growing or shrinking as it passes through the layer, we choose $s^2$ so that $\mathrm{Var}(z)$ matches the variance at the previous layer.
+
+- **Activations roughly linear near 0** (such as tanh): $a \approx z$, so $\mathbb{E}[a^2] \approx \mathrm{Var}(z_{\text{prev}})$, which requires $n_{\text{in}}s^2 = 1$. The backward pass multiplies by $\mathbf{W}^\top$, which similarly asks for $n_{\text{out}}s^2 = 1$. **Xavier initialization** (Glorot & Bengio, 2010) compromises by averaging the two fan sizes:
+
+$$
+s^2 = \frac{2}{n_{\text{in}} + n_{\text{out}}}
+$$
+
+- **ReLU**: when $z$ is symmetric around 0, ReLU zeroes out half the values, so $\mathbb{E}[a^2] = \frac{1}{2}\mathrm{Var}(z_{\text{prev}})$. To compensate for the halved variance, **He initialization** (He et al., 2015, also called Kaiming initialization) doubles the variance:
+
+$$
+s^2 = \frac{2}{n_{\text{in}}}
+$$
+
+Take a square 64 → 64 ReLU layer as a concrete example. Stepping backward through one ReLU layer multiplies the variance of $\delta$ by $n\,s^2 \cdot \frac{1}{2}$. With unit standard deviation ($s = 1$), that factor is $64 \times 1 \times \frac{1}{2} = 32$, multiplying the standard deviation by $\sqrt{32} \approx 5.7$ at every single layer — rapid explosion. With He initialization, $64 \times \frac{2}{64} \times \frac{1}{2} = 1$: the scale stays flat. The second code cell measures these exact numbers.
+
+Xavier was derived assuming slope 1 near 0, whereas sigmoid has slope only $\frac{1}{4}$ at 0, so sigmoid with Xavier still vanishes. That is a major reason modern deep networks pair ReLU (or GELU) with He initialization. Note that PyTorch's `nn.Linear` defaults to uniform weights on $\left[-1/\sqrt{n_{\text{in}}},\, 1/\sqrt{n_{\text{in}}}\right]$, which has variance $1/(3n_{\text{in}})$ — smaller than He; call `nn.init.kaiming_normal_` when you want exact He initialization.
+
+### BatchNorm
+
+Good initialization only keeps signals well-scaled **at step zero**. As training updates the weights, the distribution of $\mathbf{z}^{[l]}$ drifts. **Batch normalization** (BatchNorm, BN; Ioffe & Szegedy, 2015) actively re-normalizes the signal at every training step.
+
+Consider **one neuron** across a mini-batch of $B$ samples, with pre-activation values $z^{(1)}, \dots, z^{(B)}$. BatchNorm computes the mini-batch mean and variance and standardizes the values:
+
+$$
+\begin{aligned}
+\mu_B &= \frac{1}{B}\sum_{i=1}^{B} z^{(i)}, \qquad \sigma_B^2 = \frac{1}{B}\sum_{i=1}^{B}\left(z^{(i)} - \mu_B\right)^2 \\
+\hat{z}^{(i)} &= \frac{z^{(i)} - \mu_B}{\sqrt{\sigma_B^2 + \epsilon}}
+\end{aligned}
+$$
+
+Here $\epsilon$ is a tiny constant (PyTorch defaults to $10^{-5}$) preventing division by zero. After standardization, the $\hat{z}$ values have mean 0 and variance near 1. Finally, BatchNorm scales and shifts them:
+
+$$
+\mathrm{BN}\!\left(z^{(i)}\right) = \gamma\,\hat{z}^{(i)} + \beta
+$$
+
+**Why $\gamma$ and $\beta$ are needed.** Forcing every neuron to mean 0 and variance 1 can restrict what the layer can represent — for instance, a subsequent sigmoid would be confined to its nearly linear middle region. The learnable parameters $\gamma$ and $\beta$ (one pair per neuron) let the network choose whatever scale and shift work best; if needed, it can even learn $\gamma = \sigma_B$ and $\beta = \mu_B$ to undo the normalization entirely. Because subtracting $\mu_B$ cancels out any constant offset added before BN, the bias $\mathbf{b}^{[l]}$ of the preceding linear layer is redundant and usually omitted (`bias=False`), with $\beta$ taking over its job.
+
+BatchNorm is typically placed right after the linear (or convolutional) layer and before the activation function, as in the original paper. Each neuron maintains its own $\mu_B, \sigma_B, \gamma, \beta$.
+
+**Training versus inference.** At inference time, the prediction for one image should not depend on whatever other images happen to share its batch, and you may be predicting on a single image ($B = 1$). Therefore, during training, BatchNorm maintains exponential **running averages** of $\mu_B$ and $\sigma_B^2$ across mini-batches:
+
+$$
+\mu_{\text{run}} \leftarrow (1 - \alpha)\,\mu_{\text{run}} + \alpha\,\mu_B
+$$
+
+and analogously for the variance. PyTorch calls $\alpha$ `momentum` and defaults to $0.1$ (unrelated to optimizer momentum). At inference time, BatchNorm freezes and uses $\mu_{\text{run}}$ and $\sigma^2_{\text{run}}$ instead of batch statistics. Switching between these two behaviors is why you must call `model.train()` and `model.eval()`.
+
+**Why BatchNorm helps.** Networks with BatchNorm tolerate larger learning rates, are far less sensitive to weight initialization, and converge faster. Because mini-batch statistics fluctuate slightly from batch to batch, BN also acts as a mild regularizer. While the original paper attributed BN's success to reducing "internal covariate shift", Santurkar et al. (2018) showed that its primary benefit is making the loss landscape significantly smoother. Weakness: when the batch size is very small, $\mu_B$ and $\sigma_B$ become noisy. Transformers therefore use **layer normalization** (LayerNorm), which normalizes across all neurons of a **single** sample; see [Transformers](/en/dl/transformers/).
+
+### Dropout
+
+A large network can memorize the training set, just like the degree-15 polynomial in [Overfitting and Underfitting](/en/ml/overfitting-underfitting/). A failure mode specific to neural networks is **co-adaptation**: a group of neurons latch onto each other so tightly that one neuron's output is useful only when several specific partner neurons fire alongside it. **Dropout** (Srivastava et al., 2014) breaks up co-adaptation with a remarkably simple trick: on each training step, **randomly zero out** each neuron with probability $p$.
+
+For a layer with activation vector $\mathbf{a}$, draw a random mask $\mathbf{r}$ whose entries are independent, equal to 1 with probability $1 - p$ and 0 with probability $p$. The standard implementation, **inverted dropout**, also divides by $1 - p$:
+
+$$
+\tilde{\mathbf{a}} = \frac{1}{1 - p}\,\mathbf{r} \odot \mathbf{a}
+$$
+
+**Why divide by $1 - p$?** Each entry has expected value $\mathbb{E}[\tilde{a}_j] = (1 - p)\cdot\frac{a_j}{1 - p} + p \cdot 0 = a_j$. The next layer receives activations with the exact same average magnitude as when dropout is absent. Thanks to this rescaling, **at inference time Dropout does nothing at all**: it passes $\mathbf{a}$ through untouched, dropping no neurons and multiplying by nothing. (The original paper left training activations unscaled and multiplied weights by $1 - p$ at test time; both give the same expectation, but inverted dropout is cleaner because inference code does not need to know $p$.)
+
+During backpropagation, dropped neurons have $\delta = 0$, so their incoming weights receive no update on that step. Every training step therefore trains a different random sub-network, and the full network at inference time acts like an ensemble average over exponentially many sub-networks. Typical drop rates are $p = 0.5$ for wide MLP hidden layers and $p \approx 0.1$ in Transformers.
+
+### Weight decay, early stopping, and gradient clipping
+
+Three concise techniques used in almost every practical training run:
+
+**Weight decay.** Add an $L_2$ penalty $\lambda\lVert\mathbf{w}\rVert_2^2$, just like Ridge in [Regularization: Ridge, Lasso, Elastic Net](/en/ml/regularization/). The penalty's gradient is $2\lambda\mathbf{w}$, turning the gradient descent update into:
+
+$$
+\mathbf{w} \leftarrow \mathbf{w} - \eta\left(\nabla\mathcal{L} + 2\lambda\mathbf{w}\right) = (1 - 2\eta\lambda)\,\mathbf{w} - \eta\nabla\mathcal{L}
+$$
+
+The right-hand side explains the name: before taking the gradient step, the weights **decay** toward 0 by a constant factor $(1 - 2\eta\lambda)$ unless the data gradient actively pulls them away. In PyTorch optimizers, the `weight_decay` argument adds $\text{wd}\cdot\mathbf{w}$ to the gradient, so $\text{wd} = 2\lambda$. With Adam, adding $\text{wd}\cdot\mathbf{w}$ to the gradient is no longer equivalent to decaying the weights directly because Adam rescales gradients per parameter; **AdamW** (Loshchilov & Hutter, 2019) decouples the weight decay step to restore true decay. Biases $\mathbf{b}$ and BatchNorm parameters $\gamma, \beta$ are usually excluded from weight decay.
+
+**Early stopping.** After each epoch, evaluate the loss on a held-out **validation set**. Validation loss typically decreases at first and then turns upward once the network begins memorizing the training set. Save a checkpoint whenever validation loss hits a new best; if it fails to improve for a set number of epochs (the **patience**), stop training and restore the best checkpoint.
+
+**Gradient clipping.** Directly cap exploding gradients: if the norm of the entire gradient vector $\mathbf{g}$ exceeds a threshold $c$, rescale it back to length $c$:
+
+$$
+\mathbf{g} \leftarrow c\,\frac{\mathbf{g}}{\lVert\mathbf{g}\rVert} \quad \text{when } \lVert\mathbf{g}\rVert > c
+$$
+
+This preserves the gradient's direction while bounding its length, ensuring a single pathological mini-batch cannot hurl the parameters off a cliff. In PyTorch, call `torch.nn.utils.clip_grad_norm_(model.parameters(), c)` after `backward()` and before `step()`. Gradient clipping is standard in recurrent networks (Pascanu et al., 2013; see [Recurrent Neural Networks (RNN)](/en/dl/rnn/)) and large language model training.
+
+### Limitations
+
+- **Good initialization and BatchNorm are still not enough for ultra-deep networks** (hundreds of layers). **Residual connections** in ResNet create a direct highway for gradients; see [Modern CNN Architectures](/en/dl/modern-cnn-architectures/).
+- **This lesson does not cover optimizer choice and learning-rate schedules** (momentum, Adam, warmup, cosine decay).
+- **Variance analysis relies on independence assumptions** that hold at initialization but gradually break down once weights become correlated during training.
+
+## Illustration
+
+The interactive visualization conceptually builds a deep MLP on random inputs and plots a bar for each layer's gradient norm, from the first layer (left) to the last layer (right). The vertical axis is logarithmic: equal vertical steps represent equal multiplicative factors, letting you read off how many times the gradient shrinks or grows per layer. Compare four setups:
+
+1. **Sigmoid + Xavier**, 10 layers: the bars step down steadily toward the left. Each backward step shrinks the gradient by roughly a factor of 4, matching the bound $\sigma' \le \frac{1}{4}$. At 20 layers, the early layers practically vanish.
+2. **ReLU + std 1**: the opposite extreme — the bars shoot upward by many orders of magnitude as you move toward the early layers. That is an exploding gradient, caused by each layer multiplying the variance by roughly $n/2$.
+3. **ReLU + He**: the bars stay nearly level across all layers, even at 20 layers. Each layer preserves the signal scale.
+4. **tanh + Xavier**: much flatter than sigmoid + Xavier because $\tanh'(0) = 1$ rather than $\frac{1}{4}$ — the exact regime Xavier was designed for.
+
+{/* VIZ: GradientFlowViz
+    Idea: layer gradient magnitude is a product of W and g' factors; sigmoid vanishes, ReLU with std 1 explodes, ReLU with He stays stable. */}
+
+## Code examples
+
+The first two cells run directly in the browser using only NumPy, each generating its own data. The third cell uses PyTorch and runs locally on your machine.
+
+The first cell implements the four backpropagation equations from the Theory section for a 2-layer MLP (3 inputs, 4 sigmoid hidden neurons, 1 sigmoid output neuron) over 5 random samples, and compares the result against central-difference numerical gradients with $h = 10^{-5}$.
+
+<PythonRunner code={backpropCode} title="Backpropagation and gradient checking" />
+
+The relative errors across all four parameter groups are tiny — from $3.1 \times 10^{-12}$ ($\mathbf{b}^{[2]}$) to $1.7 \times 10^{-10}$ ($\mathbf{W}^{[1]}$), well below the $10^{-7}$ threshold — confirming our backpropagation implementation is exact. Now try introducing a deliberate bug: delete `* a1 * (1 - a1)` on the line computing `d1` (forgetting the $g'$ factor) and run the cell again. $\mathbf{W}^{[2]}$ and $\mathbf{b}^{[2]}$ remain exact, while the relative errors for $\mathbf{W}^{[1]}$ and $\mathbf{b}^{[1]}$ jump to $7.6 \times 10^{-1}$ and $7.2 \times 10^{-1}$. Gradient checking not only catches the bug, it pinpoints which layer contains it.
+
+The second cell builds a 10-layer MLP with 64 neurons per layer, runs 32 random samples forward, and propagates backward to print $\lVert\boldsymbol{\delta}^{[l]}\rVert$ at each layer across three setups. To make all three setups directly comparable, $\boldsymbol{\delta}$ at layer 10 is fixed to the exact same random vector, so row 10 is identical across all three columns.
+
+<PythonRunner code={gradDepthCode} title="Gradient magnitude across 10 layers" />
+
+Reading the table from bottom to top (the direction of backpropagation):
+
+- **Sigmoid + Xavier:** drops from 1.4 at layer 10 down to $2.9 \times 10^{-6}$ at layer 1, shrinking by roughly a factor of 4 per layer. The first layer receives a gradient nearly half a million times smaller than the last layer.
+- **ReLU + std 1:** explodes from 1.4 up to $8.0 \times 10^{6}$, growing by roughly $5.7\times$ per layer — matching the factor $\sqrt{32}$ we derived in the Initialization section.
+- **ReLU + He:** stays steady between 1.3 and 1.5 across all 10 layers.
+
+Note that the weight gradient $\boldsymbol{\delta}^{[l]}\mathbf{a}^{[l-1]\top}$ also multiplies by the previous layer's activation. Under `std 1`, activations explode during the forward pass too, making the weight gradients enormous at every layer.
+
+The third cell trains two 3-hidden-layer MLPs on scikit-learn's `load_digits` dataset (1797 $8 \times 8$ images, split 50/50 into train and test): a baseline MLP versus an MLP with BatchNorm and Dropout ($p = 0.5$) after each hidden layer. Finally, it deliberately forgets to call `model.eval()` at test time to show the consequence.
+
+<LocalCode
+  code={bnDropoutCode}
+  title="MLP with and without BatchNorm and Dropout"
+  packages={['torch', 'scikit-learn']}
+  hardware="CPU is enough. Runs in 5 to 15 seconds depending on your machine"
+>
+
+```text
+Base MLP (eval): test acc = 0.913
+BN + Dropout (eval): test acc = 0.917
+BN + Dropout (quen eval): test acc = ['0.830', '0.815', '0.816']
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **With `model.eval()`:** The MLP with BatchNorm and Dropout achieves 0.917 test accuracy, edging out the baseline MLP (0.913) on the $8 \times 8$ digits dataset. In `eval()` mode, Dropout is disabled and BatchNorm uses the running mean and variance accumulated during training rather than test-batch statistics.
+- **When forgetting `model.eval()`:** Test accuracy drops sharply to around 0.815–0.830 and changes randomly on every evaluation call. That happens because Dropout keeps randomly zeroing out 50% of the neurons during inference, while BatchNorm normalizes using the current test batch instead of the learned population statistics.
+
+## Common pitfalls
+
+:::caution[Forgetting to switch between `model.train()` and `model.eval()`]
+BatchNorm and Dropout are the two layers (in this lesson) that behave differently during training and inference. If you forget `model.eval()` before evaluation, Dropout keeps randomly dropping neurons and BatchNorm uses the evaluation batch's statistics — hurting accuracy and making predictions non-deterministic, as shown at the end of the third code cell. Conversely, if you forget to switch back to `model.train()` after running validation mid-training, Dropout stays off and BatchNorm stops updating its running averages. Always put `model.train()` at the start of each training epoch and `model.eval()` (paired with `torch.no_grad()`) before evaluation.
+:::
+
+:::caution[Initializing all weights to 0 or to the same constant]
+The network will run and the loss may even tick down slightly (via the biases), but every neuron in a layer will compute the exact same value and receive the exact same gradient forever, reducing the entire layer to a single effective neuron. Biases $\mathbf{b}$ can safely be initialized to 0 because the random weights already break symmetry. Use He initialization for ReLU and Xavier initialization for tanh.
+:::
+
+:::caution[Running gradient checking with Dropout enabled, or in 32-bit float]
+Dropout draws a fresh random mask on every forward pass, so $\mathcal{L}(\theta_k + h)$ and $\mathcal{L}(\theta_k - h)$ evaluate two different sub-networks, making finite differences meaningless. Always disable Dropout (or freeze the random mask) before gradient checking. In 32-bit floating point (`float32`), subtracting two nearly equal numbers in the numerator loses too many significant digits when $h$ is small; always run gradient checks in 64-bit precision (`float64`), as in the first code cell. Also keep in mind that ReLU has a kink at $z = 0$: if a pre-activation lands within $h$ of 0, the finite difference can disagree with the analytic derivative even when your code is right.
+:::
+
+## Quick check
+
+{/* Questions live in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Backpropagation applies the chain rule from the output layer back to the input layer while reusing cached intermediate values: $\boldsymbol{\delta}^{[l]} = \left(\mathbf{W}^{[l+1]\top}\boldsymbol{\delta}^{[l+1]}\right) \odot g'(\mathbf{z}^{[l]})$ and $\partial\mathcal{L}/\partial\mathbf{W}^{[l]} = \boldsymbol{\delta}^{[l]}\mathbf{a}^{[l-1]\top}$. Verify custom gradients with central differences; a relative error around $10^{-7}$ or below confirms correctness.
+- Early-layer gradients are products of many $\mathbf{W}^\top$ and $g'$ factors, making them prone to vanishing (sigmoid has $\sigma' \le \frac{1}{4}$) or exploding (when weights are too large).
+- Variance-preserving initialization keeps signals stable across layers: Xavier $s^2 = 2/(n_{\text{in}} + n_{\text{out}})$ for tanh, and He $s^2 = 2/n_{\text{in}}$ for ReLU.
+- BatchNorm standardizes each neuron across the mini-batch, rescales with learnable $\gamma, \beta$, and switches to running averages at inference time; inverted dropout zeroes neurons with probability $p$ and divides by $1 - p$ during training while doing nothing at inference. Weight decay shrinks weights toward 0, early stopping keeps the best validation checkpoint, and gradient clipping caps exploding gradients.
+
+**Further reading:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Lesson 14: Multi-layer Perceptron and Backpropagation](https://machinelearningcoban.com/2017/02/24/mlp/). Derives matrix-form backpropagation in Vietnamese.
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. (2023). [*Dive into Deep Learning*](https://d2l.ai/): Section 5.3 (Forward Propagation, Backward Propagation, and Computational Graphs), Section 5.4 (Numerical Stability and Initialization), Section 5.6 (Dropout), and Section 8.5 (Batch Normalization).
+- Goodfellow, I., Bengio, Y., Courville, A. (2016). [*Deep Learning*](https://www.deeplearningbook.org/), MIT Press: Section 6.5 (Back-Propagation), Chapter 7 (Regularization, including dropout and early stopping), and Sections 8.4 & 8.7.1 (Initialization and BatchNorm).
+- Stanford CS231n. Lecture notes [*Neural Networks Part 3*](https://cs231n.github.io/neural-networks-3/), Gradient checks section. Practical tips on relative error, kinks in ReLU, and using 64-bit floats.
+- Original papers: Rumelhart, D. E., Hinton, G. E., Williams, R. J. (1986). [*Learning representations by back-propagating errors*](https://doi.org/10.1038/323533a0). *Nature* 323, 533–536. Glorot, X., Bengio, Y. (2010). [*Understanding the difficulty of training deep feedforward neural networks*](https://proceedings.mlr.press/v9/glorot10a.html). AISTATS. He, K. et al. (2015). [*Delving Deep into Rectifiers*](https://arxiv.org/abs/1502.01852). arXiv:1502.01852. Ioffe, S., Szegedy, C. (2015). [*Batch Normalization*](https://arxiv.org/abs/1502.03167). arXiv:1502.03167. Srivastava, N. et al. (2014). [*Dropout: A Simple Way to Prevent Neural Networks from Overfitting*](https://jmlr.org/papers/v15/srivastava14a.html). *JMLR* 15, 1929–1958.
+
+<LessonProgress />

@@ -1,0 +1,362 @@
+---
+title: Information Retrieval
+description: Finding answers in a store FAQ. Inverted index, BM25, precision@k, MRR, nDCG, dense retrieval, cross-encoders, and hybrid retrieval.
+quiz:
+  - question: 'With BM25, $k_1 = 1.2$, and $b = 0$, a query term appears once in a document. If that term appears 10 times instead, by roughly what factor does its score contribution (with the same idf) increase?'
+    options:
+      - '10 times, because the score is proportional to term frequency'
+      - 'About 2 times'
+      - 'Unchanged, because BM25 only checks whether a term is present'
+    answer: 1
+    explanation: 'With $b = 0$, the term-frequency factor is $\mathrm{tf}\,(k_1 + 1) / (\mathrm{tf} + k_1)$. For $\mathrm{tf} = 1$ this gives $2.2 / 2.2 = 1$; for $\mathrm{tf} = 10$ it gives $22 / 11.2 \approx 1.96$. That is saturation: extra occurrences still add score, but with diminishing returns, and never exceed $k_1 + 1 = 2.2$. Only when $k_1 = 0$ does BM25 ignore frequency altogether.'
+  - question: 'A corpus contains 8 documents relevant to a query. A system returns 10 documents, 4 of which are relevant. What are precision@10 and recall@10?'
+    options:
+      - 'Precision@10 = 0.5, recall@10 = 0.4'
+      - 'Precision@10 = 0.4, recall@10 = 0.4'
+      - 'Precision@10 = 0.4, recall@10 = 0.5'
+      - 'Precision@10 = 1.0, recall@10 = 0.5'
+    answer: 2
+    explanation: 'Precision@10 divides the number of relevant documents retrieved by the number of documents returned: $4/10 = 0.4$. Recall@10 divides by the total number of relevant documents in the corpus: $4/8 = 0.5$. The two metrics share the same numerator but have different denominators; swapping those denominators is a common mistake.'
+  - question: 'You evaluate three queries. The first relevant document is at rank 1 for the first query, rank 3 for the second query, and absent from the list for the third query. What is the MRR?'
+    options:
+      - 'About $0.44$'
+      - 'About $0.67$'
+      - '$1$, because the first query already got rank 1'
+    answer: 0
+    explanation: 'The reciprocal ranks of the three queries are $1$, $1/3$, and $0$ (not found counts as 0). MRR is their average: $(1 + 1/3 + 0)/3 \approx 0.44$. The value $0.67$ is what you get if you drop the third query; leaving failed queries out of the denominator makes a system look better than it really is.'
+  - question: 'A customer messages: "where is order DH48213 now". The corpus has millions of support messages, each mentioning an order code, and the system must reply in under a second. Which retriever is most likely to rank the right message for DH48213 at the top?'
+    options:
+      - 'A dense retriever, because it understands the meaning of the question'
+      - 'A cross-encoder scoring the entire corpus without a candidate stage'
+      - 'None of them; you must use Boolean retrieval'
+      - 'BM25, because the order code is a rare exact-match term with a very high idf'
+    answer: 3
+    explanation: 'The code DH48213 appears in only a few messages, so its idf is very large and BM25 pushes those exact messages to the top. An embedding compresses the whole sentence into one vector, so look-alike codes (DH48213, DH48231) easily end up with nearby vectors. Boolean retrieval finds the matches but does not rank them. A cross-encoder can be accurate, but scoring millions of (query, message) pairs cannot finish in under a second.'
+  - question: 'Why don''t we use a cross-encoder to directly score every document in a million-document corpus?'
+    options:
+      - 'Because a cross-encoder is less accurate than a bi-encoder'
+      - 'Because a cross-encoder must run the model once per (query, document) pair at query time and cannot precompute document vectors'
+      - 'Because a cross-encoder can only read the query, not the document'
+    answer: 1
+    explanation: 'A cross-encoder reads the query and document together, so a score can only be computed once the query is known: one million documents means one million model forward passes per query. A bi-encoder encodes all documents once offline, leaving just one query encoding and a nearest-neighbor search at query time. Cross-encoders are usually more accurate, so they are used to rerank a few dozen to a few hundred candidates.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import bm25Code from '@code/nlp/information-retrieval/bm25.en.py?raw';
+import metricsCode from '@code/nlp/information-retrieval/metrics.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand the **information retrieval** problem: given a **query** and a document corpus, rank documents by **relevance**, and explain why an **inverted index** makes this fast.
+- Read every piece of the BM25 formula—idf, term-frequency saturation, and length normalization—and compute a term's score by hand.
+- Compute precision@k, recall@k, MRR, AP, and nDCG both by hand and in code.
+- Recognize when sparse retrieval (BM25) wins, when dense retrieval (a bi-encoder such as DPR) wins, and how to combine them with cross-encoder reranking and hybrid retrieval via Reciprocal Rank Fusion.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+## Intuition
+
+A phone shop has a frequently asked questions (FAQ) page with 10 short answers: opening hours, returns, shipping fees, payment methods, warranty, BT200 headphone promotion, online ordering, defective-item exchange, parking, and student discounts. A customer types into the search box: `"bt200 có giảm giá không"` ("is bt200 on sale").
+
+With 10 answers, you can glance through and spot the one about the BT200 promotion. A computer can do the same: compare the query against every answer. But an e-commerce site has millions of product descriptions and Q&A entries. Comparing against **every** document on **every** keystroke is far too slow.
+
+There is a harder problem too: **ordering**. The student-discount answer (`"học sinh sinh viên được giảm 5 phần trăm"`, "students get 5 percent off") also contains the word `"giảm"` ("discount"). The parking answer (`"cửa hàng có chỗ gửi xe"`, "the store has parking") contains `"có"` ("has"). Which answer should come first? The word `"có"` appears everywhere, so matching `"có"` tells us almost nothing. The token `"bt200"` is rare; matching it is almost certainly on target.
+
+Then another customer types `"hàng bị hỏng thì làm sao"` ("what if the item is broken"). The FAQ has the sentence `"sản phẩm lỗi do nhà sản xuất được đổi mới trong 30 ngày đầu"` ("products with manufacturer defects are replaced within the first 30 days")—the exact answer, yet sharing zero words with the query. Word matching misses it completely. And when you tweak your search algorithm, how do you know the new version is **better** than the old one, instead of trying a few queries and guessing?
+
+The problem of this lesson is: **given a document corpus and a query, quickly find relevant documents, rank them in a sensible order, and measure how good that ranking is.**
+
+## Theory
+
+### Problem formulation
+
+The task in this lesson is called **ad hoc retrieval**: the document corpus is fixed, while each user query is new. Notation:
+
+- The corpus has $N$ **documents**, numbered from 0 as in the code. We write $D$ for a document and $|D|$ for its length in words. We avoid $d$ for documents because $d$ already denotes embedding dimension.
+- A query $Q$ consists of terms $w_1, \dots, w_t$.
+- $\mathrm{tf}(w, D)$ (**term frequency**) is the number of times term $w$ appears in $D$. $n(w)$ is the number of documents containing $w$ (**document frequency**).
+- The system returns a **ranked list**: documents sorted by $\mathrm{score}(Q, D)$ in descending order, usually keeping only the top $k$.
+
+**Relevance** is a human judgment: does this document help the person asking? It is not "do they share words?". The defective-item exchange answer is relevant to `"hàng bị hỏng thì làm sao"` even though they share no words. Every scoring function is only a **guess** at relevance; the Evaluation section compares that guess against human judgments.
+
+In the 10 Vietnamese FAQ entries used in our code, tokens are whitespace-separated syllables in lowercase. How Vietnamese word segmentation works and why it matters is covered in [Tokenization](/en/nlp/tokenization/).
+
+### Inverted index: look up terms, do not scan documents
+
+Many textbooks have an **index** at the back: each term is followed by the page numbers that mention it. To find "derivative", you do not re-read the whole book; you look it up in the index. An **inverted index** does the exact same thing for a document corpus:
+
+- **Vocabulary**: every distinct term appearing in the corpus. Our 10-sentence FAQ corpus has 84 distinct terms.
+- Each term $w$ points to a **posting list** (the list of documents containing that term): pairs of (document ID, $\mathrm{tf}$). For example, `"giảm"` ("discount") has a posting list consisting of document 5 (count 1) and document 9 (count 1).
+
+It is called "inverted" because we normally store document $\to$ its words; the index stores the reverse direction, term $\to$ documents. The index is built **once** at indexing time and reused for every query.
+
+**Why it is fast.** For the query `"bt200 có giảm giá không"`, the engine only opens four posting lists (`"không"` is not in the corpus): $1 + 3 + 2 + 1 = 7$ postings in total. Any document absent from all of those posting lists has score 0 and is never touched. In real corpora, most terms are rare, so their posting lists are short and each query touches only a tiny fraction of the corpus. Terms with very long posting lists, such as `"có"` or `"và"` ("and"), contribute the least score, as the BM25 section will show.
+
+### Boolean retrieval
+
+The simplest way to use an inverted index is **Boolean retrieval**: the query is a logical expression, and the result is an unranked **set** of documents.
+
+- `giảm AND giá`: **intersect** the two posting lists. Documents 5 and 9 contain `"giảm"`, and only document 5 contains `"giá"`, so the result is document 5. When posting lists are sorted by document ID, the engine intersects them with two parallel pointers in a single linear pass.
+- `giảm OR thẻ`: **take the union** of the two lists, yielding documents 3, 5, and 9.
+- `giảm AND NOT thẻ`: remove documents containing `"thẻ"`, leaving document 5.
+
+Boolean retrieval is still used in legal search and patent search, where expert users craft queries carefully. For everyday users it has two drawbacks. First, **no ranking**: a matching document simply matches, with no notion of which match is better. Second, **too strict or too loose**: `bt200 AND có AND giảm AND giá AND không` returns the empty set because no document contains `"không"`; switching to `OR` pulls in every document containing `"có"` on equal footing with the BT200 answer. We need a numerical **score** for each document.
+
+### Ranking with TF-IDF and cosine
+
+[Vector Semantics and Embeddings](/en/nlp/vector-semantics-embeddings/) built our first scoring method: represent both query and document as TF-IDF vectors—where a term gets a large weight when it occurs frequently in the document but rarely across the corpus—and rank by the cosine similarity between the two vectors. The first code cell below still computes TF-IDF cosine for comparison.
+
+TF-IDF with cosine works reasonably well, but has two weaknesses for search:
+
+- **Term frequency grows linearly.** A document mentioning `"giảm"` 10 times gets 10 times the tf weight of a document mentioning it once. Yet the tenth mention adds very little evidence compared to the second.
+- **Length normalization is rigid.** Cosine divides by the vector norm, penalizing a long document even when it is long because it covers many useful topics.
+
+BM25 fixes both of these issues.
+
+### BM25
+
+**BM25** (Best Matching 25, also called Okapi BM25) grew out of the Okapi system at City University, London, in the 1990s, and was consolidated by Robertson and Zaragoza (2009) within the probabilistic relevance framework. Today it remains the standard baseline across information retrieval research. The score of document $D$ for query $Q$ is the sum of scores over the query terms:
+
+$$
+\mathrm{score}(Q, D) = \sum_{i=1}^{t} \mathrm{idf}(w_i) \cdot \frac{\mathrm{tf}(w_i, D)\,(k_1 + 1)}{\mathrm{tf}(w_i, D) + k_1 \cdot B(D)}
+$$
+
+with the length factor
+
+$$
+B(D) = 1 - b + b \cdot \frac{|D|}{\mathrm{avgdl}}
+$$
+
+where $\mathrm{avgdl}$ is the average document length in the corpus, and $k_1 \ge 0$ and $0 \le b \le 1$ are two hand-tuned parameters. A term absent from $D$ has $\mathrm{tf} = 0$, making the fraction 0 and contributing nothing—so we still only need to traverse the posting lists. Let's read each piece.
+
+**Part 1: idf, term rarity.**
+
+$$
+\mathrm{idf}(w) = \ln\left(1 + \frac{N - n(w) + 0.5}{n(w) + 0.5}\right)
+$$
+
+The fraction compares the number of documents that **do not** contain $w$ against the number of documents that do. Rare terms get a large ratio; common terms get a small one. The two $0.5$ constants are estimation smoothing terms inherited from Robertson–Spärck Jones weights: they keep the fraction finite and nonzero at both extremes, even when a term appears in every document ($n(w) = N$). In our FAQ corpus, $N = 10$:
+
+- `"bt200"` appears in 1 document: $\mathrm{idf} = \ln(1 + 9.5 / 1.5) = \ln 7.33 \approx 1.992$.
+- `"giảm"` ("discount") appears in 2 documents: $\mathrm{idf} = \ln(1 + 8.5 / 2.5) = \ln 4.4 \approx 1.482$.
+- `"hàng"` ("item/store") appears in 6 documents: $\mathrm{idf} = \ln(1 + 4.5 / 6.5) \approx \ln 1.692 \approx 0.526$.
+
+Robertson and Zaragoza write idf **without** the inner $1 +$: $\ln\frac{N - n(w) + 0.5}{n(w) + 0.5}$. That form goes negative whenever a term appears in more than half the corpus: for `"hàng"` it gives $\ln(4.5 / 6.5) \approx -0.368$, meaning that matching `"hàng"` would **subtract** from the score. Many libraries, such as Lucene (the core of Elasticsearch), add $1 +$ inside the logarithm so idf is always non-negative. Our code uses the $1 +$ form.
+
+**Part 2: term frequency saturation.** Suppose the document has exact average length, so $B(D) = 1$. The frequency factor simplifies to $\frac{\mathrm{tf}\,(k_1 + 1)}{\mathrm{tf} + k_1}$. With $k_1 = 1.2$:
+
+| $\mathrm{tf}$ | 1 | 2 | 3 | 5 | 10 | 100 |
+|---|---:|---:|---:|---:|---:|---:|
+| Frequency factor | 1.000 | 1.375 | 1.571 | 1.774 | 1.964 | 2.174 |
+
+The first occurrence gives 1, the second adds 0.375, the third adds nearly 0.2, and each subsequent occurrence adds less and less. When $\mathrm{tf}$ is very large, both numerator and denominator are dominated by $\mathrm{tf}$, so the fraction approaches the ceiling $k_1 + 1 = 2.2$ and never exceeds it. That is saturation: a document cannot climb to the top simply by repeating one keyword dozens of times. The parameter $k_1$ controls the curvature: $k_1 = 0$ makes this factor 1 for any $\mathrm{tf} \ge 1$ (binary presence only), whereas a very large $k_1$ behaves nearly linearly like TF-IDF.
+
+The factor $(k_1 + 1)$ in the numerator simply normalizes a single occurrence ($\mathrm{tf} = 1$, $B = 1$) to have a frequency factor of 1. Because it multiplies every score by the same constant, it does not change rankings; Robertson and Zaragoza note that some BM25 variants omit it, and Lucene is one example.
+
+**Part 3: length normalization.** $B(D)$ equals 1 when a document has average length, exceeds 1 when it is longer, and is less than 1 when it is shorter. It sits in the denominator next to $k_1$: a longer document needs more occurrences to reach the same frequency factor, because a long document has more room to mention a word by chance. The parameter $b$ controls the strength of this penalty: $b = 0$ turns length normalization off completely, while $b = 1$ scales linearly with document length. Robertson and Zaragoza report that values around $0.5 < b < 0.8$ and $1.2 < k_1 < 2$ generally work well; this lesson uses the common defaults $k_1 = 1.2$ and $b = 0.75$.
+
+**Hand calculation for one term.** Consider the query `"hàng bị hỏng thì làm sao"` and document 6 (`"bạn có thể đặt hàng trực tuyến và nhận hàng tại cửa hàng"`): $\mathrm{tf} = 3$ for `"hàng"`, $|D| = 13$, and the corpus has $\mathrm{avgdl} = 13.1$.
+
+$$
+\begin{aligned}
+B &= 1 - 0.75 + 0.75 \cdot \frac{13}{13.1} \approx 0.994 \\
+\text{tf term} &= \frac{3 \cdot 2.2}{3 + 1.2 \cdot 0.994} = \frac{6.6}{4.193} \approx 1.574 \\
+\text{score} &= 0.526 \cdot 1.574 \approx 0.828
+\end{aligned}
+$$
+
+Line 1: the document is slightly shorter than average, so $B$ is just under 1. Line 2: plug $\mathrm{tf} = 3$, $k_1 = 1.2$, and $B$ into the frequency factor. Line 3: multiply by the idf of `"hàng"`. Documents 3 and 2 both contain `"hàng"` twice, but document 3 is 12 words long while document 2 is 16 words long, so document 3 scores 0.741 whereas document 2 scores only 0.681: at equal term frequency, the shorter document wins. The first code cell prints these exact rounded scores: `0.83`, `0.74`, and `0.68`.
+
+:::note[Key takeaway]
+A document's BM25 score sums, over query terms, the term's idf (rarer terms weigh more) times a frequency factor. That frequency factor grows with $\mathrm{tf}$ but saturates at $k_1 + 1$, and is gently penalized by document length relative to the corpus average, with the penalty strength controlled by $b$.
+:::
+
+### Evaluation: comparing rankings with human judgments
+
+To measure search quality, you need a **test collection**: a set of queries and, for each query, **relevance judgments** assigned by human annotators. Relevance can be binary (relevant or not) or graded (0, 1, 2, …). [RAG and Modern Chatbots](/en/llm/rag-chatbot/) used hit rate, the simplest metric: did at least one relevant document land in the top $k$? The metrics below tell us much more.
+
+Take the query `"hàng bị hỏng thì làm sao"` ("what if the item is broken"). A human annotator grades document 7 (defective-item exchange) as 2, document 1 (returns) as 1, document 4 (warranty) as 1, and all other documents as 0. Thus there are $R = 3$ relevant documents in total. Suppose a retriever returns the top-5 list: documents 7, 4, 6, 1, 3. Let's compute each metric on this list.
+
+**Precision@k and recall@k.** Precision@k is the fraction of relevant documents among the top $k$ results; recall@k is the fraction of all relevant documents in the corpus that appear in the top $k$:
+
+$$
+\mathrm{P@}k = \frac{\text{relevant docs in top-}k}{k}, \qquad \mathrm{R@}k = \frac{\text{relevant docs in top-}k}{R}
+$$
+
+The top 3 are documents 7, 4, 6, containing 2 relevant documents, so $\mathrm{P@}3 = 2/3 \approx 0.667$ and $\mathrm{R@}3 = 2/3$. The top 5 contain all 3 relevant documents, so $\mathrm{R@}5 = 1$. The two metrics pull in opposite directions: as $k$ grows, recall never decreases while precision typically drops. Neither metric cares about **the ordering inside** the top $k$.
+
+**Reciprocal rank and MRR.** Often the user only needs one good answer, as high up as possible. The reciprocal rank (RR) is $1 / \text{rank of the first relevant document}$, or 0 if no relevant document appears in the list. Here document 7 is at rank 1, so $\mathrm{RR} = 1$; if it were at rank 4, $\mathrm{RR} = 0.25$. **MRR** (mean reciprocal rank) averages RR across all queries in the evaluation set.
+
+**Average precision and MAP.** AP rewards pushing **all** relevant documents toward the top. Every time you encounter a relevant document at rank $i$, record the precision at that exact rank, sum those precisions, and divide by $R$. Any relevant document not retrieved contributes 0:
+
+$$
+\mathrm{AP} = \frac{1}{R} \sum_{i \,:\, \text{doc at rank } i \text{ is relevant}} \mathrm{P@}i
+$$
+
+Here relevant documents sit at ranks 1, 2, and 4, where the precisions are $1/1$, $2/2$, and $3/4$. Thus $\mathrm{AP} = (1 + 1 + 0.75)/3 \approx 0.917$. Why divide by $R$ rather than by the number of relevant documents retrieved? So that missing a relevant document is penalized. **MAP** (mean average precision) is the mean of AP across all queries.
+
+**nDCG@k** (normalized discounted cumulative gain, Järvelin and Kekäläinen, 2002) handles multi-level relevance grades. Let $g_i$ be the relevance grade of the document at rank $i$. Each document contributes $g_i$, **discounted** by its rank because users rarely scroll far down:
+
+$$
+\mathrm{DCG@}k = \sum_{i=1}^{k} \frac{g_i}{\log_2(i + 1)}
+$$
+
+Rank 1 divides by $\log_2 2 = 1$, rank 2 by $\log_2 3 \approx 1.585$, and rank 5 by $\log_2 6 \approx 2.585$. Raw DCG values cannot be averaged fairly across queries because queries with more relevant documents naturally have higher DCG. We therefore divide by **IDCG**, the DCG of the ideal ordering (documents sorted by relevance grade in descending order), yielding a score in $[0, 1]$:
+
+$$
+\begin{aligned}
+\mathrm{DCG@}5 &= \frac{2}{\log_2 2} + \frac{1}{\log_2 3} + \frac{0}{\log_2 4} + \frac{1}{\log_2 5} + \frac{0}{\log_2 6} \approx 2 + 0.631 + 0.431 = 3.062 \\
+\mathrm{IDCG@}5 &= \frac{2}{\log_2 2} + \frac{1}{\log_2 3} + \frac{1}{\log_2 4} \approx 2 + 0.631 + 0.5 = 3.131 \\
+\mathrm{nDCG@}5 &= 3.062 / 3.131 \approx 0.978
+\end{aligned}
+$$
+
+Line 1 sums the discounted gains of documents 7, 4, 6, 1, 3 with grades 2, 1, 0, 1, 0. Line 2 is the ideal ranking: grade 2 first, followed by the two grade-1 documents. The resulting nDCG is close to 1 because only document 1 slipped from rank 3 to rank 4. Variants exist: Järvelin and Kekäläinen's original paper divides by $\log_b i$ starting at rank $b$ (often $b = 2$, leaving the top two ranks undiscounted); the $\log_2(i + 1)$ denominator above is the standard modern form, and many libraries use the numerator $2^{g_i} - 1$ to put extra weight on highly relevant documents. When comparing two systems, always use the exact same formula.
+
+:::note[Key takeaway]
+Precision@k and recall@k count relevant documents in the top $k$ regardless of order. MRR only looks at the first relevant result. MAP rewards ranking all relevant documents early. nDCG supports graded relevance and logarithmic position discounting. Every metric requires human relevance judgments and is averaged over a query set.
+:::
+
+### Dense retrieval: bi-encoders
+
+BM25 and TF-IDF are **sparse retrieval** methods: a document vector has one dimension per vocabulary word, with almost all entries equal to 0. They only match when the query and document **use the exact same words**. `"Hàng bị hỏng"` ("item is broken") and `"sản phẩm lỗi"` ("defective product") share no words, so BM25 fails.
+
+**Dense retrieval** represents each passage as a dense vector of a few hundred dimensions learned by a neural network, trained so that passages with the same meaning land close together even when phrased differently. A classic example is DPR (Dense Passage Retriever, Karpukhin et al., 2020), a **bi-encoder**:
+
+$$
+\mathrm{score}(Q, D) = E_Q(Q)^\top E_D(D)
+$$
+
+Here $E_Q$ and $E_D$ are two [BERT](/en/nlp/bert/) encoders that map a text passage to a $768$-dimensional vector (the `[CLS]` token vector), and the relevance score is their dot product. The prefix "bi-" highlights that the query and the document are encoded **independently**. Because $E_D(D)$ does not depend on the query, all document vectors can be computed once offline at indexing time; at query time the system only encodes $Q$ once and searches for the document vectors with the largest dot product.
+
+DPR is trained on (question, positive passage) pairs. For each question, the positive passage must score higher than **negative** passages: the positive passages of other questions in the same mini-batch (in-batch negatives), plus one passage that BM25 ranks high for the question but that does not contain the answer (a hard negative). Across standard English open-domain QA benchmarks, DPR improves top-20 retrieval accuracy over BM25 by roughly 9 to 19 percentage points. The paper also notes an instructive exception: on SQuAD, where annotators wrote questions while looking directly at the passage and thus copied many of its words, BM25 still wins.
+
+**Approximate nearest neighbor search.** With millions of vectors, computing the exact dot product against every vector is still slow. Approximate nearest neighbor (ANN) libraries such as [FAISS](https://arxiv.org/abs/1702.08734) (Johnson, Douze, and Jégou; arXiv 2017, IEEE Transactions on Big Data 2019) partition the vector space into clusters or quantize vectors so each query only checks a small fraction of the corpus, trading a tiny amount of recall for speed. Vector stores and cosine similarity are put to work in [RAG and Modern Chatbots](/en/llm/rag-chatbot/).
+
+### Cross-encoder reranking
+
+A bi-encoder compresses an entire document into a single vector **before seeing the query**, inevitably losing fine detail. A **cross-encoder** does the opposite: it concatenates the query and document into a single sequence `[CLS] query [SEP] document [SEP]`, runs BERT over the pair, and reads out a relevance score. Every self-attention layer attends across both query tokens and document tokens simultaneously, allowing the model to spot exact token-to-token interactions. Nogueira and Cho (2019) used this setup to rerank the top 1000 BM25 passages on MS MARCO, improving MRR@10 by roughly 27% relative to the best prior system.
+
+The catch: the score can only be computed after the query arrives, so nothing can be precomputed per document. A corpus of one million documents would require one million BERT forward passes per query. Practical search engines therefore use a **two-stage pipeline**: a fast first-stage retriever (BM25 or a bi-encoder) fetches a few dozen to a few hundred **candidates**, and a cross-encoder **reranks** only those candidates. Stage one handles recall; stage two refines precision at the very top of the list.
+
+### Hybrid retrieval: Reciprocal Rank Fusion
+
+Sparse and dense retrievers make different kinds of mistakes, so combining them often beats either one alone. The obstacle is that their raw scores live on incompatible scales: BM25 might output 5.48, TF-IDF cosine 0.44, and embedding cosine anything in $[-1, 1]$. **Reciprocal Rank Fusion** (RRF, Cormack, Clarke, and Büttcher, 2009) sidesteps score calibration by using only **ranks**:
+
+$$
+\mathrm{RRF}(D) = \sum_{r} \frac{1}{c + \mathrm{rank}_r(D)}
+$$
+
+The sum runs over ranked lists $r$; if a document does not appear in a list, that list contributes 0. The constant $c$ dampens the gap between rank 1 and rank 2 so that a single outlier list cannot dominate; the original paper chose $c = 60$ empirically and noted that the exact value is not critical.
+
+Let's fuse the two top-5 lists from our evaluation example: BM25 returns `6, 3, 2, 4, 8`, while the dense retriever returns `7, 4, 6, 1, 3`. Document 6 gets $1/61 + 1/63 \approx 0.0323$, document 4 gets $1/64 + 1/62 \approx 0.0318$, document 3 gets $1/62 + 1/65 \approx 0.0315$, while document 7 only gets $1/61 \approx 0.0164$ and drops to rank 4. RRF promotes documents that **both** retrievers agree on. In this particular query BM25 misses almost everything, so fusing it drags the result down compared to the dense retriever alone. Hybrid retrieval helps when both retrievers are reasonably informative; always measure on your own evaluation set before trusting it.
+
+### Sparse or dense?
+
+| Scenario | Usually wins | Why |
+|---|---|---|
+| Product codes, order IDs, serial numbers, rare proper nouns (`"bt200"`) | Sparse (BM25) | Exact token match with high idf; embeddings tend to blur look-alike codes together |
+| Users phrase things differently from documents (`"hàng hỏng"` vs. `"sản phẩm lỗi"`) | Dense | Learns synonyms and paraphrases |
+| New domain, no training data, need to launch immediately | Sparse | Zero training required; dense models trained on another domain may degrade |
+| Need to explain why a document matched | Sparse | Score decomposes into a sum over matched query terms |
+| Long, natural-language questions with varied phrasing | Dense | Compares whole-sentence meaning rather than isolated words |
+
+When in doubt, production systems commonly run both, fuse with RRF, and rerank the top candidates with a cross-encoder.
+
+### Limitations
+
+- **Tokenization quality dictates index quality.** Queries and documents must pass through the exact same tokenization and normalization pipeline; see the first caution box under Common pitfalls.
+- **Evaluation sets are expensive to build.** Without human relevance judgments, none of the metrics above can be computed. [RAG and Modern Chatbots](/en/llm/rag-chatbot/) discusses generating synthetic evaluation questions and the pitfalls involved.
+- **Retrieval returns documents, not answers.** Extracting the exact answer span from a retrieved passage is the job of [Question Answering](/en/nlp/question-answering/), where the retriever from this lesson serves as the first stage.
+
+## Illustration
+
+The table below shows a slice of the inverted index built by the first code cell from our 10 FAQ sentences. Look at the second column: the more documents a term appears in, the smaller its idf. Notice also that `"sản"` occurs twice in document 7 because that sentence contains both `"sản phẩm"` ("product") and `"sản xuất"` ("manufacturer").
+
+| Term | Document frequency $n(w)$ | Posting list (doc ID: $\mathrm{tf}$) | BM25 idf |
+|---|---:|---|---:|
+| hàng | 6 | 0: 1, 2: 2, 3: 2, 4: 1, 6: 3, 8: 1 | 0.526 |
+| cửa | 5 | 0: 2, 3: 1, 4: 1, 6: 1, 8: 1 | 0.693 |
+| có | 3 | 1: 1, 6: 1, 8: 1 | 1.145 |
+| đổi | 2 | 1: 1, 7: 1 | 1.482 |
+| sản | 2 | 1: 1, 7: 2 | 1.482 |
+| giảm | 2 | 5: 1, 9: 1 | 1.482 |
+| lỗi | 1 | 7: 1 | 1.992 |
+| bt200 | 1 | 5: 1 | 1.992 |
+
+Documents are numbered from 0 as in the code: document 0 is opening hours, document 5 is the BT200 headphone promotion, and document 9 is the student discount. To answer `"bt200 có giảm giá không"`, the engine only reads the rows for `"bt200"`, `"có"`, `"giảm"`, and `"giá"` (whose posting list contains only document 5); no other document is ever touched.
+
+## Code examples
+
+The code in this lesson was last tested in November 2026 on Pyodide 314.0.7 (Python 3.14). Both cells use only the Python standard library, run directly in your browser, and are independent of each other.
+
+### Inverted index, BM25, and TF-IDF
+
+This cell builds an inverted index for the 10 FAQ answers, prints the posting lists for a few terms, and ranks three queries using BM25 ($k_1 = 1.2$, $b = 0.75$, idf with $1 +$). For comparison, it also computes TF-IDF cosine using the default idf and L2 normalization formula of scikit-learn's `TfidfVectorizer` (smoothed idf $\ln\frac{1 + N}{1 + n(w)} + 1$, followed by unit-length normalization). The only difference is tokenization: this cell splits on whitespace and keeps single-character tokens such as `"8"`, whereas scikit-learn's default `token_pattern` drops them; writing it in pure Python lets the cell run instantaneously. Each result is a `(doc_id, score)` pair, printing only documents with a positive score.
+
+<PythonRunner code={bm25Code} title="Inverted index and BM25 on 10 FAQ answers" />
+
+Reading the output:
+
+- `N = 10, avgdl = 13.1`: 10 documents, averaging 13.1 words per document. The printed posting lists match the table in the Illustration section.
+- **`"đổi trả sản phẩm lỗi"` ("return defective product")**: both methods rank document 7 (defective-item exchange, 6.82) above document 1 (returns, 6.26). Both documents contain `"đổi"`, `"sản"`, and `"phẩm"`; document 1 has `"trả"` while document 7 has `"lỗi"`, two equally rare terms. The tiebreaker comes from `"sản"`: document 7 contains it twice, though the second occurrence belongs to `"sản xuất"` ("manufacturer") rather than `"sản phẩm"` ("product"). Syllable-level splitting prevents the index from distinguishing those two compound words.
+- **`"bt200 có giảm giá không"` ("is bt200 on sale")**: document 5 leads by a wide margin (5.48) because it matches three terms, two of which (`"bt200"` and `"giá"`) appear only in document 5. Document 9 (1.49) matches only `"giảm"`. Document 8 (1.23) sneaks into the top 3 solely on the function word `"có"`.
+- **`"hàng bị hỏng thì làm sao"` ("what if the item is broken")**: both sparse methods fail. Only `"hàng"` appears in the corpus, so the document with the most occurrences of `"hàng"` (document 6, online ordering) comes first, followed by documents 3 and 2—matching our hand calculation in the BM25 section. Document 7, which actually answers the question, gets a score of 0. This is the vocabulary-mismatch limitation of sparse retrieval that dense retrieval addresses.
+
+On this tiny corpus, BM25 and TF-IDF produce the same top-3 ordering across all three queries. BM25's advantages (frequency saturation and tunable length normalization) stand out on larger corpora where document lengths vary widely.
+
+### Ranking metrics
+
+This cell computes the evaluation metrics from the Theory section for the query `"hàng bị hỏng thì làm sao"`, comparing two top-5 lists. List A is the exact BM25 output from the previous cell (which only printed the top 3; ranks 4 and 5 are documents 4 and 8, tied at 0.56 and ordered by document ID). List B is a **hypothetical** dense retriever output, crafted by hand to illustrate the metrics rather than produced by a trained model.
+
+<PythonRunner code={metricsCode} title="Precision@k, recall@k, RR, AP, and nDCG@k" />
+
+Row B matches our hand calculation in the Evaluation section: `P@3 = 0.667`, `R@5 = 1.000`, `RR = 1.000`, `AP = 0.917`, and `nDCG@5 = 0.978`. Row A shows just how badly BM25 struggles on this query: zero relevant documents in the top 3 (`P@3 = R@3 = 0`), the first relevant document is document 4 at rank 4 (`RR = 0.250`), and only one of the three relevant documents is retrieved (`R@5 = 0.333`), yielding `AP = 0.083` and `nDCG@5 = 0.138`. Here every metric tells the same story; on real benchmarks they often disagree, and choosing a metric means choosing what matters to your users.
+
+## Common pitfalls
+
+:::caution[Running different tokenizers on queries and documents]
+An inverted index only matches identical strings. If documents are lowercased at indexing time but queries keep uppercase letters, `"BT200"` will not match `"bt200"`. If documents are word-segmented (`"sản_phẩm"`) while queries are split by whitespace (`"sản phẩm"`), nothing matches. If your corpus stores old-style Vietnamese diacritic placement (`"hoà"`) while users type new-style (`"hòa"`), the two strings differ at the Unicode code-point level. Write **one** preprocessing function (lowercasing, Unicode normalization, tokenization) and call it both when indexing and when querying; see [Text Normalization](/en/nlp/text-normalization/).
+:::
+
+:::caution[Dropping BM25 as soon as you have a dense retriever]
+Dense retrievers excel at semantic paraphrases, but often miss the exact strings users care about most: product codes, order IDs, regulation numbers, and rare proper nouns. They can also degrade when deployed on a domain that differs from their training data. BM25 is cheap, requires no training, and serves as a sanity-check baseline to verify whether your dense model is actually helping. Measure both on the same evaluation set, and consider hybrid retrieval.
+:::
+
+:::caution[Evaluating on a handful of made-up queries]
+Trying five queries, seeing results that "look fine", and concluding the new system is better will not catch regressions on queries you did not think of. Build a benchmark from real user queries (sampled from search logs when available), annotate relevance judgments, and track average metrics. When computing recall@k or AP, remember that the denominator is **all** relevant documents in the corpus, not just the relevant documents your system happened to find; dividing by the wrong denominator makes a system with poor recall look perfect.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Ad hoc retrieval: given a query and a corpus, return a ranked list judged against human relevance. An inverted index maps each term to its posting list, so a query only touches documents that share at least one term with it.
+- BM25 sums, over query terms, idf times the frequency factor $\frac{\mathrm{tf}\,(k_1 + 1)}{\mathrm{tf} + k_1 (1 - b + b\,|D|/\mathrm{avgdl})}$: rare terms weigh more, repeated terms saturate, and long documents receive a gentle penalty.
+- Precision@k and recall@k count hits in the top $k$; MRR looks at the first relevant hit; MAP rewards ranking all relevant documents early; nDCG handles graded relevance with a $1/\log_2(i + 1)$ position discount.
+- Bi-encoders (DPR) precompute document vectors and match by meaning; cross-encoders are more accurate but only fast enough to rerank candidates; RRF fuses ranked lists using ranks alone. Sparse wins on rare exact keywords; dense wins when users paraphrase.
+
+**Further reading:**
+
+- Manning, C. D., Raghavan, P., Schütze, H. (2008). [*Introduction to Information Retrieval*](https://nlp.stanford.edu/IR-book/). Cambridge University Press, free online edition. Chapter 1 (inverted index, Boolean retrieval), Chapter 6 (TF-IDF), Chapter 8 (evaluation), and Chapter 11 (Okapi BM25). The standard, approachable textbook of the field.
+- Jurafsky, D., Martin, J. H. [*Speech and Language Processing*](https://web.stanford.edu/~jurafsky/slp3/), 3rd edition draft (August 2026), Chapter 11 "Information Retrieval and RAG". Walks from TF-IDF and BM25 to dense retrieval and RAG along the same arc as this lesson.
+- Robertson, S., Zaragoza, H. (2009). [*The Probabilistic Relevance Framework: BM25 and Beyond*](https://www.nowpublishers.com/article/Details/INR-019). Foundations and Trends in Information Retrieval 3(4). Sections 3.4–3.5 derive term saturation, length normalization, and BM25 variants.
+- Järvelin, K., Kekäläinen, J. (2002). [*Cumulated Gain-Based Evaluation of IR Techniques*](https://doi.org/10.1145/582415.582418). ACM Transactions on Information Systems 20(4). The paper introducing DCG and nDCG for graded relevance.
+- Karpukhin, V., Oğuz, B., Min, S., et al. (2020). [*Dense Passage Retrieval for Open-Domain Question Answering*](https://arxiv.org/abs/2004.04906). EMNLP 2020. Bi-encoders, in-batch negatives, and comparisons against BM25. Read alongside Nogueira, R., Cho, K. (2019), [*Passage Re-ranking with BERT*](https://arxiv.org/abs/1901.04085), for cross-encoders, and Cormack, G. V., Clarke, C. L. A., Büttcher, S. (2009), [*Reciprocal Rank Fusion Outperforms Condorcet and Individual Rank Learning Methods*](https://doi.org/10.1145/1571941.1572114), SIGIR 2009, for RRF.
+
+<LessonProgress />

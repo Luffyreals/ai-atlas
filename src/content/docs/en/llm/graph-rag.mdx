@@ -1,0 +1,355 @@
+---
+title: Graph RAG
+description: Questions that connect multiple facts can easily slip past vector RAG. Build a knowledge graph with an LLM, store it in Neo4j, run multi-hop Cypher queries, and understand Microsoft's GraphRAG.
+quiz:
+  - question: 'A music news archive contains two passages: "Singer Ha signed a contract with Sound Wave Records" and "Sound Wave Records just released the debut album of the band Rising Wind." A user asks: "Who is on the same record label as singer Ha?". Why is vector RAG with a small top-$k$ likely to miss the answer?'
+    options:
+      - 'Because embeddings cannot represent proper nouns'
+      - 'Because the second passage never mentions Ha, so it may not be similar enough to the question to make the top-$k$; answering requires connecting the two passages through the shared node Sound Wave Records'
+      - 'Because cosine similarity can only compare two passages of equal length'
+    answer: 1
+    explanation: 'Vector RAG scores each passage independently by its similarity to the question. The passage containing the answer (Rising Wind) does not mention Ha at all, so it is easily ranked low. In a graph, the two triples (Ha, SIGNED_WITH, Sound Wave Records) and (Sound Wave Records, RELEASED, Rising Wind) share the node Sound Wave Records, so a two-hop walk reaches the answer. Cosine similarity does not require equal text length, and embeddings handle proper nouns fine; the issue is that the needed facts are split across two passages.'
+  - question: 'An LLM extracts two triples from two different passages: (Lan, FOUNDED, Blue Cloud) and (Blue Cloud Co., BASED_IN, Da Nang). A query for "the founder of the company based in Da Nang" returns nobody. What is the most likely cause?'
+    options:
+      - 'Cypher cannot traverse two hops in a single query'
+      - 'Both edges must have their directions reversed for the query to run'
+      - 'Blue Cloud and Blue Cloud Co. became two separate nodes, breaking the graph in the middle; entity resolution is needed before saving'
+      - 'A GCN network is missing to learn node embeddings'
+    answer: 2
+    explanation: 'A graph only connects two facts when they share the exact same node. Two surface spellings created two distinct nodes, leaving no path from Lan to Da Nang. Cypher handles multi-hop queries easily (via a two-hop pattern or `{1,3}`). The edge directions here are already consistent, and Graph RAG does not require training a neural network; what is missing is entity resolution.'
+  - question: 'A graph contains the edge (An)-[:WORKS_AT]->(Sunrise Corp). The query `MATCH (c {name: ''Sunrise Corp''})-[:WORKS_AT]->(p) RETURN p.name` returns no rows. How do you fix it?'
+    options:
+      - 'Reverse the arrow to `(c)<-[:WORKS_AT]-(p)`, or drop the arrowhead `(c)-[:WORKS_AT]-(p)` to ignore direction'
+      - 'Replace `MATCH` with `MERGE`'
+      - 'Add `{1,1}` after `-[:WORKS_AT]->`'
+      - 'Pass the company name via a parameter `$name` instead of a literal string'
+    answer: 0
+    explanation: 'The stored edge points from An to the company, whereas the query pattern asks for an edge pointing outward from the company. The pattern must match the edge direction, or omit the arrowhead to accept either direction. When `MERGE` fails to match the whole pattern, it creates the whole pattern—adding a duplicate ''Sunrise Corp'' node, an empty node, and an edge between them instead of searching. `{1,1}` only specifies one hop without changing direction, and while `$name` is good practice, it will not make a backwards arrow match.'
+  - question: 'You have 2,000 meeting minutes and ask: "What were the three most frequently discussed issues across the entire year?". Why is GraphRAG''s global search (Microsoft) a better fit for this question than top-$k$ vector RAG?'
+    options:
+      - 'Because GraphRAG makes no LLM calls during indexing, so it is cheaper'
+      - 'Because GraphRAG finds the entity named in the question and walks a few hops around it'
+      - 'Because GraphRAG simply uses a larger $k$ to read more chunks'
+      - 'Because no single passage contains the answer; GraphRAG pre-summarizes each entity community across the whole corpus and then aggregates partial answers from those summaries'
+    answer: 3
+    explanation: 'A global question requires surveying the entire corpus, whereas top-$k$ retrieval only sees a handful of chunks most similar to the question wording. GraphRAG pays an upfront cost at indexing time (many LLM calls to extract entities and write community summaries) so that query time has pre-built summaries spanning the whole dataset. Walking around a specific entity is local search, which fits questions about a named entity; this question names no entity at all.'
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import RagPipelineFigure from '@components/figures/RagPipelineFigure.astro';
+import multiHopCode from '@code/llm/graph-rag/multi-hop.en.py?raw';
+import extractCode from '@code/llm/graph-rag/extract-triples.en.py?raw';
+import neo4jCode from '@code/llm/graph-rag/neo4j-graph.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Explain why questions that connect multiple facts challenge vector RAG, and how a **knowledge graph** helps bridge those gaps.
+- Represent facts as subject–relation–object **triples**, and write a prompt that asks an LLM to extract triples into validated JSON.
+- Store triples in Neo4j and write one-hop, two-hop, and variable-length `{1,3}` Cypher queries.
+- Understand the core idea behind Microsoft's GraphRAG—community summaries for corpus-wide questions—and know when plain vector RAG is still the better choice.
+
+## Prerequisites
+
+{/* List populated from roadmap.ts prerequisites. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+Standard RAG splits documents into **chunks**, embeds each chunk, and for each question retrieves the **top-$k$** chunks with the highest cosine similarity before stuffing them into a prompt. This lesson keeps that overall pipeline intact and only swaps out the retrieval step.
+:::
+
+## Intuition
+
+Suppose you are building a chatbot for a startup news site with an archive of several thousand short articles. Three passages in the archive read:
+
+- "Ms Lan, an alumna of Polytechnic University, founded Blue Cloud in 2021."
+- "Morning Star Fund just invested in Blue Cloud, a company based in Da Nang."
+- "Golden Rice in Can Tho, founded by Mr Minh, announced new funding from Morning Star Fund."
+
+The question "Who founded Blue Cloud?" is easy. The first passage closely matches the question, vector RAG retrieves it at top-1, and you are done.
+
+Now consider: "Which companies share an investor with Blue Cloud?". The answer is Golden Rice, mentioned in the third passage. But the third passage never mentions Blue Cloud at all. To answer, you have to take two steps: from Blue Cloud to Morning Star Fund (passage two), and then from Morning Star Fund to Golden Rice (passage three). Because vector RAG scores each passage independently against the question, the third passage is likely ranked low, leaving the model with only half the story.
+
+Think of an investigation board in a detective movie. The detective pins photos of people, companies, and cities onto a corkboard and stretches red yarn between them, labeling each string: "founded", "invested in", "based in". Our hard question now becomes **following the yarn**: start at the photo of Blue Cloud, follow the "invested in" string backward to Morning Star Fund, and follow another "invested in" string forward to Golden Rice. No single article needs to mention both companies at once.
+
+Graph RAG builds that exact investigation board from raw text, using an LLM to read the files and string the yarn for you. **The problem: turn a text corpus into a graph of entities and relations, and answer questions by walking along the edges of the graph—across multiple hops when needed—instead of only searching for passages that look like the question.**
+
+## Theory
+
+### Knowledge graphs: entities, relations, triples
+
+The word "graph" here means a network of **nodes** and **edges**, not a bar chart or line plot.
+
+- Each node is an **entity**: a person, a company, an investment fund, a city.
+- Each edge is a **relation** between two entities. Edges are **directed** and **labeled**: "Lan founded Blue Cloud" is not the same as "Blue Cloud founded Lan."
+
+A single fact is recorded as a **triple** $(s, r, o)$: $s$ is the **subject**, $r$ is the **relation** (or predicate), and $o$ is the **object**. For example, (Lan, FOUNDED, Blue Cloud) reads "Lan founded Blue Cloud," with an edge pointing from Lan to Blue Cloud. An entire knowledge graph is simply a collection of triples. From the three passages in the Intuition section, plus one more fact about Minh's university, we get the 8 triples used throughout this lesson:
+
+| Subject $s$ | Relation $r$ | Object $o$ | Reads as |
+|---|---|---|---|
+| Lan | `FOUNDED` | Blue Cloud | Lan founded Blue Cloud |
+| Minh | `FOUNDED` | Golden Rice | Minh founded Golden Rice |
+| Morning Star Fund | `INVESTED_IN` | Blue Cloud | Morning Star Fund invested in Blue Cloud |
+| Morning Star Fund | `INVESTED_IN` | Golden Rice | Morning Star Fund invested in Golden Rice |
+| Lan | `STUDIED_AT` | Polytechnic University | Lan studied at Polytechnic University |
+| Minh | `STUDIED_AT` | Polytechnic University | Minh studied at Polytechnic University |
+| Blue Cloud | `BASED_IN` | Da Nang | Blue Cloud is based in Da Nang |
+| Golden Rice | `BASED_IN` | Can Tho | Golden Rice is based in Can Tho |
+
+The key property: **two triples that share an entity automatically connect.** The third and fourth triples come from two separate articles, yet because both share the node Morning Star Fund, they form a continuous path in the graph: Blue Cloud – Morning Star Fund – Golden Rice. Facts scattered across separate passages snap together at shared nodes.
+
+Relation names are written in uppercase letters joined by underscores (`FOUNDED`, `INVESTED_IN`), following the standard convention in Cypher (the query language covered below). Identifiers made only of letters, digits, and underscores (with no spaces) do not need to be wrapped in backticks. The list of allowed relation types (and entity types) is called the **schema**. Enforcing a schema ensures that the same concept is always recorded under the exact same label, rather than `FOUNDED` in one place and `CO_FOUNDER_OF` in another.
+
+### From text to triples: LLM extraction
+
+Who writes out those 8 triples? When you have thousands of articles, you ask an LLM to extract them. The workflow mirrors the indexing phase of RAG: split documents into chunks, and call a chat model once **for each chunk**. The extraction prompt combines three techniques from [Prompt Engineering](/en/llm/prompt-engineering/):
+
+1. **Clear instructions with an explicit schema:** only use the relations `FOUNDED`, `INVESTED_IN`, `STUDIED_AT`, `BASED_IN`; only record facts explicitly stated in the text; do not guess.
+2. **A worked example** (few-shot): one short sentence paired with its exact target JSON output.
+3. **Structured output format:** return only a JSON object, optionally reinforced with JSON mode as shown in [Using Text APIs](/en/llm/text-api/).
+
+Given the passage `"Morning Star Fund just invested in Blue Cloud, a company based in Da Nang."`, the target output is:
+
+```json
+{
+  "triples": [
+    {"subject": "Morning Star Fund", "relation": "INVESTED_IN", "object": "Blue Cloud"},
+    {"subject": "Blue Cloud", "relation": "BASED_IN", "object": "Da Nang"}
+  ]
+}
+```
+
+Because the model's output is still just text, your code must validate every triple before saving it: check that the JSON parses, that `relation` is in your schema, and that neither entity name is empty. Triples outside the schema are dropped (or retried with a reminder). You should also store the **source chunk ID** alongside each triple so you can inspect the original passage when in doubt and let your chatbot cite its sources just like in standard RAG.
+
+**Entity resolution** is the hardest part in practice. `"Blue Cloud"`, `"Blue Cloud company"`, and `"Blue Cloud Co."` all refer to the same company, but if you store them as three separate nodes, the graph splits apart: a walk starting from Lan will never reach Da Nang. Common techniques, from cheapest to most expensive, include string normalization (stripping extra whitespace and titles like `"Mr"` or `"Ms"`), a hand-maintained alias table, or using embeddings and an LLM to flag candidate duplicate names for human review.
+
+The price of this step: whereas vector RAG indexes a corpus using only embedding calls, Graph RAG calls a chat model **once per chunk**. On a large corpus, indexing is much slower and more expensive, and whenever documents change, the updated chunks must be re-extracted.
+
+### Storing and querying with Neo4j
+
+You can store triples in anything—a Python dict, a SQL table. When the graph grows large and you want expressive queries, teams use a **graph database**. Neo4j is a widely used option whose free Community Edition runs in Docker. Its query language, **Cypher**, lets you sketch the pattern you are looking for using ASCII art:
+
+- Nodes: `(c:Entity {name: 'Blue Cloud'})`. Here `c` is a variable name, `Entity` is the node label, and the braces hold properties.
+- Edges: `-[:FOUNDED]->`, where the arrow shows direction. Omitting the arrowhead (`-[:FOUNDED]-`) matches the edge in either direction.
+
+**Creating triples** with `MERGE`: match the pattern if it exists, or create it if it does not. One subtlety: `MERGE` evaluates the **entire pattern** at once; if the full pattern does not match, it creates the full pattern—including duplicating nodes that already existed. That is why our code cell `MERGE`s each node individually first and then `MERGE`s the edge between them. (`CREATE`, by contrast, always creates new nodes and edges, so running it twice would create two `"Lan"` nodes.)
+
+```cypher
+MERGE (lan:Entity {name: 'Lan'})
+MERGE (bc:Entity {name: 'Blue Cloud'})
+MERGE (lan)-[:FOUNDED]->(bc)
+```
+
+**One hop:** who founded Blue Cloud? The pattern walks from any node `p` along a `FOUNDED` edge to Blue Cloud.
+
+```cypher
+MATCH (p)-[:FOUNDED]->(c:Entity {name: 'Blue Cloud'})
+RETURN p.name
+```
+
+Result: `"Lan"`.
+
+**Two hops:** which companies share an investor with Blue Cloud? The pattern draws the exact path from our Intuition section: start at Blue Cloud, follow an `INVESTED_IN` edge **backward** to a fund `f`, then follow another `INVESTED_IN` edge **forward** to `other`.
+
+```cypher
+MATCH (c:Entity {name: 'Blue Cloud'})<-[:INVESTED_IN]-(f)-[:INVESTED_IN]->(other)
+RETURN f.name AS fund, other.name AS company
+```
+
+Result: `"Morning Star Fund", "Golden Rice"`. Notice that Blue Cloud does not appear in the `company` column alongside itself, because within a single `MATCH` pattern Cypher never traverses the exact same edge twice.
+
+**Variable-length paths:** find every entity within 1 to 3 hops of Blue Cloud, along any relation type and in either direction.
+
+```cypher
+MATCH (c:Entity {name: 'Blue Cloud'})-[]-{1,3}(n)
+RETURN DISTINCT n.name AS name
+```
+
+Placing `{1,3}` after an edge pattern means "repeat this edge between 1 and 3 times." This is the modern syntax aligned with the ISO GQL standard. Older tutorials and docs write `-[*1..3]-`. Neo4j Community 2026.10 accepts both and returns the same 7 entities, though older Neo4j releases may only support `[*1..3]`, so check your database version if a snippet raises a syntax error.
+
+**Always pass user values via parameters.** In application code, write `{name: $name}` and pass `name="Blue Cloud"` separately—never concatenate raw strings into Cypher. String concatenation lets a crafted name containing quotes and Cypher clauses turn into a data-deletion command, just like SQL injection or prompt injection at the database layer. One place where a standard `$param` cannot sit is the **relationship type** inside `-[:FOUNDED]->`. Our Neo4j code cell interpolates the relationship type into the query string, but only after checking `r in RELATIONS` against the whitelist schema. (Recent Neo4j versions also offer dynamic labels/types via `$(...)` specifically to prevent Cypher injection, though Neo4j's docs note that dynamic type queries can run slower than static ones.)
+
+### Multi-hop queries are graph traversals
+
+Underneath `{1,3}` sits a graph traversal algorithm. The most natural choice is **BFS** (breadth-first search): start at the seed node and visit all of its immediate neighbors (hop 1), then visit all unvisited neighbors of those nodes (hop 2), layer by layer, stopping at $h$ hops. Because BFS explores in layers, the first time it reaches any node is guaranteed to be a shortest path to that node. Our in-browser Python cell implements this exact algorithm using a dict and a queue.
+
+The number of reachable nodes grows rapidly with $h$. Suppose each node has roughly $d$ neighbors. Hop 1 reaches at most $d$ nodes; each of those opens up $d$ more, so hop 2 reaches at most $d^2$; after $h$ hops, you can reach up to
+
+$$
+d + d^2 + \cdots + d^h
+$$
+
+nodes. With $d = 10$ and $h = 3$, that is $10 + 100 + 1000 = 1110$ nodes—far too many to stuff into a prompt, and most of them will be irrelevant noise. For that reason, practical Graph RAG systems **keep the hop limit small** (typically 1–2 hops), cap the number of triples added to the prompt, and **filter by relation type** (as in our two-hop query above) rather than walking every edge blindly.
+
+### End-to-end Graph RAG
+
+Putting the pieces together, an application-level Graph RAG pipeline runs in five steps:
+
+1. **Index the corpus** (once): split into chunks, use an LLM to extract triples, validate against the schema, resolve duplicate entities, and store triples in the graph alongside their source chunk IDs.
+2. **Identify entities in the user's question**: ask an LLM to list proper nouns in the question, then match them to graph nodes (by exact string match or by embedding node names).
+3. **Traverse the graph** 1–2 hops around those seed nodes, filtering by relation type when appropriate.
+4. **Format the retrieved triples as text**: one triple per line, such as `Morning Star Fund INVESTED_IN Golden Rice`, optionally accompanied by the source chunk text.
+5. **Assemble the prompt and call the chat model**, just like standard RAG: system instructions, numbered context, and the user's question.
+
+Compared with the pipeline in [RAG and Modern Chatbots](/en/llm/rag-chatbot/), only the retrieval step changes: "top-$k$ by cosine similarity" is replaced by "graph traversal around seed entities." The two methods are not mutually exclusive. Many production systems combine both (**hybrid retrieval**): vector search pulls relevant passages, while graph traversal fills in multi-hop connections that no single passage states in one place.
+
+The diagram below revisits the vector RAG pipeline from the earlier lesson. For Graph RAG, read the "Vector store" block as your knowledge graph, and read "Top-k search (cosine)" as traversing the graph around the entities mentioned in the question; prompt assembly and the chat model call stay the same.
+
+{/* FIG: reused from rag-chatbot; only the retrieval step changes, as described above. */}
+<RagPipelineFigure />
+
+There is an alternative for step 3: ask an LLM to **translate the user's question directly into a Cypher query** (Text-to-Cypher). This is flexible, but executing model-generated queries directly against a database carries real risk. If you take this route, run the query in read-only mode (`routing_=RoutingControl.READ` in the Python driver so the server rejects write operations), enforce a query timeout, and on Neo4j Enterprise use a database account with read-only permissions.
+
+### Microsoft's GraphRAG: questions about the whole corpus
+
+There is another class of question where both vector RAG and local traversal around a seed entity fall short: **"What are the main themes across this entire document archive?"**. No single chunk holds the answer, and the question names no specific entity from which to start a BFS walk. Grabbing the top-$k$ chunks is like polling a whole classroom by only listening to three students in the front row.
+
+[Edge et al. (2024)](https://arxiv.org/abs/2404.16130) proposed **GraphRAG** specifically for these **global** sensemaking questions. While the name looks like the general term "Graph RAG", it refers to a specific architecture and open-source project from Microsoft. Its core workflow:
+
+- **At indexing time:** an LLM extracts entities and relations from the chunks to build a knowledge graph. A community detection algorithm (the project uses the Leiden algorithm) partitions the graph into hierarchical **communities**—clusters of entities that are densely connected to one another. The LLM then writes a **summary report for each community** ahead of time.
+- **At query time:** each community summary is used to generate a partial answer in parallel (map), and those partial answers are combined into the final response (reduce). Returning to the classroom analogy: each table group discusses the question first and elects a spokesperson, and their reports are synthesized at the end.
+
+The paper reports that GraphRAG produces answers with higher **comprehensiveness** and **diversity** than a baseline vector RAG system on global sensemaking questions over corpora of around one million tokens. Keep the scope of that finding in mind: it applies to global questions over a whole dataset, not a blanket claim that "GraphRAG beats vector RAG everywhere." The project's documentation distinguishes several query modes: **global search** uses community summaries for corpus-wide questions; **local search** starts from specific entities and explores their neighborhood, much like the traversal in the previous section; plus DRIFT search (which blends local search with community context) and basic vector search for single-passage lookups.
+
+### Limitations
+
+- **A graph is only as good as its extraction step.** An LLM can hallucinate relations, flip edge directions, or split one entity into multiple nodes. The second callout in Common pitfalls covers how to audit this.
+- **Indexing is expensive**, as noted earlier: every chunk requires a chat model call, and Microsoft's GraphRAG adds further LLM calls to summarize every community.
+- **Schemas require maintenance.** Supporting a new category of question may require adding new relation types and re-extracting the corpus.
+- **Graph neural networks are a separate topic.** A Graph Convolutional Network (GCN; [Kipf and Welling, 2017](https://arxiv.org/abs/1609.02907)) learns vector embeddings for nodes by aggregating features from neighboring nodes during training. GCNs require training a neural network; the Graph RAG pipelines in this lesson do not. We mention GCNs here only so you do not confuse the two when reading the literature.
+
+## Illustration
+
+The first table pairs four questions with the graph paths that answer them in our 8-triple dataset. Look at the "Hops" column: the more hops a question requires, the more likely its facts are scattered across separate articles (row 3 spans two different news stories), and the more likely similarity search is to miss a piece.
+
+| Question | Path in the graph | Hops |
+|---|---|---:|
+| Who founded Blue Cloud? | Blue Cloud `<-[FOUNDED]-` **Lan** | 1 |
+| Where did Blue Cloud's founder go to university? | Blue Cloud `<-[FOUNDED]-` Lan `-[STUDIED_AT]->` **Polytechnic University** | 2 |
+| Which company shares an investor with Blue Cloud? | Blue Cloud `<-[INVESTED_IN]-` Morning Star Fund `-[INVESTED_IN]->` **Golden Rice** | 2 |
+| Who attended the same university as Blue Cloud's founder? | Blue Cloud `<-[FOUNDED]-` Lan `-[STUDIED_AT]->` Polytechnic University `<-[STUDIED_AT]-` **Minh** | 3 |
+
+The second table compares the three approaches side by side. Start with the "Best at" row: each method shines on a different shape of question.
+
+| Criterion | Vector RAG | Graph RAG (graph traversal) | GraphRAG (community summaries) |
+|---|---|---|---|
+| Indexing | Split chunks, call embedding model | Plus: LLM extracts triples per chunk, entity resolution | Plus: detect communities, LLM summarizes each community |
+| Retrieval | Top-$k$ chunks by cosine similarity | Traverse 1–2 hops around entities in the question | Map-reduce over community summaries |
+| Best at | Single-passage lookups: "What does policy X say?" | Relational, multi-hop questions: "Who shares an investor with X?" | Corpus-wide questions: "What are the main themes?" |
+| Weakest at | Facts split across multiple passages | Sensitive to extraction errors and schema coverage | Highest LLM indexing cost |
+| When documents change | Re-embed changed chunks | Re-extract triples and re-run entity resolution | Re-extract and potentially re-compute communities and summaries |
+
+## Code examples
+
+The code in this lesson was last tested in October 2026 with Python 3.14, `openai` 3.37, and the `neo4j` 6.4 driver against Neo4j Community 2026.10.1; the in-browser cell uses pure Python only. The first cell runs right on this page. The second cell calls an LLM API and the third connects to Neo4j, so run those two on your own machine.
+
+### Multi-hop traversal with BFS
+
+This cell builds the graph from our 8 triples using no external libraries. Each triple is recorded in an adjacency list at **both endpoints**: as an outgoing edge `-[R]->` on the subject, and as an incoming edge `<-[R]-` on the object. That lets BFS walk across edges in either direction while still remembering the true direction of each edge. The `bfs` function returns the shortest path from `start` to every reachable entity within `max_hops` steps.
+
+<PythonRunner code={multiHopCode} title="Multi-hop knowledge graph traversal with a dict and BFS" />
+
+- **The first three lines** count how many entities are reachable from Blue Cloud: 3 entities within 1 hop, 5 within 2 hops, and 7 within 3 hops. Because the entire graph has 8 nodes, 3 hops reach every other node. Our Neo4j cell below gets the exact same count of 7 using `-[]-{1,3}`.
+- **The three one-hop paths** (Lan, Morning Star Fund, Da Nang) answer single-step questions like "Who founded Blue Cloud?".
+- **The two two-hop paths** match rows 2 and 3 of the Illustration table: Lan `-[STUDIED_AT]->` Polytechnic University, and Morning Star Fund `-[INVESTED_IN]->` Golden Rice.
+
+Try changing `bfs("Blue Cloud", 2)` in the final `for` loop to `bfs("Blue Cloud", 3)`: two new three-hop paths to Minh and Can Tho appear. The path to Minh matches the last row of the Illustration table because BFS visits Polytechnic University before Golden Rice.
+
+### Extracting triples with an LLM
+
+This cell sends the model the extraction prompt from the Theory section: system instructions with the allowed schema, one few-shot example (`user` and `assistant` turns), and the target passage. Set the three environment variables as shown in [Using Text APIs](/en/llm/text-api/#setup-providers-and-environment-variables). If your provider returns a 400 error for `response_format`, remove that line: the system prompt still asks for JSON, and `json.loads` still validates it.
+
+<LocalCode code={extractCode} title="Extract triples from a passage with schema validation" packages={['openai']} />
+
+The script prints each valid triple as a Python tuple, prints `"Skipped (not in the schema)"` for any triple whose relation is outside `RELATIONS`, and prints `"Skipped (empty name)"` if the subject or object is blank. If the model fails to return valid JSON or `triples` is not a list, it prints `"Could not parse JSON"` along with the raw response. The input passage was chosen to highlight two subtle cases:
+
+- `"graduated from Polytechnic University"` does not use the word "studied", so the model has to map "graduated from" onto `STUDIED_AT` (or skip it). Either behavior can occur across models.
+- `"was funded by Morning Star Fund"` is written in the passive voice with Blue Cloud as the grammatical subject. The semantically correct triple is `(Morning Star Fund, INVESTED_IN, Blue Cloud)`. If you see `(Blue Cloud, INVESTED_IN, Morning Star Fund)` instead, the model inverted the edge direction—an error that schema checking alone **cannot** catch.
+
+### Storing in Neo4j and querying with Cypher
+
+Run Neo4j Community in Docker (see [Docker and Cloud Deployment](/en/llm/docker-cloud/) if you are new to Docker). Set the password in an environment variable shared between `docker run` and the Python script; Neo4j requires a password of at least 8 characters. Prefixing each port mapping with `127.0.0.1:` binds Neo4j to localhost only.
+
+<Tabs syncKey="os">
+<TabItem label="macOS, Linux (bash)">
+
+```sh
+export NEO4J_PASSWORD='<password, at least 8 characters>'
+docker run --rm --name neo4j-atlas \
+  -p 127.0.0.1:7474:7474 -p 127.0.0.1:7687:7687 \
+  -e NEO4J_AUTH="neo4j/$NEO4J_PASSWORD" \
+  neo4j:community
+```
+
+</TabItem>
+<TabItem label="Windows (PowerShell)">
+
+```powershell
+$env:NEO4J_PASSWORD = '<password, at least 8 characters>'
+docker run --rm --name neo4j-atlas `
+  -p 127.0.0.1:7474:7474 -p 127.0.0.1:7687:7687 `
+  -e NEO4J_AUTH="neo4j/$env:NEO4J_PASSWORD" `
+  neo4j:community
+```
+
+</TabItem>
+</Tabs>
+
+Once the container logs show `Started.`, open a second terminal window, export `NEO4J_PASSWORD` there as well, and run the cell below. Port 7687 is the Bolt protocol port used by the Python driver; port 7474 opens Neo4j Browser at `http://localhost:7474`, where you can paste the Cypher snippets from the Theory section and visualize the graph interactively. Because we used `--rm` without a persistent volume, stopping the container wipes the database—ideal for a clean lab, not for production data.
+
+<LocalCode code={neo4jCode} title="Write 8 triples to Neo4j and run two-hop and multi-hop queries" packages={['neo4j']} sampleVaries={false}>
+
+```text
+{'fund': 'Morning Star Fund', 'company': 'Golden Rice'}
+{'n': 7}
+```
+
+</LocalCode>
+
+This script deletes **all** existing `Entity` nodes in the database, writes the 8 triples using `MERGE`, and runs two queries parameterized with `name="Blue Cloud"`. The first output line is the two-hop shared-investor query—matching row 3 of the Illustration table. The second line counts distinct entities within 1 to 3 hops of Blue Cloud, returning `7`, which matches the in-browser BFS cell above: on this graph, Cypher's `{1,3}` pattern and our BFS reach the exact same set of entities. (Under the hood they do not work identically: Cypher enumerates all edge-disjoint paths up to length 3, whereas BFS only keeps a single shortest path per node.) Because no LLM is involved in this cell, the output is identical on every run. The `NEO4J_URI` environment variable is optional and only needed if Neo4j is not running on `127.0.0.1:7687`; never point this script at a database holding real data.
+
+## Common pitfalls
+
+:::caution[Assuming Graph RAG always beats vector RAG]
+It does not. For single-passage questions ("Where is Blue Cloud based?"), vector RAG is fast to build, cheap to index, and immune to triple-extraction mistakes. The gains reported by Edge et al. (2024) are specifically for global sensemaking questions under their experimental setup. Start with vector RAG, evaluate on real user questions, and only add a graph layer when you see queries failing because they need to join facts across multiple passages.
+:::
+
+:::caution[Trusting LLM-extracted triples blindly, and skipping entity resolution]
+An LLM can hallucinate relations not in the text, invert edge directions as in our passive-voice `"was funded by"` example, or split one company across three spelling variants. Code-level schema checks only catch format errors, not semantic ones. To reduce direction errors, spell out the direction of each relation inside the prompt schema itself—for example, "`INVESTED_IN`: investor → company receiving funding". Store the source chunk ID with every triple, manually audit a random sample of a few dozen triples, and perform entity resolution before loading the graph. When a multi-hop query unexpectedly returns empty results, the most common culprit is a graph split by two spellings of the same entity.
+:::
+
+:::caution[Concatenating strings into Cypher, or hardcoding database passwords]
+Writing `f"MATCH (c {{name: '{name}'}})"` opens the door to Cypher injection, especially when `name` comes from user input or LLM output. Always pass node properties through parameters like `$name`; the only piece interpolated into our query string is the relationship type, and only after checking `r in RELATIONS`. Treat your Neo4j password just like an API key: read it from an environment variable, never commit it to Git, and bind Docker ports to `127.0.0.1` rather than exposing `-p 7687:7687` to the public network.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- A knowledge graph is a set of triples $(s, r, o)$: entities are nodes, and relations are directed, labeled edges. Whenever two triples share an entity node, they connect automatically, linking facts that were scattered across separate passages.
+- An LLM can extract triples from each chunk into JSON following a fixed schema. Your code must validate the JSON and schema, record the source chunk ID, and resolve duplicate entity names; extraction is the costliest and most error-prone step of the pipeline.
+- Neo4j stores graphs and queries them with Cypher ASCII patterns such as `(c)<-[:INVESTED_IN]-(f)-[:INVESTED_IN]->(o)` and `-[]-{1,3}` for 1 to 3 hops (legacy syntax `*1..3`). Underneath sits a traversal like BFS; because reachable nodes grow on the order of $d^h$, keep hop counts small and filter by relation type.
+- Graph RAG swaps out the retrieval step of RAG for graph traversal. Microsoft's GraphRAG adds hierarchical community summaries to answer global questions across an entire corpus. For single-passage lookups, plain vector RAG remains cheaper and simpler.
+
+**Further reading:**
+
+- Edge, D., Trinh, H., Cheng, N. et al. (2024). [*From Local to Global: A Graph RAG Approach to Query-Focused Summarization*](https://arxiv.org/abs/2404.16130). arXiv:2404.16130. The Microsoft GraphRAG paper: LLM graph extraction, Leiden community detection, community summaries, and map-reduce answering for global questions.
+- Microsoft. [*GraphRAG*](https://microsoft.github.io/graphrag/), project documentation (accessed 10/2026). Indexing pipeline and global, local, and DRIFT search modes; source code at [microsoft/graphrag](https://github.com/microsoft/graphrag).
+- Neo4j. [*Cypher Manual: Variable-length patterns*](https://neo4j.com/docs/cypher-manual/current/patterns/variable-length-patterns/) (accessed 10/2026). The GQL-aligned `{1,3}` syntax compared with legacy `*1..3`.
+- Neo4j. [*Python Driver Manual*](https://neo4j.com/docs/python-manual/current/), v6 (accessed 10/2026). `GraphDatabase.driver`, `execute_query`, and parameterized queries.
+- Kipf, T. N., Welling, M. (2017). [*Semi-Supervised Classification with Graph Convolutional Networks*](https://arxiv.org/abs/1609.02907). ICLR 2017. For readers curious about GCNs—the neural node-embedding approach mentioned in Limitations.
+
+<LessonProgress />

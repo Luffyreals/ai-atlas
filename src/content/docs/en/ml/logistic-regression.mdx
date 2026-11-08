@@ -40,7 +40,7 @@ import gdNumpyCode from '@code/ml/logistic-regression/gd-numpy.en.py?raw';
 import lineVsSigmoidCode from '@code/ml/logistic-regression/line-vs-sigmoid.en.py?raw';
 import breastCancerCode from '@code/ml/logistic-regression/breast-cancer.en.py?raw';
 
-## Objectives
+## Goals
 
 After this lesson, you will be able to:
 
@@ -293,7 +293,7 @@ Regularization also prevents pathology in a critical scenario: when classes are 
 - **Probabilities are trustworthy only if the model is well-specified.** If true log-odds are non-linear with respect to features, estimated probabilities may be miscalibrated even when classification accuracy remains high.
 - **Weights are hard to interpret under multicollinearity** (see the third pitfall below).
 
-## Visualization
+## Illustration
 
 The figure below plots the sigmoid function against $z$. Observe the two ends of the curve flattening horizontally toward horizontal asymptotes at 0 and 1, and the inflection point at $\sigma(0) = 0.5$. Dots represent the 18 students positioned at $z^{(i)} = 1.263x^{(i)} - 6.006$ from the first code cell, at height 1 if passing and 0 if failing. The vertical line $z = 0$ corresponds to the decision boundary at 4.75 study hours.
 
@@ -309,7 +309,7 @@ The figure below plots the sigmoid function against $z$. Observe the two ends of
     Caption: Sigmoid function $\sigma(z) = 1/(1 + e^{-z})$ and 18 students plotted at $z = 1.263x - 6.006$;
       the vertical line $z = 0$ ($x \approx 4.75$ hours) is the decision boundary where $\sigma(0) = 0.5$. */}
 
-## Code Examples
+## Code examples
 
 The three cells below run independently, each generating its own dataset. The first execution takes slightly longer while the browser loads scikit-learn; the second cell also loads Matplotlib.
 
@@ -346,7 +346,7 @@ The third cell uses the built-in `load_breast_cancer` dataset: 569 tumor samples
 - **The top three coefficients are all negative**: radius error (fluctuation of nucleus radius, $w = -1.213$), worst texture (roughness in the worst region, $-1.107$), mean concave points (average number of concave indentations, $-1.106$). Because features are standardized: increasing radius error by **one standard deviation** (holding other features constant) multiplies the odds of being benign by $e^{-1.213} = 0.297$—less than a third. Negative weights here indicate malignant risk, since class 1 denotes benign.
 - The first five test tumors have benign probabilities of 0.996, 0.000, 0.000, 1.000, and 0.003, all correctly predicted. The "0.000" and "1.000" are artifacts of rounding; sigmoid never evaluates to absolute 0 or 1.
 
-## Common Pitfalls
+## Common pitfalls
 
 :::caution[Forgetting That `LogisticRegression` Regularizes by Default]
 `LogisticRegression()` applies L2 penalty with `C=1` by default, rather than standard unregularized logistic regression from classic statistics textbooks. On our 18 students, it yields $w = 1.002$ instead of $1.263$. When comparing with formulas in textbooks or interpreting coefficients as odds ratios, always verify what value of `C` is in use. Keep in mind the inverted direction: smaller `C` means **stronger** penalty, opposite to `alpha` or $\lambda$ in `Ridge`.
@@ -360,13 +360,13 @@ A positive coefficient means that increasing the feature increases the odds of *
 Comparing coefficient magnitudes is only meaningful when features are standardized, and even then demands caution. The breast cancer dataset contains highly correlated features (radius, perimeter, area), allowing the model to divide weights among them somewhat arbitrarily, just like collinear features in Lasso. The assumption "increase one feature while holding others constant" is often unrealistic when physical features naturally move together.
 :::
 
-## Quick Check
+## Quick check
 
 {/* Questions defined in the `quiz` frontmatter field. */}
 
 <Quiz />
 
-## Summary and Further Reading
+## Summary and further reading
 
 **Key Takeaways:**
 

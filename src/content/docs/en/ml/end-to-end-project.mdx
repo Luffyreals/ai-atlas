@@ -43,7 +43,7 @@ import exploreDataCode from '@code/ml/end-to-end-project/explore-data.en.py?raw'
 import compareModelsCode from '@code/ml/end-to-end-project/compare-models.en.py?raw';
 import tuneAndTestCode from '@code/ml/end-to-end-project/tune-and-test.en.py?raw';
 
-## Objectives
+## Goals
 
 After this lesson, you will be able to:
 
@@ -195,7 +195,7 @@ This snippet assumes an already fitted `search` object as shown in the third cod
 - **Strong predictive correlation does not imply causality** (Step 3).
 - **This overview abstracts certain complex production concerns**: raw data collection and labeling pipelines, patient privacy and HIPAA compliance, demographic fairness auditing, and non-technical stakeholder communication.
 
-## Visualization
+## Illustration
 
 The table below summarizes the 8-step methodology. Notice the final column: each stage produces a tangible artifact. If an artifact cannot be clearly stated, the step is incomplete.
 
@@ -212,7 +212,7 @@ The table below summarizes the 8-step methodology. Notice the final column: each
 
 In [Introduction to Machine Learning](/en/ml/ml-overview/), the workflow was introduced simply as split, fit, and score. Here, between "split" and "score" lies an iterative loop of exploration, preprocessing, validation, and error analysis—operating exclusively on training data.
 
-## Code Examples
+## Code examples
 
 The three code cells below run independently: each loads and partitions data with identical parameters (`random_state=0`), observing the identical 353 training and 89 test patients. The initial run may take slightly longer while the browser loads pandas and scikit-learn. Data is imported with `scaled=False` to preserve raw units; scikit-learn's default pre-scaled return values would bypass the preprocessing demonstration in Step 4.
 
@@ -266,7 +266,7 @@ This provides critical clinical context: the model exhibits its **largest errors
 
 The latter two patients diverge from the general population pattern where elevated BMI corresponds to severe progression. Because the linear model assigns substantial weight to BMI, it makes large errors on individuals who break this trend—confirming patterns flagged during out-of-fold analysis.
 
-## Common Pitfalls
+## Common pitfalls
 
 :::caution[Preprocessing or Feature Selection Prior to Splitting]
 Fitting scalers, imputing missing values, or selecting "top 10 features correlated with $y$" on the **entire** dataset prior to splitting introduces severe data leakage. Information from test samples leaks directly into the model. Selecting features based on global correlation with $y$ is particularly hazardous because it utilizes test labels directly. Leakage can also emerge from domain features: recording a feature created **after** the outcome is known (such as "annual follow-up visits") inflates training metrics but is unavailable during real inference. Remedy: split immediately, wrap all transformers inside a `Pipeline`, and verify whether each feature exists at the exact moment of clinical prediction.
@@ -280,13 +280,13 @@ Iteratively evaluating test scores and tweaking hyperparameters converts the tes
 Using accuracy for imbalanced medical diagnosis, MSE when stakeholders evaluate absolute point deviations, or MAE when severe outliers pose catastrophic safety risks: an incorrect loss function misaligns optimization objectives. Select evaluation metrics in Step 1 based on real-world error consequences, always benchmarking against a `DummyRegressor` or `DummyClassifier`. For classification metrics, consult [Model Evaluation: Accuracy, Precision, Recall, F1](/en/ml/classification-metrics/).
 :::
 
-## Quick Check
+## Quick check
 
 {/* Questions defined in frontmatter `quiz` field. */}
 
 <Quiz />
 
-## Summary and Further Reading
+## Summary and further reading
 
 **Key Takeaways:**
 

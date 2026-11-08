@@ -1,0 +1,343 @@
+---
+title: Vector Semantics and Embeddings
+description: Guess the meaning of an unknown word from its neighbors. The distributional hypothesis, co-occurrence matrices, TF-IDF, PPMI, cosine, and SVD turn each word into a vector.
+quiz:
+  - question: 'In a corpus with $N_{\text{pair}} = 1000$ (word, context) pairs, word $w$ has a total count of 20, context $c$ has a total count of 50, and the pair $(w, c)$ occurs exactly once. What is $\mathrm{PMI}(w, c)$, and what does it mean?'
+    options:
+      - 'Negative, because the pair occurs only once'
+      - 'Equal to $\log_2 20 \approx 4.3$, because $w$ meets $c$ in 1 out of 20 occurrences'
+      - 'Equal to 0: the two words co-occur at the exact rate expected if they were independent'
+      - 'Cannot be computed without the full matrix'
+    answer: 2
+    explanation: '$\mathrm{PMI} = \log_2 \frac{1 \cdot 1000}{20 \cdot 50} = \log_2 1 = 0$. If $w$ and $c$ are unrelated, we expect them to co-occur $20 \cdot 50 / 1000 = 1$ time, which matches the observed count of 1. A small count does not automatically make PMI negative: PMI only compares the actual count against that expected baseline.'
+  - question: 'Document B is document A pasted three times in a row. You represent both by unnormalized word-count vectors. Which measure shows that the two documents have the same content?'
+    options:
+      - 'Dot product, because it is largest when two documents are alike'
+      - 'Cosine similarity, because it compares only the directions of the two vectors'
+      - 'Euclidean distance, because both vectors contain the same words'
+      - 'All three behave the same'
+    answer: 1
+    explanation: 'The vector for B is exactly 3 times the vector for A, so both point in the same direction and their cosine is 1. The dot product also scales by 3 with length, giving B a larger dot product with A than A has with itself, despite adding no new content. The Euclidean distance between A and 3A is twice the norm of A—quite large even though the content is identical.'
+  - question: 'A corpus has 4 documents, and the word "và" ("and") appears in all 4. With scikit-learn''s default `TfidfVectorizer`, what is the idf of "và"?'
+    options:
+      - '0, because a word that appears everywhere carries no information'
+      - '$\ln 4 \approx 1.39$'
+      - '$\ln(5/4) \approx 0.22$'
+      - '1, thanks to the $+1$ added at the end of the formula'
+    answer: 3
+    explanation: 'scikit-learn computes $\ln\frac{1 + 4}{1 + 4} + 1 = 0 + 1 = 1$. It is the textbook formula $\log\frac{N}{\mathrm{df}_t}$ that gives 0. The trailing $+1$ keeps a small weight for ubiquitous words instead of zeroing them out completely. Even so, "và" still gets the lowest idf in the corpus, so it is downweighted relative to rarer words.'
+  - question: 'In the first code cell, $\mathrm{PPMI}(\text{chó}, \text{sủa}) = 3.17$ while $\mathrm{PPMI}(\text{chó}, \text{con}) = 2.85$, even though "con" appears next to "chó" twice and "sủa" only once. Which adjustment reduces this bias?'
+    options:
+      - 'Raise context counts to the power $\alpha = 0.75$ before computing $P(c)$'
+      - 'Drop the $\max(0, \cdot)$ step and keep negative PMI values'
+      - 'Change $\log_2$ to $\ln$'
+      - 'Increase the window from $\pm 2$ to $\pm 5$'
+    answer: 0
+    explanation: 'PMI is high because $P(\text{sủa})$ in the denominator is tiny. Raising counts to the power $0.75$ gives rare contexts a slightly larger probability, lowering their PMI (Levy et al., 2015). Changing the logarithm base only multiplies every PMI by the same constant, leaving the ranking unchanged. Removing $\max$ does not affect these positive cells.'
+  - question: 'Change `d = 3` to `d = 2` in the first code cell: the SVD cosine of (phở, xe_máy) jumps from $0.16$ to $0.99$. Which explanation is most accurate?'
+    options:
+      - 'SVD suffers from numerical instability when $d$ is too small'
+      - 'There are three semantic groups but only two directions left, so two groups are forced to share a direction'
+      - 'The PPMI vectors of phở and xe_máy are actually very similar'
+      - 'Cosine similarity cannot be used on two-dimensional vectors'
+    answer: 1
+    explanation: 'The first three singular values are $12.36$, $12.18$, $10.75$, followed by $8.58$: three word groups need a three-dimensional space to separate cleanly. Keeping only two dimensions forces foods and vehicles into the same direction. On the raw PPMI matrix, the cosine of this pair is just $0.10$, so the third option is wrong.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import ppmiSvdCode from '@code/nlp/vector-semantics-embeddings/ppmi-svd.en.py?raw';
+import tfidfCode from '@code/nlp/vector-semantics-embeddings/tfidf.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand the **distributional hypothesis**: a word's meaning is reflected by the words that frequently appear next to it, and why one-hot vectors cannot measure how similar two words are.
+- Build term–document and word–context matrices, convert raw counts into weights using TF-IDF or PPMI, and explain why reweighting is needed.
+- Measure similarity with cosine, and compress sparse vectors into dense vectors with truncated SVD—the core idea behind LSA.
+- Implement these methods with NumPy and scikit-learn, and spot common pitfalls: default tokenization patterns on Vietnamese text, PMI's bias toward rare words, and choosing too few dimensions.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+A **vector** is a list of numbers, such as $\mathbf{u} = (1, 0, 2)$. The **dot product** multiplies matching coordinates and adds them up: $\mathbf{u} \cdot \mathbf{v} = \sum_i u_i v_i$. The **norm** $\lVert \mathbf{u} \rVert = \sqrt{\mathbf{u} \cdot \mathbf{u}}$ is the length of a vector. **SVD** (singular value decomposition) factors any matrix into a product of three matrices $\mathbf{U}\boldsymbol{\Sigma}\mathbf{V}^\top$, where $\boldsymbol{\Sigma}$ is a diagonal matrix holding the **singular values** in descending order. Keeping the top $d$ singular values and dropping the rest gives a compact approximation of the original matrix.
+:::
+
+## Intuition
+
+### A word you have never met
+
+Read the three Vietnamese sentences below (with English translations). The word "thồn" is made up—you have never seen it before:
+
+> Mẹ nấu một nồi **thồn** rất thơm. *(Mom cooked a very fragrant pot of **thồn**.)*
+> **Thồn** ăn nóng với rau sống thì ngon nhất. *(**Thồn** tastes best eaten hot with fresh herbs.)*
+> Tôi ăn hai bát **thồn** mà vẫn còn thèm. *(I ate two bowls of **thồn** and still wanted more.)*
+
+You can already guess quite a bit: "thồn" is a dish cooked in a pot, served in a bowl, and eaten hot. It is much closer to *phở* (noodle soup), *bún* (rice vermicelli), or soup than to a motorbike or a cat. Nobody defined it for you. You guessed its meaning from **the words next to it**: "nấu" (cook), "nồi" (pot), "ăn" (eat), "bát" (bowl), and "ngon" (delicious) are words you have seen around *phở* and *bún*.
+
+Linguists in the 1950s stated this exact insight. Harris (1954) argued that two words differ in meaning roughly to the extent that their environments differ. Firth (1957, p. 11) put it more memorably: *"You shall know a word by the company it keeps."* This idea is called the **distributional hypothesis**: words that occur in similar contexts have similar meanings.
+
+### Turning "what it goes with" into numbers
+
+A computer cannot guess like you, but it is very good at **counting**. Take a text **corpus** and, for each word, count how often other words appear near it:
+
+| Word | ăn (eat) | bát (bowl) | nóng (hot) | nuôi (raise) | con (classifier) | đường (road) |
+|---|---:|---:|---:|---:|---:|---:|
+| phở | 5 | 4 | 3 | 0 | 0 | 0 |
+| bún | 4 | 3 | 2 | 0 | 0 | 0 |
+| mèo (cat) | 0 | 0 | 0 | 3 | 6 | 0 |
+
+(Numbers made up for illustration.) Each row is now a list of numbers—a **vector**. *Phở* and *bún* have nearly matching rows, whereas *mèo* (cat) looks completely different. Word meaning has become a point in space, and "two words have similar meanings" becomes "two points are close together." This perspective is called **vector semantics**, and a vector representing a word's meaning is called an **embedding**.
+
+Still, several choices remain. Within what range should we count? Words like "một" (one/a), "tôi" (I), and "rất" (very) appear next to everything—should they count as much as "bát" (bowl)? How do we compare two vectors when a frequent word has counts a hundred times larger? And is a vector as long as the entire vocabulary, filled mostly with zeros, practical to use?
+
+The problem of this lesson is: **given a raw text corpus, assign each word (or document) a vector so that words used in similar contexts get nearby vectors, and measure "nearby" with a single number.**
+
+## Theory
+
+### One-hot: every word is equally far apart
+
+The simplest way to turn a word into a vector is to number the words in the vocabulary $V$ from 1 to $|V|$. Word $i$ becomes a vector of length $|V|$ with zeros everywhere except a single 1 at position $i$. This is a **one-hot vector**.
+
+With $|V| = 4$ consisting of (bún, chó, mèo, phở): $\mathbf{e}_{\text{mèo}} = (0, 0, 1, 0)$ and $\mathbf{e}_{\text{chó}} = (0, 1, 0, 0)$. The dot product of any two distinct one-hot vectors is always 0, because no position is nonzero in both. Thus *mèo* (cat) is just as far from *chó* (dog) as it is from *phở*. One-hot encoding only tells you whether two words **are identical**, not **how similar** they are.
+
+The distributional hypothesis suggests the fix: instead of putting a single 1 at the word's own index, describe the word by **its contexts**.
+
+### Term–document and word–context matrices
+
+There are two standard ways to define "context," giving two types of matrices (Turney and Pantel, 2010):
+
+- **Term–document matrix**: each row is a word, each column is a document, and cell $(t, j)$ is the number of times word $t$ appears in document $j$. Reading by **column** gives a document vector; two documents sharing many words have similar columns. This is the foundation of classical search, which we revisit in [Information Retrieval](/en/nlp/information-retrieval/). Reading by **row** gives a word vector: two words that often appear in the same documents have similar rows.
+- **Word–context matrix**, also called a **co-occurrence matrix**: both rows and columns are words. Call the row word the **target word** $w$ and the column word the **context word** $c$. Cell $F_{wc}$ counts how many times $c$ falls within a **window** of $\pm s$ around $w$—that is, at most $s$ positions away from $w$. (This window is different from an LLM's "context window," which is the maximum number of tokens the model can read in one call.) The matrix has size $|V| \times |V|$.
+
+For example, with $s = 2$ and the sentence "tôi ăn một bát phở nóng" ("I eat a bowl of hot phở"): the target word "phở" is at position 5, so its context words are "một", "bát" (to the left) and "nóng" (to the right, where the sentence ends). We add 1 to the three cells $F_{\text{phở},\text{một}}$, $F_{\text{phở},\text{bát}}$, and $F_{\text{phở},\text{nóng}}$, and repeat for every word in every sentence.
+
+A narrow window ($s$ from 1 to 3) tends to group words of the **same syntactic/semantic category** that can substitute for one another, like *phở* and *bún*. A wide window or a whole document groups words from the **same topic**, like *phở* with *bát* (bowl), *đũa* (chopsticks), and *quán* (stall).
+
+With a realistic vocabulary of tens of thousands of words, each row holds tens of thousands of numbers, almost all of which are 0 because any given word co-occurs with only a tiny fraction of the vocabulary. Such a vector is called a **sparse vector**.
+
+### Cosine: compare direction, not length
+
+To see how similar two rows $\mathbf{u}$ and $\mathbf{v}$ are, we might try their dot product $\mathbf{u} \cdot \mathbf{v}$, which is large when both vectors have large values in the same positions. But it has a flaw. A word like "phở" occurring 1000 times in the corpus has counts 100 times larger than "bún" occurring 10 times, so the dot product of "phở" with **every** word is large. Frequent words end up looking "similar" to everything.
+
+The fix is to divide by the lengths of both vectors, giving **cosine similarity**:
+
+$$
+\cos(\mathbf{u}, \mathbf{v}) = \frac{\mathbf{u} \cdot \mathbf{v}}{\lVert \mathbf{u} \rVert \, \lVert \mathbf{v} \rVert}
+$$
+
+Multiplying $\mathbf{u}$ by any $t > 0$ multiplies both numerator and denominator by $t$, leaving the cosine unchanged: it looks only at the **direction** of the vector—the **proportions** across contexts—not at how many times the word appeared overall. As the name says, this is the cosine of the angle between the two vectors: 1 when they point in the same direction, 0 when they are orthogonal (sharing no common contexts). Since counts are never negative, cosine values on a count matrix lie in $[0, 1]$. The lesson [RAG and Modern Chatbots](/en/llm/rag-chatbot/) walks through another hand-worked example.
+
+### TF-IDF: downweight words that appear everywhere
+
+Raw counts have a second problem. In a term–document matrix, words like "và" (and), "của" (of), and "tôi" (I) appear in nearly every document, dominating the vector's length while saying nothing about what the document is about. We want a weight that is **large** when a word appears often **in this document**, and **small** when the word appears **across all documents**. That is TF-IDF (term frequency–inverse document frequency), the product of two terms.
+
+**Term frequency** $\mathrm{tf}_{t,j}$: the number of times word $t$ appears in document $j$. A common variant is $1 + \log \mathrm{tf}_{t,j}$ (for $\mathrm{tf}_{t,j} > 0$), since a word appearing 100 times is not 100 times more informative than a word appearing once.
+
+**Inverse document frequency.** Let $N$ be the total number of documents in the corpus and $\mathrm{df}_t$ be the number of documents containing $t$. The textbook form, following Spärck Jones (1972), is:
+
+$$
+\mathrm{idf}_t = \log \frac{N}{\mathrm{df}_t}
+$$
+
+A word appearing in only 1 document gets the largest idf, $\log N$. A word appearing in every document gets $\log 1 = 0$, erasing it completely. The final weight is $\mathrm{tf}_{t,j} \times \mathrm{idf}_t$.
+
+**scikit-learn's version.** By default, `TfidfVectorizer` uses raw counts for tf and a **smoothed** idf with the natural logarithm:
+
+$$
+\mathrm{idf}_t = \ln \frac{1 + N}{1 + \mathrm{df}_t} + 1
+$$
+
+- Adding 1 in the numerator and denominator acts as if there were an extra document containing every word once, preventing division by zero.
+- Adding 1 at the end gives ubiquitous words a weight of 1 instead of 0.
+- After multiplying tf by idf, each row (a document) is divided by its L2 norm so every document vector has unit length. Cosine similarity then reduces to a simple dot product.
+
+With $N = 4$: a word in 3 documents gets $\mathrm{idf} = \ln(5/4) + 1 \approx 1.223$; in 2 documents, $\ln(5/3) + 1 \approx 1.511$; in 1 document, $\ln(5/2) + 1 \approx 1.916$. The second code cell prints these exact three values. To use log-scaled tf, pass `sublinear_tf=True` (scikit-learn uses $1 + \ln \mathrm{tf}$).
+
+### PMI and PPMI: how much more often a pair co-occurs than by chance
+
+Word–context matrices suffer from frequent words too: "một" (a/one) appears next to *phở*, *bún*, *mèo* (cat), and *chó* (dog). Rather than asking **how many times** $w$ meets $c$, we should ask **how much more often** they meet than if they occurred independently by chance.
+
+**Step 1: turn counts into probabilities.** Let $N_{\text{pair}} = \sum_{w, c} F_{wc}$ be the sum of all cells—the total number of (word, context) pairs counted, distinct from $N$ (the number of documents) in the TF-IDF section. We estimate:
+
+$$
+P(w, c) = \frac{F_{wc}}{N_{\text{pair}}}, \qquad
+P(w) = \frac{\sum_{c} F_{wc}}{N_{\text{pair}}}, \qquad
+P(c) = \frac{\sum_{w} F_{wc}}{N_{\text{pair}}}
+$$
+
+$P(w, c)$ is the probability of drawing a random pair from the corpus and getting $(w, c)$. $P(w)$ is the sum of row $w$ divided by $N_{\text{pair}}$, and $P(c)$ is the sum of column $c$ divided by $N_{\text{pair}}$.
+
+**Step 2: compare against independence.** If $w$ and $c$ had nothing to do with each other, the probability of seeing them together would be $P(w)P(c)$. **PMI** (pointwise mutual information), introduced into computational linguistics by Church and Hanks (1990), is the log ratio between the observed probability and that independent baseline:
+
+$$
+\mathrm{PMI}(w, c) = \log_2 \frac{P(w, c)}{P(w)\,P(c)}
+= \log_2 \frac{F_{wc} \cdot N_{\text{pair}}}{\left(\sum_{c'} F_{wc'}\right)\left(\sum_{w'} F_{w'c}\right)}
+$$
+
+The second expression follows by substituting the three probabilities from Step 1: the $N_{\text{pair}}$ in the denominator of $P(w, c)$ and the two factors of $N_{\text{pair}}$ in the denominator of $P(w)P(c)$ cancel to leave a single factor of $N_{\text{pair}}$ in the numerator. PMI is 0 when a pair co-occurs at the chance rate, positive when it co-occurs more often, and negative when less often. With $\log_2$, a PMI of 1 means the pair co-occurs **twice** as often as by chance. Changing the log base only multiplies all PMI values by a constant; this lesson uses $\log_2$ like Church and Hanks, while [Word2Vec, GloVe, FastText](/en/nlp/word2vec-glove-fasttext/) uses $\ln$.
+
+Applying this to the small corpus in the first code cell: $N_{\text{pair}} = 180$ (variable `N` in the code), "phở" has row sum 6, "bát" has column sum 10, and the pair (phở, bát) occurs twice. Thus $\mathrm{PMI} = \log_2 \frac{2 \cdot 180}{6 \cdot 10} = \log_2 6 \approx 2.585$: *phở* appears next to *bát* 6 times more often than chance. Meanwhile (phở, một) gets only $0.907$, because "một" appears next to all kinds of words.
+
+**Step 3: clip negative values.** There are two reasons. An unseen pair has $F_{wc} = 0$ and $\mathrm{PMI} = \log 0 = -\infty$, which is unusable. And moderately negative PMI values ("co-occurring less often than chance") require an enormous corpus to estimate reliably: if two words each have probability around $10^{-6}$, confirming that they meet **less** than $10^{-12}$ of the time takes a huge number of observations. In practice we therefore use **PPMI** (positive PMI), replacing all negative values with 0:
+
+$$
+\mathrm{PPMI}(w, c) = \max\big(\mathrm{PMI}(w, c),\, 0\big)
+$$
+
+**PMI is biased toward rare contexts.** The denominator contains $P(c)$. The rarer a context word $c$ is, the smaller $P(c)$ becomes, so co-occurring with $w$ even once yields a high PMI. In the first code cell, "sủa" (bark) appears in only one sentence, yet $\mathrm{PPMI}(\text{chó}, \text{sủa}) = 3.17$, higher than $\mathrm{PPMI}(\text{chó}, \text{con}) = 2.85$ even though "con" appears next to "chó" twice. Two common ways to reduce this bias:
+
+- **Drop very rare pairs.** Church and Hanks ignored pairs occurring 5 times or fewer because small counts make the ratio unstable.
+- **Context distribution smoothing.** Smoothing slightly adjusts estimated probabilities so a few small counts do not dominate. Levy, Goldberg, and Dagan (2015) replace $P(c)$ with $P_\alpha(c) = \frac{F_c^{\,\alpha}}{\sum_{c'} F_{c'}^{\,\alpha}}$, where $F_c$ is the column sum of $c$ and $\alpha = 0.75$. An exponent below 1 raises the probability of rare contexts slightly, pulling their PMI down. In their experiments, this consistently improved performance across tasks and settings, especially for PPMI.
+
+### From sparse to dense vectors: truncated SVD
+
+After PPMI, each word is still a row of $|V|$ numbers, mostly zeros. That brings two drawbacks: it wastes memory, and more importantly, **two words from the same category that happen to share no exact context word have a cosine of 0**. If a small corpus only has "phở ... ngon" and "bún ... thơm", sparse vectors cannot connect *phở* and *bún*, even if "ngon" (delicious) and "thơm" (fragrant) frequently co-occur elsewhere.
+
+**Truncated SVD** solves both problems. Let $\mathbf{M} \in \mathbb{R}^{|V| \times |V|}$ be the PPMI matrix. SVD factors it as:
+
+$$
+\mathbf{M} = \mathbf{U}\boldsymbol{\Sigma}\mathbf{V}^\top
+$$
+
+Here bold $\mathbf{V}$ is an SVD factor matrix, distinct from the vocabulary $V$. The columns of $\mathbf{U}$ are orthogonal **directions** in word space, and $\boldsymbol{\Sigma}$ tells how strong each direction is (singular values $\sigma_1 \ge \sigma_2 \ge \dots \ge 0$). Keeping only the top $d$ directions gives:
+
+$$
+\mathbf{M} \approx \mathbf{U}_d \boldsymbol{\Sigma}_d \mathbf{V}_d^\top
+$$
+
+where $\mathbf{U}_d$ holds the first $d$ columns of $\mathbf{U}$ and $\boldsymbol{\Sigma}_d$ is the top-left $d \times d$ block of $\boldsymbol{\Sigma}$. By the Eckart–Young theorem, this is the best rank-$d$ approximation to $\mathbf{M}$ in the least-squares sense. Row $w$ of $\mathbf{U}_d \boldsymbol{\Sigma}_d$ is the $d$-dimensional **embedding** of word $w$: just $d$ numbers (typically a few hundred) instead of $|V|$, with almost no zeros. That is a **dense vector**.
+
+Why does compression help? To reconstruct $\mathbf{M}$ well with only a few directions, SVD is forced to merge contexts that regularly co-occur (ăn, bát, nóng, ngon) into a single shared direction. Both *phở* and *bún* load heavily onto that direction, so they end up close together even if they never shared the exact same context word. Turney and Pantel call this capturing **high-order co-occurrence**: two words become close because their contexts are similar, without needing identical contexts. Idiosyncratic details—such as "mèo nằm ngủ" (the cat lies sleeping) versus "chó sủa" (the dog barks)—get treated as noise and discarded.
+
+Deerwester et al. (1990) applied truncated SVD to a term–document matrix and called the method **LSA** (latent semantic analysis), viewing the retained directions as latent "topics." Some practitioners use $\mathbf{U}_d$ without multiplying by $\boldsymbol{\Sigma}_d$, or multiply by $\boldsymbol{\Sigma}_d^{1/2}$; Levy et al. (2015) found that dropping $\boldsymbol{\Sigma}$ or using fractional powers often improves word similarity benchmarks. The first code cell uses $\mathbf{U}_d \boldsymbol{\Sigma}_d$ to match the definition above; try removing `* S[:d]` to compare. On this corpus, the cosine of (phở, xe_máy) drops from 0.16 to 0.05 while same-group pairs barely change.
+
+**How do you choose $d$?** There is no universal magic number. Look at the singular values: if the first few are large and then drop sharply, that elbow is a useful hint. In practice the drop is rarely sharp, so domain knowledge and downstream validation matter more. Too small a $d$ squeezes distinct semantic groups into the same direction; too large a $d$ keeps noise. On real corpora, people typically pick a few hundred dimensions and tune on a validation task.
+
+:::note[Key takeaway]
+Count a word's contexts (term–document or word–context matrix), reweight raw counts (TF-IDF for documents, PPMI for words), and compare with cosine. The resulting vectors have length $|V|$ and are sparse. Truncated SVD keeps the top $d$ directions, giving each word a dense $d$-dimensional embedding that can connect words even when they share no direct context.
+:::
+
+### What is an embedding, and how is it evaluated
+
+An **embedding** is a real-valued vector of fixed dimension $d$ representing a word (or sentence, or document) such that geometric relationships between vectors (angles, distances) reflect semantic relationships. The name stays the same across the field: a row of $\mathbf{U}_d \boldsymbol{\Sigma}_d$ is an embedding, a vector learned by Word2Vec is an embedding, and the first layer of every LLM is an embedding lookup table.
+
+How do we know whether an embedding is good? There are two approaches:
+
+- **Intrinsic evaluation**: compare against human judgments. A **word similarity** dataset contains word pairs scored by human annotators—for instance WordSim-353 or SimLex-999 for English, and ViSim-400 for Vietnamese (Nguyen et al., 2018). We compute the cosine for each pair and measure how well the cosine ranking correlates with the human ranking (Spearman correlation). Another intrinsic test is word **analogy** ("Hanoi is to Vietnam as Paris is to ?"), covered in [Word2Vec, GloVe, FastText](/en/nlp/word2vec-glove-fasttext/).
+- **Extrinsic evaluation**: plug the embeddings into a real downstream task (classification, search) and check whether task performance improves. This is ultimately what matters most, because a higher intrinsic score does not guarantee better results on your application.
+
+### Limitations
+
+- **One word, one vector.** "Đường" in "đi trên đường" (walk on the road) and "cho thêm đường" (add more sugar) shares a single row, so its vector blends both senses. Contextual embeddings such as [BERT](/en/nlp/bert/) produce a separate vector for each occurrence.
+- **Close does not mean synonymous.** "Nóng" (hot) and "lạnh" (cold) appear in nearly identical contexts, so their vectors end up close together. The third box under Common pitfalls discusses this further.
+- **The $|V| \times |V|$ matrix is huge** and running SVD on it is expensive; adding new text requires recounting and refactoring. [Word2Vec](/en/nlp/word2vec-glove-fasttext/) learns dense vectors directly by predicting words sentence by sentence, without ever building the full matrix.
+- **Unseen words have no vector**, and rare words have noisy vectors. FastText in the next lesson builds word vectors from character n-grams to handle this.
+
+## Illustration
+
+The tables below come from the first code cell in the next section: 12 short Vietnamese sentences about dishes, animals, and vehicles, with a $\pm 2$ window. The first table shows 8 of the 33 columns of the co-occurrence matrix $\mathbf{F}$. Notice the nonzero blocks: each group of words lights up its own set of columns.
+
+| Target word | một (a) | bát (bowl) | nóng (hot) | rất (very) | con (clf.) | cả (all) | đường (road) | chạy (run) | Row sum |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| phở | 1 | 2 | 1 | 1 | 0 | 0 | 0 | 0 | 6 |
+| bún | 1 | 1 | 1 | 1 | 0 | 0 | 0 | 0 | 7 |
+| mèo (cat) | 1 | 0 | 0 | 0 | 2 | 0 | 0 | 0 | 5 |
+| chó (dog) | 1 | 0 | 0 | 0 | 2 | 1 | 0 | 0 | 5 |
+| xe_máy (motorbike) | 0 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | 6 |
+| ô_tô (car) | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 1 | 6 |
+
+The columns "một" (a/one) and "rất" (very) are shared across groups. They make the cosine between different groups positive, which is why we need PPMI to downweight them. The row sum is computed across all 33 columns, not just the 8 shown here.
+
+The second table compares the cosine of six word pairs on two kinds of vectors: PPMI rows (33 numbers, sparse) and truncated-SVD embeddings ($d = 3$, dense). Compare the "Same group" column against the two numeric columns.
+
+| Pair | Same group | PPMI cosine | SVD cosine, $d = 3$ |
+|---|---|---:|---:|
+| phở, bún | yes | 0.43 | 1.00 |
+| mèo, chó | yes | 0.34 | 1.00 |
+| xe_máy, ô_tô | yes | 0.53 | 0.98 |
+| phở, mèo | no | 0.04 | 0.07 |
+| phở, xe_máy | no | 0.10 | 0.16 |
+| chó, ô_tô | no | 0.00 | 0.01 |
+
+On PPMI, the three same-group pairs reach only 0.34 to 0.53 because each word still has idiosyncratic contexts ("nằm", "ngủ", "sủa") pulling the vectors apart. After SVD, same-group pairs jump to nearly 1 while cross-group pairs stay near 0.
+
+## Code examples
+
+The code in this lesson was last tested in November 2026 with Pyodide 314.0.7 (Python 3.14, NumPy 2.4, scikit-learn 1.8), the exact runtime used on this page. Both cells run independently right in your browser. The second cell takes longer on its first run while the browser downloads scikit-learn.
+
+### PPMI, cosine, and SVD in NumPy
+
+This cell reproduces the entire Theory section on 12 short sentences. Compound words like "xe máy" (motorbike) are pre-joined with an underscore so whitespace splitting keeps each word as a single token (real Vietnamese word segmentation is covered in [Tokenization](/en/nlp/tokenization/)). The code counts $\mathbf{F}$ with a $\pm 2$ window, computes PPMI, runs SVD keeping $d = 3$ dimensions, and prints the cosine of six pairs on both representations.
+
+<PythonRunner code={ppmiSvdCode} title="Co-occurrence, PPMI, cosine, and truncated SVD" />
+
+Reading the output:
+
+- **`|V| = 33, nonzero = 13%`.** Only 13% of the cells in $\mathbf{F}$ are nonzero, even on this tiny 12-sentence corpus. On a real corpus, that fraction is much smaller still.
+- **Singular values `12.36 12.18 10.75 8.58 7.76`.** There is no sharp cliff. The largest gap among the top five sits between the 3rd and 4th values, and since we know the corpus has three groups, we pick $d = 3$. Setting $d = 4$ or $d = 5$ gives similar results: same-group pairs stay at 0.93 or above, while cross-group pairs stay at 0.26 or below.
+- **Cosine.** Matches the table in the Illustration section. The pair (phở, xe_máy) has a PPMI cosine of 0.10 rather than 0 because both appear next to "rất" ("phở này rất ngon", "xe_máy chạy rất nhanh").
+- **Coordinates.** The first coordinate is positive for every word: it captures a shared background direction that does not separate the groups. The three groups separate cleanly along the other two coordinates: dishes have a large positive third coordinate (phở 2.61, bún 4.04), animals have a positive second coordinate (2.43), and vehicles are negative on both the second and third coordinates. *Mèo* and *chó* get identical coordinates: the contexts that distinguish them ("nằm", "ngủ" for cat; "sủa", "cả" for dog) occur too rarely, so SVD discards them as noise. (Column signs in $\mathbf{U}$ may flip across library versions, but cosines are invariant.)
+
+Try two experiments. First, change `cos(ppmi, a, b)` to `cos(F, a, b)` to compare on raw counts: the cosine of (phở, bún) becomes 0.67, **higher** than on PPMI. On this tiny corpus, PPMI boosts rare contexts too aggressively—the exact bias discussed in the Theory section; on real corpora, PPMI generally outperforms raw counts (Turney and Pantel, 2010, citing Bullinaria and Levy, 2007). Second, change `d = 3` to `d = 2`: the last question in the Quick check section explains what happens. To try $\alpha = 0.75$ smoothing, raise each column sum to the power 0.75 before dividing to compute $P(c)$: the ranking flips, with $\mathrm{PPMI}(\text{chó}, \text{sủa}) = 3.016$ dropping below $\mathrm{PPMI}(\text{chó}, \text{con}) = 3.025$.
+
+### TF-IDF and cosine between documents with scikit-learn
+
+This cell switches to a term–document matrix. Four short Vietnamese documents are passed directly to `TfidfVectorizer` without prior word segmentation, so each syllable is treated as a token ("Hà Nội" becomes "hà" and "nội"). The code does three things: shows which characters the default token pattern silently drops, prints the idf of three words, and computes the pairwise cosine similarity matrix across all four documents.
+
+<PythonRunner code={tfidfCode} title="TF-IDF and cosine similarity between documents" />
+
+Reading the output:
+
+- **`dropped: ['ô', 'ở']`.** The default pattern `(?u)\b\w\w+\b` only keeps tokens of two or more characters. In English that only drops words like "a" or "I"; in Vietnamese it drops meaningful single-letter syllables such as "ở" (at/in), "ô" (in "ô tô", car, or umbrella), "ý" (idea), and "ủ" (ferment). The code sets `token_pattern=r"(?u)\b\w+\b"` so every alphanumeric sequence of length one or more becomes a token while punctuation is still stripped. The default tokenizer also lowercases everything (`lowercase=True`), turning "Hà" into "hà".
+- **`shape: (4, 21)`.** scikit-learn stores each **document** as a row—the transpose of the term–document matrix convention in the Theory section.
+- **idf: 1.223, 1.511, 1.916.** "hà" appears in 3 documents, "phở" in 2, and "mèo" in 1, matching our hand calculation in the Theory section.
+- **Document 0.** Every word in "tôi ăn phở bò ở Hà Nội" appears once, so the weights are proportional to idf: "ăn" and "ở" (unique to this document) get 0.46, while "hà" and "nội" (present in 3 documents) get only 0.30. The row norm is 1.00 thanks to L2 normalization.
+- **Cosine matrix.** Documents 0 and 1 (both about Hanoi beef *phở*) score 0.42, the highest pair. Documents 0 and 3 share only "Hà Nội" and score 0.14. Documents 1 and 2 share no words at all, scoring 0. This illustrates the limitation of sparse vectors: "con mèo nhà tôi rất lười" (my cat is very lazy) and a sentence about "chú chó" (a puppy) would get a cosine of 0 even though both are about pets.
+
+## Common pitfalls
+
+:::caution[Using scikit-learn's default token pattern on Vietnamese text]
+`TfidfVectorizer` and `CountVectorizer` drop all single-character tokens by default, causing Vietnamese syllables like "ở", "ô", and "ý" to vanish silently (the `dropped` line in the second code cell). For Vietnamese, pass `token_pattern=r"(?u)\b\w+\b"` to keep single-character tokens while still stripping punctuation. Note that this pattern expects Unicode NFC text: in NFD, combining tone marks are separate characters outside `\w`, splitting "Hà Nội" into "Ha", "No", "i" (see [Text Normalization](/en/nlp/text-normalization/)). A pattern like `r"\S+"` only works if punctuation has already been stripped, otherwise `"ngon,"` and `"ngon"` become two distinct tokens. Either pattern splits compounds like "xe máy" into two syllables; if you need word-level tokens, run a word segmenter first and join compounds with underscores as in the first code cell. Always inspect `get_feature_names_out()` at least once.
+:::
+
+:::caution[Trusting high PMI scores on pairs that occur only once]
+In the first code cell, $\mathrm{PPMI}(\text{mèo}, \text{ngủ}) = 3.17$, higher than $\mathrm{PPMI}(\text{mèo}, \text{con}) = 2.85$, simply because "ngủ" appears in a single sentence. Ranking a word's "most characteristic contexts" by raw PMI typically surfaces rare words or even typos. Apply a minimum count threshold (Church and Hanks dropped pairs with count $\le 5$), smooth $P(c)$ with the $0.75$ power, and use a sufficiently large corpus.
+:::
+
+:::caution[Assuming nearby vectors mean synonymous words]
+The distributional hypothesis only promises "similar contexts." Antonyms ("nóng" hot and "lạnh" cold, "mua" buy and "bán" sell) occur in nearly identical contexts and therefore often have high cosine similarity. Topically related words of different types (*phở* and *bát* bowl) also land close together when the context window is wide. Benchmarks like SimLex-999 were specifically designed to separate **similarity** (cup, mug) from **relatedness** (cup, coffee). If your application requires true synonyms—such as suggesting word replacements—do not rely on cosine similarity alone.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` field of the frontmatter. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Distributional hypothesis: words used in similar contexts have similar meanings. One-hot vectors cannot capture this because any two distinct words have a dot product of 0.
+- Term–document matrices count words per document; word–context matrices count words within a $\pm s$ window. Raw counts are dominated by frequent words, so we reweight them with TF-IDF ($\mathrm{tf} \times \mathrm{idf}$; scikit-learn uses $\ln\frac{1 + N}{1 + \mathrm{df}_t} + 1$ with $N$ documents, followed by L2 normalization) or PPMI ($\max(0, \log_2 \frac{P(w,c)}{P(w)P(c)})$, which is biased toward rare contexts).
+- Cosine similarity $\frac{\mathbf{u} \cdot \mathbf{v}}{\lVert \mathbf{u} \rVert \lVert \mathbf{v} \rVert}$ compares direction rather than length, so frequent words or long documents do not automatically look similar to everything.
+- Truncated SVD (LSA) compresses $|V|$-dimensional sparse vectors into $d$-dimensional dense embeddings, connecting words even when they share no direct context. Each word still gets only one vector; Word2Vec in the next lesson learns dense vectors directly by predicting words.
+
+**Further reading:**
+
+- Jurafsky, D., Martin, J. H. (2026). [*Speech and Language Processing*](https://web.stanford.edu/~jurafsky/slp3/), 3rd ed. draft of Aug 19, 2026, Chapter 5 "Embeddings" (Sections 5.1–5.4 and 5.9) and Chapter 11, Section 11.1.2 (tf-idf). Free textbook featuring the "ongchoi" example that inspired "thồn" at the start of this lesson. (This draft removed the PPMI section; see the second reference for that.)
+- Turney, P. D., Pantel, P. (2010). [*From Frequency to Meaning: Vector Space Models of Semantics*](https://arxiv.org/abs/1003.1141), *JAIR* 37, Sections 2, 4.2, and 4.3. Survey covering three matrix types, weighting schemes (TF-IDF, PMI, PPMI), and four interpretations of truncated SVD.
+- Church, K. W., Hanks, P. (1990). [*Word Association Norms, Mutual Information, and Lexicography*](https://aclanthology.org/J90-1003/), *Computational Linguistics* 16(1). The paper that brought PMI into computational linguistics, including notes on small counts.
+- Deerwester, S., Dumais, S. T., Furnas, G. W., Landauer, T. K., Harshman, R. (1990). [*Indexing by Latent Semantic Analysis*](https://doi.org/10.1002/(SICI)1097-4571(199009)41:6%3C391::AID-ASI1%3E3.0.CO;2-9), *Journal of the American Society for Information Science* 41(6). The original LSA paper: truncated SVD on a term–document matrix.
+- Spärck Jones, K. (1972). [*A Statistical Interpretation of Term Specificity and Its Application in Retrieval*](https://doi.org/10.1108/eb026526), *Journal of Documentation* 28(1): 11–21. Origin of the idf idea: terms appearing in fewer documents are more useful for retrieval. Harris (1954) and Firth (1957) in the Intuition section are cited via Turney and Pantel (2010), Section 2.
+- scikit-learn (2025). [*Tf–idf term weighting*](https://scikit-learn.org/1.8/modules/feature_extraction.html#tfidf-term-weighting), v1.8 documentation, and the [`TfidfVectorizer`](https://scikit-learn.org/1.8/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html) API page. Covers the smoothed idf formula, L2 normalization, and `token_pattern`, matching the version running on this page.
+
+<LessonProgress />

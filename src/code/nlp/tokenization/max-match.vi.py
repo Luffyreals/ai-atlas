@@ -7,7 +7,7 @@ MAX_LEN = max(len(w.split()) for w in DICT)  # từ dài nhất: 2 âm tiết
 
 
 def segment(syl, from_right=False):
-    """Mỗi lần lấy từ dài nhất có trong từ điển, từ trái hoặc từ phải."""
+    # Mỗi lần lấy từ dài nhất có trong từ điển, từ trái hoặc từ phải.
     words = []
     i, j = 0, len(syl)  # phần chưa tách là syl[i:j]
     while i < j:

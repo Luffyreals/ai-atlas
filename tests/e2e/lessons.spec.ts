@@ -370,6 +370,9 @@ for (const lesson of WITH_PAGE) {
       }) => {
         test.skip(!isNarrow(page), 'mobile project (375px) only');
         await page.goto(path);
+        for (const box of await page.locator(SCROLL_BOXES).all()) {
+          await box.scrollIntoViewIfNeeded();
+        }
         await page.evaluate(() => document.fonts.ready);
         // The script batches its work (ResizeObserver, then 100 ms, then idle time): poll until it is done.
         await expect
@@ -409,6 +412,9 @@ for (const lesson of WITH_PAGE) {
       }) => {
         test.skip(!isNarrow(page), 'mobile project (375px) only');
         await page.goto(path);
+        for (const pre of await page.locator('.expressive-code pre').all()) {
+          await pre.scrollIntoViewIfNeeded();
+        }
         const template = s(textLocale, 'common.codeBlock');
         await expect
           .poll(() => page.locator('.expressive-code pre').evaluateAll(codeLabelMismatches, template), { timeout: 10_000 })

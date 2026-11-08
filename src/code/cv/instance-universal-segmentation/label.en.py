@@ -1,18 +1,18 @@
 import numpy as np
 from scipy import ndimage
 
-# Ảnh 20 x 32 có ba đồng xu cùng một lớp; xu B và xu C chạm nhau
+# 20 x 34 grid with three coins of the same class; coins B and C touch
 yy, xx = np.indices((20, 34))
 def disk(cy, cx, r):
     return (yy - cy) ** 2 + (xx - cx) ** 2 <= r ** 2
-gt = [disk(6, 5, 4), disk(11, 15, 5), disk(11, 27, 6)]  # 3 mask thật
-semantic = gt[0] | gt[1] | gt[2]  # mask semantic: chỉ biết "là xu"
+gt = [disk(6, 5, 4), disk(11, 15, 5), disk(11, 27, 6)]  # 3 true masks
+semantic = gt[0] | gt[1] | gt[2]  # semantic mask: only knows "is a coin"
 
 def iou(a, b):
     return (a & b).sum() / (a | b).sum()
 
 def pq(pred):
-    # Ghép dự đoán với vật thật khi IoU > 0.5, rồi tính PQ
+    # Match predictions to true objects when IoU > 0.5, then compute PQ
     M = np.array([[iou(p, g) for g in gt] for p in pred])
     tp = [M[i, j] for i in range(len(pred)) for j in range(3)
           if M[i, j] > 0.5]
@@ -22,13 +22,13 @@ def pq(pred):
     print(f"TP={len(tp)} FP={fp} FN={fn} "
           f"PQ={sum(tp) / (len(tp) + 0.5 * fp + 0.5 * fn):.3f}")
 
-# Cách 1: mỗi vùng liền nhau là một vật
+# Method 1: each connected component is treated as one object
 labels, n = ndimage.label(semantic)
 print(f"components: {n}")
 pq([labels == k for k in range(1, n + 1)])
 
-# Cách 2: co mask để tách chỗ chạm, đánh số, rồi trả mỗi pixel
-# về hạt giống gần nhất (một dạng watershed rất thô)
+# Method 2: erode mask to break the contact, label seeds, then assign
+# each mask pixel to its nearest seed (a rough watershed)
 seeds, n2 = ndimage.label(ndimage.binary_erosion(semantic, iterations=1))
 _, (iy, ix) = ndimage.distance_transform_edt(seeds == 0,
                                              return_indices=True)

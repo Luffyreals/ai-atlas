@@ -1,0 +1,329 @@
+---
+title: Preparing Pre-Training Data
+description: A single sentence repeated 60,000 times in web data. Data sources, quality filtering, exact and MinHash deduplication, PII removal, source mixing, and sequence packing.
+quiz:
+  - question: 'You compute a MinHash signature of $K = 100$ numbers. Setup A splits it into $b = 20$ bands of $r = 5$ rows each. Setup B splits it into $b = 5$ bands of $r = 20$ rows each. For a pair of documents with true Jaccard similarity $J = 0.7$, what happens?'
+    options:
+      - 'Both setups behave identically because both use 100 hashes'
+      - 'Setup A almost certainly flags the pair as a candidate ($\approx 0.97$), whereas Setup B almost certainly misses it ($< 0.01$)'
+      - 'Setup B catches the pair more easily because each band is longer and carries more information'
+      - 'Both setups flag the pair with probability exactly $0.7$'
+    answer: 1
+    explanation: 'The probability of becoming a candidate pair is $1 - (1 - s^r)^b$. In Setup A, $0.7^5 \approx 0.168$, so $1 - 0.832^{20} \approx 0.97$. In Setup B, $0.7^{20} \approx 0.0008$, so $1 - (1 - 0.0008)^5 \approx 0.004$. Longer bands require many rows to match simultaneously, making the filter much stricter. The value $0.7$ is the collision probability at a single row, not the candidate probability.'
+  - question: 'You compute SHA-256 hashes directly on the raw text of two news archives and find 0 exact duplicates, even though visual inspection shows hundreds of identical articles. What is the most likely explanation?'
+    options:
+      - 'SHA-256 frequently assigns different hashes to identical inputs'
+      - 'You need to use Python''s built-in `hash()` to compare strings across sources'
+      - 'You must use MinHash because SHA-256 cannot handle long articles'
+      - 'The two archives differ in casing, whitespace, or Unicode accent encoding (NFC vs. NFD), so their raw bytes differ even though the rendered text looks identical'
+    answer: 3
+    explanation: 'Cryptographic hashes operate on raw bytes, not visual glyphs. A single accented character like "à" can be encoded as one precomposed code point (NFC) or as "a" plus a combining grave accent (NFD), and a single extra space changes the SHA-256 digest completely. Normalize text before hashing. SHA-256 is deterministic for any byte sequence of any length, whereas Python''s built-in `hash()` is randomly salted per process and cannot even be compared across runs.'
+  - question: 'A team runs global MinHash deduplication across all of their Common Crawl snapshots combined, removing a huge fraction of documents. Yet a model trained on the deduplicated corpus performs no better than one trained on the un-deduplicated data. What is the right takeaway?'
+    options:
+      - 'Deduplication is always useless and should be skipped'
+      - 'They did not deduplicate aggressively enough and should lower the similarity threshold'
+      - 'The volume of data removed says nothing about the quality of what remains; every filtering choice must be validated by training and evaluating a model'
+      - 'The result must be caused by a bug in their training script'
+    answer: 2
+    explanation: 'The FineWeb team (2024) ran into this exact phenomenon: global deduplication across 96 dumps removed up to 90% of older snapshots, but the surviving 10% had worse quality (more ads and keyword lists) than the 90% that was discarded. Deduplicating each snapshot independently yielded 20T tokens and matched RefinedWeb performance. Deduplication does help (Lee et al., 2022), so dropping it altogether is wrong—and lowering the threshold blindly just removes even more without checking.'
+  - question: 'A packed sequence of length $L = 8$ tokens holds the last 3 tokens of document A (including its EOS token) followed by the first 5 tokens of document B. Under a cross-document attention mask, how many $(i, j)$ pairs are allowed to attend?'
+    options: ['$21$', '$36$', '$15$', '$64$']
+    answer: 0
+    explanation: 'Each document forms its own lower-triangular block along the diagonal: $\tfrac{3 \cdot 4}{2} = 6$ entries for document A plus $\tfrac{5 \cdot 6}{2} = 15$ entries for document B, totaling $21$. $36 = \tfrac{8 \cdot 9}{2}$ is the count for a standard causal mask where B is allowed to attend back to A; $15$ counts only B''s block; and $64$ is an unmasked $8 \times 8$ grid.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import dedupCode from '@code/llm/pretraining-data/dedup.en.py?raw';
+import packingCode from '@code/llm/pretraining-data/packing.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Trace the pipeline that turns raw web crawls into LLM pre-training data: text extraction, quality filtering, exact and near-duplicate **deduplication**, PII removal, source mixing, and **sequence packing**.
+- Derive why **MinHash** estimates Jaccard similarity, and derive the probability $1 - (1 - s^r)^b$ that banded **LSH** flags a pair of documents as candidates.
+- Implement exact SHA-256 deduplication, MinHash + LSH near-deduplication, and sequence packing with a **cross-document attention mask** in NumPy.
+- Recognize the real-world trade-offs in data curation: heuristic rules that accidentally discard good text, why removing more duplicates is not always better, and why source mixing weights have no universal formula.
+
+## Prerequisites
+
+{/* List populated from roadmap.ts prerequisites. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In [Building Your First LLM](/en/llm/build-first-llm/), we trained a language model with **cross-entropy** on fixed-length windows of $L$ tokens, using a **causal mask** so position $t$ only attends to positions $\le t$. That lesson also showed how quickly a model memorizes when data is scarce, and normalized text to Unicode **NFC** before counting characters.
+:::
+
+## Intuition
+
+### Quantity alone is not enough
+
+[Building Your First LLM](/en/llm/build-first-llm/) showed why an LLM needs a massive amount of text so that learning general language rules beats memorizing individual passages. The largest public source of text is the web. According to the creators of the C4 dataset (Raffel et al., 2020), Common Crawl—a public archive of web snapshots—produces roughly 20 TB of extracted text every month. Yet the same authors observed that the vast majority of that text is not natural prose at all: it is navigation menus, error messages, boilerplate notices, and repeated spam.
+
+A concrete example: Lee et al. (2022) inspected C4 and found a single 61-word English sentence repeated more than **60,000 times**. A model reading that sentence 60,000 times learns nothing new after the first few occurrences; it only wastes compute and memorizes the sentence verbatim.
+
+Consequently, most of the work in preparing pre-training data is **throwing data away**, not hoarding more of it. Inside a raw web crawl, you will run into:
+
+- pages consisting solely of navigation bars, footers, and cookie consent banners;
+- the exact same syndicated news article republished across dozens of sites, differing only in the dateline;
+- SEO spam and auto-generated product listings;
+- real people's email addresses and phone numbers.
+
+**The problem: starting from a massive pile of raw text, keep the pages worth learning from, strip out exact and near-duplicate documents without comparing every pair, and pack the surviving documents into fixed-length sequences of $L$ tokens for training.**
+
+## Theory
+
+### Data sources
+
+Pre-training corpora typically blend several distinct domains so the model acquires a broad set of skills:
+
+| Source | What it brings | Examples |
+|---|---|---|
+| Web crawls (Common Crawl) | Scale and broad coverage of everyday topics | C4, RefinedWeb, FineWeb |
+| Books | Long-range narrative coherence | Public-domain books from Project Gutenberg |
+| Academic papers | Technical depth, math, formal reasoning | arXiv, PubMed Central |
+| Source code | Structured logic and programming syntax | Public repositories on GitHub |
+| Wikipedia | Concise, edited reference knowledge | Multi-language Wikipedia dumps |
+
+The Pile (Gao et al., 2020) combined 22 diverse sub-datasets along these lines; Dolma (Soldaini et al., 2024) assembled roughly 3 trillion tokens across web pages, academic papers, code, books, and encyclopedias. Every source carries its own licensing, copyright, and terms-of-use rules—even publicly accessible web pages, as covered in [Web Crawling and MongoDB](/en/llm/web-crawling-mongodb/).
+
+For web crawls, step zero is **extracting plain text from raw HTML**. The FineWeb team (Penedo et al., 2024) found that extracting text directly from raw WARC HTML files using the `trafilatura` library produced noticeably better downstream models than using Common Crawl's pre-extracted WET text files, which often retain menus and boilerplate.
+
+### Quality filtering
+
+**Heuristic filtering.** C4 applied a set of fast, rule-based filters, including:
+
+- keep only lines that end with a terminal punctuation mark and contain at least 5 words, and drop any page with fewer than 3 sentences;
+- drop any line mentioning `"Javascript"` or cookie policies, and drop any page containing `"lorem ipsum"` or a curly brace `{`;
+- drop any page containing words on a blocklist, and keep only pages classified as English by `langdetect` with probability at least $0.99$.
+
+Heuristic rules are transparent and cheap to run, but every rule has collateral damage. Dropping pages containing `{` was intended to filter out leaked JavaScript snippets, yet it also wiped out every C, Java, and Python tutorial on the web. When the FineWeb team ablated C4's rules one by one, they found that the "keep only lines ending in punctuation" rule gave the single largest boost on its own—but threw away ~30% of all tokens; keeping all the *other* C4 rules while dropping that one achieved an even better model score while discarding only ~7% of tokens. Rules tuned on English prose also need to be re-validated before applying them to other languages.
+
+**Classifier-based filtering.** A complementary approach trains a lightweight model to score "how educational or well-written is this page?". To build FineWeb-Edu, the FineWeb authors prompted Llama-3-70B-Instruct to grade 460,000 web pages on educational quality, trained a fast classifier on those grades, and kept only pages scoring above a threshold—distilling 15 trillion tokens of FineWeb down to 1.3 trillion tokens in FineWeb-Edu. Models trained on FineWeb-Edu jumped from 33% to 37% on MMLU at the same compute budget. The trade-off: a classifier bakes in whatever biases exist in your definition of "good", and can narrow the corpus's stylistic diversity if applied too aggressively.
+
+### Exact deduplication
+
+The simplest way to remove duplicates is to normalize each document (Unicode NFC, lowercase, collapse whitespace), hash the resulting byte string with a cryptographic hash such as SHA-256, and keep only the first document seen for each digest. Any two documents that become byte-for-byte identical after normalization produce the exact same 256-bit hash. This pass runs in linear time and needs only one hash per document in memory.
+
+Its limitation is obvious: change a single comma or a timestamp at the top of a syndicated article, and the SHA-256 hash changes completely. To catch shared boilerplate paragraphs *inside* otherwise different pages, Lee et al. (2022) also ran **exact substring deduplication** using a **suffix array** to strip any repeated span of 50 tokens or longer.
+
+### Near-deduplication: shingles and Jaccard similarity
+
+To catch **near-duplicates**—pages that are 80% or 90% identical—we first need a mathematical measure of document overlap. We represent each document as a set of **shingles** ($n$-grams of consecutive words or tokens). Using 2-word shingles, the 4-word phrase `"hà nội là thủ đô"` (5 words) produces 4 shingles: `("hà", "nội")`, `("nội", "là")`, `("là", "thủ")`, `("thủ", "đô")`. Given the shingle sets $A$ and $B$ of two documents, their **Jaccard similarity** is:
+
+$$
+J(A, B) = \frac{|A \cap B|}{|A \cup B|}
+$$
+
+The numerator counts shared shingles; the denominator counts distinct shingles across both documents combined. $J = 1$ when the two sets are identical, and $J = 0$ when they share no shingles at all. In our first code cell below, document 0 has 14 word-pair shingles and document 2 (which inserts the single word `"cổ"`) has 15 shingles. They share 13 shingles in common and have $14 + 15 - 13 = 16$ in their union, giving $J = 13 / 16 \approx 0.81$.
+
+Why not just compute $J(A, B)$ for every pair of documents? With $m$ documents there are $m(m - 1)/2$ pairs; for $m = 10^9$ web pages, that is $\approx 5 \times 10^{17}$ pairs, and each comparison would have to intersect full shingle sets. Scaling to the web requires two clever tricks: compress each document's shingle set into a fixed-size **signature** (MinHash), and only compare pairs that collide in at least one bucket (LSH).
+
+### MinHash: a compact signature that estimates Jaccard
+
+Introduced by Broder (1997) for AltaVista's web crawler, **MinHash** compresses an arbitrarily large set $A$ into a small vector of integers whose collision rate equals $J(A, B)$. Pick a random hash function $h$ that maps each shingle $x$ to a distinct integer. The **MinHash** of set $A$ is simply the minimum hash value across its elements: $\min_{x \in A} h(x)$.
+
+**Why $\Pr[\min h(A) = \min h(B)] = J(A, B)$.** Consider the single shingle $x^*$ that achieves the smallest hash value across the entire union $A \cup B$:
+
+- If $x^* \in A \cap B$, then $x^*$ is present in both $A$ and $B$, so both sets attain the exact same minimum $h(x^*)$, and $\min h(A) = \min h(B)$.
+- If $x^*$ belongs only to $A$ (and not $B$), then $\min h(A) = h(x^*)$, whereas every element of $B$ has a strictly larger hash value, so $\min h(A) \ne \min h(B)$. The symmetric argument holds if $x^*$ belongs only to $B$.
+
+Therefore, $\min h(A) = \min h(B)$ **if and only if** the global minimum element $x^* \in A \cup B$ happens to lie in the intersection $A \cap B$. Because $h$ assigns random orderings, every element of $A \cup B$ is equally likely to be the minimum $x^*$. The probability that $x^*$ falls in $A \cap B$ is therefore $|A \cap B| / |A \cup B| = J(A, B)$.
+
+A single hash function gives one coin flip with success probability $J$. By applying $K$ independent hash functions $h_1, \dots, h_K$, we represent each document by a **MinHash signature** of $K$ integers—regardless of whether the document is 50 words or 50,000 words long—and estimate $J(A, B)$ by the fraction of matching coordinates:
+
+$$
+\hat{J} = \frac{1}{K} \sum_{k=1}^{K} \mathbb{1}\big[\min h_k(A) = \min h_k(B)\big]
+$$
+
+where $\mathbb{1}[\cdot]$ is $1$ when the condition holds and $0$ otherwise. Because $\hat{J}$ is the average of $K$ independent Bernoulli($J$) trials, it is an unbiased estimator with mean $J$ and standard deviation $\sqrt{J(1 - J) / K}$. For $J = 0.81$ and $K = 64$, the standard error is $\approx 0.05$; cutting the error in half requires $4\times$ as many hashes.
+
+### LSH: comparing only likely matches
+
+Even with compact $K$-integer signatures, comparing all $m(m - 1)/2$ pairs is still quadratic in $m$. **Locality-Sensitive Hashing** (**LSH**) via banding avoids all-pairs comparison. Partition the $K$-element signature into $b$ **bands** of $r$ consecutive rows each, so $K = b \cdot r$ (note: here $b$ denotes the number of bands, not a bias term). Two documents become a **candidate pair** if and only if their signatures match on **all $r$ rows of at least one band**. In practice, you hash each band's $r$-tuple into a bucket table; only documents that land in the same bucket in at least one band are ever compared.
+
+Let $s = J(A, B)$ be the probability that two signatures match at any single row. We can derive the probability $P(s)$ that the pair becomes a candidate in four lines:
+
+1. Probability that all $r$ independent rows in one specific band match: $s^r$.
+2. Probability that this band does *not* match completely: $1 - s^r$.
+3. Probability that *none* of the $b$ independent bands match completely: $(1 - s^r)^b$.
+4. Probability that **at least one** band matches completely (complement of step 3):
+
+$$
+P(s) = 1 - (1 - s^r)^b
+$$
+
+Evaluating $P(s)$ for $b = 16$ bands of $r = 4$ rows ($K = 64$, matching our code cell):
+
+| True similarity $s$ | 0.1 | 0.3 | 0.5 | 0.7 | 0.81 |
+|---|---:|---:|---:|---:|---:|
+| $P(s)$ | 0.0016 | 0.12 | 0.64 | 0.99 | 0.9999 |
+
+Plotting $P(s)$ against $s$ produces an S-curve (step-like threshold): pairs with low similarity ($s = 0.1$) almost never collide ($0.16\%$), whereas near-duplicates ($s = 0.81$) are caught $99.99\%$ of the time. The inflection threshold where the curve rises steepest sits near $s \approx (1/b)^{1/r}$—here $(1/16)^{1/4} = 0.5$. Notice how $r$ and $b$ pull in opposite directions: increasing $r$ requires more rows to match at once (making the filter stricter and shifting the threshold right), while increasing $b$ gives pairs more chances to collide (making the filter looser and shifting the threshold left). Because LSH is a probabilistic sieve, candidate pairs are often verified in a second pass.
+
+Published MinHash + LSH configurations from major corpora:
+
+| Corpus | Shingle unit | $K$ | $b \times r$ | Reported candidate probability |
+|---|---|---:|---:|---|
+| FineWeb (2024) | 5 words | 112 | $14 \times 8$ | $s = 0.75$: $77\%$; $s = 0.85$: $98.8\%$ |
+| Lee et al. (2022) | 5 whitespace words | 9,000 | $450 \times 20$ | same curve as RefinedWeb below |
+| RefinedWeb (2023) | 5 GPT-2 tokens (after NFD + accent stripping) | 9,000 | $450 \times 20$ | $s = 0.75$: $76\%$; $s = 0.80$: $99.4\%$ (Appendix G) |
+
+(Watch out for a notation swap when reading Lee et al. and RefinedWeb: those papers write $b = 20$ for the number of rows per band and $r = 450$ for the number of bands—the reverse of our $b$-bands, $r$-rows convention. Also note that Section 3.3 of RefinedWeb accidentally writes "20 buckets of 450 hashes", whereas Appendix G of the same paper shows the actual $450 \times 20$ curve matching $1 - (1 - s^{20})^{450}$. Lee et al. additionally filter candidate pairs by checking that true Jaccard similarity exceeds $0.8$ and token-level edit similarity exceeds $0.8$.)
+
+### Why deduplicate—and when is it too much?
+
+Lee et al. (2022) demonstrated two major benefits of deduplicating pre-training corpora. First, models trained on deduplicated data emitted **roughly $10\times$ less memorized training text verbatim** (dropping from over $1\%$ of generated continuations to ~0.1%). Second, they found that over $4\%$ of validation examples in standard benchmarks had near-duplicates sitting inside raw training sets—a problem known as **test-set contamination**, which inflates benchmark scores by grading the model on passages it has already seen. Deduplicating training data against evaluation benchmarks is therefore essential.
+
+More deduplication is not automatically better, however. When the FineWeb authors ran MinHash deduplication globally across all 96 Common Crawl dumps combined (shrinking the corpus to 4 trillion tokens), models trained on the result performed **no better** than models trained on un-deduplicated data. Digging in, they found that global deduplication stripped up to 90% of older crawl snapshots, and the surviving 10% consisted disproportionately of unique but low-quality pages—ads, unformatted keyword lists, andgibberish—that happened to be unique across time. When they instead deduplicated **each Common Crawl dump independently**, 20 trillion tokens survived and downstream model performance matched RefinedWeb. The lesson: **you cannot judge a data filter by how many gigabytes it deletes; you must validate every filtering stage by training a model and measuring downstream benchmarks.**
+
+### PII and toxic content
+
+**Personally identifiable information** (**PII**)—such as email addresses, phone numbers, and public IP addresses—can be memorized during pre-training and regurgitated at inference time. FineWeb masks email addresses and public IP addresses with placeholders in its released corpus; Dolma applies regex-based PII masking alongside classifier-based toxic content filtering trained on Jigsaw Toxic Comments, whereas C4 relied on word blocklists. Every safety filter involves a precision–recall trade-off: overly aggressive blocklists disproportionately erase benign discussions from minority communities (for example, medical or LGBTQ+ pages), while overly lax filters leave sensitive personal data in the corpus.
+
+### Mixing data sources
+
+Once individual sources are cleaned, each source is assigned a **mixing weight** determining what fraction of training tokens comes from that domain. High-quality, smaller domains (such as Wikipedia or textbooks) are often **upsampled** for multiple epochs, while massive web crawls are read for a single epoch or less. A subset of the 22 components in The Pile (825 GiB raw size, ~1,254 GiB effective size after epoch upsampling):
+
+| Component | Effective weight | Epochs |
+|---|---:|---:|
+| Pile-CC (web crawl) | 18.11% | 1.0 |
+| PubMed Central | 14.40% | 2.0 |
+| ArXiv | 8.96% | 2.0 |
+| GitHub | 7.59% | 1.0 |
+| Wikipedia (en) | 1.53% | 3.0 |
+
+Here Wikipedia is only 6.38 GiB on disk, but reading it for 3 epochs triples its share in the training stream. There is no universal formula for optimal domain weights—teams tune them empirically via small proxy training runs tailored to their target capabilities.
+
+### Sequence packing and cross-document attention masks
+
+During pre-training, the GPU expects rectangular batches of sequences of exact length $L$ (say, $L = 4096$ or $8192$), whereas real documents range from a two-line tweet to a 100-page paper. If you **pad** each document chunk out to length $L$ with dummy pad tokens, a large fraction of your GPU FLOPs is wasted multiplying zeros. Instead, pre-training pipelines use **sequence packing**: tokenize every document, append an **end-of-sequence** (`<eos>`) token at the end of each document, concatenate the entire stream end to end, and slice it into contiguous chunks of length $L$. Not a single token slot is wasted on padding—at the cost that a single training window of length $L$ now frequently contains the tail of one document followed immediately by the start of an unrelated document.
+
+There are two ways to handle attention across those document boundaries:
+
+1. **Standard causal mask:** leave the lower-triangular causal mask unchanged and rely on the `<eos>` token to signal to the model that a new topic has begun.
+2. **Cross-document attention mask** (called a **document mask** in Llama 3): block tokens in one document from attending to tokens in any preceding document packed into the same window. Let $\mathrm{doc}(i)$ denote the document index of token position $i$ within the window, where $\mathrm{doc}(i)$ increments right after each `<eos>` token (so `<eos>` belongs to the document it closes). The additive attention mask $\mathbf{M}$ sets $M_{ij} = 0$ if and only if **both** conditions hold:
+
+$$
+j \le i, \qquad \mathrm{doc}(i) = \mathrm{doc}(j),
+$$
+
+and sets $M_{ij} = -\infty$ everywhere else. The first condition is the familiar causal mask; the second restricts attention to the same document. Visually, $\mathbf{M}$ becomes a block-diagonal series of lower-triangular triangles—one triangle per packed document. For a 12-token window containing 4 tokens of document 0 followed by 8 tokens of document 1, the number of allowed $(i, j)$ attention pairs drops from $\tfrac{12 \cdot 13}{2} = 78$ under a standard causal mask to $\tfrac{4 \cdot 5}{2} + \tfrac{8 \cdot 9}{2} = 10 + 36 = 46$ under a cross-document mask.
+
+The [Llama 3 report](https://arxiv.org/abs/2407.21783) (Llama Team, 2024) notes that while document masking has a modest effect during standard short-context pre-training, it is crucial when continuing pre-training on very long sequences (such as 128K context), where it prevents attention heads from wasting capacity attending across unrelated packed documents.
+
+:::note[Key takeaway]
+MinHash estimates Jaccard similarity because $\Pr[\min h(A) = \min h(B)] = J(A, B)$. Banded LSH splits a $K$-element signature into $b$ bands of $r$ rows and flags candidate pairs with probability $1 - (1 - s^r)^b$. Sequence packing concatenates documents separated by `<eos>` into gap-free windows of length $L$, and a cross-document mask adds the condition $\mathrm{doc}(i) = \mathrm{doc}(j)$ to the causal mask.
+:::
+
+### Limitations
+
+- **Token counts depend on the tokenizer.** FineWeb's 15 trillion tokens (counted with the GPT-2 tokenizer) and Dolma's 3 trillion tokens (counted with the Llama tokenizer) are not measured with the same ruler.
+- **Web-scale pipelines require distributed tooling.** Our code cells run on 5 sentences in memory; processing billions of web pages uses distributed frameworks such as Hugging Face's [datatrove](https://github.com/huggingface/datatrove) for parallel extraction, MinHash bucketing, and tokenization.
+- **Pre-training data is only raw fuel.** A model pre-trained on even the cleanest web corpus still only knows how to continue documents. Turning it into an instruction-following assistant is the job of [The GPT Family and Multi-Task Fine-Tuning](/en/llm/gpt-family-finetuning/).
+
+## Illustration
+
+The first table traces six hypothetical web pages through our curation pipeline. Look closely at the rightmost column: heuristic rules inevitably throw away some baby with the bathwater.
+
+| Web page (illustrative example) | Pipeline stage that catches it | Outcome |
+|---|---|---|
+| `"Home \| News \| Contact \| Sign in"` | Heuristic: short line with no terminal punctuation | Dropped (intended) |
+| `"Please enable JavaScript to view this page"` | C4 `"Javascript"` line filter | Dropped (intended) |
+| A clean Python tutorial containing a `{ ... }` dict snippet | C4 curly-brace `{` page filter | Dropped (**false positive**) |
+| A classic poem without periods at the ends of verses | C4 terminal-punctuation line filter | Most lines stripped (**false positive**) |
+| The same wire-service news story on 10 sites with different datelines | Near-deduplication (MinHash + LSH) | 1 copy kept, 9 dropped |
+| A forum thread containing a user's personal email address | PII regex masking | Page kept, email replaced with placeholder |
+
+The second table compares **padding** vs. **sequence packing** on the three surviving sentences from our second code cell (document lengths of 16, 10, and 13 tokens including `<eos>`, packed into windows of length $L = 12$):
+
+| Method | Windows of length $L = 12$ | Wasted pad tokens | Leftover tail tokens |
+|---|---:|---:|---:|
+| Padding (each document chunked separately) | 5 | 21 out of 60 slots (35%) | 0 |
+| Sequence packing (concatenate then slice) | 3 | 0 | 3 |
+
+In a real corpus, those 3 leftover tail tokens are not lost—they simply sit at the start of the very next window, immediately followed by the next document in the stream.
+
+## Code examples
+
+The code in this lesson was last tested in October 2026 with Python 3.14 and NumPy 2.4 (in Pyodide). Both cells run right in your browser and are completely self-contained.
+
+### Exact deduplication and MinHash + LSH
+
+This cell builds a 5-sentence toy corpus in Vietnamese (so we can see Unicode accent normalization in action). Sentence 1 is an exact copy of sentence 0, except uppercased, padded with extra spaces, and converted to decomposed **NFD** Unicode (where base letters and tone/vowel diacritics are stored as separate code points). Sentence 2 is identical to sentence 0 except for one inserted word (`"cổ"`). Sentence 3 is about *phở*, and sentence 4 is a spam ad. The script runs exact SHA-256 deduplication after NFC normalization, then computes $K = 64$ MinHash signatures over 2-word shingles and applies banded LSH with $r = 4$ rows per band ($b = 16$ bands).
+
+<PythonRunner code={dedupCode} title="Exact deduplication, MinHash, and LSH" />
+
+Walking through the output:
+
+- **`raw equal: False`, yet `after exact: [0, 2, 3, 4]`.** Even though `docs[0]` and `docs[1]` differ in raw bytes, NFC normalization, lowercasing, and whitespace tokenization map both to the exact same SHA-256 digest, dropping sentence 1.
+- **Pair `0-2`:** true Jaccard is $J = 0.81$ (matching our $13 / 16$ hand calculation in Theory), and the 64-hash MinHash signature estimates $\hat{J} = 0.84$—within one standard error ($\approx 0.05$). LSH flags `cand = True`, matching our table where $P(0.81) \approx 0.9999$.
+- **Pairs `0-3` and `2-3`:** true Jaccard is $J = 0.10$ (sharing only `"của việt"` and `"việt nam"`), estimated at $0.11$ and $0.09$, with `cand = False`. All pairs involving the spam sentence 4 have $J = 0.00$, $\hat{J} = 0.00$, and `cand = False`.
+
+Notice that our hash helper `h(k, s)` takes the first 60 bits of `hashlib.sha1` rather than calling Python's built-in `hash()` (see the first pitfall below). Using 60 bits fits cleanly inside a signed 64-bit integer (`int64`) in NumPy without overflow.
+
+Try two quick edits on line 27 (`K, r = 64, 4`):
+
+- **`K, r = 256, 4`:** the MinHash estimate for pair `0-2` tightens to `0.82` (closer to the true $0.81$) because quadrupling $K$ cuts the standard error in half to $\approx 0.024$.
+- **`K, r = 64, 16`:** now there are only $b = 4$ bands of $r = 16$ rows each. Pair `0-2` flips to `cand = False` even though its MinHash similarity is still `0.84`! By our formula, $1 - (1 - 0.81^{16})^4 \approx 0.13$: making bands too wide causes LSH to miss genuine near-duplicates.
+
+### Sequence packing and cross-document attention masks
+
+This cell takes the three distinct sentences left after deduplication: sentence 0 (about Hanoi), sentence 3 (about *phở*), and sentence 4 (the spam line, kept here just so we have three documents of different lengths; in a real pipeline the quality filter would have dropped it). Each word is treated as one token, with `<eos>` appended at the end of each document. The script compares padding vs. sequence packing for window length $L = 12$, prints the second packed window alongside its document IDs $\mathrm{doc}(i)$, and counts how many attention pairs $(i, j)$ are permitted under a standard causal mask vs. a cross-document mask.
+
+<PythonRunner code={packingCode} title="Sequence packing with EOS and cross-document attention masking" />
+
+Walking through the output:
+
+- **`padding: 5 sequences, 21 pad tokens` vs. `packing: 3 sequences, 3 tokens left over`**: the exact numbers from our second Illustration table.
+- **The second packed window (`seq 1`)** starts with `"nghìn năm tuổi <eos>"` (the last 4 tokens of the Hanoi sentence, document 0) followed immediately by the first 8 tokens of the *phở* sentence (document 1). Its `doc` array is four `0`s (including `<eos>`) followed by eight `1`s.
+- **Allowed attention entries:** `causal allows: 78` vs. `doc mask allows: 46`, matching our Theory calculation $\tfrac{4 \cdot 5}{2} + \tfrac{8 \cdot 9}{2} = 10 + 36 = 46$.
+- **`row 4` of the mask** corresponds to `"phở"`, the very first token of document 1. Under the cross-document mask, row 4 contains a single `1` (at index 4, attending only to itself) and zeros at indices 0–3, preventing `"phở"` from attending back to `"nghìn năm tuổi"`. A standard causal mask would have placed five `1`s in row 4.
+
+## Common pitfalls
+
+:::caution[Using Python's built-in `hash()` for MinHash shingles]
+Since Python 3.3, `hash()` on strings is randomized with a per-process secret seed (hash salting) to prevent hash-flooding denial-of-service attacks. That means the exact same shingle produces different `hash()` values every time you restart Python or run across multiple worker processes, making MinHash signatures non-reproducible and impossible to compare across machines. Always use a deterministic hash function such as `hashlib.sha1`, `hashlib.sha256`, `xxhash`, or `zlib.crc32`, as our `h(k, s)` helper does.
+:::
+
+:::caution[Hashing or shingling before Unicode normalization]
+An accented character like `"à"` can be represented either as a single precomposed code point (NFC) or as `"a"` followed by a combining accent code point (NFD). Because hash functions read raw bytes, NFC and NFD strings hash to completely different digests. Worse, in our first code cell, if you remove `unicodedata.normalize("NFC", ...)` from line 13, regex tokenization `r"\w+"` fails to match combining accent marks as word characters, splitting words right at their accents (`"nội"` splits into `"no"` and `"i"`) and dropping the Jaccard similarity between sentence 0 and sentence 1 all the way to `0.00`! Always normalize to NFC, lowercase, and standardize whitespace before hashing or shingling.
+:::
+
+:::caution[Equating deduplication with quality filtering, or assuming more removal is always better]
+Deduplication only removes repetition: if a toxic or spam page appears once, deduplication will happily keep that one copy, so dedicated quality and safety filters are still required. Conversely, deleting a larger fraction of tokens does not mean the surviving corpus is cleaner—as FineWeb's global deduplication experiment showed when removing 90% of older crawls left behind the lowest-quality 10%. Judge every data pipeline change by downstream model evaluations, not by how many terabytes were cut.
+:::
+
+:::caution[Forgetting to deduplicate training data against evaluation benchmarks]
+If test questions or passages from your evaluation benchmarks sit inside your pre-training corpus, high benchmark scores may simply reflect memorization (**test-set contamination**). Always run exact and near-duplicate decontamination between your pre-training data and every evaluation benchmark you plan to report, just as [Machine Learning Overview](/en/ml/ml-overview/) warned against train–test leakage.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Raw web crawls are massive but dominated by boilerplate, spam, and duplicates. Preparing pre-training data is largely the art of throwing away bad data: HTML text extraction, heuristic and classifier-based quality filtering, exact and near-deduplication, PII/toxicity filtering, and domain mixing.
+- Exact deduplication hashes normalized text (e.g., with SHA-256). Near-deduplication represents documents as $n$-gram shingle sets with Jaccard similarity $J = |A \cap B| / |A \cup B|$; MinHash compresses each set to $K$ minimum hashes whose collision probability equals $J$; and banded LSH partitions the $K$ hashes into $b$ bands of $r$ rows, flagging candidate pairs with probability $1 - (1 - s^r)^b$.
+- Deduplication cuts verbatim memorization by ~10× and prevents test-set contamination, but overly aggressive global deduplication can degrade corpus quality. Always validate data filtering choices by training proxy models.
+- Sequence packing concatenates tokenized documents separated by `<eos>` into fixed-length windows of $L$ tokens with zero padding waste, and a cross-document attention mask adds $\mathrm{doc}(i) = \mathrm{doc}(j)$ to the causal mask so attention never leaks across packed document boundaries.
+
+**Further reading:**
+
+- Lee, K., Ippolito, D., Nystrom, A., Zhang, C., Eck, D., Callison-Burch, C., Carlini, N. (2022). [*Deduplicating Training Data Makes Language Models Better*](https://arxiv.org/abs/2107.06499). ACL 2022, Section 4. MinHash + LSH, suffix-array substring deduplication, memorization reduction, and benchmark contamination rates. (Note that this paper swaps the letters $b$ and $r$ relative to our notation.)
+- Penedo, G., Kydlíček, H., Ben Allal, L., Lozhkov, A., Mitchell, M., Raffel, C., Von Werra, L., Wolf, T. (2024). [*The FineWeb Datasets: Decanting the Web for the Finest Text Data at Scale*](https://arxiv.org/abs/2406.17557). arXiv:2406.17557, Sections 3 and 4. Empirical ablations of WARC extraction, C4 heuristic filters, per-dump vs. global MinHash deduplication, and classifier-filtered FineWeb-Edu.
+- Penedo, G. et al. (2023). [*The RefinedWeb Dataset for Falcon LLM: Outperforming Curated Corpora with Web Data, and Web Data Only*](https://arxiv.org/abs/2306.01116). arXiv:2306.01116, Section 3 and Appendix G. End-to-end web filtering pipeline and MinHash LSH curve details.
+- Raffel, C. et al. (2020). [*Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer*](https://arxiv.org/abs/1910.10683). *JMLR* 21(140), Section 2.2. The C4 dataset and its heuristic filtering rules.
+- Gao, L. et al. (2020). [*The Pile: An 800GB Dataset of Diverse Text for Language Modeling*](https://arxiv.org/abs/2101.00027). arXiv:2101.00027, Table 1. Domain composition, mixing weights, and epoch upsampling across 22 data sources.
+- Soldaini, L. et al. (2024). [*Dolma: an Open Corpus of Three Trillion Tokens for Language Model Pretraining Research*](https://arxiv.org/abs/2402.00159). ACL 2024, arXiv:2402.00159. Open 3T-token corpus and curation toolkit, including PII masking and toxicity filtering ablations.
+
+<LessonProgress />

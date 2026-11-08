@@ -1,0 +1,301 @@
+---
+title: Web Crawling and MongoDB
+description: Gather web pages for a chatbot. robots.txt and rule layers, polite fetching with requests, extracting text with BeautifulSoup, and saving to MongoDB without duplicate URLs.
+quiz:
+  - question: 'A site''s robots.txt has a `User-agent: *` group containing a single rule `Disallow: /news`. Your crawler wants to fetch `/news-feed/ai` and `/News/ai`. According to RFC 9309, what is the result?'
+    options:
+      - 'Both are allowed, because `/news` is not a directory path ending with a slash'
+      - '`/news-feed/ai` is disallowed, while `/News/ai` is allowed'
+      - 'Both are disallowed, because path matching is case-insensitive'
+      - '`/news-feed/ai` is allowed, while `/News/ai` is disallowed'
+    answer: 1
+    explanation: 'Rules match by path prefix: `/news-feed/ai` starts with `/news` and is therefore blocked, even if the site owner only meant to block `/news`. Path matching is case-sensitive, however, so `/News/ai` does not match `/news` and is allowed. Only product tokens on `User-agent` lines are case-insensitive. To block only a directory, a site owner writes `Disallow: /news/`.'
+  - question: 'A crawler requests `/robots.txt` from a site and receives HTTP 503 because the server is overloaded. According to RFC 9309, what must the crawler do?'
+    options:
+      - 'Treat the site as having no robots.txt and crawl all pages freely'
+      - 'Crawl pages as usual, just adding a 1-second delay between requests'
+      - 'Treat the entire site as disallowed until robots.txt can be fetched successfully'
+      - 'Retry fetching robots.txt in a tight loop until it succeeds'
+    answer: 2
+    explanation: 'A 5xx status code means robots.txt is "unreachable", and RFC 9309 requires crawlers to assume a complete disallow of the site. The first option describes how 4xx status codes are handled: when the file does not exist, the crawler may access the site without restriction. Confusing 4xx and 5xx is a common bug—and hammering a server that is already returning 503 is the worst thing a crawler can do.'
+  - question: 'A forum''s robots.txt allows all paths. Public member profile pages display each user''s full name, phone number, and photo. You plan to crawl these pages as a data source for a RAG chatbot. Which statement is accurate?'
+    options:
+      - 'robots.txt is only one layer. Terms of Service, copyright, and personal data protection laws still apply, so you should avoid collecting personal data in the first place'
+      - 'Because robots.txt allows it and the pages are public, you may collect and use anything on them'
+      - 'You only need to spoof a browser `User-Agent` so the site does not realize you are a bot'
+      - 'In 2022, US courts ruled that scraping any publicly accessible web page is always legal'
+    answer: 0
+    explanation: 'robots.txt is a technical convention expressing which paths a crawler may visit; permission in robots.txt is not legal authorization to copy or process the content. Names, phone numbers, and photos are personal data protected by privacy laws (such as GDPR or Vietnam''s Personal Data Protection Law). The hiQ v. LinkedIn ruling addressed only one specific US statute (the CFAA), not whether scraping is universally legal. Spoofing a browser `User-Agent` is dishonest and provides zero legal protection.'
+  - question: 'Your crawler runs once a day. The MongoDB collection has a unique index on `url`, and your script saves each page with `pages.insert_one(page)`. On day two, an already-saved page has updated text. What happens?'
+    options:
+      - 'MongoDB automatically replaces the old document with the new content'
+      - 'A second document with the same `url` is inserted, because its auto-generated `_id` is different'
+      - '`insert_one` raises `DuplicateKeyError` and the new content is not saved. You should use `update_one` filtered by `url` with `upsert=True`'
+    answer: 2
+    explanation: 'The unique index blocks a second document with the same `url` even though `_id` differs, so the second option never happens. However, a unique index does not turn an insert into an update: `insert_one` only inserts, raises `DuplicateKeyError` on a collision, and halts the script if uncaught. An upsert filtered by `url` updates the existing document with `$set` when found and inserts a new document when not found, keeping exactly one document per page across repeated runs.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import robotsCode from '@code/llm/web-crawling-mongodb/robots.en.py?raw';
+import parseHtmlCode from '@code/llm/web-crawling-mongodb/parse-html.en.py?raw';
+import crawlCode from '@code/llm/web-crawling-mongodb/crawl.en.py?raw';
+import saveCode from '@code/llm/web-crawling-mongodb/save.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Distinguish the layers of rules governing web data collection: `robots.txt`, **Terms of Service**, copyright, and personal data protection, and explain why permission in `robots.txt` alone is not enough.
+- Parse and evaluate `robots.txt` under RFC 9309 using `urllib.robotparser`, including how to handle missing files and server errors.
+- Write a small, polite crawler using `requests` (with an explicit `timeout`, an honest `User-Agent`, and a delay between requests) and extract clean article text with BeautifulSoup.
+- Store crawled pages as documents in MongoDB, using a **unique index** on `url` combined with **upsert** so repeated runs update pages in place without creating duplicates.
+
+## Prerequisites
+
+{/* List populated from prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+This lesson relies on three core Python building blocks. **Strings**: `text.splitlines()` splits a multi-line string into a list of lines, and f-strings `f"{x}"` format values into strings. **Dictionaries** (dicts) `{"url": ..., "title": ...}` map field names to values; in Python, a MongoDB document is represented as a plain dict. **Functions** group reusable logic under a name, like `load_robots()` in our crawler script.
+:::
+
+## Intuition
+
+Suppose you want to build a chatbot that answers questions about the documentation of an open-source library. The documentation spans a few hundred web pages. Copying and pasting each page by hand would take a week, so you write a script to fetch the pages, strip out the navigation menus, and save the article text. Automatically traversing links and fetching web pages is called **web crawling**; extracting structured data from a fetched page is called **web scraping**. People often use the two terms interchangeably, though crawling emphasizes discovering and fetching pages while scraping emphasizes pulling data out of them.
+
+Think of your crawler as a visitor walking into a shop. On the back door hangs a "Staff Only" sign: that is **`robots.txt`**. The sign is not a physical lock, but a polite visitor reads it and stays out. Nor does the absence of a "Staff Only" sign mean you are allowed to photograph every copyrighted book in the shop and reprint it for sale. A polite visitor also does not barge through the door with a hundred clones at the same second: a script firing hundreds of requests per second can knock a small website offline.
+
+Once you have fetched the pages, where should you store them? You have a few hundred pages, each with a URL, title, body text, and fetch timestamp; some pages also have an author field while others do not. When you rerun the crawler next week, you want to refresh changed pages in place rather than ending up with two copies of every page. A **document database** like MongoDB fits this workflow naturally: each page is stored as a self-contained record (document), and if one page has an extra `author` field while another does not, no table migration is required.
+
+The problem this lesson solves is: **fetch and extract clean text from web pages lawfully and politely, and store each page in MongoDB so that every URL appears at most once alongside the metadata a RAG chatbot needs to cite its sources.**
+
+## Theory
+
+### Before the first line of code: are you allowed to fetch it?
+
+Ask this question before writing any code, because a technically flawless crawler can still violate the law or a site's terms. Five distinct layers of rules apply, each answering a different question:
+
+| Layer | Question it answers | How to check |
+|---|---|---|
+| `robots.txt` | Which URL paths may an automated crawler visit? | Fetch and parse `/robots.txt` (covered next) |
+| Terms of Service | Does the site permit automated collection? | Read the site's Terms of Service; many sites explicitly prohibit scraping |
+| Copyright | How may you reproduce or redistribute the content? | Check the content license; publicly readable does not mean public domain |
+| Personal data | Does the page contain names, emails, phone numbers, or photos of real people? | Avoid collecting personal data altogether |
+| Server load | Is your crawler slowing the site down for human visitors? | Space out requests, fetch only what you need, and stop immediately on 429/503 |
+
+Laws vary by jurisdiction, and this lesson is not legal advice. Two real-world examples illustrate why these distinctions matter:
+
+- In the United States, in *hiQ Labs v. LinkedIn*, the Ninth Circuit ruled in 2022 that automated scraping of publicly accessible profiles (not behind a login wall) likely did not violate the Computer Fraud and Abuse Act (CFAA). However, that ruling only addressed the CFAA. Later in 2022, the district court held that LinkedIn's User Agreement prohibiting scraping was enforceable, and the case ended in a consent judgment permanently barring hiQ from scraping LinkedIn. The case **does not** mean scraping public web pages is always legal.
+- In Vietnam, the Personal Data Protection Law (Law No. 91/2025/QH15) takes effect on January 1, 2026; in the EU, the GDPR applies. Consult the primary statutes and qualified legal counsel before collecting data for commercial use.
+
+The safest path is to crawl sources that **explicitly permit reuse**: official APIs, open datasets, or documentation published under a permissive license—and to strip out personal data before storing anything.
+
+### robots.txt under RFC 9309
+
+`robots.txt` is a plain-text file placed at the root of a website, such as `https://example.com/robots.txt`. Introduced in 1994 and standardized as the **Robots Exclusion Protocol** in RFC 9309 (Koster et al., 2022), the file consists of one or more **groups**:
+
+```text
+User-agent: *
+Disallow: /admin/
+Disallow: /search
+
+User-agent: BadBot
+Disallow: /
+```
+
+- Each group starts with one or more `User-agent` lines followed by `Allow` and `Disallow` rules. A crawler looks for the group whose `User-agent` token matches its own name (case-insensitively). If no specific group matches, it falls back to the `*` group; if neither exists, access is unrestricted. In the example above, `BadBot` is blocked from the entire site, while all other crawlers are only blocked from `/admin/` and `/search`.
+- Rules match by **path prefix** and are **case-sensitive**. `Disallow: /search` blocks both `/search?q=ai` and `/searching-tips`, but does not block `/Search`.
+- When multiple rules in the matching group match a URL path, the **longest** (most specific) rule wins. If an `Allow` rule and a `Disallow` rule match with the exact same length, `Allow` wins. If no rule matches, the path is allowed. (RFC 9309 also supports `*` wildcards and `$` end-of-path anchors, which we do not need here.)
+
+What if fetching `/robots.txt` itself fails? RFC 9309 specifies exact behavior based on the HTTP status code:
+
+| Status when fetching `/robots.txt` | Meaning | Required crawler behavior |
+|---|---|---|
+| Success (`2xx`) | Rules retrieved | Parse and obey the rules |
+| Client error (`4xx`, e.g. 404, 403) | No rules file available | Crawl without `robots.txt` restrictions |
+| Server error (`5xx`) or network failure | Server unreachable | **Assume the entire site is disallowed** |
+
+One special case is HTTP 429 (`Too Many Requests`): although 429 starts with a `4`, it means the server is rate-limiting you. Our crawler script treats 429 like a `5xx` error and halts crawling. Crawlers should cache a fetched `robots.txt` file so they do not re-download it before every page, refreshing the cache at least once every 24 hours.
+
+Python's standard library includes `urllib.robotparser`: `parse(lines)` parses an iterable of lines, and `can_fetch(agent, url)` returns `True` or `False`. `crawl_delay(agent)` reads the non-standard `Crawl-delay` directive that many sites still include. Note that while `RobotFileParser.read()` can fetch `/robots.txt` over the network, it sends Python's default `urllib` `User-Agent` header rather than your crawler's name, and it treats HTTP 401/403 as a full block (diverging from RFC 9309). For that reason, our crawler fetches `/robots.txt` using `requests` directly.
+
+(A version note: starting in Python's 2026 point releases—tested on 3.13.14 and 3.14.5—`urllib.robotparser` implements longest-match precedence and `*`/`$` wildcards per RFC 9309. Earlier releases such as 3.12.10 and 3.14.2, including the Pyodide runtime in the browser cell, evaluate rules top-to-bottom where the first matching rule wins. Our example rules have no overlapping prefixes, so both versions produce identical output.)
+
+:::note[Key takeaway]
+`robots.txt` is **not** an access-control mechanism or a legal license. RFC 9309 explicitly states that `robots.txt` rules are not a form of authorization, and anyone can read the file itself. Well-behaved crawlers obey it; malicious bots ignore it. Respecting `robots.txt` is necessary, but not sufficient on its own.
+:::
+
+### Polite fetching with `requests`
+
+The `requests` library fetches a page via `requests.get(url, headers=..., timeout=...)`, returning a response object with `status_code` (the HTTP status), `content` (raw bytes), and `text` (decoded string). Four habits belong in every crawler from line one, all shown in our crawler example below:
+
+- **Always set a `timeout`.** Without `timeout`, `requests.get` can hang indefinitely if a server accepts the connection and never sends a byte. Passing `timeout=10` caps the wait time for establishing a connection or receiving the next chunk of data to 10 seconds, raising `requests.Timeout` if exceeded. In a larger crawler, catch `requests.RequestException` so one unresponsive URL does not crash the entire run.
+- **Send an honest `User-Agent` header.** This header tells the server operator who is making the request. Identify your bot and provide a contact URL or email—such as `atlas-tutorial-bot/0.1 (+https://...)`—and never disguise your bot as a desktop web browser. If your crawler accidentally causes trouble, an operator who can see who you are can contact you instead of banning your IP range.
+- **Check the HTTP status code.** An HTTP 404 page or a "Rate limit exceeded" block page is still valid HTML. Only store pages that return status `200`, or call `r.raise_for_status()` to raise on `4xx`/`5xx`. If you receive `429` or `503`, the server is asking you to back off: stop crawling immediately.
+- **Space out requests** with `time.sleep`. There is no universal magic interval; this lesson **suggests** waiting at least 1 second between requests, or longer if `robots.txt` specifies a larger `Crawl-delay`. Never fire dozens of parallel threads at a small website.
+
+### Extracting text with BeautifulSoup
+
+An HTML document is a tree of nested elements (tags): `<title>`, `<p>`, `<a href="...">`. BeautifulSoup parses raw HTML into a navigable tree in Python. Note that the pip package is named `beautifulsoup4`, while the Python module you import is `bs4`.
+
+- `BeautifulSoup(html, "html.parser")` uses Python's built-in HTML parser. When you pass raw bytes `r.content` (rather than `r.text`), BeautifulSoup automatically inspects the page's `<meta charset>` tag to detect the character encoding.
+- **Finding elements.** `soup.find("title")` returns the **first matching tag**, or `None` if no such tag exists. `soup.find_all("a")` and `soup.select("article p")` (which takes a **CSS selector**) return a list of all matching tags.
+- **Extracting text and attributes.** `tag.get_text(strip=True)` extracts the text inside a tag and strips leading/trailing whitespace. When a tag contains nested child tags, pass a separator like `get_text(" ", strip=True)` so words from adjacent child tags do not get glued together. `tag.get("href")` reads an attribute value, and `urljoin(page_url, href)` resolves a relative link like `"embedding"` into a full absolute URL.
+
+A real web page surrounds its main content with navigation bars, footers, ads, and scripts. Selecting the specific content container (typically `<article>` or `<main>`) yields much cleaner text for RAG than dumping the text of the entire `<body>`.
+
+### Saving to MongoDB
+
+MongoDB stores records as **documents**: BSON objects made of field–value pairs, which can contain nested subdocuments and arrays. (Here "document" is the database term for a record, not a Word or PDF file.) Documents live inside a **collection**, and collections live inside a **database**. From Python, you connect with the `pymongo` driver, where each document is a plain Python `dict`.
+
+- **Flexible schema.** Documents in the same collection do not have to share the exact same set of fields. If one crawled page has an `author` field and another does not, MongoDB stores both without complaint—unlike a relational SQL table where every row must match fixed columns. "Flexible" does not mean sloppy, however: keep core field names consistent (`url`, `title`, `text`, `fetched_at`) so downstream code knows what to query.
+- **`_id`.** Every MongoDB document has a unique `_id` primary key. If you do not supply `_id` yourself, `pymongo` automatically generates a unique `ObjectId`.
+- **Inserting and querying.** `insert_one(doc)` inserts a single document; `insert_many([doc1, doc2])` inserts a list of documents. `find(filter_dict)` returns a **cursor** you can iterate over to read matching documents, while `find_one(filter_dict)` returns the first matching document or `None`. A filter is just a dict, such as `{"url": "https://example.com/a"}`.
+
+What happens when you run your crawler a second time tomorrow? Two features work together to guarantee that each `url` is stored at most once:
+
+- **Unique index.** Calling `pages.create_index("url", unique=True)` instructs MongoDB to reject any operation that would leave two documents with the same `url`. Attempting to insert a duplicate raises `DuplicateKeyError` (on `insert_one`) or `BulkWriteError` (on `insert_many`). Think of the unique index as a database-level safety net: even if a bug creeps into your Python script, duplicate URLs cannot enter the collection.
+- **Upsert** (a portmanteau of *update* and *insert*). Calling `update_one({"url": url}, {"$set": page}, upsert=True)` looks for a document matching `{"url": url}`: if one exists, it updates the fields in `$set`; if none exists, it inserts a new document. It never raises a duplicate error and is **idempotent**—you can rerun it any number of times and still end up with one up-to-date document per URL. The returned result exposes `matched_count` (how many existing documents matched the filter) and `upserted_id` (non-`None` when a new document was inserted).
+
+Use both together: write with `upsert=True`, and keep the unique index on `url` to guard against accidental `insert_one` calls. Make sure your `update_one` filter matches the indexed `url` field—if you filter on a field that changes between runs, every run will insert a fresh document.
+
+A **connection string** tells `pymongo` how to reach the MongoDB server, such as `mongodb://localhost:27017`. For cloud-hosted MongoDB services, the connection string includes your database username and password, so our code reads it from the **`MONGODB_URI`** environment variable—using the exact same habit as `OPENAI_API_KEY` in [Using Text Generation APIs](/en/llm/text-api/).
+
+Crawled pages serve as the raw material for [RAG and Modern Chatbots](/en/llm/rag-chatbot/). Storing `url` (so the chatbot can cite its source), `fetched_at` (so you know which pages are stale), and clean `text` (free of navigation menus and scripts) right at crawl time saves headaches later—because any boilerplate garbage saved into your database will eventually get retrieved into your LLM prompts. Splitting pages into chunks and computing embeddings is covered in the RAG lesson, while large-scale deduplication and corpus filtering are covered in [Preparing Pre-training Data](/en/llm/pretraining-data/).
+
+### Limitations
+
+- **JavaScript-rendered pages.** `requests` only downloads the initial HTML returned by the server; it does not execute JavaScript. Single-page applications that render their text in the browser via JavaScript will return an almost empty HTML shell to `requests`. Before reaching for a headless browser, check whether the site loads its content from a clean JSON API you can query directly.
+- **Our example crawler does not spider links recursively.** It iterates over an explicit list of paths. A full spider maintains a frontier queue of discovered links, a set of visited URLs, a domain allowlist, and a maximum depth/page budget.
+- **Raw crawled text still needs cleaning.** Near-duplicate pages, encoding glitches, and soft-404 error pages are discussed in Common pitfalls and in [Preparing Pre-training Data](/en/llm/pretraining-data/).
+
+## Illustration
+
+The example below feeds a small, self-contained HTML string through BeautifulSoup. Compare the raw HTML in the code against the printed output below it to see what is kept and what is stripped away.
+
+<LocalCode code={parseHtmlCode} title="Extract text from a given HTML page" packages={['beautifulsoup4']} sampleVaries={false}>
+
+```text
+Title: What is RAG? | Blog
+h2 tag: None
+Text: RAG finds relevant passages and adds them to the prompt. So the model answers from real sources.
+Link: https://example.com/
+Link: https://example.com/blog/
+Link: https://example.com/blog/embedding
+```
+
+</LocalCode>
+
+- **`h2 tag: None`.** The page has no `<h2>` element, so `soup.find("h2")` returns `None`. If you wrote `soup.find("h2").get_text()` without checking, Python would crash with an `AttributeError`. That is why the title line checks `if title` before calling `.get_text()`.
+- **`Text`** contains only the two content paragraphs inside `<article>`. The `<nav>` menu, `<footer>`, `<script>`, and the `<p class="meta">` date line (excluded via the CSS selector `p:not(.meta)`) are all left out.
+- **`Link`** `"embedding"` is a relative path. Resolved against the page URL `https://example.com/blog/rag`, `urljoin` replaces the final path segment `rag` and produces `https://example.com/blog/embedding`.
+
+Combined with `url` and a fetch timestamp, this extracted data becomes a MongoDB document like the one below (MongoDB automatically adds `_id`, and stores `fetched_at` as a native BSON `Date` object rather than a string):
+
+```json
+{
+  "url": "https://example.com/blog/rag",
+  "title": "What is RAG? | Blog",
+  "text": "RAG finds relevant passages and adds them to the prompt. So the model answers from real sources.",
+  "fetched_at": "2026-10-24T08:00:00Z"
+}
+```
+
+## Code examples
+
+The code in this lesson was last tested in October 2026 with Python 3.14, `requests` 2.34, `beautifulsoup4` 4.15, and `pymongo` 4.19. The MongoDB script was tested against MongoDB 8.3 (Docker image `mongo:8`).
+
+The first cell runs right in your browser because `urllib.robotparser` is part of the Python standard library and needs no network access. The next two scripts run on your machine: one makes HTTP requests, and the other connects to a MongoDB server.
+
+### Reading robots.txt without network calls
+
+This cell passes an in-memory `robots.txt` string to `RobotFileParser.parse` and checks `can_fetch` across six URL paths.
+
+<PythonRunner code={robotsCode} title="Reading robots.txt with urllib.robotparser" />
+
+- `/` and `/blog/rag` return `True` because no `Disallow` rule matches them. `/admin/users` returns `False`, whereas `/Admin/users` returns `True` because path matching is case-sensitive.
+- Both `/search?q=ai` and `/searching-tips` return `False`: `Disallow: /search` matches by prefix, blocking `/searching-tips` even if the site owner only intended to block search result pages.
+- `crawl delay: 2` is larger than our 1-second baseline suggestion, so a polite crawler waits 2 seconds between requests. `BadBot` matches its own dedicated group (`Disallow: /`) and is blocked from `/blog/rag` as well.
+
+### A small, polite crawler
+
+This script puts the Theory rules into practice. `load_robots` fetches `/robots.txt` with `requests` (so it sends your custom `User-Agent` header) and handles status codes according to RFC 9309: `2xx` parses the UTF-8 rules, `4xx` (except 429) allows all paths, and `5xx`, `429`, or a network exception blocks all paths. Then, for each path in `PATHS`, the loop checks `robots.can_fetch`, fetches with a 10-second `timeout`, stops immediately on `429` or `503`, saves only `200` responses, and sleeps between requests.
+
+<LocalCode code={crawlCode} title="Polite crawler: robots.txt, User-Agent, and rate limiting" packages={['requests', 'beautifulsoup4']} />
+
+`SITE` is set to `https://example.com`, a domain reserved by IANA for documentation examples. Replace it only with a site whose Terms of Service you have checked. Each requested path prints its HTTP status code and URL. On a site where `/` exists (`200`) and `/no-such-page/` does not (`404`), you will see one `200` line, one `404` line, and `Pages fetched: 1`—the 404 error page is never added to `pages`. Between the two requests, the script sleeps for at least 1 second.
+
+To keep the script short, line 54 extracts text from the entire page with `soup.get_text(" ", strip=True)`, which includes navigation and footer text. When crawling a real site, narrow the selection to `<article>` or `<main>` as shown in the Illustration section.
+
+### Saving to MongoDB without duplicate URLs
+
+The final script reads `MONGODB_URI` from the environment, creates a unique index on `url`, and demonstrates both `insert_one` and `update_one(..., upsert=True)`. Setting `serverSelectionTimeoutMS=5000` makes `pymongo` fail fast after 5 seconds if no MongoDB server is reachable (instead of waiting the default 30 seconds). Notice that `pages.drop()` clears the `pages` collection inside the `atlas_demo` database at the start of each run so the output is reproducible—never point `MONGODB_URI` at a production database before reading that line.
+
+The quickest way to run a local MongoDB server for testing is a single Docker command (see [Docker and the Cloud](/en/llm/docker-cloud/) for background on Docker), then setting `MONGODB_URI` to `mongodb://localhost:27017`:
+
+```sh
+docker run -d --name atlas-mongo -p 127.0.0.1:27017:27017 mongo:8
+```
+
+<LocalCode code={saveCode} title="Saving pages to MongoDB: unique index and upsert" packages={['pymongo']} sampleVaries={false}>
+
+```text
+Duplicate url, not inserted.
+https://example.com/a matched: 1 inserted: False
+https://example.com/c matched: 0 inserted: True
+Documents: 3
+{'url': 'https://example.com/a', 'text': 'Content A, new version.'}
+{'url': 'https://example.com/b', 'text': 'Content B.'}
+{'url': 'https://example.com/c', 'text': 'Content C.'}
+{'title': 'Page B'}
+```
+
+</LocalCode>
+
+Notice that Page B includes an extra `lang` field not present on Page A, and MongoDB stores both seamlessly. Attempting to re-insert Page A with `insert_one` is blocked by the unique index (`DuplicateKeyError`), whereas the `update_one(..., upsert=True)` loop updates Page A in place (`matched: 1`, `inserted: False`) and inserts Page C (`matched: 0`, `inserted: True`), leaving exactly 3 documents in the collection—one per unique `url`. The second argument passed to `find` and `find_one` is a **projection** that selects which fields to return (`1` to include, `0` to exclude `_id`), so the final printed dicts show only the requested fields.
+
+In a complete pipeline, you connect the two scripts: let the crawler populate the `pages` list, and pass each item to the MongoDB upsert loop.
+
+## Common pitfalls
+
+:::caution[Assuming "publicly visible and allowed by robots.txt" means free to take]
+Being able to view a page in a browser does not grant permission to copy it into a dataset. `robots.txt` only communicates which paths a crawler may visit; a site's Terms of Service can still forbid scraping, its articles are typically protected by copyright, and pages may contain personal data. Check the Terms of Service first, prefer official APIs and openly licensed documentation, and never scrape personal emails, phone numbers, or photos "just in case"—anything stored in your RAG database can surface verbatim in chatbot answers.
+:::
+
+:::caution[Running an impatient crawler]
+Omitting `timeout` risks hanging your process forever; omitting `time.sleep` hammers the target server and gets your IP banned; ignoring `status_code` saves 404 and "Access Denied" pages into your knowledge base as if they were real articles. Worst of all is getting blocked and spoofing a browser `User-Agent` to bypass the block—that is both deceptive and a red flag under Terms of Service. If a site blocks your bot, stop crawling and look for an official API or contact the site owner. One subtle text bug to watch out for: garbled characters when a server omits the HTTP `charset` header and `requests.text` guesses the wrong encoding. Passing raw bytes `r.content` to BeautifulSoup (as our crawler does) lets BeautifulSoup read the `<meta charset>` tag directly from the HTML.
+:::
+
+:::caution[Hardcoding `MONGODB_URI` or exposing MongoDB to the public Internet]
+Cloud MongoDB connection strings contain your database password. Committing a connection string to Git leaks your entire database just like committing an API key. Always read `MONGODB_URI` from an environment variable. Conversely, when running the official `mongo` Docker image locally, remember that **authentication is disabled by default**: anyone who can reach port 27017 can read or wipe every database. That is why our `docker run` command binds strictly to localhost (`-p 127.0.0.1:27017:27017`) rather than `-p 27017:27017`.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Before crawling, check all five rule layers: `robots.txt`, Terms of Service, copyright, personal data protection, and server load. Permission in `robots.txt` is necessary but not sufficient, and `robots.txt` is not a security mechanism.
+- Under RFC 9309, `robots.txt` selects the group matching the crawler's `User-agent` (or `*`), matches path prefixes case-sensitively, and gives precedence to the longest matching rule. A `4xx` when fetching `/robots.txt` means unrestricted access, whereas `5xx` requires treating the entire site as disallowed.
+- A polite crawler sets a `timeout`, sends an honest `User-Agent`, stores only HTTP `200` responses, sleeps between requests, and stops on `429` or `503`. In BeautifulSoup, always check whether `find` returned `None` and extract only the main content container.
+- In MongoDB, store one document per page: combine a unique index on `url` with `update_one(..., upsert=True)` to prevent duplicates and update existing pages in place. Keep `url` and `fetched_at` for downstream RAG citations, and read the connection string from `MONGODB_URI`.
+
+**Further reading:**
+
+- Koster, M., Illyes, G., Zeller, H., Sassman, L. (2022). [*RFC 9309: Robots Exclusion Protocol*](https://www.rfc-editor.org/rfc/rfc9309.html). IETF. Section 2 (rule matching and HTTP status code handling) is concise and readable.
+- Python Software Foundation (2026). [*urllib.robotparser: Parser for robots.txt*](https://docs.python.org/3.14/library/urllib.robotparser.html). Python 3.14 documentation for `RobotFileParser`, `can_fetch`, and `crawl_delay`.
+- Reitz, K. et al. (2026). [*Requests: Quickstart*](https://requests.readthedocs.io/en/latest/user/quickstart/), sections on Custom Headers, Response Status Codes, and Timeouts. Also Richardson, L. (2026). [*Beautiful Soup Documentation*](https://www.crummy.com/software/BeautifulSoup/bs4/doc/), sections on parsers, `find`, `find_all`, `select`, and `get_text`.
+- MongoDB (2026). [*PyMongo: Insert Documents*](https://www.mongodb.com/docs/languages/python/pymongo-driver/current/crud/insert/), [*Find Documents*](https://www.mongodb.com/docs/languages/python/pymongo-driver/current/crud/query/find/), [*Update Documents*](https://www.mongodb.com/docs/languages/python/pymongo-driver/current/crud/update/), and [*Indexes*](https://www.mongodb.com/docs/languages/python/pymongo-driver/current/indexes/). Official documentation for the PyMongo methods used in this lesson, including `upsert=True` and unique indexes.
+- Newby, T. G., Feder, D., Yoo-Scott, J. (2022). [*hiQ Labs Scrapes By Again: The Ninth Circuit Reaffirms that Data-Scraping Does Not Violate the CFAA*](https://www.fenwick.com/insights/publications/hiq-labs-scrapes-by-again-the-ninth-circuit-reaffirms-that-data-scraping-does-not-violate-the-cfaa-1), Fenwick & West; and Dull, K. R., Jacobson, J. B. (2022). [*LinkedIn's Data Scraping Battle with hiQ Labs Ends with Proposed Judgment*](https://www.natlawreview.com/article/linkedin-s-data-scraping-battle-hiq-labs-ends-proposed-judgment), The National Law Review. Legal commentary on both the Ninth Circuit CFAA decision and the subsequent district court judgment on Terms of Service.
+
+<LessonProgress />

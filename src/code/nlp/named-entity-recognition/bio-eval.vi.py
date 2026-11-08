@@ -14,6 +14,7 @@ def spans(tags):
     return out
 
 data = [  # (câu, nhãn đúng, nhãn dự đoán)
+    # Câu 1: lệch biên ở đầu thực thể PER
     ("Ông Nguyễn Văn An đến Hà Nội làm việc cho Vietcombank từ tháng 3/2024",
      "O B-PER I-PER I-PER O B-LOC I-LOC O O O B-ORG O O O",
      "O O B-PER I-PER O B-LOC I-LOC O O O B-ORG O O O"),

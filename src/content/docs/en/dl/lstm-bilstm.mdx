@@ -1,0 +1,367 @@
+---
+title: LSTM and BiLSTM
+description: 'The cell state as a conveyor belt, the forget, input, and output gates, and why the additive path lets gradients travel far; comparing LSTM and GRU, stacked LSTMs, and BiLSTMs reading in both directions.'
+quiz:
+  - question: 'For a particular component of an LSTM cell over 50 consecutive steps, the forget gate has $f_t \approx 1$ and the input gate has $i_t \approx 0$. What happens to that component of $\mathbf{c}_t$?'
+    options:
+      - 'It is wiped to 0 at the very first step'
+      - 'It stays nearly unchanged across all 50 steps, and the gradient along the $\mathbf{c}$ path also passes through almost intact'
+      - 'It gets replaced by the candidate $\tilde{c}_t$ at every step'
+      - 'It grows steadily because a positive quantity is added at every step'
+    answer: 1
+    explanation: 'Substitute into $c_t = f_t c_{t-1} + i_t \tilde{c}_t$: with $f_t \approx 1$ and $i_t \approx 0$, we have $c_t \approx c_{t-1}$, so the cell simply copies the old value forward. The derivative along the direct conveyor-belt path is the product of the $f_t$ values—here close to 1—so the gradient is not eroded. Wiping to 0 corresponds to $f_t \approx 0$; replacing with the candidate corresponds to $f_t \approx 0, i_t \approx 1$.'
+  - question: 'An LSTM has $d_x = 100$ and $d_h = 200$. Using the lesson''s formula (one bias vector per branch), how many parameters does this LSTM have?'
+    options: ['60,200', '180,600', '240,800', '241,600']
+    answer: 2
+    explanation: 'Each branch has $d_h(d_x + d_h) + d_h = 200 \cdot 300 + 200 = 60,200$ parameters, matching a single vanilla RNN. Because an LSTM has four branches (three gates plus the candidate), it has 4 times as many: $240,800$. 180,600 is for a GRU (three branches). 241,600 is what PyTorch''s `nn.LSTM` reports because it uses two bias vectors per branch: $4(d_h(d_x + d_h) + 2d_h)$.'
+  - question: 'You train a language model to predict the next word $x_{t+1}$ from the state at position $t$. Switching from an LSTM to a BiLSTM drives the training loss nearly to 0. Why shouldn''t you celebrate?'
+    options:
+      - 'Because a BiLSTM has twice as many parameters and therefore always overfits'
+      - 'Because a near-zero loss means the gradients have vanished'
+      - 'Because the backward pass has already read $x_{t+1}$ when forming the state at $t$: the model is copying the answer, and at generation time $x_{t+1}$ does not exist yet'
+      - 'You actually should celebrate: a BiLSTM is always better than a unidirectional LSTM'
+    answer: 2
+    explanation: 'The backward hidden state at position $t$ summarizes $x_L, \dots, x_t$, which includes $x_{t+1}$—the exact target label. The model learns to read the answer rather than predict it. At generation time, future words have not been written yet, so the backward pass has nothing to read. A BiLSTM can only be used when the entire input sequence is available upfront.'
+  - question: 'You classify whole sentences using PyTorch''s BiLSTM and feed `output[:, -1]` (the vector at the final position) into your classifier head. What is wrong with this?'
+    options:
+      - 'Nothing is wrong; the final position has always read the entire sentence in both directions'
+      - '`output[:, -1]` only contains $\mathbf{c}_t$, not $\mathbf{h}_t$'
+      - 'A BiLSTM cannot be used for whole-sentence classification'
+      - 'The backward half of `output[:, -1]` has only read the very last word, so only the forward half summarizes the whole sentence'
+    answer: 3
+    explanation: 'The backward LSTM runs from the end of the sentence to the beginning, so at the last position it has just started and has only seen $x_L$. Its full-sentence summary sits at position 0. Instead, use `h_n` (which holds the final step of each direction) or concatenate the forward half of `output[:, -1]` with the backward half of `output[:, 0]`.'
+  - question: 'In the PyTorch code cell, the label at position $t$ is whether the next digit is strictly greater than the current digit. The unidirectional LSTM plateaus around 75% accuracy. Why can''t it go higher?'
+    options:
+      - 'Because 400 steps is too short; training longer would push it to 100%'
+      - 'At position $t$ it has not seen $x_{t+1}$ yet and can only guess from $x_t$: predict "greater" when the current digit is small, which is right 75% of the time on average'
+      - 'Because a unidirectional LSTM has fewer parameters'
+      - 'Because gradients vanish after 12 steps'
+    answer: 1
+    explanation: 'Given current digit $v \in \{0,\dots,9\}$, the probability that a random next digit is larger is $(9 - v)/10$. Guessing the more likely outcome at each $v$ succeeds with probability $\max\big((9 - v)/10,\ (v + 1)/10\big)$; averaged over all 10 digits, that is $7.5/10 = 0.75$. Without seeing $x_{t+1}$, neither longer training nor extra parameters can beat this ceiling. The BiLSTM sees $x_{t+1}$ via its backward pass and reaches 100%.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import lstmStepCode from '@code/dl/lstm-bilstm/lstm-step.en.py?raw';
+import bilstmCode from '@code/dl/lstm-bilstm/bilstm-tagging.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Explain the roles of the **cell state** $\mathbf{c}_t$ and the three gates of an **LSTM** (Long Short-Term Memory): the **forget gate**, **input gate**, and **output gate**.
+- Explain why the additive update $\mathbf{c}_t = \mathbf{f}_t \odot \mathbf{c}_{t-1} + \mathbf{i}_t \odot \tilde{\mathbf{c}}_t$ lets gradients travel much farther than in a vanilla RNN.
+- Implement a single LSTM step in NumPy, count its parameters, and compare an LSTM with a GRU.
+- Recognize when a **bidirectional LSTM** (BiLSTM) is appropriate—and when it is invalid—and stack multiple LSTM layers.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+An **RNN** ([Recurrent Neural Networks](/en/dl/rnn/)) reads a sequence $\mathbf{x}_1, \dots, \mathbf{x}_L$ step by step and updates a **hidden state** $\mathbf{h}_t = \tanh(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{W}_{hh}\mathbf{h}_{t-1} + \mathbf{b}_h)$. During backpropagation across many steps, gradients are multiplied repeatedly by the same weight matrix and easily vanish or explode. A **GRU** ([GRU](/en/dl/gru/)) introduces **gates**: vectors in $(0, 1)$ that multiply elementwise ($\odot$) to control how much of the old state is kept and how much new information is written.
+:::
+
+## Intuition
+
+Read the sentence below and fill in the blank:
+
+> The **scooter** my grandfather bought back in 1995, after countless repairs, tire changes, a fresh coat of paint, and last year's flood, still ___ smoothly today.
+
+You immediately guess "runs" (or "rides"), not "cooks" or "reads." The word that decides the answer is "scooter," sitting more than twenty words before the blank. Most of the details in between (1995, tires, paint, flood) can be forgotten as soon as you read them. You only need to **hold on** to one small note: "the subject is a vehicle."
+
+A vanilla RNN cannot hold onto a note like that for long. At every step it **rewrites the entire** state $\mathbf{h}_t$: multiply by a matrix, add the new input, and squash through $\tanh$. Like photocopying a photocopy, after a few dozen steps the original ink is blurred beyond recognition. And during training, as the RNN lesson showed, the error signal traveling backward 20+ steps gets multiplied 20+ times by the same matrix and usually dies out before reaching "scooter."
+
+### A conveyor belt running through the sentence
+
+An LSTM adds a dedicated track for long-term notes, called the **cell state** $\mathbf{c}_t$. Picture a conveyor belt running straight across every time step. By default, whatever is placed on the belt glides forward without being multiplied by any weight matrix. Standing alongside the belt at each step are three gatekeepers, each holding a continuous valve:
+
+- **The forget gatekeeper** looks at the new input and decides which items on the belt to erase. When a new clause introduces a new subject, wipe the old subject.
+- **The input gatekeeper** decides which new items to place onto the belt. Upon reading "scooter," write down "singular vehicle subject."
+- **The output gatekeeper** decides which items on the belt are needed right now. At the blank, expose the note about the subject so the network can pick a matching verb.
+
+On most intermediate steps, all three valves leave the "scooter" note untouched, so it rides across twenty-odd words almost unchanged.
+
+### When the whole sentence is already available
+
+Now switch to a different task: labeling each word in a sentence. In the two Vietnamese sentences below, is the opening word "Hồ" part of a person's name or a city's name?
+
+> **Hồ** Chí Minh đọc bản Tuyên ngôn Độc lập năm 1945. (*Ho Chi Minh read the Declaration of Independence in 1945.*)
+>
+> **Hồ** Chí Minh là thành phố đông dân nhất Việt Nam. (*Ho Chi Minh City is the most populous city in Vietnam.*)
+
+To the left of "Hồ" there is nothing at all. Only the words **to the right** ("read the Declaration..." vs. "is the most populous city...") disambiguate it. An LSTM reading strictly left-to-right has to label "Hồ" before seeing any of the words that follow. When the entire sentence is already sitting in memory, why not read it a second time from right to left?
+
+The problem for this lesson is: **design a recurrent cell that preserves information (and gradients) across dozens of steps via an additive memory track, and pair two such cells running in opposite directions so every position sees both the left and right context.**
+
+## Theory
+
+### Problem setup
+
+The input is a sequence $\mathbf{x}_1, \dots, \mathbf{x}_L$, where each $\mathbf{x}_t \in \mathbb{R}^{d_x}$ (for example, a word embedding). Unlike a vanilla RNN or GRU, an LSTM carries **two** vectors across every time step, both of dimension $d_h$:
+
+- **The cell state** $\mathbf{c}_t$: the conveyor belt, acting as internal long-term memory. It is not exposed directly to the outside world.
+- **The hidden state** $\mathbf{h}_t$: the working summary read out at step $t$, used both for step-$t$ predictions and for computing the gates at step $t + 1$.
+
+Initially $\mathbf{c}_0 = \mathbf{h}_0 = \mathbf{0}$. Each step takes $(\mathbf{x}_t, \mathbf{h}_{t-1}, \mathbf{c}_{t-1})$ and returns $(\mathbf{h}_t, \mathbf{c}_t)$.
+
+### Four branches: three gates and a candidate
+
+At each step, an LSTM computes four vectors from the same pair $(\mathbf{x}_t, \mathbf{h}_{t-1})$. Each branch has its own weights with the exact same shapes as a vanilla RNN: $\mathbf{W}_{x\cdot} \in \mathbb{R}^{d_h \times d_x}$ multiplying the input, $\mathbf{W}_{h\cdot} \in \mathbb{R}^{d_h \times d_h}$ multiplying the previous hidden state, and a bias vector.
+
+$$
+\begin{aligned}
+\mathbf{f}_t &= \sigma(\mathbf{W}_{xf}\mathbf{x}_t + \mathbf{W}_{hf}\mathbf{h}_{t-1} + \mathbf{b}_f) \\
+\mathbf{i}_t &= \sigma(\mathbf{W}_{xi}\mathbf{x}_t + \mathbf{W}_{hi}\mathbf{h}_{t-1} + \mathbf{b}_i) \\
+\mathbf{o}_t &= \sigma(\mathbf{W}_{xo}\mathbf{x}_t + \mathbf{W}_{ho}\mathbf{h}_{t-1} + \mathbf{b}_o) \\
+\tilde{\mathbf{c}}_t &= \tanh(\mathbf{W}_{xc}\mathbf{x}_t + \mathbf{W}_{hc}\mathbf{h}_{t-1} + \mathbf{b}_c)
+\end{aligned}
+$$
+
+- $\mathbf{f}_t$ is the **forget gate**, $\mathbf{i}_t$ is the **input gate**, and $\mathbf{o}_t$ is the **output gate**. All three pass through the sigmoid $\sigma$, so every entry lies in $(0, 1)$: 0 means completely closed, 1 means completely open.
+- $\tilde{\mathbf{c}}_t$ is the **candidate** cell content: new information that could be written onto the belt. It passes through $\tanh$, so its entries lie in $(-1, 1)$ and can be positive or negative. This branch has the exact formula of a vanilla RNN step.
+
+Why do gates use sigmoid while the candidate uses $\tanh$? A gate is a **multiplier** that scales another value between "block completely" ($0$) and "pass through" ($1$). The candidate is **content** that needs to be able to either push a memory slot up or pull it down.
+
+### Updating the cell state and hidden state
+
+The two central equations of an LSTM are:
+
+$$
+\begin{aligned}
+\mathbf{c}_t &= \mathbf{f}_t \odot \mathbf{c}_{t-1} + \mathbf{i}_t \odot \tilde{\mathbf{c}}_t \\
+\mathbf{h}_t &= \mathbf{o}_t \odot \tanh(\mathbf{c}_t)
+\end{aligned}
+$$
+
+Read the first equation component by component. The new value $c_{t,j}$ equals the **retained** part of the old cell, $f_{t,j}\,c_{t-1,j}$, plus the **newly written** part of the candidate, $i_{t,j}\,\tilde{c}_{t,j}$. Four extreme settings illustrate what a slot can do:
+
+| $f_{t,j}$ | $i_{t,j}$ | $c_{t,j}$ | What the cell slot does |
+|---:|---:|---|---|
+| 1 | 0 | $c_{t-1,j}$ | Keep the old value unchanged, ignore the current input |
+| 0 | 1 | $\tilde{c}_{t,j}$ | Wipe the old value, overwrite completely with new content |
+| 1 | 1 | $c_{t-1,j} + \tilde{c}_{t,j}$ | Accumulate (add to the existing value) |
+| 0 | 0 | 0 | Reset to zero |
+
+Because the forget and input gates are independent, an LSTM has an "accumulate" mode that a GRU lacks: in a GRU, the keep weight $\mathbf{z}_t$ and the write weight $\mathbf{1} - \mathbf{z}_t$ are tied to sum to 1.
+
+The second equation reads the cell out into the hidden state. First $\tanh$ squashes the cell value (which can exceed $[-1, 1]$ when accumulated over several steps) back into $(-1, 1)$, and then the output gate selects which components are exposed in $\mathbf{h}_t$. As a result, a cell slot can **silently carry** a piece of information across many steps without affecting $\mathbf{h}_t$ at all, until the output gate opens at the step where that information is needed.
+
+:::note[Key takeaway]
+An LSTM separates long-term storage ($\mathbf{c}_t$) from the exposed working state ($\mathbf{h}_t$). The forget gate controls how much of the old cell is kept, the input gate controls how much new candidate content is added, and the output gate controls how much of the cell is revealed. Crucially, $\mathbf{c}_t$ is updated by **addition**, not by matrix multiplication.
+:::
+
+### Why the additive path helps gradients travel far
+
+Recall why a vanilla RNN struggles. With $\mathbf{h}_t = \tanh(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{W}_{hh}\mathbf{h}_{t-1} + \mathbf{b}_h)$, the one-step Jacobian is
+
+$$
+\frac{\partial \mathbf{h}_t}{\partial \mathbf{h}_{t-1}} = \mathrm{diag}\!\left(\mathbf{1} - \mathbf{h}_t \odot \mathbf{h}_t\right)\mathbf{W}_{hh}
+$$
+
+(where $\mathrm{diag}(\mathbf{v})$ places the entries of $\mathbf{v}$ on the main diagonal, and $\mathbf{1} - \mathbf{h}_t \odot \mathbf{h}_t$ is the elementwise derivative of $\tanh$). Stepping backward $k$ steps multiplies $k$ such matrices, with the same $\mathbf{W}_{hh}$ repeated every time, causing the product to vanish or explode exponentially.
+
+Now look at the **direct conveyor-belt path** in an LSTM: from $\mathbf{c}_{t-1}$ to $\mathbf{c}_t$, treating the gates as fixed multipliers. Differentiating $\mathbf{c}_t = \mathbf{f}_t \odot \mathbf{c}_{t-1} + \mathbf{i}_t \odot \tilde{\mathbf{c}}_t$ along this direct path with respect to $\mathbf{c}_{t-1}$ drops the second term and leaves elementwise multiplication by $\mathbf{f}_t$:
+
+$$
+\frac{\partial \mathbf{c}_t}{\partial \mathbf{c}_{t-1}} = \mathrm{diag}(\mathbf{f}_t)
+$$
+
+Across $k$ steps from $t$ back to $t - k$, the chain rule multiplies $k$ diagonal matrices, which is simplyanother diagonal matrix whose entries are the elementwise products of the forget gates:
+
+$$
+\frac{\partial \mathbf{c}_t}{\partial \mathbf{c}_{t-k}} = \mathrm{diag}\!\left(\mathbf{f}_t \odot \mathbf{f}_{t-1} \odot \cdots \odot \mathbf{f}_{t-k+1}\right)
+$$
+
+Compare this with a vanilla RNN:
+
+1. **No weight matrix $\mathbf{W}_{hh}$ and no $\tanh'$ factor** sit on this highway. The gradient is multiplied only by the forget-gate activations.
+2. **Each step and each component chooses its own multiplier.** Whenever slot $j$ holds an important note, the network can set $f_{t,j} \approx 1$, letting the gradient pass through nearly unattenuated. In a vanilla RNN, a single matrix $\mathbf{W}_{hh}$ is forced onto every step and every direction.
+3. **No explosion along this path**, because every $f_{t,j}$ lies in $(0, 1)$.
+
+Of course, this direct highway is only one term of the full recurrent Jacobian—the gates themselves depend on $\mathbf{h}_{t-1}$, adding indirect paths through weight matrices. Still, having **one** unimpeded highway is enough for error signals to reach the word "scooter" twenty steps back. You will meet this exact "add rather than overwrite" principle again in the residual connections of ResNets and Transformers.
+
+An LSTM is not magic, though. If $f = 0.9$ at every step, after 100 steps the factor is $0.9^{100} \approx 2.7 \times 10^{-5}$; if $f = 0.99$, it is $0.99^{100} \approx 0.37$. The network has to **learn** to push $f$ very close to 1. And because gradients flowing through the indirect gate paths can still explode, gradient clipping remains standard practice when training LSTMs.
+
+:::tip[Tip: initialize the forget-gate bias to 1]
+If $\mathbf{b}_f$ is initialized to 0, then at the start of training $\mathbf{f}_t \approx \sigma(0) = 0.5$: the cell loses half its memory at every step, leaving less than 0.1% after 10 steps and making long-range dependencies hard to discover early on. Initializing $\mathbf{b}_f = \mathbf{1}$ gives $\mathbf{f}_t \approx \sigma(1) \approx 0.73$, so the cell defaults to remembering much longer. Gers et al. (2000) noted this when introducing the forget gate, and Jozefowicz et al. (2015) re-popularized it after showing that simply setting $\mathbf{b}_f = \mathbf{1}$ closed most of the gap between LSTMs and GRUs across a wide range of tasks.
+:::
+
+### A brief history
+
+Sepp Hochreiter and Jürgen Schmidhuber published the original LSTM in 1997 specifically to solve the vanishing gradient problem. That 1997 version **had no forget gate**: the cell updated via $\mathbf{c}_t = \mathbf{c}_{t-1} + \mathbf{i}_t \odot \tilde{\mathbf{c}}_t$, equivalent to fixing $\mathbf{f}_t = \mathbf{1}$. The authors called this identity path the **constant error carousel** because error gradients circulated across time without decaying or growing.
+
+The catch was that on continuous streams without explicit resets, the cell could only add and never erase, causing $\mathbf{c}_t$ to grow without bound. In 2000, Felix Gers, Jürgen Schmidhuber, and Fred Cummins added the **forget gate** so the cell could learn when to flush its own memory. That forget-gate version is what everyone today calls an LSTM, and it is what PyTorch's `nn.LSTM` implements. A large empirical study by Greff et al. (2017) comparing eight LSTM variants found that the forget gate and the output activation are the two most critical components.
+
+### Parameter count and comparison with GRU
+
+Each of the four branches has $\mathbf{W}_{x\cdot}$ ($d_h d_x$ entries), $\mathbf{W}_{h\cdot}$ ($d_h^2$ entries), and a bias vector ($d_h$ entries)—$d_h(d_x + d_h) + d_h$ parameters per branch, matching a vanilla RNN. With four branches, an LSTM has:
+
+$$
+\text{LSTM parameters} = 4\left(d_h(d_x + d_h) + d_h\right)
+$$
+
+A GRU has three branches (two gates and a candidate), giving 3 times a vanilla RNN. For $d_x = 3$ and $d_h = 4$ (as in the NumPy cell below): a vanilla RNN has $4 \cdot 7 + 4 = 32$ parameters, a GRU has 96, and an LSTM has 128.
+
+:::note[Why PyTorch counts slightly more]
+PyTorch's `nn.LSTM` stores **two** bias vectors per branch: `bias_ih` (paired with $\mathbf{W}_{x\cdot}$) and `bias_hh` (paired with $\mathbf{W}_{h\cdot}$). Because the two biases are simply added together, they are mathematically equivalent to a single bias vector, just with $4d_h$ extra parameters. PyTorch therefore reports $4\left(d_h(d_x + d_h) + 2d_h\right)$ parameters—144 in the example above. `nn.GRU` uses two biases per branch in the same way.
+:::
+
+Comparing LSTM and GRU side by side:
+
+| Criterion | LSTM | GRU |
+|---|---|---|
+| Vectors carried across steps | Two: $\mathbf{c}_t$ and $\mathbf{h}_t$ | One: $\mathbf{h}_t$ |
+| Number of branches | 4 (forget, input, output, candidate) | 3 (reset, update, candidate) |
+| Parameter count | $4\times$ vanilla RNN | $3\times$ vanilla RNN |
+| Keep old vs. write new | Two independent gates; can accumulate | Single update gate interpolating old and new |
+| Output gate | Yes—can keep cell content hidden | No—full state $\mathbf{h}_t$ is exposed at every step |
+| Year introduced | 1997 (forget gate: 2000) | 2014 |
+
+How do they compare in practice? Chung et al. (2014) found GRU and LSTM to perform **comparably** on polyphonic music and speech signal modeling. Jozefowicz et al. (2015) evaluated over ten thousand recurrent architectures: with default initialization, GRU outperformed LSTM on most tasks except language modeling; once the LSTM's forget-gate bias was initialized to 1, the two were nearly tied, and with dropout the LSTM was best on language modeling. Neither architecture dominates universally. A practical rule of thumb: try GRU first when you want roughly 25% fewer parameters and faster steps; use LSTM (with forget bias $\ge 1$) as a time-tested default; and benchmark on your own data if the margin matters.
+
+### Stacked (multi-layer) LSTMs
+
+A single LSTM layer maps an input sequence $\mathbf{x}_1, \dots, \mathbf{x}_L$ to a hidden-state sequence $\mathbf{h}_1, \dots, \mathbf{h}_L$ of the exact same length. That output sequence can immediately serve as the input sequence to a second LSTM layer, then a third. Writing $\mathbf{h}^{[l]}_t$ for the hidden state of layer $l$ at step $t$ (with $\mathbf{h}^{[0]}_t = \mathbf{x}_t$):
+
+$$
+\mathbf{h}^{[l]}_t, \mathbf{c}^{[l]}_t = \mathrm{LSTM}^{[l]}\!\left(\mathbf{h}^{[l-1]}_t,\ \mathbf{h}^{[l]}_{t-1},\ \mathbf{c}^{[l]}_{t-1}\right)
+$$
+
+Each layer has its own parameters and its own conveyor belt $\mathbf{c}^{[l]}_t$. Just like stacking layers in an MLP, depth lets higher layers build more abstract features on top of the representations extracted by lower layers. In PyTorch, pass `nn.LSTM(..., num_layers=2, dropout=0.2)`, which applies dropout to the hidden states passed between layers. Two to four layers are common: Sutskever et al. (2014) used a 4-layer LSTM in their landmark seq2seq translation model ([Sequence-to-Sequence Models (Seq2Seq)](/en/llm/seq2seq/)), and Google's GNMT system (Wu et al., 2016) stacked 8 encoder layers and 8 decoder layers.
+
+### BiLSTM: reading in both directions
+
+The idea of a **bidirectional RNN** goes back to Schuster and Paliwal (1997), and Graves and Schmidhuber (2005) combined it with LSTM cells to form the **BiLSTM**. The construction is straightforward: run **two separate LSTMs** with independent parameters on the same sequence:
+
+- The forward LSTM reads from $\mathbf{x}_1$ to $\mathbf{x}_L$, producing $\overrightarrow{\mathbf{h}}_t$, a summary of $\mathbf{x}_1, \dots, \mathbf{x}_t$.
+- The backward LSTM reads from $\mathbf{x}_L$ back to $\mathbf{x}_1$, producing $\overleftarrow{\mathbf{h}}_t$, a summary of $\mathbf{x}_L, \dots, \mathbf{x}_t$.
+
+At every position $t$, concatenate the two hidden states into a single vector:
+
+$$
+\mathbf{h}_t = \left[\overrightarrow{\mathbf{h}}_t;\ \overleftarrow{\mathbf{h}}_t\right] \in \mathbb{R}^{2d_h}
+$$
+
+Now $\mathbf{h}_t$ encodes context from both before and after position $t$. For the word "Hồ" at the start of our Vietnamese example, the backward state $\overleftarrow{\mathbf{h}}_1$ has already read "read the Declaration..." or "is the most populous city..." by the time it reaches position 1. A BiLSTM has twice the parameters of a unidirectional LSTM with the same $d_h$, and any layer on top receives a $2d_h$-dimensional vector.
+
+**When you can use a BiLSTM (the full sequence is available upfront):**
+
+- Per-token labeling: part-of-speech tagging, named entity recognition (NER). Pairing a BiLSTM with a CRF layer (Huang, Xu, and Yu, 2015) was the standard recipe for sequence labeling prior to Transformers.
+- Whole-sentence or document classification.
+- The encoder of a translation model, where the complete source sentence is given (GNMT used a bidirectional bottom encoder layer).
+
+**When you cannot use a BiLSTM:**
+
+- **Left-to-right text generation.** When generating word $t + 1$, future words do not exist yet, so the backward LSTM cannot run. Worse, if you train a next-token language model with a BiLSTM on complete sentences, $\overleftarrow{\mathbf{h}}_t$ has already seen $\mathbf{x}_{t+1}$—the exact target label—so the network cheats by copying the answer and fails completely at generation time. Seq2seq decoders are therefore strictly unidirectional.
+- **Low-latency streaming**, such as live speech recognition, where you cannot wait for the speaker to finish the entire utterance before running a backward pass.
+
+### Limitations
+
+- **Still sequential.** Step $t$ must wait for step $t - 1$, preventing parallel computation across the sequence length on GPUs. Training on long sequences remains slow.
+- **Still strained on very long sequences.** Gradients on the conveyor belt are multiplied by $\prod f$, which stays large only when $f$ is kept extremely close to 1. Information from hundreds of steps ago still has to hop through every single step in between.
+- **Fixed-size vector bottleneck.** In basic seq2seq models, an entire source sentence must be compressed into the final state vector of dimension $d_h$—the bottleneck that motivated attention.
+
+All three limitations lead directly to [Transformers](/en/dl/transformers/): instead of passing notes step by step along a chain, every position **attends directly** to every other position in a single parallel step.
+
+## Illustration
+
+The diagram below traces a single LSTM cell. Follow the top horizontal line from $\mathbf{c}_{t-1}$ to $\mathbf{c}_t$: along this conveyor belt sit only an elementwise multiplication by the forget gate and an elementwise addition—no weight matrix multiplication at all. All the heavy machinery (the four sigmoid/$\tanh$ branches) sits below and interacts with the belt only through those two operations.
+
+{/* FIG: LstmCellFigure
+    Idea: the cell state runs straight across the top like a conveyor belt, touched only by an elementwise multiply (forget gate) and an addition (input gate * candidate); the four dense branches sit below. */}
+
+The table below shows what each direction of a BiLSTM has read at three positions of the 11-syllable Vietnamese sentence "Hồ Chí Minh là thành phố đông dân nhất Việt Nam" (*Ho Chi Minh City is the most populous city in Vietnam*). At position 1, the forward pass has seen only the first syllable while the backward pass has read the entire sentence; at position 11, the roles are reversed.
+
+| Position | Forward state $\overrightarrow{\mathbf{h}}_t$ has read | Backward state $\overleftarrow{\mathbf{h}}_t$ has read |
+|---|---|---|
+| 1 ("Hồ") | Hồ | Hồ Chí Minh là thành phố … Việt Nam |
+| 4 ("là") | Hồ Chí Minh là | là thành phố … Việt Nam |
+| 11 ("Nam") | Hồ Chí Minh là thành phố … Việt Nam | Nam |
+
+The bottom row also explains a classic PyTorch bug: the vector at the final position `output[:, -1]` does **not** summarize the full sentence in both directions (see Common pitfalls).
+
+## Code examples
+
+The two code cells are self-contained. The first runs directly in the page using only NumPy. The second uses PyTorch and runs on your machine (CPU is plenty).
+
+The first cell implements the exact equations from the Theory section with $d_x = 3$ and $d_h = 4$, runs across a random sequence of $L = 5$ steps with the forget-gate bias initialized to 1, and verifies the parameter count formulas.
+
+<PythonRunner code={lstmStepCode} title="A single LSTM step in NumPy" />
+
+Reading the output:
+
+- **Forget gate** at step 1 has entries 0.77, 0.74, 0.69, 0.73, clustered around $\sigma(1) \approx 0.73$—the direct effect of initializing $\mathbf{b}_f = \mathbf{1}$. On later steps, once $\mathbf{h}_{t-1}$ is nonzero, the values spread out more (from 0.48 to 0.88).
+- **Cell state** $\mathbf{c}_t$ changes sign and grows in magnitude across steps (first component: 0.13, 0.49, 0.19, $-0.53$, $-0.87$), whereas $\mathbf{h}_L$ stays strictly inside $(-1, 1)$ thanks to $\tanh$ and the output gate.
+- **`prod f`** is the elementwise product of $\mathbf{f}_t$ across all 5 steps—the diagonal of the direct conveyor-belt Jacobian $\partial \mathbf{c}_5 / \partial \mathbf{c}_0$—ranging from 0.103 to 0.271, right around $0.73^5 \approx 0.21$. With a zero forget-gate bias, the gates hover around 0.5 and the 5-step product drops to roughly $0.5^5 \approx 0.03$. And once trained, the network can push $f$ even closer to 1 on slots that need to hold memories longer.
+- **Parameter count:** 128, matching $4(d_h(d_x + d_h) + d_h)$. A vanilla RNN of the same size has 32, a GRU has 96, and PyTorch's `nn.LSTM` reports 144 because of its two bias vectors per branch.
+
+The second cell compares a unidirectional LSTM with a BiLSTM on a synthetic per-position tagging task. Each input is a sequence of 12 random digits. The label at position $t$ is 1 if the **next** digit $x_{t+1}$ is strictly greater than the current digit $x_t$, and 0 otherwise (the final position has no label). Just like disambiguating "Hồ" at the start of a sentence, the label at $t$ depends on what lies to the right.
+
+<LocalCode
+  code={bilstmCode}
+  title="Unidirectional LSTM vs. BiLSTM on per-position tagging"
+  packages={['torch']}
+  hardware="CPU is enough, no GPU required. Takes about 30 to 60 seconds on a dev laptop, or a couple of minutes on a busy/slower machine"
+  sampleVaries={false}
+>
+
+```text
+LSTM   params  6400  loss 0.497  test acc 0.753
+BiLSTM params 12800  loss 0.000  test acc 1.000
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **Parameter count:** the LSTM has $d_x = 16$ (embedding size) and $d_h = 32$, so PyTorch counts $4(32 \cdot 48 + 2 \cdot 32) = 6400$ recurrent parameters, matching the two-bias formula. The BiLSTM runs two such LSTMs, doubling the count to 12,800.
+- **The unidirectional LSTM plateaus at 0.753.** This is not undertraining. At position $t$, it has not seen $x_{t+1}$ yet and can only guess from $x_t$: if the current digit is $v$, the probability that a random next digit is larger is $(9 - v)/10$. Guessing the more likely outcome at each $v$ gives accuracy $\max\big((9 - v)/10,\ (v + 1)/10\big)$, which averages across $v \in \{0,\dots,9\}$ to $7.5/10 = 0.75$. The unidirectional model has learned the optimal causal strategy and hit the information ceiling (0.753 is slightly above 0.75 only due to finite-sample variance on 2,000 test sequences).
+- **The BiLSTM reaches 1.000** test accuracy with loss 0.000. Because its backward pass at position $t$ has already read $x_{t+1}$, comparing $x_t$ and $x_{t+1}$ is trivial.
+
+The gap comes from **information access**, not parameter count: giving the unidirectional LSTM more layers or a wider hidden state will never let it see $x_{t+1}$ at step $t$. Because the seed is fixed, re-running on the same machine reproduces these numbers; if execution feels unusually slow, set `OMP_NUM_THREADS=1` so PyTorch does not spin up multiple threads for a tiny network.
+
+## Common pitfalls
+
+:::caution[Using a BiLSTM for autoregressive text generation]
+In a BiLSTM, the backward state at position $t$ has already read $\mathbf{x}_{t+1}$. If your training target at position $t$ is $\mathbf{x}_{t+1}$ (next-token language modeling), the network simply copies the answer from the backward state, driving training loss near 0—and then fails at inference time when future tokens do not exist. Rule of thumb: use a BiLSTM only when **the entire input sequence is available** at prediction time. Autoregressive decoders must be unidirectional.
+:::
+
+:::caution[Taking `output[:, -1]` of a BiLSTM as a whole-sentence summary]
+With `bidirectional=True`, `output[:, -1]` contains the **final** step of the forward LSTM concatenated with the **first** step of the backward LSTM—which has only read the very last token (bottom row of the Illustration table). As the PyTorch docs note, `h_n` is not equal to the last element of `output` for a bidirectional layer. To summarize a whole sentence, either concatenate the top layer's forward and backward final states from `h_n` (`h_n[-2]` and `h_n[-1]`), or concatenate `output[:, -1, :d_h]` with `output[:, 0, d_h:]`. And when batching variable-length sequences with padding, wrap the input in `pack_padded_sequence` so the backward pass starts at each sequence's true final token rather than at `[PAD]` tokens.
+:::
+
+:::caution[Confusing $\mathbf{c}_t$ with $\mathbf{h}_t$, or forgetting to pass $\mathbf{c}_t$ across steps]
+`nn.LSTM` returns `output, (h_n, c_n)`. Downstream layers should read `output` (the sequence of hidden states $\mathbf{h}_t$), not $\mathbf{c}_t$: the cell state is unscaled internal memory that has not been filtered by the output gate. Conversely, when writing a step-by-step decoding loop or truncated BPTT loop, you must pass **both** $(\mathbf{h}, \mathbf{c})$ to the next call. Passing only $\mathbf{h}$ while resetting $\mathbf{c}$ to zeros wipes the conveyor belt at every step.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- An LSTM maintains a cell state $\mathbf{c}_t$ (internal conveyor-belt memory) alongside the hidden state $\mathbf{h}_t$ (exposed output). Three sigmoid gates govern the update: $\mathbf{c}_t = \mathbf{f}_t \odot \mathbf{c}_{t-1} + \mathbf{i}_t \odot \tilde{\mathbf{c}}_t$ and $\mathbf{h}_t = \mathbf{o}_t \odot \tanh(\mathbf{c}_t)$.
+- Along the conveyor belt, gradients are multiplied only by the forget-gate values, bypassing weight matrices and $\tanh$ derivatives. Learning $f \approx 1$ on important slots lets gradients travel far; initializing the forget-gate bias to 1 gives training a head start.
+- An LSTM has 4 times the parameters of a vanilla RNN, while a GRU has 3 times; empirically the two perform similarly. Multi-layer LSTMs stack layers by feeding the $\mathbf{h}_t$ sequence of layer $l - 1$ as the input to layer $l$.
+- A BiLSTM runs forward and backward LSTMs and concatenates their hidden states so every position sees both left and right context. Use it when the full input sequence is available (tagging, NER, classification, encoders), never for left-to-right generation.
+
+**Further reading:**
+
+- Christopher Olah (2015). [*Understanding LSTM Networks*](https://colah.github.io/posts/2015-08-Understanding-LSTMs/). The classic visual walkthrough of each gate and the source of the "conveyor belt" analogy.
+- Aston Zhang, Zachary C. Lipton, Mu Li, Alexander J. Smola (2023). [*Dive into Deep Learning*](https://d2l.ai/chapter_recurrent-modern/lstm.html), Section 10.1 (LSTM) and Sections 10.3–10.4 (deep and bidirectional RNNs). Includes from-scratch implementations; writes $\mathbf{I}_t, \mathbf{F}_t, \mathbf{O}_t$ for the gates and calls $\tilde{\mathbf{C}}_t$ the "input node."
+- Sepp Hochreiter, Jürgen Schmidhuber (1997). [*Long Short-Term Memory*](https://doi.org/10.1162/neco.1997.9.8.1735). *Neural Computation* 9(8). The original paper introducing the constant error carousel (prior to the forget gate) and analyzing vanishing gradients.
+- Felix A. Gers, Jürgen Schmidhuber, Fred Cummins (2000). [*Learning to Forget: Continual Prediction with LSTM*](https://doi.org/10.1162/089976600300015015). *Neural Computation* 12(10). Introduces the forget gate.
+- Rafal Jozefowicz, Wojciech Zaremba, Ilya Sutskever (2015). [*An Empirical Exploration of Recurrent Network Architectures*](https://proceedings.mlr.press/v37/jozefowicz15.html). ICML 2015. Compares LSTM, GRU, and over ten thousand recurrent mutations, highlighting the forget-bias initialization trick.
+- Alex Graves, Jürgen Schmidhuber (2005). [*Framewise Phoneme Classification with Bidirectional LSTM and Other Neural Network Architectures*](https://doi.org/10.1016/j.neunet.2005.06.042). *Neural Networks* 18(5–6). Introduces BiLSTMs on phoneme recognition.
+
+<LessonProgress />

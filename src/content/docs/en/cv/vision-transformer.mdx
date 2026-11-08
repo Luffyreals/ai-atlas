@@ -1,0 +1,345 @@
+---
+title: 'Image Classification with Transformers: Attention, ViT'
+description: A cat ear in the top corner, a tail in the bottom corner—ViT connects them in the very first layer via attention. Patches, [CLS] token, N² cost, DeiT, and Swin.
+quiz:
+  - question: 'A CNN consists solely of $3 \times 3$ convolutional layers with stride 1 and no pooling. After 3 layers, what image region does one point on the feature map "see"? And how much does a patch token see in the very first attention layer of ViT?'
+    options:
+      - 'CNN sees $9 \times 9$; ViT sees the surrounding $3 \times 3$ patches'
+      - 'CNN sees $7 \times 7$; ViT sees the entire image'
+      - 'Both see the entire image right from the first layer'
+      - 'CNN sees $3 \times 3$ at every layer; ViT sees the entire image'
+    answer: 1
+    explanation: 'Each $3 \times 3$ layer expands the receptive field by 1 pixel on each side, giving $(2l + 1) \times (2l + 1)$ after $l$ layers: for 3 layers, $7 \times 7$. In unmasked self-attention, every attention weight $A_{ij}$ is positive, so every patch reads from every patch right in the first layer. The "$3 \times 3$ at every layer" option forgets that stacked layers accumulate their receptive fields.'
+  - question: 'ViT-B/16 is pretrained on $224 \times 224$ images (196 patches, plus `[CLS]` makes 197 tokens). You fine-tune it on $384 \times 384$ images while keeping $P = 16$. By roughly what factor does the number of entries in each attention score matrix (per head, per layer) increase?'
+    options:
+      - 'About 1.7x, because the image side is roughly 1.7x longer'
+      - 'About 2.9x, because the number of tokens increases by roughly 2.9x'
+      - 'About 8.6x'
+      - 'Unchanged, because $P$ stays the same'
+    answer: 2
+    explanation: '$384 / 16 = 24$, giving $24^2 = 576$ patches, plus `[CLS]` for 577 tokens. The attention score matrix has $577^2 = 332,929$ entries compared to $197^2 = 38,809$—roughly 8.6 times larger. The token count grows by about 2.9x, but attention scores every pair, so its cost scales quadratically. The position embeddings must also be 2D-interpolated from a $14 \times 14$ grid to $24 \times 24$.'
+  - question: 'You remove position embeddings from a ViT and randomly shuffle the order of the 16 patches of an image before feeding them in. How does the output at the `[CLS]` token (and the predicted class label) change?'
+    options:
+      - 'It changes completely, because attention sees the order of the patches'
+      - 'It changes slightly, because the MLP processes each position separately'
+      - 'The model raises an error because the patch count does not match'
+      - 'It does not change at all: without position embeddings, ViT sees a bag of patches, so the shuffled image and original image are identical to the model'
+    answer: 3
+    explanation: 'The `[CLS]` output is a weighted sum of value rows; permuting the rows permutes the attention weights identically, leaving the sum unchanged. Both the MLP and layer normalization operate independently on each token, independent of order. Position embeddings are the sole mechanism telling ViT where each patch sits.'
+  - question: 'A hospital has 5,000 labeled X-ray images and wants to train a classifier from scratch with no pretrained weights. Based on the findings of the ViT and DeiT papers, which choice is most sensible?'
+    options:
+      - 'A medium-sized CNN, or a small ViT paired with strong data augmentation and regularization'
+      - 'ViT-L from scratch, because larger models are always more accurate'
+      - 'ViT with $1 \times 1$ patches so no fine detail is lost'
+      - 'Turn off augmentation so ViT learns the true distribution of the X-rays'
+    answer: 0
+    explanation: 'ViT has weak inductive bias, so with limited data it overfits much more easily than a comparably sized CNN: even on ImageNet (1.3M images), ViT-L underperforms ViT-B when trained from scratch. CNNs bake in the assumption that nearby pixels are related, which helps when data is scarce. DeiT showed that ViT can train on moderate datasets only by combining heavy augmentation and knowledge distillation. Using $1 \times 1$ patches makes $N$ equal to the pixel count, causing the $N^2$ attention cost to explode.'
+  - question: 'You double both the height and width of an input image while keeping the patch size fixed. By what factor does the attention compute cost increase in standard ViT versus Swin (with a fixed $M \times M$ window size)?'
+    options:
+      - 'Both increase by 4x'
+      - 'ViT increases by 16x, Swin by 4x'
+      - 'ViT increases by 4x, Swin is unchanged'
+      - 'Both increase by 16x'
+    answer: 1
+    explanation: 'The number of patches $N$ quadruples. ViT scores all pairs, scaling as $N^2$, which is 16x. Swin computes attention only inside each window of $M^2$ patches; the number of windows quadruples while the cost per window stays constant, so total cost increases by 4x—linear in the number of patches. Answering "Swin is unchanged" forgets that the number of windows grows with image area.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import patchAttentionCode from '@code/cv/vision-transformer/patch-attention.en.py?raw';
+import tinyVitCode from '@code/cv/vision-transformer/tiny-vit.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand why **self-attention** over image patches lets every region see the entire image right from the first layer, unlike the gradually expanding **receptive field** of a CNN.
+- Trace how an image flows through a **Vision Transformer** (ViT): patch embedding, **class token** (`[CLS]`), position embeddings, Transformer encoder blocks, and classification head—and compute the token count and $O(N^2)$ attention cost.
+- Explain **inductive bias** and why ViT requires massive datasets (like JFT-300M), whereas DeiT trains on ImageNet alone using strong augmentation and **knowledge distillation**; and state the core idea of Swin Transformer (local attention in shifted windows).
+- Implement patch extraction and scaled dot-product attention in NumPy, then train a tiny ViT in PyTorch and compare it head-to-head with a small CNN.
+
+## Prerequisites
+
+{/* List populated from prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+The Deep Learning lesson on Transformers is not published yet, so here is what this lesson uses; a fuller treatment with causal masking appears in [Build Your First LLM](/en/llm/build-first-llm/). **Self-attention** lets every position in a sequence of vectors look at every position in that same sequence: it scores how relevant each pair is, converts scores into weights with softmax, and takes a weighted average. Each input vector is multiplied by three learned matrices to produce a **query, key, and value** ($\mathbf{Q}$, $\mathbf{K}$, $\mathbf{V}$): the query asks "what am I looking for?", the key says "what do I contain?", and the value provides "the information I pass along." **Multi-head attention** runs $h$ such operations in parallel, each of dimension $d = D/h$, and concatenates the results so different heads can track different relationships. A **Transformer block** consists of multi-head attention followed by a small **feed-forward network** (MLP), each preceded by **layer normalization** and wrapped in a **residual connection** that adds the input back to the output. Splitting an image into patches and projecting each patch into a vector was introduced in [Multimodal LLMs](/en/llm/multimodal/); this lesson picks up from those patch vectors to classify the image.
+:::
+
+## Intuition
+
+### Cat ear in the top corner, tail in the bottom corner
+
+Imagine looking at a photo of a stretching cat: its ear is in the top-left corner, and its curved tail is in the bottom-right corner. To be sure this is **one** cat rather than two separate objects, your visual system has to link those two distant corners together.
+
+In [Image Classification with CNNs](/en/cv/cnn-image-classification/), each convolutional layer looks only at a tiny local window, such as $3 \times 3$ pixels. For information from the ear to meet information from the tail, signals must hop through many layers, expanding outward a little at a time like a rumor passed from neighbor to neighbor. Pooling and stride speed up the spread, but two far-apart regions still only "meet" in deep layers.
+
+Now picture a town hall meeting instead. Cut the image into a grid of square patches, where each patch is a participant in the room. In the very first minute, every participant can ask **every** other participant directly: "Do you have anything relevant to me?" The patch holding the cat's ear can talk to the patch holding the tail immediately. That is self-attention over patches, and it is the central idea of ViT.
+
+### The price of the meeting
+
+A meeting where everyone talks to everyone else comes with two costs.
+
+First, **the number of pairs grows quadratically**. With 4 participants there are 16 pairs (including talking to oneself); with 200 participants there are 40,000 pairs. Slicing an image into smaller patches to capture finer detail increases the number of participants, causing the number of pairs to skyrocket.
+
+Second, **nobody is told in advance to pay special attention to the person sitting next to them**. A CNN bakes that assumption directly into its architecture: nearby pixels are related, and shifting an object left still leaves it the same object. ViT has to discover spatial layout from scratch by looking at data. When training data is abundant, learning from scratch is an advantage because the model is not constrained by rigid assumptions; when data is scarce, ViT underperforms a CNN.
+
+The central question of this lesson is: **how do we adapt a Transformer—originally built for text—to classify images, how much does it cost as images grow larger, and when does it beat or lose to a CNN?**
+
+## Theory
+
+### Notation
+
+An input image $\mathbf{X} \in \mathbb{R}^{H \times W \times C}$ has height $H$, width $W$, and $C$ color channels. The patch size is $P$, the number of patches is $N = (H/P)(W/P)$, and each token has dimension $D$, matching [Multimodal LLMs](/en/llm/multimodal/). The Transformer encoder stacks $J$ blocks indexed by $\ell = 1, \dots, J$ (the ViT paper writes $L$, which we reserve for sequence length as in the LLM lessons). Each block has $h$ attention heads, each of dimension $d = D/h$.
+
+### Step 1: from image to token sequence
+
+Since [Multimodal LLMs](/en/llm/multimodal/) derived this step in detail, we state it concisely here. The image is split into $N$ non-overlapping patches, each flattened into a row vector $\mathbf{x}_i \in \mathbb{R}^{P^2 C}$ and multiplied by a **single** shared projection matrix $\mathbf{E} \in \mathbb{R}^{(P^2 C) \times D}$. ViT prepends a learnable `[CLS]` token to the start of the sequence and adds position embeddings (Dosovitskiy et al., 2021, Equation 1):
+
+$$
+\mathbf{Z}_0 =
+\begin{bmatrix}
+\mathbf{x}_{\text{cls}} \\
+\mathbf{x}_1 \mathbf{E} \\
+\vdots \\
+\mathbf{x}_N \mathbf{E}
+\end{bmatrix}
++ \mathbf{E}_{\text{pos}},
+\qquad
+\mathbf{Z}_0, \mathbf{E}_{\text{pos}} \in \mathbb{R}^{(N+1) \times D}
+$$
+
+Breaking down the pieces:
+
+- **$\mathbf{x}_{\text{cls}}$** is a learnable $D$-dimensional vector shared across all images. Because it starts out independent of any specific patch, it serves as an unbiased aggregation slot that gathers information from all patches across the attention layers.
+- **$\mathbf{E}_{\text{pos}}$** has $N + 1$ rows, where each row is a learnable position embedding added to the token at that index (including position 0 for `[CLS]`).
+- For an $8 \times 8$ grayscale digit from `load_digits` ($C = 1$) with $P = 4$: there are $N = 2 \cdot 2 = 4$ patches of $16$ numbers each, plus `[CLS]`, giving a sequence of 5 tokens. The NumPy code cell below runs this exact setup.
+
+### Step 2: self-attention over patches
+
+In each encoder block, the token sequence passes through self-attention. For a single head, three learned projections produce queries, keys, and values:
+
+$$
+\mathbf{Q} = \mathbf{Z}\mathbf{W}_Q, \quad
+\mathbf{K} = \mathbf{Z}\mathbf{W}_K, \quad
+\mathbf{V} = \mathbf{Z}\mathbf{W}_V,
+\qquad
+\mathbf{W}_Q, \mathbf{W}_K, \mathbf{W}_V \in \mathbb{R}^{D \times d}
+$$
+
+Here bold $\mathbf{K}$ denotes the key matrix, not to be confused with the convolutional kernel of the CNN lesson. Next comes **scaled dot-product attention**:
+
+$$
+\mathbf{A} = \mathrm{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d}}\right),
+\qquad
+\mathrm{Attn}(\mathbf{Z}) = \mathbf{A}\mathbf{V}
+$$
+
+Breaking down each term:
+
+- **$\mathbf{Q}\mathbf{K}^\top$** has shape $(N+1) \times (N+1)$. Entry $(i, j)$ is the dot product between token $i$'s query and token $j$'s key, measuring how relevant token $j$ is to token $i$.
+- **Dividing by $\sqrt{d}$** keeps dot products from growing too large as $d$ increases, preventing softmax from saturating onto a single entry (see [Build Your First LLM](/en/llm/build-first-llm/) for the variance derivation).
+- **Row-wise softmax** turns scores into positive weights that sum to 1 along each row. Row $i$ of $\mathbf{A}$ is how token $i$ distributes its attention across all tokens.
+- **$\mathbf{A}\mathbf{V}$**: row $i$ of the output is a weighted average of all value rows. Patch $i$ can thus "read" information from the entire image.
+
+**No causal mask.** GPT masks out future positions because future words do not exist yet during text generation. An image is given all at once—there is no "future"—so ViT uses an unmasked bidirectional encoder: a patch in the bottom corner can attend to a patch in the top corner and vice versa.
+
+**Global receptive field from layer 1.** Because $e^{s} > 0$ for any finite score $s$, every attention weight $A_{ij}$ is strictly positive: every token receives information from **every** token right in the first block. Contrast this with a CNN: a single $3 \times 3$ stride-1 layer lets each point see a $3 \times 3$ neighborhood. A second $3 \times 3$ layer looks at $3 \times 3$ points of the first layer, expanding the view by 1 pixel on each side. After $l$ layers, the receptive field is $(2l + 1) \times (2l + 1)$. Covering an $8 \times 8$ digit takes 4 layers ($2 \cdot 4 + 1 = 9 \ge 8$), and covering a $224 \times 224$ image without pooling or stride would take 112 layers.
+
+Of course, *being able* to look everywhere does not mean every head *does* look everywhere. The ViT paper measures the average **attention distance** of each head—an analog of receptive field size. In early layers, some heads attend locally (much like early convolutions) while others attend across the entire image; deeper in the network, attention distance becomes globally broad across all heads (Section 4.5). The model learns when to look near and when to look far.
+
+**Multi-head attention.** Running $h$ heads in parallel with separate $(\mathbf{W}_Q, \mathbf{W}_K, \mathbf{W}_V)$ matrices yields $h$ outputs of shape $(N+1) \times d$. Concatenating them restores dimension $D = hd$, and a final $D \times D$ linear projection mixes information across heads. ViT-Base uses $D = 768$ and $h = 12$, so each head has $d = 64$.
+
+### Step 3: encoder block and classification head
+
+Each encoder block $\ell$ applies two sub-layers, each with layer normalization ($\mathrm{LN}$) at its input and a residual connection at its output (Equations 2 and 3 of the ViT paper):
+
+$$
+\begin{aligned}
+\mathbf{Z}'_\ell &= \mathrm{MSA}\big(\mathrm{LN}(\mathbf{Z}_{\ell-1})\big) + \mathbf{Z}_{\ell-1} \\
+\mathbf{Z}_\ell &= \mathrm{MLP}\big(\mathrm{LN}(\mathbf{Z}'_\ell)\big) + \mathbf{Z}'_\ell
+\end{aligned}
+$$
+
+Here $\mathrm{MSA}$ is multi-head self-attention from Step 2, and $\mathrm{MLP}$ is a two-layer feed-forward network with a GELU activation in between, applied independently to each token; in ViT-Base, the hidden layer has width $3,072 = 4D$. Placing $\mathrm{LN}$ before each sub-layer (Pre-LN) matches the GPT-2 convention in Build Your First LLM, and the residual additions let gradients flow cleanly through dozens of blocks.
+
+After $J$ blocks, ViT takes only the **first row**—the final state of `[CLS]`—applies one last layer normalization, and feeds it into the classification head (Equation 4):
+
+$$
+\mathbf{y} = \mathrm{LN}\big(\mathbf{Z}_J[0]\big),
+\qquad
+\text{logit} = \mathbf{y}\,\mathbf{W}_{\text{head}} + \mathbf{b}_{\text{head}}
+$$
+
+Here $\mathbf{Z}_J[0]$ is row 0 (the `[CLS]` token) of $\mathbf{Z}_J$, and $\mathbf{W}_{\text{head}}$ maps from $D$ dimensions to the number of classes (10 for digits). Softmax over the logits gives class probabilities, trained with standard cross-entropy loss. The paper uses a one-hidden-layer MLP head during pretraining and replaces it with a **single zero-initialized linear layer** when fine-tuning on downstream tasks. Instead of `[CLS]`, you can also average all patch tokens (global average pooling) just like ResNet; the paper's appendix shows both work equally well once the learning rate is tuned accordingly.
+
+The table below lists the three model sizes defined in Table 1 of the ViT paper. A name like ViT-B/16 means the Base variant with $16 \times 16$ patches.
+
+| Variant | Blocks $J$ | $D$ | MLP hidden size | Heads $h$ | Parameters |
+|---|---:|---:|---:|---:|---:|
+| ViT-Base | 12 | 768 | 3,072 | 12 | 86M |
+| ViT-Large | 24 | 1,024 | 4,096 | 16 | 307M |
+| ViT-Huge | 32 | 1,280 | 5,120 | 16 | 632M |
+
+### Computational cost: $O(N^2)$ in the number of patches
+
+The attention score matrix $\mathbf{Q}\mathbf{K}^\top$ has $(N+1)^2$ entries per head in every block. Computing each entry takes a $d$-dimensional dot product, so one head costs $(N+1)^2 d$ multiplies, and $h$ heads cost $(N+1)^2 hd = (N+1)^2 D$. Multiplying $\mathbf{A}\mathbf{V}$ costs the same again. By contrast, linear projections and the MLP operate token by token, scaling linearly with $N$. When $N$ grows large, the quadratic $O(N^2)$ term dominates.
+
+Substituting $N = HW/P^2$ reveals a sharp trade-off: **halving the patch size $P$ or doubling both image dimensions quadruples $N$, increasing the attention matrix size by roughly 16x**. As the NumPy cell below prints, a $224 \times 224$ image with $P = 16$ produces 197 tokens and $38,809$ pairs; halving $P$ to $8$ produces 785 tokens and $616,225$ pairs—about 15.9 times more. That is why standard ViT uses relatively coarse patches ($14 \times 14$ or $16 \times 16$ pixels), inspiring the paper's title *"An Image is Worth 16x16 Words."*
+
+It is common to fine-tune a pretrained ViT at a higher image resolution than it saw during pretraining. Keeping $P$ fixed increases $N$, so the learned position embeddings no longer match the grid size; the authors resolve this by applying **2D interpolation** to the pretrained position embeddings according to their 2D grid coordinates (Section 3.2).
+
+### Inductive bias: why ViT needs large datasets
+
+An **inductive bias** is a prior assumption built into a model's architecture before it sees any data. The ViT paper highlights three assumptions baked into every layer of a CNN: **locality** (nearby pixels are related), 2D neighborhood structure, and **translation equivariance** (shifting the input shifts the features identically because the same kernel slides everywhere). In ViT, only the MLP is local and translation-equivariant, while self-attention is global. The 2D grid structure of the image is used in only two places: when slicing the image into patches, and when interpolating position embeddings across resolutions. At initialization, the position embeddings carry zero information about which patches are adjacent; all spatial relationships must be learned from data.
+
+Fewer built-in assumptions make a model more flexible, but require many more training examples to avoid overfitting—the classic trade-off from [Overfitting and Underfitting](/en/ml/overfitting-underfitting/). The ViT paper demonstrates this by pretraining on three datasets of increasing scale (Sections 4.1 and 4.3):
+
+| Pretraining dataset | Images | Classes | ViT finding (Dosovitskiy et al., 2021) |
+|---|---:|---:|---|
+| ImageNet | 1.3M | 1,000 | Trails comparably sized ResNets by a few percentage points; ViT-Large even underperforms ViT-Base |
+| ImageNet-21k | 14M | 21,000 | ViT-Large and ViT-Base perform similarly |
+| JFT-300M (Google internal) | 303M | 18,000 | Larger models shine and surpass strong ResNet baselines |
+
+A second experiment makes the crossover explicit: when pretrained on a 9M-image subset of JFT, ViT-B/32 falls well behind a ResNet-50 of comparable compute cost; at 90M+ images, ViT-B/32 overtakes it. The authors conclude that convolutional inductive bias is helpful on smaller datasets, whereas at large scale learning spatial structure directly from data is sufficient—and even beneficial.
+
+### DeiT: training ViT on ImageNet alone
+
+Because JFT-300M is private, most researchers cannot use it. DeiT (*Data-efficient image Transformers*, Touvron et al., 2021) showed how to train a ViT **on ImageNet-1K alone** in about 53 hours on a single 8-GPU node. Two ingredients made the difference:
+
+- **Aggressive data augmentation and regularization.** Because Transformers lack convolutional priors and overfit easily on 1.3M images, the authors artificially expanded the data using RandAugment, Mixup, CutMix, random erasing, repeated augmentation, and stochastic depth. Nearly every augmentation they ablated contributed measurably to accuracy (these techniques are covered in [Data Augmentation in CV](/en/cv/image-augmentation/)).
+- **A distillation token.** DeiT appends a second learnable token alongside `[CLS]` that also interacts with all patch tokens through self-attention. While the `[CLS]` output predicts the true label $y$, the distillation token output is trained to match the hard label $y_t = \arg\max_c Z_t(c)$ predicted by a pretrained **teacher** network with logits $Z_t$. Hard-label distillation averages the two cross-entropy terms:
+
+$$
+\mathcal{L} = \tfrac{1}{2}\,\mathrm{CE}\big(\mathrm{softmax}(\mathbf{z}_{\text{cls}}), y\big) + \tfrac{1}{2}\,\mathrm{CE}\big(\mathrm{softmax}(\mathbf{z}_{\text{dist}}), y_t\big)
+$$
+
+Here $\mathbf{z}_{\text{cls}}$ and $\mathbf{z}_{\text{dist}}$ are the logit vectors produced by the two tokens. Intriguingly, using a **CNN** (RegNetY-16GF) as the teacher yields significantly better student accuracy than using a Transformer teacher of similar accuracy—suggesting that the CNN transfers its inductive bias to the ViT student through its predictions. DeiT's 86M-parameter baseline reaches 83.1% top-1 accuracy on ImageNet without external data, rising to 85.2% with distillation.
+
+### Swin: attention inside shifted windows
+
+Standard ViT has two drawbacks when used as a general-purpose vision backbone for dense tasks like segmentation: quadratic cost in the number of patches, and single-scale feature maps. Swin Transformer (Liu et al., 2021) addresses both:
+
+- **Local window attention.** Swin starts with small $4 \times 4$ patches and computes self-attention **only within** non-overlapping local windows of $M \times M$ patches ($M = 7$ by default). For a grid of $h \times w$ patches with channel dimension $C$ (matching $D$ in our notation), the paper counts the complexity of global attention as $4hwC^2 + 2(hw)^2C$, versus $4hwC^2 + 2M^2hwC$ for window attention. With $M$ fixed, the second term drops from quadratic to **linear** in the number of patches $hw$.
+- **Shifted windows.** If windows never moved, patches in adjacent windows would never exchange information. Swin alternates between two partitioning configurations in consecutive blocks: the first block partitions the grid starting from the top-left corner, and the next block shifts the window grid by $\lfloor M/2 \rfloor$ patches along both axes so the new windows bridge across the boundaries of the previous ones.
+- **Hierarchical feature maps.** Between stages, a **patch merging** layer concatenates each $2 \times 2$ group of neighboring patches and projects their channel dimension to $2C$, reducing token count by 4x while doubling channels—mirroring the multi-scale pyramid of a CNN.
+
+Notice how Swin brings locality and hierarchical multi-scale structure—two core ideas of CNNs—right back into a Transformer. Swin-L reaches 87.3% top-1 accuracy on ImageNet-1K (when pretrained on ImageNet-22K) and serves as a versatile backbone for object detection and image segmentation.
+
+:::note[Key takeaway]
+ViT = split into patches, project linearly, add `[CLS]` and position embeddings, pass through $J$ Transformer encoder blocks, and classify from `[CLS]`. Self-attention gives every patch a global view from layer 1, at the cost of $O(N^2)$ compute and weak inductive bias—requiring either massive pretraining data (JFT-300M) or strong augmentation plus distillation (DeiT). Swin restricts attention to shifted local windows so compute scales linearly with the number of patches.
+:::
+
+### Limitations
+
+- **Image classification only.** Using CNN or Transformer backbones for dense pixel prediction is covered in [Semantic Segmentation](/en/cv/semantic-segmentation/).
+- **Self-supervised ViTs** (such as MAE and DINO) belong to [Self-Supervised Learning in Vision](/en/cv/self-supervised-learning/); joint image-text pretraining belongs to [CLIP, BLIP, GLIP](/en/cv/clip-blip-glip/).
+- **Other efficient attention mechanisms** (such as FlashAttention or sparse attention) are outside our scope here; they either optimize GPU memory I/O for the exact same math or prune token pairs.
+
+## Illustration
+
+The diagram below traces an image through ViT from left to right. Follow the `[CLS]` token: it enters the encoder carrying no image-specific content, gathers information from all patches across the layers, and exits as the sole vector fed into the classification head.
+
+{/* FIG: VitFigure
+    Idea: an image becomes N patches, each projected to a token; the [CLS] token aggregates information from all patches through the encoder, and only the [CLS] output is used for classification.
+    Blocks and arrows: (1) a square image divided into a 2x2 or 3x3 grid of numbered patches in reading order; (2) arrow to a row of N "patch embedding" boxes (shared linear projection); (3) a distinctly colored [CLS] box prepended at the start of the row; (4) plus sign adding a row of "position 0, 1, ..., N" boxes; (5) large "Transformer Encoder × J" block (noting LN, multi-head attention, LN, MLP, residual connections inside); (6) from the output slot corresponding to [CLS] (focal point, matching input [CLS] color), an arrow leads to "MLP Head" and "classes: 0–9". The remaining patch outputs are muted with no outgoing arrows.
+    Labels: "Image"; "Split patches"; "Linear projection"; "[CLS]"; "Position"; "Transformer Encoder"; "Classification head"; "Predicted class".
+    Caption: An $8 \times 8$ image with $P = 4$ gives $N = 4$ patches, plus `[CLS]` for 5 tokens of dimension $D$; only the final `[CLS]` row enters the classification head. */}
+
+The table below compares CNNs and the three ViT families covered in this lesson. The dataset recommendations summarize empirical findings from the ViT and DeiT papers rather than rigid rules.
+
+| Criterion | CNN (ResNet) | ViT | DeiT | Swin |
+|---|---|---|---|---|
+| Core operation | Small-kernel convolution | Global self-attention | Global self-attention + distillation token | Shifted-window self-attention |
+| Layer-1 view | Local ($3 \times 3$, $7 \times 7$) | Entire image | Entire image | One $M \times M$ patch window |
+| Inductive bias | Strong: locality, translation equivariance | Weak: only patch splitting and position grid | Weak, compensated by augmentation & CNN teacher | Moderate: locality and hierarchy restored |
+| Cost vs. patch count $N$ | Linear in pixel count | $O(N^2)$ | $O(N^2)$ | Linear when $M$ is fixed |
+| Data needed to train well | Small to medium | Very large (14M to 300M images) | ImageNet (1.3M) with heavy augmentation | ImageNet-1K or 22K |
+| Feature map resolution | Multi-scale pyramid | Single scale | Single scale | Multi-scale pyramid |
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the NumPy cell with Python 3.14, NumPy 2.4, and scikit-learn 1.8 (in Pyodide); the PyTorch script with Python 3.14, PyTorch 2.15, and scikit-learn 1.9 on CPU. The NumPy cell runs directly in your browser, while the PyTorch script runs on your local machine. The two cells are independent. The NumPy cell takes slightly longer on its first run while Pyodide loads scikit-learn for `load_digits`.
+
+### Patch splitting and attention in NumPy
+
+The cell below takes the first digit from `load_digits` (a handwritten 0 of size $8 \times 8$), slices it into four $4 \times 4$ patches, projects each patch to dimension $D = 8$ using a random matrix (seed 0), prepends `[CLS]` and adds position embeddings, and runs one head of self-attention. Because the projection weights are random and untrained, this cell verifies tensor shapes and mathematical properties rather than classification accuracy.
+
+<PythonRunner code={patchAttentionCode} title="Splitting a digit into patches and computing self-attention" />
+
+Reading the output:
+
+- **`patches: (4, 16) N = 4`:** $N = (8/4)^2 = 4$ patches, each flattened into $4 \cdot 4 = 16$ numbers. The `True` line confirms patch 1 is the top-right block: patches are ordered row by row.
+- **`tokens Z: (5, 8)`:** 4 patch tokens plus `[CLS]` at row 0, each of dimension 8, matching the $(N+1) \times D$ shape of $\mathbf{Z}_0$.
+- **Attention matrix $\mathbf{A}$ of shape $5 \times 5$:** rows are query tokens and columns are key tokens. Row 0 is `[CLS]`: it puts weight 0.457 on token 2 (patch 1) and spreads the rest across the remaining tokens. With random weights these numbers carry no semantic meaning; after training, this row is how `[CLS]` chooses which patches to read.
+- **`row sums: [1. 1. 1. 1. 1.]`** and **`all weights > 0: True`:** softmax makes every row a valid probability distribution with strictly positive entries. Every token incorporates information from all 5 tokens right in this first layer—a global receptive field.
+- **Final lines:** the number of attention pairs is $(N+1)^2$. An $8 \times 8$ digit with $P = 2$ already has 17 tokens and 289 pairs; a $224 \times 224$ image with $P = 8$ has $616,225$ pairs, roughly 15.9 times the $38,809$ pairs for $P = 16$.
+
+### Tiny ViT vs. small CNN in PyTorch
+
+The script below builds a tiny ViT: $2 \times 2$ patches on $8 \times 8$ digits ($N = 16$, plus `[CLS]` for 17 tokens), $D = 32$, 2 encoder blocks, 4 heads, and MLP hidden width $2D$. Patch embedding is implemented as a single `Conv2d` with kernel size and stride both equal to $P$, just as verified in the Multimodal lesson. The encoder uses `nn.TransformerEncoderLayer` with `norm_first=True` (Pre-LN, matching the equations in Step 3). For comparison, the script also builds a two-layer CNN with a similar parameter count. Both models train for 60 epochs on 1,437 images and are evaluated on the remaining 360 images using AdamW. For CPU PyTorch installation instructions, see [Build Your First LLM](/en/llm/build-first-llm/).
+
+<LocalCode
+  code={tinyVitCode}
+  title="Tiny ViT and small CNN on load_digits"
+  packages={['torch', 'scikit-learn']}
+  hardware="CPU is sufficient, no GPU required. Takes about 2 minutes on a development machine, or slightly longer on a busy/slower CPU"
+>
+
+```text
+ViT: 18218 params, test acc 0.958
+CNN: 16122 params, test acc 0.986
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **Comparable parameter counts:** ViT has 18,218 parameters while the CNN has 16,122. Most of ViT's parameters live in its two encoder blocks; the position embeddings take only $17 \cdot 32 = 544$ numbers.
+- **The CNN wins:** 0.986 vs. 0.958 on the 360 test images—the CNN misses about 5 digits while the ViT misses about 15. With only 1,437 training images, the CNN's built-in assumption that nearby pixels belong together gives it a clear edge, illustrating our inductive bias discussion: ViT has to figure out how the 16 patches relate from scratch using a tiny dataset.
+- **ViT accuracy may vary slightly on your machine.** Even with a fixed random seed, PyTorch parallelizes reductions across CPU threads in slightly different orders, and tiny floating-point differences accumulate over 60 epochs. Running the exact same script single-threaded (`OMP_NUM_THREADS=1`) gives 0.972 for ViT and 0.986 for the CNN—the takeaway remains the same.
+
+Try changing `TinyViT(P=4)`: that leaves just 4 patches of 16 pixels each, making the sequence much shorter (only 25 attention pairs), at the cost of coarser patch representations.
+
+## Common pitfalls
+
+:::caution[Assuming ViT is always better than a CNN]
+ViT outperformed CNNs in the original paper **when pretrained on 14M to 300M images**. Trained from scratch on ImageNet alone without special tricks, it trailed a comparably sized ResNet, and on a tiny dataset like `load_digits` our small CNN beats TinyViT (0.986 vs. 0.958) with fewer parameters. When you have limited data and no pretrained checkpoint, start with a CNN, fine-tune a pretrained ViT, or adopt DeiT-style heavy augmentation. Never pick an architecture just because it is newer.
+:::
+
+:::caution[Forgetting that self-attention is blind to patch order]
+Unmasked self-attention is **permutation-equivariant**: shuffling the input tokens simply shuffles the patch outputs in the exact same way while leaving the `[CLS]` output completely unchanged. Without position embeddings, ViT treats an image as an unordered bag of patches—a digit and a scrambled jigsaw puzzle of its patches look identical to the network. The ViT paper's appendix reports a massive accuracy drop when position embeddings are removed. When implementing ViT yourself, verify that `pos` is actually added and has shape $(N + 1) \times D$.
+:::
+
+:::caution[Changing image or patch size without accounting for position embeddings and $O(N^2)$ cost]
+A ViT pretrained at $224 \times 224$ with $P = 16$ has exactly $N + 1 = 197$ position embeddings. Feeding it a $384 \times 384$ image produces 577 tokens, causing a shape mismatch unless you 2D-interpolate the $14 \times 14$ patch position grid to $24 \times 24$ (never truncate or tile it). Likewise, shrinking patch size $P$ to capture finer detail is not free: halving $P$ increases the attention matrix size by roughly 16x, as shown at the bottom of the NumPy output.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- ViT treats an image like a sentence: $N = HW/P^2$ patches are linearly projected into $D$-dimensional tokens, prepended with a `[CLS]` token, summed with position embeddings, and passed through $J$ Transformer encoder blocks (Pre-LN, multi-head self-attention, MLP, residual connections). The final `[CLS]` state feeds the classifier head.
+- Unmasked self-attention $\mathrm{softmax}(\mathbf{Q}\mathbf{K}^\top/\sqrt{d})\mathbf{V}$ lets every patch attend to every patch from the very first layer, whereas a CNN's receptive field grows gradually as $(2l+1) \times (2l+1)$ across $l$ layers of $3 \times 3$ convolutions. The trade-off: an $(N+1)^2$ attention matrix whose cost grows ~16x when patch size is halved.
+- Because ViT lacks built-in locality and translation equivariance, it needs either massive pretraining datasets (such as JFT-300M) or DeiT's combination of strong data augmentation and distillation from a CNN teacher.
+- Swin Transformer restricts self-attention to local $M \times M$ windows and shifts the window grid between consecutive blocks, achieving linear complexity in the number of patches and hierarchical multi-scale features like a CNN.
+
+**Further reading:**
+
+- Dosovitskiy, A. et al. (2021). [*An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale*](https://arxiv.org/abs/2010.11929), ICLR 2021, Section 3 (Equations 1–4 and "Inductive bias"), Section 4.3, and Section 4.5. Concise and readable; covers the architecture, dataset-scale experiments, and attention-distance plots.
+- Touvron, H., Cord, M., Douze, M., Massa, F., Sablayrolles, A., Jégou, H. (2021). [*Training data-efficient image transformers & distillation through attention*](https://arxiv.org/abs/2012.12877), arXiv:2012.12877, Sections 4 and 6. Introduces the distillation token and ablates each augmentation and regularization choice.
+- Liu, Z., Lin, Y., Cao, Y., Hu, H., Wei, Y., Zhang, Z., Lin, S., Guo, B. (2021). [*Swin Transformer: Hierarchical Vision Transformer using Shifted Windows*](https://arxiv.org/abs/2103.14030), arXiv:2103.14030, Sections 3.1 and 3.2. Figure 2 illustrates shifted windows clearly, and Equations 1–2 compare computational complexity.
+- Vaswani, A. et al. (2017). [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762), arXiv:1706.03762, Section 3.2. The original formulation of scaled dot-product attention and multi-head attention.
+
+<LessonProgress />

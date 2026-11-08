@@ -1,0 +1,375 @@
+---
+title: Sentiment Analysis
+description: Reading a restaurant review and predicting whether the customer is praising or complaining. Sentiment lexicons, Naive Bayes, logistic regression on TF-IDF n-grams, negation, macro F1, and fine-tuning BERT.
+quiz:
+  - question: 'The two reviews "quán không sạch, đồ ăn ngon" ("not clean, delicious food") and "quán sạch, đồ ăn không ngon" ("clean, food not delicious") pass through `TfidfVectorizer(ngram_range=(1, 1))` and then logistic regression. How do the positive probabilities assigned to the two sentences compare?'
+    options:
+      - 'The first sentence is higher, because "ngon" sits at the end'
+      - 'The second sentence is higher, because "sạch" sits near the beginning'
+      - 'They are identical, because both sentences contain the exact same words with the exact same counts'
+      - 'They cannot be compared, because TF-IDF depends on sentence length'
+    answer: 2
+    explanation: 'With unigrams, each sentence is just a bag of words: "quán", "không", "sạch", "đồ", "ăn", "ngon", each occurring once. Because the two bags are identical, their TF-IDF vectors are identical and the model outputs the exact same probability. Word order is completely lost. Adding bigrams gives the first sentence "không sạch" and the second sentence "không ngon", making the two vectors distinct.'
+  - question: 'A dataset of 1,000 reviews has 950 positive sentences and 50 negative sentences. A dummy model always predicts "positive". Which pair of numbers is closest to its accuracy and macro F1?'
+    options:
+      - 'Accuracy 0.50, macro F1 0.50'
+      - 'Accuracy 0.95, macro F1 0.49'
+      - 'Accuracy 0.95, macro F1 0.95'
+      - 'Accuracy 0.95, macro F1 0.97'
+    answer: 1
+    explanation: 'The model gets 950/1000 sentences right, so accuracy is 0.95. For the positive class, precision is 0.95 and recall is 1, giving $F_1 = 2 \cdot 0.95 / 1.95 \approx 0.974$. The negative class is never predicted, so its recall is 0 and $F_1 = 0$. Macro F1 is the unweighted average across the two classes: about 0.487. The number 0.97 is the F1 of the positive class alone, not macro F1.'
+  - question: 'You fine-tune PhoBERT to classify reviews into three labels: negative, neutral, and positive. What is added to the model, and what gets updated during training?'
+    options:
+      - 'Add a new vocabulary of three label tokens; update only the embedding table'
+      - 'Add nothing; use the MLM head to predict the word "good" or "bad" at the end of the sentence'
+      - 'Add a three-output layer; freeze PhoBERT and train only this new layer'
+      - 'Add a $3 \times D$ matrix on top of the `[CLS]` vector; update both this matrix and all of PhoBERT'
+    answer: 3
+    explanation: 'BERT-style fine-tuning attaches a small classification head reading $\mathbf{h}_{\text{CLS}}$: in original BERT this is a $3 \times D$ linear layer, while RoBERTa/PhoBERT in `transformers` adds a $D \times D$ dense layer with tanh before that projection. Softmax produces three probabilities, and the entire network is trained end-to-end with cross-entropy. Freezing PhoBERT and training only the new layer also works (feature extraction), but that is not fine-tuning and usually performs worse. In PhoBERT, the sequence-start token is named `<s>`, playing the role of `[CLS]`.'
+  - question: 'Suppose you feed the sentence "The bill lists three dishes." into a DistilBERT model fine-tuned on SST-2 and receive `NEGATIVE 0.981`. Which conclusion is most accurate?'
+    options:
+      - 'The model only has two labels, so softmax must split 100% of the probability mass between them; 0.981 does not mean the sentence is genuinely negative'
+      - 'The sentence carries hidden negative sentiment that human readers miss'
+      - 'Any score above 0.95 is reliable; you only need to filter out low scores'
+      - 'The model weights were corrupted during download, so re-running will give a different answer'
+    answer: 0
+    explanation: 'A model trained on SST-2 has only two classes, so for every input it must pick either positive or negative, and the two probabilities must sum to 1. A high score only says one class beat the other, not that the sentence actually expresses an opinion. In our code cell, the neutral sentence "The restaurant opens at 9 am." gets 0.997 positive. Thresholding confidence scores cannot fix this; you need a neutral class during training or a separate subjectivity filter.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import tfidfLogregCode from '@code/nlp/sentiment-analysis/tfidf-logreg.en.py?raw';
+import pipelineCode from '@code/nlp/sentiment-analysis/pipeline.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Formulate **sentiment analysis** at three levels of granularity: document level, sentence level, and **aspect-based sentiment analysis** (ABSA).
+- Compare three approaches: counting words with a **sentiment lexicon**, learning from labeled data with Naive Bayes or **logistic regression** on TF-IDF features, and fine-tuning BERT.
+- Explain why a bag of unigrams cannot distinguish `"ngon"` ("delicious") from `"không ngon"` ("not delicious"), and how much adding bigrams helps.
+- Properly evaluate a classifier under class imbalance: read a confusion matrix, compute macro F1, and explain why accuracy can be misleading.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+A **confusion matrix** counts examples by `(true label, predicted label)` pairs; in this lesson, rows are true labels and columns are predicted labels. For a given class, **precision** is the fraction of examples predicted as that class that are truly in that class, while **recall** is the fraction of true examples of that class that the model successfully finds. **F1** is their harmonic mean: $F_1 = 2PR/(P + R)$. **Macro F1** computes F1 for each class separately and takes their unweighted average, giving small classes the same weight as large ones.
+:::
+
+## Intuition
+
+### Praise or complaint?
+
+Suppose you open a *bún chả* restaurant and read customer reviews on a food-delivery app. Every day brings a few hundred new lines. You want to know quickly: are customers praising or complaining today, and what are they complaining about?
+
+| Review | How you read it |
+|---|---|
+| `Đồ ăn ngon, giao nhanh.` (Delicious food, fast delivery.) | Praise |
+| `Không ngon chút nào.` (Not delicious at all.) | Complaint |
+| `Không tệ, sẽ quay lại.` (Not bad, will come back.) | Praise, despite the word `"tệ"` ("bad") |
+| `Đồ ăn ngon nhưng phục vụ chậm.` (Delicious food, but slow service.) | Praises the food, complains about the service |
+| `Ngon đến mức không muốn quay lại.` (So delicious I never want to come back.) | Complaint, expressed sarcastically |
+| `Quán mở cửa lúc 9 giờ.` (The shop opens at 9 a.m.) | Neither praise nor complaint |
+
+You can read those six lines in a few seconds. For a computer, they are much harder. The third line contains the word `"tệ"` ("bad") yet is a compliment. The fourth line praises one thing and criticizes another. The fifth line uses positive-looking words (`"ngon"`, `"quay lại"`) to express a complaint.
+
+### Trying the simplest approach: counting words
+
+The first idea everyone thinks of is to list positive words (`"ngon"`, `"nhanh"`, `"sạch"`) and negative words (`"tệ"`, `"chậm"`, `"bẩn"`), then count. If positive words outnumber negative ones, call it praise.
+
+That works on the first two lines once you add a negation rule: "whenever you see `"không"` ('not'), flip the sign of the next word." But it fails on the fifth line because no simple rule knows that `"ngon đến mức"` ("so delicious that...") introduces sarcasm. It scores the fourth line as a tie (one positive, one negative), whereas the restaurant owner needs to know that the **food** was praised and the **service** was criticized. And for the sixth line, every system eventually has to admit a "neutral" label.
+
+Pang, Lee, and Vaithyanathan (2002) tested this exact hand-built word-list idea on English movie reviews. They asked two graduate students to pick positive and negative word lists, then classified reviews by counting. The two lists reached only 58% and 64% accuracy on a balanced dataset where random guessing gets 50%. In the same paper, models that **learned** word weights from labeled reviews reached 73% to 83% accuracy depending on configuration.
+
+**The problem of this lesson: given a piece of text, predict whether it is positive or negative (or neutral) in a way that handles negation, and measure accurately how well our classifier performs.**
+
+## Theory
+
+### Problem formulation
+
+The input is a piece of text, such as a customer review. The output is a label $y$ from a small set: two classes ("negative" and "positive"), three classes adding "neutral", or a 1-to-5 star rating. This is text **classification**, structurally identical to spam filtering or topic categorization, except that the label reflects the writer's **attitude** rather than the **topic**.
+
+Liu (2012) divides the problem into three levels of granularity:
+
+- **Document level.** One label for the entire review. Appropriate when the whole text evaluates a single item, such as a movie review.
+- **Sentence level.** One label per sentence. The first step is often subjectivity classification: separating opinionated sentences from purely factual ones (`"Quán mở cửa lúc 9 giờ"`).
+- **Aspect level** (ABSA). Identify each aspect mentioned (food, service, price, ambiance) and the sentiment toward that specific aspect. `"Đồ ăn ngon nhưng phục vụ chậm"` yields two pairs: `(food, positive)` and `(service, negative)`. The SemEval-2014 Task 4 benchmark (Pontiki et al., 2014) provides restaurant and laptop reviews annotated in this format.
+
+The rest of this lesson focuses on short reviews with binary labels. Sentence-level and aspect-level systems build on the exact same modeling techniques, differing only in how inputs and labels are structured.
+
+### Approach 1: sentiment lexicons
+
+A **sentiment lexicon** assigns a numerical score to each sentiment-bearing word: `"ngon"` ("delicious") $+1$, `"tuyệt"` ("wonderful") $+2$, `"chậm"` ("slow") $-1$, `"tệ"` ("bad") $-2$. A document's score is the sum of its word scores: positive if the sum is $> 0$, negative if $< 0$, and neutral if $0$.
+
+Add a simple negation rule: whenever `"không"`, `"chẳng"`, or `"chưa"` ("not / never / not yet") appears, flip the sign of the immediately following sentiment word.
+
+| Review | Scored words | Sum | Prediction |
+|---|---|---:|---|
+| `Đồ ăn ngon, giao nhanh` | ngon $+1$, nhanh $+1$ | $+2$ | Positive, correct |
+| `Không tệ, sẽ quay lại` | không tệ $-(-2) = +2$ | $+2$ | Positive, correct |
+| `Đồ ăn ngon nhưng phục vụ chậm` | ngon $+1$, chậm $-1$ | $0$ | Neutral, loses information |
+| `Ngon đến mức không muốn quay lại` | ngon $+1$ | $+1$ | Positive, wrong |
+
+Pros: requires no labeled training data and is completely transparent. Cons: someone must build and maintain the lexicon, word polarity shifts across domains ("long-lasting" is positive for phone batteries, negative for delivery wait times), and every new linguistic construction demands another hand-crafted rule. Chapter 23 of Jurafsky and Martin surveys established English sentiment lexicons and how they are constructed.
+
+### Approach 2: learning from labeled data
+
+Instead of assigning word scores by hand, we collect a dataset of labeled reviews and let a model **learn** the weights. This takes two steps.
+
+**Step 1: turn text into a feature vector.** A standard choice is bag-of-words TF-IDF, covered in [Vector Semantics and Embeddings](/en/nlp/vector-semantics-embeddings/): each document becomes a sparse vector $\mathbf{x}$ of length $|V|$, with one dimension per vocabulary item. A feature dimension can also represent an **n-gram**—a contiguous sequence of $n$ tokens. With $n = 2$ (bigrams), `"đồ ăn không ngon"` adds the bigram features `"đồ ăn"`, `"ăn không"`, and `"không ngon"`.
+
+Vietnamese has a language-specific quirk: spaces separate **syllables**, not multi-syllable words ([Tokenization](/en/nlp/tokenization/)). Because scikit-learn's `TfidfVectorizer` splits on whitespace and punctuation, the two-syllable word `"phục vụ"` ("service") becomes two unigram features `"phục"` and `"vụ"`, and the bigram `"vụ chậm"` joins the second half of `"phục vụ"` with `"chậm"` ("slow"). The classifier still learns effectively because `"vụ chậm"` reliably co-occurs with negative reviews. By default, `TfidfVectorizer` also lowercases text and drops single-character tokens via the regex `\w\w+` (such as `"ở"` or `"à"`); pass a custom `token_pattern` if you want to keep them. Running a Vietnamese word segmenter (such as VnCoreNLP's RDRSegmenter) produces cleaner features, though it is not strictly required for this pipeline.
+
+**Step 2: train a classifier on those vectors.** Two classic choices are Naive Bayes and logistic regression.
+
+### Naive Bayes
+
+Naive Bayes picks the class $y$ with the highest posterior probability given the document's tokens $t_1, \dots, t_L$. By Bayes' rule, $P(y \mid t_1, \dots, t_L)$ is proportional to $P(y)\,P(t_1, \dots, t_L \mid y)$. The "naive" assumption is that tokens are conditionally independent given the class $y$, so the likelihood of the sequence is the product of individual token probabilities. Taking logarithms turns the product into a sum (and avoids numerical underflow when multiplying many small probabilities):
+
+$$
+\hat{y} = \arg\max_{y} \Big[ \ln P(y) + \sum_{k=1}^{L} \ln P(t_k \mid y) \Big]
+$$
+
+Here $P(y)$ is the fraction of training documents in class $y$, and $P(t \mid y)$ is the relative frequency of token $t$ across all documents in class $y$, with $+1$ added to every count (Laplace or add-one smoothing) so that an unseen token in one class does not send the log-sum to $-\infty$:
+
+$$
+P(t \mid y) = \frac{\mathrm{count}(t, y) + 1}{\sum_{t'} \mathrm{count}(t', y) + |V|}
+$$
+
+Look back at the decision rule: each token $t_k$ adds a score $\ln P(t_k \mid y)$ to class $y$. That is the exact same linear scoring structure as a sentiment lexicon, except the scores are **counted** from labeled data instead of written by hand. Naive Bayes trains in a single pass of counting and works well on small datasets; Wang and Manning (2012) found that on short sentiment snippets it even outperforms linear SVMs.
+
+### Logistic regression
+
+For binary classification, **logistic regression** computes a weighted sum of the input features and squashes it into $(0, 1)$ using the sigmoid function $\sigma(z) = 1/(1 + e^{-z})$:
+
+$$
+\hat{p} = P(y = \text{positive} \mid \mathbf{x}) = \sigma(\mathbf{w}^\top \mathbf{x} + b)
+$$
+
+Each weight $w_j$ acts as the "sentiment score" of feature $j$: positive weights push toward the positive class, negative weights push toward the negative class. Unlike Naive Bayes, all weights are learned **jointly** by minimizing binary cross-entropy over the training set ($y^{(i)} = 1$ for positive, $0$ for negative):
+
+$$
+\mathcal{L} = -\frac{1}{m} \sum_{i=1}^{m} \Big[ y^{(i)} \ln \hat{p}^{(i)} + \big(1 - y^{(i)}\big) \ln\big(1 - \hat{p}^{(i)}\big) \Big]
+$$
+
+Each term is $-\ln$ of the probability the model assigns to the true class: near zero when the model is confident and right, very large when the model is confident and wrong. In scikit-learn, `LogisticRegression` adds an L2 penalty ([Regularization](/en/ml/regularization/)) whose inverse strength is controlled by `C` (default $C = 1$; smaller $C$ means stronger regularization). Regularization is essential here because the number of n-gram features often exceeds the number of training documents. For three or more classes, the sigmoid is replaced by a softmax over one score vector per class.
+
+Why does joint training beat independent counting? Correlated features that always appear together—such as the two syllables `"phục"` and `"vụ"`—are double-counted by Naive Bayes as if they were two independent pieces of evidence. Logistic regression splits the weight between them.
+
+### Negation: why we need n-grams
+
+With a bag of unigrams, `"quán không sạch, đồ ăn ngon"` ("shop not clean, food delicious") and `"quán sạch, đồ ăn không ngon"` ("shop clean, food not delicious") contain the **exact same** words with the exact same counts. Their feature vectors are identical, so every classifier built on those vectors must output the exact same prediction. The word `"không"` ("not") sits in its own isolated feature dimension with no record of which word it negated.
+
+Two standard fixes are used in practice:
+
+- **Add bigrams.** Phrases like `"không ngon"`, `"không sạch"`, and `"không tệ"` become distinct features with their own learned weights. This helps whenever the negated pair appeared in the training set, though it still misses long-range negation (`"không phải là quán ngon"`, "not a good restaurant").
+- **Negation scope tagging.** Pang et al. (2002) prepend `NOT_` to every word from a negation word up to the next punctuation mark: `"không ngon lắm, giá rẻ"` becomes `"không NOT_ngon NOT_lắm, giá rẻ"`. Now `NOT_ngon` is a completely separate feature from `ngon`.
+
+How much bigrams help depends on text length. On full-length movie reviews, Pang et al. found that unigrams plus bigrams did not beat unigrams alone (Naive Bayes 80.6% vs. 81.0%), because a long review contains enough other sentiment words to outweigh a few negated phrases. Wang and Manning (2012) showed that bigrams yield consistent gains across sentiment benchmarks, especially on short snippets. Restaurant reviews are usually short, and a single `"không"` flips the meaning of the whole sentence—as our first code cell demonstrates.
+
+### Evaluating under class imbalance
+
+Real-world review datasets are rarely balanced: on most platforms, positive reviews far outnumber negative ones. Suppose a test set has 90 positive reviews and 10 negative reviews, and a lazy classifier **always predicts positive**:
+
+- **Accuracy** $= 90/100 = 0.90$. Sounds great on paper.
+- **Positive class:** precision $90/100 = 0.90$, recall $90/90 = 1$, so $F_1 = 2 \cdot 0.9 \cdot 1 / 1.9 \approx 0.947$.
+- **Negative class:** the model never predicts negative, so recall $= 0$ and $F_1 = 0$. (Precision is $0/0$; scikit-learn sets it to 0 and emits a warning.)
+- **Macro F1** $= (0.947 + 0) / 2 \approx 0.474$.
+
+This classifier is useless to the restaurant owner because it catches zero complaints, yet its accuracy is 0.90. Macro F1 exposes the failure immediately. For sentiment analysis, always report macro F1 and the confusion matrix alongside accuracy. When training on imbalanced data, you can also reweight classes (`class_weight="balanced"` in scikit-learn) or tune the probability threshold instead of defaulting to 0.5.
+
+:::note[Key takeaway]
+Logistic regression on TF-IDF learns a sentiment weight $w_j$ for each feature. Unigrams cannot tell which word `"không"` negates; bigrams give `"không ngon"` its own weight. Under class imbalance, evaluate with macro F1 and the confusion matrix, because accuracy rewards models that simply guess the majority class.
+:::
+
+### Approach 3: fine-tuning BERT
+
+Even with bigrams, bag-of-words models ignore most word order and broader context. A Transformer encoder like BERT (Devlin et al., 2019) reads the entire sentence bidirectionally, allowing `"không"` to shape the representation of `"ngon"` even when several words sit between them.
+
+Sequence-level fine-tuning works just as in [BERT](/en/nlp/bert/): take the final-layer vector $\mathbf{h}_{\text{CLS}} \in \mathbb{R}^{D}$ of the `[CLS]` token, multiply by a learned matrix $\mathbf{W} \in \mathbb{R}^{K \times D}$ where $K$ is the number of classes, and apply softmax:
+
+$$
+\hat{\mathbf{y}} = \mathrm{softmax}(\mathbf{W}\mathbf{h}_{\text{CLS}})
+$$
+
+We train the entire network (both BERT and $\mathbf{W}$) end-to-end with cross-entropy on labeled reviews for a few epochs. Notice how similar the output layer is to logistic regression: it is still a linear projection followed by softmax. The difference is that $\mathbf{h}_{\text{CLS}}$ is a learned dense representation of the whole sentence in context, rather than a fixed sparse vector of word counts.
+
+For Vietnamese, two main pretrained options are common:
+
+- **Multilingual models** such as mBERT or XLM-R, which take raw unsegmented text directly.
+- **PhoBERT** (Nguyen and Nguyen, 2020), pretrained specifically on Vietnamese. Remember to word-segment the input with the same segmenter PhoBERT used during pretraining, as discussed in the BERT lesson.
+
+A widely used real-world Vietnamese benchmark is **UIT-VSFC** (Nguyen et al., 2018): roughly 16,000 student feedback sentences labeled as negative, neutral, or positive. The class distribution is heavily skewed: out of 11,426 training sentences, only 458 (about 4%) are neutral, alongside 5,325 negative and 5,643 positive sentences (per the Hugging Face dataset viewer). A model that completely ignores the neutral class can still post high accuracy, whereas macro F1 immediately penalizes it.
+
+The `LocalCode` example below uses DistilBERT (Sanh et al., 2019)—a 6-layer distilled BERT—fine-tuned on **SST-2**, the binary subset of the Stanford Sentiment Treebank (Socher et al., 2013) built from English movie reviews. The original SST annotated all 215,154 phrases inside the parse trees of 11,855 sentences specifically so models could learn how negation and compositional subphrases flip sentence meaning.
+
+### Approach 4: prompting an LLM directly
+
+When you have no labeled training set, you can prompt a large language model zero-shot: *"Classify the following review as positive, negative, or neutral. Reply with a single word."* This requires no training, handles Vietnamese and subtle context well, and adapts easily to aspect-based extraction (*"List each aspect mentioned and its sentiment"*). The trade-off is latency and cost—one LLM call per review is much slower and pricier than a small classifier—and sensitivity to prompt wording. Techniques for writing clear instructions, adding few-shot examples, and constraining output formats are covered in [Prompt Engineering](/en/llm/prompt-engineering/). Whichever approach you choose, you still need a labeled test set of your own to measure macro F1.
+
+### Hard cases for every approach
+
+- **Sarcasm.** `"Ngon đến mức không muốn quay lại."` ("So delicious I never want to come back.") Positive words, negative intent. Detecting it requires world knowledge and pragmatic context that bag-of-words lacks.
+- **Thwarted expectations.** Highlighted by Pang et al. (2002): the writer builds up a series of positive remarks only to deliver a crushing verdict in the final sentence. Word-counting models get fooled by the positive buildup.
+- **Comparisons.** `"Quán A ngon hơn quán B"` ("Restaurant A is better than Restaurant B") praises A and criticizes B. A single sentence-level label cannot capture both; Liu (2012) devotes a full chapter to comparative opinions.
+- **Mixed aspects.** `"Đồ ăn ngon nhưng phục vụ chậm"` ("Delicious food, slow service") calls for ABSA rather than a single document label.
+- **Domain shift.** A classifier trained on movie reviews struggles on restaurant reviews, and a model trained on formal text degrades on slang-heavy social media posts.
+
+### Limitations
+
+- **The toy dataset in the browser code cell is tiny.** Its numbers illustrate the mechanism of unigrams vs. bigrams; with a few dozen sentences, changing a couple of examples shifts the metrics noticeably (see the stability note below the first code cell).
+- **Binary classifiers force every input into positive or negative.** The second code cell shows a purely factual sentence assigned 0.997 positive probability.
+- **Sentiment labels are inherently subjective.** Human annotators regularly disagree—especially on the boundary between neutral and mild sentiment—placing a ceiling on achievable model agreement.
+- **Social bias.** The model card for DistilBERT SST-2 notes that `"This film was filmed in COUNTRY"` receives a 0.89 positive score for France but 0.08 for Afghanistan. Always audit pretrained models on your own target data.
+
+## Illustration
+
+The two tables below show the confusion matrices printed by the first code cell on the same 11 test sentences (6 positive, 5 negative). Rows are true labels and columns are predicted labels. Focus on the `"True: negative"` row: that is where unigrams break down.
+
+**Unigrams only**, `ngram_range=(1, 1)`:
+
+| True (row) vs. Predicted (col) | Positive | Negative |
+|---|---:|---:|
+| True: positive | 5 | 1 |
+| True: negative | 4 | 1 |
+
+**Unigrams plus bigrams**, `ngram_range=(1, 2)`:
+
+| True (row) vs. Predicted (col) | Positive | Negative |
+|---|---:|---:|
+| True: positive | 6 | 0 |
+| True: negative | 1 | 4 |
+
+Hand calculation from the first table:
+
+- **Negative class:** the model predicts negative for 2 sentences and gets 1 right, so precision is $1/2$. Out of 5 true negative sentences, it finds only 1, so recall is $0.2$. Thus $F_1 = 2 \cdot 0.5 \cdot 0.2 / (0.5 + 0.2) \approx 0.286$.
+- **Positive class:** precision $5/9 \approx 0.556$, recall $5/6 \approx 0.833$, giving $F_1 \approx 0.667$.
+- **Macro F1** $= (0.286 + 0.667)/2 \approx 0.476$, while accuracy is $6/11 \approx 0.545$. Macro F1 is noticeably lower than accuracy because the negative class is almost completely missed.
+
+The second table yields $F_1 = 8/9 \approx 0.889$ for the negative class, $12/13 \approx 0.923$ for the positive class, and a macro F1 of $\approx 0.906$. Because the bigram model performs well on both classes, accuracy ($10/11 \approx 0.909$) and macro F1 are close here; on heavily imbalanced sets like our 90/10 example in the Theory section, the two numbers diverge sharply.
+
+The summary table below compares how the two models in the Code examples section handle each tricky sentence type:
+
+| Sentence | Challenge | Logistic regression, bigrams (Cell 1) | DistilBERT SST-2 (Cell 2) |
+|---|---|---|---|
+| `Đồ uống không tệ` / `Not bad at all.` | Negated negative word | Positive, correct | POSITIVE 0.999, correct |
+| `Món này không ngon` / `The food was not good.` | Negated positive word | Negative, correct | NEGATIVE 1.000, correct |
+| `Đồ ăn ngon nhưng phục vụ chậm` / `Great food, but the service was painfully slow.` | Mixed aspects | $P(\text{pos}) = 0.52$, undecided | NEGATIVE 0.998 |
+| `Ngon đến mức không muốn quay lại` / `Great, another hour of waiting for cold soup.` | Sarcasm | $P(\text{pos}) = 0.57$, wrong | POSITIVE 0.897, wrong |
+| `The restaurant opens at 9 am.` | Neutral statement | (not tested) | POSITIVE 0.997, wrong (no neutral label) |
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the logistic regression cell on Python 3.14 and scikit-learn 1.8 (bundled in Pyodide), and the DistilBERT cell on Python 3.14, `transformers` 5.22, and PyTorch 2.14 on CPU. The first cell runs directly in the browser (the first run takes a few seconds to load scikit-learn). The second cell requires PyTorch and model weights, so run it on your own machine. The two cells are independent.
+
+### TF-IDF and logistic regression on Vietnamese reviews
+
+The cell below uses 43 hand-written Vietnamese restaurant reviews for training (25 positive, 18 negative) and 11 separate reviews for testing (6 positive, 5 negative). No test sentence overlaps with the training set, even up to word reordering. The test set was written specifically to **concentrate negation cases** (6 of the 11 test sentences contain `"không"`), making the difference between the two feature representations immediately visible.
+
+The script trains the exact same classifier twice: first with unigrams only, then with unigrams plus bigrams. For each run it prints `accuracy`, `F1 macro`, the confusion matrix, the misclassified test sentences, the five most negative (`top neg`) and five most positive (`top pos`) features, and the predicted positive probabilities for three new edge-case sentences. The key change is a single line:
+
+```python
+vec = TfidfVectorizer(ngram_range=(1, n))  # n = 2: add bigrams
+```
+
+<PythonRunner code={tfidfLogregCode} title="TF-IDF unigrams vs. bigrams with logistic regression on restaurant reviews" />
+
+Reading the output:
+
+- **Unigrams: accuracy 0.545, macro F1 0.476.** All five misclassified test sentences contain `"không"` ("not"): `"đồ uống không tệ"` ("drinks not bad") is predicted negative, while `"món này không ngon"`, `"quán không sạch, giá đắt"`, `"bún chả không ngon, phục vụ chậm"`, and `"cà phê không ngon, quá đắt"` are all predicted positive. Out of 5 negative test sentences, the model catches only 1. It sees `"ngon"` ("delicious") and `"sạch"` ("clean") as positive words, `"tệ"` ("bad") as a negative word, and has no idea that `"không"` precedes them.
+- **Unigram features:** `"không"` sits at the very top of `top neg`. Because `"không"` appears more often in negative training reviews than in positive ones, the unigram model treats the word `"không"` itself as a negative indicator. That is why `"đồ uống không tệ"` fails: both `"không"` and `"tệ"` pull the score toward negative.
+- **Adding bigrams: accuracy 0.909, macro F1 0.906.** The bigram `"không ngon"` jumps to the top of `top neg`, right ahead of `"không"`. The model now has a dedicated weight for the negated phrase, fixing four of the five negation errors. Only one test sentence is still misclassified: `"cà phê không ngon, quá đắt"`. Summing the feature contributions $w_j x_j$ for that sentence gives $-0.268$: `"không ngon"` contributes $-0.194$, `"đắt"` contributes $-0.043$ (also negative), while the four features `"cà"`, `"phê"`, `"cà phê"`, and `"phê không"` each contribute $+0.043$ because `"cà phê"` appeared only once in the training set—inside a positive review. However, the intercept is $b = +0.414$, so the logit is $z = -0.268 + 0.414 = 0.146 > 0$ and the model predicts positive. The positive intercept reflects the 25-vs.-18 class imbalance in the training set; in addition, L2-normalized TF-IDF spreads unit norm across all 10 active features in this sentence, diluting `"không ngon"`.
+- **Syllable bigrams like `"vụ chậm"` and `"vụ nhanh"`** illustrate whitespace tokenization on Vietnamese: `"phục vụ chậm"` splits into `"phục vụ"` and `"vụ chậm"`. The second syllable of the compound noun paired with the adjective still acts as a strong predictive feature.
+
+The three new sentences highlight the limits of both models:
+
+- `"đồ ăn ngon nhưng phục vụ chậm"` ("delicious food, but slow service") gets $P(\text{pos}) = 0.52$ under both models: one positive cue and one negative cue nearly cancel out. A single sentence-level label cannot represent mixed aspects.
+- `"chẳng ngon gì cả"` ("not delicious at all", using `"chẳng"` instead of `"không"`) gets 0.66 and then 0.64—still predicted positive. The training set only used `"không"`, never `"chẳng"`, so `"chẳng"`, `"gì"`, `"cả"`, and all of their bigrams are out-of-vocabulary and ignored. Only `"ngon"` ($+0.181$ in the bigram model) plus the positive intercept $b = +0.414$ remain. Bigrams only help for phrases seen during training.
+- `"ngon đến mức không muốn quay lại"` ("so delicious I never want to come back") gets 0.53 and 0.57: both models fall for the sarcasm and lean positive.
+
+**Small-sample numbers are noisy.** While preparing this lesson, we pooled all 54 sentences and re-split them 40 times using `StratifiedShuffleSplit(n_splits=40, test_size=11, random_state=0)` with default `LogisticRegression()`. Adding bigrams produced a higher macro F1 in 35 splits, tied in 5, and was never lower; the mean macro F1 rose from 0.445 (unigrams) to 0.616 (bigrams), both lower than on our negation-heavy test split. The directional trend is solid, but individual splits vary. On real projects, use cross-validation and a much larger test set.
+
+Try editing the cell: add `"chẳng ngon chút nào"` to `TRAIN_NEG` and re-run to see how the probability of `"chẳng ngon gì cả"` changes. Or replace `LogisticRegression()` with `LogisticRegression(class_weight="balanced")` to counter the 25/18 training imbalance: `"cà phê không ngon, quá đắt"` flips to the correct negative class, while `"đồ uống không tệ"` slips to negative, giving a macro F1 of 0.909. Class weighting shifts the decision boundary; it does not give the model deeper linguistic understanding.
+
+### DistilBERT fine-tuned on SST-2
+
+The second cell uses the `"sentiment-analysis"` pipeline from `transformers` with [`distilbert/distilbert-base-uncased-finetuned-sst-2-english`](https://huggingface.co/distilbert/distilbert-base-uncased-finetuned-sst-2-english). According to its model card, this checkpoint reaches 91.3% accuracy on the SST-2 dev set (compared to 92.7% for BERT-base). Because the model was trained on **English**, we feed it English counterparts of the tricky sentences from the Intuition section. The pipeline wraps three steps: tokenization, a forward pass through DistilBERT, and a softmax over the two output logits, returning the winning label and its probability.
+
+<LocalCode
+  code={pipelineCode}
+  title="Sentiment analysis pipeline with DistilBERT SST-2"
+  packages={['transformers', 'torch']}
+  hardware="CPU is sufficient. The first run downloads about 268 MB of weights; subsequent runs take roughly 10 seconds to a minute depending on your machine, mostly spent loading libraries and weights"
+  sampleVaries={false}
+>
+
+```text
+POSITIVE 1.000  The food was delicious and the staff were friendly.
+NEGATIVE 1.000  The food was not good.
+POSITIVE 0.999  Not bad at all.
+NEGATIVE 0.998  Great food, but the service was painfully slow.
+POSITIVE 0.897  Great, another hour of waiting for cold soup.
+POSITIVE 0.997  The restaurant opens at 9 am.
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **Negation works in both directions.** `"The food was not good."` is classified as `NEGATIVE 1.000`, and `"Not bad at all."` as `POSITIVE 0.999`. The bidirectional encoder attends across the whole sentence, and SST's phrase-level annotations explicitly taught it compositional negation.
+- **Mixed aspects** (`"Great food, but the service was painfully slow."`) comes out `NEGATIVE 0.998`. If forced to pick a single label, weighting the clause after `"but"` makes sense, though the positive signal about the food is lost.
+- **Sarcasm** (`"Great, another hour of waiting for cold soup."`) comes out `POSITIVE 0.897`—wrong. The opening word `"Great"` still dominates.
+- **Neutral statement** (`"The restaurant opens at 9 am."`) gets `POSITIVE 0.997`. Because the model only has two output classes whose softmax probabilities must sum to 1, it is forced to pick a side—and can do so with near-1.0 confidence. A high softmax score does not mean the input is genuinely opinionated.
+
+Inference is deterministic, so re-running on the same machine produces identical numbers. Do not feed Vietnamese text into this checkpoint: it was trained on English, and its `"uncased"` tokenizer strips accents ([Text Normalization](/en/nlp/text-normalization/)), collapsing distinct Vietnamese words together.
+
+## Common pitfalls
+
+:::caution[Removing `"không"`, `"chẳng"`, or `"not"` via stopword lists]
+Many off-the-shelf Vietnamese and English stopword lists include `"không"`, `"chẳng"`, `"rất"`, `"not"`, and `"very"`. In sentiment analysis, stripping those words erases the exact tokens that flip or amplify polarity: `"không ngon"` ("not delicious") turns into `"ngon"` ("delicious"). Likewise, do not blindly strip punctuation or emoticons such as `"!!!"` or `":("`. See [Text Normalization](/en/nlp/text-normalization/) for when normalization helps and when it hurts.
+:::
+
+:::caution[Reporting only accuracy on imbalanced datasets]
+When 90% of reviews are positive, a classifier that always predicts "positive" achieves 0.90 accuracy while catching zero complaints (macro F1 $\approx 0.474$). Always inspect the confusion matrix and report macro F1 (`f1_score(..., average="macro")`), paying special attention to recall on the minority class you care about—usually negative reviews.
+:::
+
+:::caution[Fitting `TfidfVectorizer` on the combined train + test data]
+Calling `fit_transform` on the entire dataset before splitting leaks test vocabulary and IDF weights into training, inflating test scores. Call `fit_transform` on the training split and only `transform` on the test split, as in our first code cell—or wrap both steps in `make_pipeline(TfidfVectorizer(), LogisticRegression())`.
+:::
+
+:::caution[Deploying a pretrained model on mismatched data without testing]
+An SST-2 checkpoint was trained on binary English movie review sentences. If you feed it Vietnamese text, slang-heavy chat messages, or neutral factual statements, it will still return a label with a 0.99 score and raise no error. Before trusting any off-the-shelf model on your domain, hand-label a few hundred examples from your own traffic and measure macro F1.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Sentiment analysis classifies text by the writer's attitude at the document, sentence, or aspect (ABSA) level. Hard cases include negation, sarcasm, comparisons, mixed aspects, and neutral statements.
+- Sentiment lexicons sum word scores without training data but are rigid. Naive Bayes and logistic regression $\hat{p} = \sigma(\mathbf{w}^\top \mathbf{x} + b)$ on TF-IDF features learn those weights from data. Unigrams cannot tell which word `"không"` negates; bigrams like `"không ngon"` fix seen negation pairs (lifting macro F1 from 0.476 to 0.906 in our code cell).
+- Under class imbalance, accuracy is misleading: always predicting the majority class scores 0.90 on a 90/10 split while macro F1 is only about 0.474. Always report macro F1 and the confusion matrix.
+- Fine-tuning BERT (or PhoBERT for Vietnamese) attaches $\hat{\mathbf{y}} = \mathrm{softmax}(\mathbf{W}\mathbf{h}_{\text{CLS}})$ and updates the full encoder, handling compositional negation far better. Zero-shot LLMs need no training data, but both still require a labeled test set from your own domain.
+
+**Further reading:**
+
+- Nguyen, K. V., et al. (2018). [*UIT-VSFC: Vietnamese Students' Feedback Corpus for Sentiment Analysis*](https://doi.org/10.1109/KSE.2018.8573337), KSE 2018, pp. 19–24. A 16,000-sentence Vietnamese sentiment dataset with three labels, available on [Hugging Face](https://huggingface.co/datasets/uitnlp/vietnamese_students_feedback)—a great benchmark for scaling up the first code cell.
+- Pang, B., Lee, L., Vaithyanathan, S. (2002). [*Thumbs up? Sentiment Classification using Machine Learning Techniques*](https://aclanthology.org/W02-1011/), EMNLP 2002, Sections 4–7. The foundational paper on machine learning for sentiment: human word lists, Naive Bayes, MaxEnt, SVMs, negation tagging, and why sentiment is harder than topic classification.
+- Jurafsky, D., Martin, J. H. [*Speech and Language Processing*](https://web.stanford.edu/~jurafsky/slp3/), 3rd edition draft (2026), Chapter 4 (logistic regression and text classification), Appendix B (Naive Bayes), and Chapter 23 (affect and sentiment lexicons). Note that the book writes $c$ for the class label where this lesson writes $y$.
+- Liu, B. (2012). [*Sentiment Analysis and Opinion Mining*](https://doi.org/10.2200/S00416ED1V01Y201204HLT016), Morgan & Claypool. Comprehensive survey covering the three levels of analysis, the quintuple opinion definition, aspect-based sentiment analysis, and comparative sentences.
+- Socher, R., et al. (2013). [*Recursive Deep Models for Semantic Compositionality Over a Sentiment Treebank*](https://aclanthology.org/D13-1170/), EMNLP 2013, Section 3. Introduces the Stanford Sentiment Treebank (the source of SST-2 used in our second code cell) and illustrates compositional negation over parse trees.
+- Wang, S., Manning, C. D. (2012). [*Baselines and Bigrams: Simple, Good Sentiment and Topic Classification*](https://aclanthology.org/P12-2018/), ACL 2012. A concise paper showing that bigrams and Naive Bayes form surprisingly strong baselines on short sentiment tasks.
+
+<LessonProgress />

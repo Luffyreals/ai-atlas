@@ -1,0 +1,207 @@
+---
+title: 'Data Structures: list, tuple, set, dict'
+description: 'Master Python''s four core data structures: list, tuple, set, and dict. Learn hash tables, O(1) vs. O(n) complexity, shallow vs. deep copies, and batch slicing.'
+quiz:
+  - question: 'You have a collection of 1,000,000 vocabulary words. Which data structure checks whether a word exists in the collection (`word in collection`) the fastest?'
+    options:
+      - '`list`, because elements are stored contiguously in memory'
+      - '`tuple`, because tuples are immutable and therefore faster to scan'
+      - '`set`, because it uses a hash table with $O(1)$ average lookup time'
+      - 'There is no speed difference among the four data structures'
+    answer: 2
+    explanation: 'With a `list` or `tuple`, checking membership via `in` scans sequentially from start to finish in $O(n)$ time. By contrast, `set` and `dict` use a hash table that computes the memory slot directly from the element''s hash code, achieving $O(1)$ average lookup time regardless of collection size.'
+  - question: 'Which of the following objects CANNOT be used as a key in a `dict` or an element in a `set`?'
+    options:
+      - 'The float `3.14`'
+      - 'The string `"learning_rate"`'
+      - 'The tuple `(1, 2, "epoch")`'
+      - 'The list `[1, 2, 3]`'
+    answer: 3
+    explanation: 'Dictionary keys and set elements must be hashable and immutable so their hash value never changes over their lifetime. A `list` is mutable—elements can be added or removed at any time—so it is unhashable and raises `TypeError: unhashable type: ''list''''.'
+  - question: 'Given `a = [[1, 2], [3, 4]]` and `b = a.copy()`, if you execute `b[0][0] = 99`, what will the value of `a[0][0]` be?'
+    options:
+      - '`1`, because `b` is a completely independent copy of `a`'
+      - '`99`, because `.copy()` only performs a shallow copy'
+      - 'It raises a `TypeError` because 2D lists do not support `.copy()`'
+      - '`None`, because the original object is locked when copied'
+    answer: 1
+    explanation: 'The `.copy()` method (or full slice `a[:]`) performs a shallow copy: it creates a new outer list, but the inner elements (the sublists `[1, 2]` and `[3, 4]`) still reference the exact same objects in memory from both `a` and `b`. To copy all nested levels independently, use `copy.deepcopy()`.'
+  - question: 'What does the list comprehension `[x ** 2 for x in range(6) if x % 2 == 1]` evaluate to?'
+    options:
+      - '`[0, 4, 16]`'
+      - '`[1, 9, 25]`'
+      - '`[1, 3, 5]`'
+      - '`[1, 4, 9, 16, 25]`'
+    answer: 1
+    explanation: 'The sequence `range(6)` produces integers 0 through 5. The filter `if x % 2 == 1` keeps only the odd numbers: 1, 3, 5. The expression `x ** 2` squares each odd number, yielding $1^2 = 1$, $3^2 = 9$, and $5^2 = 25$, or `[1, 9, 25]`.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import vocabCode from '@code/python/data-structures/vocab-indexer.en.py?raw';
+import batchCode from '@code/python/data-structures/batch-slicing.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Master the properties and syntax of Python's four core built-in data structures: `list`, `tuple`, `set`, and `dict`.
+- Distinguish mutable from immutable types, ordered sequences from unordered collections, and duplicate-allowing containers from unique sets.
+- Understand how hash tables work and why lookups in `set` and `dict` run in $O(1)$ average time instead of $O(n)$ like `list`.
+- Use slicing, list comprehensions, and dict comprehensions to transform datasets cleanly.
+- Distinguish shallow copies from deep copies to prevent unintended data mutation bugs.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In the previous lesson, you learned that variables are reference labels pointing to objects in memory. When working with compound data structures holding many elements, this reference mechanism determines whether modifying data in one variable affects another.
+:::
+
+## Intuition
+
+In data science and AI, real-world data never consists of isolated numbers—it comes in large collections: lists of thousands of images, dictionaries of millions of vocabulary words, or user feature vectors.
+
+Imagine trying to find a book in a library:
+
+1. **Method 1 (List):** Books are placed along a single long shelf without an index. To find a specific title, you have to walk from the beginning of the shelf to the end, checking one spine at a time. If the library holds 1 million books, you might have to inspect all 1 million of them.
+2. **Method 2 (Hash Table – Dict / Set):** The library uses a hash index. You type the book's title into a terminal, and it immediately computes the exact shelf and slot number. You walk straight to that slot and pick up the book in a single step, whether the library holds 100 books or 100 million.
+
+Choosing the right data structure not only keeps your code clean and readable—it is often the difference between a data loader that finishes in seconds and one that stalls for hours scanning lists.
+
+## Theory
+
+### The Four Core Data Structures
+
+Python provides four built-in collection types:
+
+| Structure | Syntax | Ordered? | Mutable? | Allows Duplicates? | Underlying Implementation |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`list`** | `[1, 2, 3]` | Yes | Yes | Yes | Dynamic Array |
+| **`tuple`** | `(1, 2, 3)` | Yes | **No** (Immutable) | Yes | Fixed-size Static Array |
+| **`set`** | `{1, 2, 3}` | No | Yes | **No** (Unique only) | Hash Table |
+| **`dict`** | `{"a": 1}` | Yes (since Python 3.7) | Yes | Unique keys | Hash Table |
+
+### Hash Tables and Hashability
+
+Why are membership lookups in `set` and `dict` so much faster than in `list`?
+
+- When you insert an item into a `set` or a `key: value` pair into a `dict`, Python passes the key through a hash function: `hash(key)`.
+- The hash function produces an integer that maps directly to a specific memory bucket.
+- When you check `key in my_dict`, Python does not scan from start to finish; it hashes the key and jumps straight to the corresponding bucket in **$O(1)$** (constant) average time.
+
+**Requirements for a Hashable Object:**
+An object must be **immutable** throughout its lifetime so its hash value never changes.
+- Hashable types: `int`, `float`, `str`, and `tuple` (provided all elements inside the tuple are also immutable).
+- Unhashable types: `list`, `dict`, `set`. Trying to use a `list` as a dictionary key raises `TypeError: unhashable type: 'list'`.
+
+### List Slicing
+
+General slicing syntax: `sequence[start:stop:step]`
+
+- `start`: Starting index (defaults to `0`).
+- `stop`: Stopping index (exclusive—stops at `stop - 1`).
+- `step`: Step size (a negative step reverses the traversal: `seq[::-1]`).
+- Negative indices: `-1` refers to the last element, `-2` to the second-to-last.
+
+Slicing is constantly used to split datasets into training/testing sets or mini-batches:
+
+```python
+train_data = all_data[:800]   # first 800 samples for training
+test_data = all_data[800:]    # remaining samples for testing
+```
+
+### Comprehensions: Writing Concise and Efficient Code
+
+Comprehensions let you construct a new list, dictionary, or set in a single expressive line that runs faster than manually calling `.append()` inside a `for` loop:
+
+- **List comprehension:** `[f(x) for x in data if condition]`
+- **Dict comprehension:** `{k: v for k, v in pairs}`
+- **Set comprehension:** `{normalize(w) for w in text}`
+
+### Shallow Copy vs. Deep Copy
+
+When working with nested lists (such as 2D matrices or nested model configurations):
+
+1. **Assignment (`b = a`):** Creates no copy at all! Both `a` and `b` point to the exact same object.
+2. **Shallow copy (`b = a.copy()` or `b = a[:]`):** Creates a new outer list container, but its inner elements still point to the same nested objects. Mutating an inner sublist via `b` also mutates `a`!
+3. **Deep copy (`import copy; b = copy.deepcopy(a)`):** Recursively clones every nested object at all levels, producing a completely independent copy.
+
+## Illustration
+
+Comparing sequential search in a dynamic array (`list`) against hash lookup in a hash table (`dict` / `set`):
+
+```text
+Lookup in a List (O(n) time complexity):
+  Query: "cat"
+  [0: "dog"] ──► [1: "bird"] ──► [2: "cat"] (Found after 3 sequential checks!)
+   (With 1,000,000 items, worst-case lookup takes 1,000,000 checks)
+
+Lookup in a Set / Dict (O(1) average time complexity):
+  Query: "cat"
+       │
+       ▼
+  [ Hash function hash("cat") ] ──► Computes memory bucket #42
+       │
+       ▼
+  [ Bucket #42: "cat" ] (Jumps straight to the target slot in 1 step!)
+```
+
+## Code examples
+
+The cells below run independently. Click **Run** to inspect the output.
+
+The first cell uses a `set` to extract unique vocabulary words and a `dict` to build bidirectional mappings (Word-to-ID and ID-to-Word). This is the mandatory first step in Natural Language Processing (NLP) and tokenization pipelines.
+
+<PythonRunner code={vocabCode} title="Building an NLP vocabulary with set and dict" />
+
+Repeated words in the raw text are automatically deduplicated by `set`. Then, dictionaries map words to integer IDs so AI models can convert text into numerical vectors for computation.
+
+The second cell demonstrates list slicing combined with `zip()` to partition a dataset into mini-batches.
+
+<PythonRunner code={batchCode} title="Splitting data into mini-batches with slicing" />
+
+The output shows how a 10-sample dataset is partitioned into 3 mini-batches (two batches of 4 samples and a final batch holding the remaining 2 samples). This is the core mechanics behind Mini-batch Stochastic Gradient Descent in deep learning.
+
+## Common pitfalls
+
+:::caution[The nested list multiplication trap]
+When you initialize a 2D matrix using `matrix = [[0] * 3] * 3`, all 3 rows actually reference the exact same inner list object in memory. If you modify `matrix[0][0] = 1`, all 3 rows become `[1, 0, 0]`. Always use a list comprehension instead: `matrix = [[0] * 3 for _ in range(3)]`.
+:::
+
+:::caution[Mutating a collection while iterating over it]
+Never call `.remove()` or `.pop()` to delete elements from a `list`, `set`, or `dict` while iterating directly over it in a `for` loop. Changing the collection size mid-iteration shifts internal indices, skipping elements or raising `RuntimeError: dictionary changed size during iteration`. Iterate over a copy or build a new filtered collection with a comprehension.
+:::
+
+:::caution[Using mutable types as dictionary keys]
+Attempting to use a `list` as a `dict` key (such as `d[[1, 2]] = "point"`) immediately crashes with `TypeError: unhashable type: 'list'`. Whenever you need a composite coordinate or sequence as a key, convert it to an immutable `tuple`: `d[(1, 2)] = "point"`.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- `list` (mutable dynamic array) and `tuple` (immutable fixed array) store ordered sequential data.
+- `set` (unique elements) and `dict` (key–value mappings) are backed by hash tables, providing $O(1)$ average lookup time.
+- Dictionary keys and set elements must be hashable and immutable.
+- Slicing and comprehensions keep data preprocessing and mini-batch partitioning concise and fast.
+- Distinguish shallow copies (`copy()`) from deep copies (`deepcopy()`) whenever working with nested data structures.
+
+**Further reading:**
+
+- Python Software Foundation (2024). [*The Python Tutorial: Data Structures*](https://docs.python.org/3/tutorial/datastructures.html). Detailed guide to lists, tuples, sets, dictionaries, and comprehensions.
+- Laurent Luce (2012). [*Python list implementation*](https://www.laurentluce.com/posts/python-list-implementation/). Deep dive into CPython's dynamic array architecture and memory allocation strategy.
+- Python Software Foundation (2024). [*TimeComplexity Wiki*](https://wiki.python.org/moin/TimeComplexity). Official Big-O time complexity reference for operations across Python's built-in collections.
+
+<LessonProgress />

@@ -35,6 +35,7 @@ export async function hydrateAll(page: Page): Promise<Locator[]> {
 
 export async function hydrate(viz: Locator): Promise<void> {
   await viz.scrollIntoViewIfNeeded();
+  await viz.evaluate((el) => el.scrollIntoView({ block: 'center' }));
   await expect(viz.locator('astro-island')).toHaveCount(1);
   await expect(viz.locator('astro-island:not([ssr])')).toHaveCount(1);
   // Astro drops `ssr` when it calls hydrateRoot; React commits a little later. Enabled controls mean it did.

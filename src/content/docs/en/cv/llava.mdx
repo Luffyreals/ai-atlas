@@ -1,0 +1,353 @@
+---
+title: 'Vision and Language (2): LLaVA and Its Variants'
+description: With CLIP, an LLM, and a projector ready, visual dialogue data is still missing. LLaVA uses text-only GPT-4 to generate data, LLaVA-1.5 fixes response formatting, AnyRes trades tokens for resolution, and POPE measures hallucination.
+quiz:
+  - question: 'Someone feeds an image into LLaVA-NeXT ($336 \times 336$ crops, patch size 14) and allows a $3 \times 3$ crop grid, plus one thumbnail image. Ignoring newline tokens, how many image tokens are produced, and does the image fit inside Vicuna-1.5''s 4,096-token context window?'
+    options:
+      - '576, fits comfortably, because the encoder always takes a $336 \times 336$ image'
+      - '5,184, does not fit'
+      - '5,760, does not fit: the image tokens alone exceed the context window'
+      - '1,728, fits, because only three crops per row are counted'
+    answer: 2
+    explanation: 'Each crop yields $(336/14)^2 = 576$ tokens. A $3 \times 3$ grid has 9 crops, plus the thumbnail for $9 + 1 = 10$ encoder passes, giving $10 \cdot 576 = 5\,760$ tokens, which exceeds 4,096. Option 5,184 forgets the thumbnail. Option 576 confuses a single crop pass with AnyRes, which runs multiple crops through the encoder.'
+  - question: 'The GPT-4 model used to generate LLaVA-Instruct-158K was text-only. How could it write questions and answers about an image?'
+    options:
+      - 'The authors manually described every single image to GPT-4'
+      - 'GPT-4 read the image captions and object bounding boxes (already available in COCO) and wrote conversations as if it were looking at the image'
+      - 'The image was converted into image tokens and fed into GPT-4'
+      - 'GPT-4 guessed the image content from the filename'
+    answer: 1
+    explanation: 'Captions describe the scene and bounding boxes tell what object is where—enough for a text-only model to "imagine" the image. Humans only wrote a few seed examples per response type. As a consequence, any detail missing from the captions and boxes is invisible to GPT-4, and caption errors go straight into the dataset.'
+  - question: 'LLaVA-1.5 mixes in academic VQA datasets where answers are just a single word. Why did the authors append "Answer the question using a single word or phrase." to those questions?'
+    options:
+      - 'So the model knows when a short answer is requested; without this prompt, the model tends to give curt replies even when users want detailed answers'
+      - 'To reduce the number of image tokens'
+      - 'Because Vicuna cannot generate long sentences'
+      - 'To make grading easier for GPT-4'
+    answer: 0
+    explanation: 'For the same kind of question, VQA datasets demand a single word while LLaVA data expects a paragraph. The formatting prompt serves as a signal separating the two modes. The LLaVA-1.5 paper cites InstructBLIP as a counterexample: trained on many short answers, it replies briefly even when users want detail. This prompt does not touch the image, so it does not change the image token count.'
+  - question: 'On a balanced POPE split (half the questions have answer "Yes", half "No"), a model always answers "Yes". Which statement is true?'
+    options:
+      - 'Recall is 1, so the model is very good'
+      - 'Accuracy is 0.5, precision is 0.5, recall is 1, and the "Yes" ratio is 1: these numbers show the model hallucinates every queried object'
+      - 'Precision is 1 because every "Yes" question is scored'
+      - 'It cannot be measured because POPE requires long answers'
+    answer: 1
+    explanation: 'Treat "Yes" as the positive class. Every ground-truth Yes question is answered Yes, so recall is 1; every ground-truth No question is answered wrong, so only half of the model''s "Yes" answers are correct: precision 0.5, accuracy 0.5. That is why POPE also reports the "Yes" ratio: it exposes a habit of nodding along to everything. High recall alone says nothing.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import MultimodalFigure from '@components/figures/MultimodalFigure.astro';
+import tokenBudgetCode from '@code/cv/llava/token-budget.en.py?raw';
+import askCode from '@code/cv/llava/ask.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand how LLaVA creates **visual instruction tuning** data: a text-only GPT-4 reads captions and bounding boxes and writes three types of responses.
+- Explain the three changes in LLaVA-1.5, especially why a single response formatting prompt matters so much.
+- Calculate the image token count of **AnyRes** (LLaVA-NeXT, LLaVA-OneVision) by hand and see how much of the context window a single image consumes.
+- Read evaluation results critically: what each benchmark measures, what **object hallucination** is, and how POPE measures it.
+
+## Prerequisites
+
+{/* List populated from prerequisites in roadmap.ts. Do not write manual links here. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+[Vision and Language (1): CLIP, BLIP, GLIP](/en/cv/clip-blip-glip/) gave you an image encoder trained to align images with text, along with BLIP-2's Q-Former. The base LLaVA architecture (image encoder → projector → LLM, two-stage training, 576 tokens per $336 \times 336$ image) was covered in [Multimodal](/en/llm/multimodal/); this lesson picks up directly from there without repeating the basics.
+:::
+
+## Intuition
+
+Suppose you have assembled the model from the Multimodal lesson: CLIP's image encoder, a projector, and an LLM such as Vicuna. All the parts are in place. You ask it: "How many apples are in the image?" It rambles, or simply repeats a one-line caption.
+
+Why? Because the connector has only learned to **pair** an image with a short caption like "a cat on a table." It has never seen someone ask a question about an image and get an instruction-following answer. For that, you need hundreds of thousands of `(image, instruction, answer)` examples. In early 2023, almost no dataset like that existed, and hiring people to write one was prohibitively expensive.
+
+Once you solve the data problem, three more issues show up right away:
+
+- **Long or short?** Some questions need a single word ("What color?"), while others need a full paragraph ("Describe the image in detail"). Mix the two kinds of data carelessly and the model gives curt answers to everything.
+- **Tiny details.** The encoder only accepts $336 \times 336$ images. Shrink a long receipt down to that size and the text blurs into unreadability.
+- **How do we evaluate?** A fluent answer is not necessarily a truthful one. The model can confidently describe a chair that is nowhere in the image.
+
+The core question of this lesson is: **where do we get visual conversation data, how do we teach the model to answer at the right length, how do we let it inspect high-resolution images without blowing up the context window, and how do we measure whether it is hallucinating?**
+
+## Theory
+
+### Data: letting text-only GPT-4 "see" images
+
+The key insight of LLaVA (Liu et al., 2023): GPT-4 at the time only accepted text, but images in the COCO dataset already came with two kinds of text descriptions.
+
+- **Captions**: a few sentences describing the scene from different angles.
+- **Bounding boxes**: each object has a class name and coordinates telling what object is where.
+
+Feed both into GPT-4 and it "sees" the image well enough to write questions and answers. The actual pixels are never sent. The authors hand-wrote a few seed examples for each response type and used them as few-shot examples in the prompt. According to the paper, that was the only human-written annotation in the entire pipeline.
+
+GPT-4 generated three types of data, totaling 158K examples (LLaVA-Instruct-158K):
+
+| Type | Examples | Format |
+|---|---:|---|
+| Conversation | 58K | Multi-turn Q&A: what objects are present, where they are, what they are doing, counting |
+| Detailed description | 23K | A rich paragraph describing the whole image |
+| Complex reasoning | 77K | Multi-step reasoning questions grounded in the scene, e.g., "why" or "what might happen next" |
+
+This pipeline is cheap and fast, but it comes at a cost. GPT-4 only knows what the captions and bounding boxes mention. If a caption is wrong or incomplete, the generated data inherits the error or omission. GPT-4's answers are also long and confident, so the student model learns that same tone even when it is unsure. You will see this again in the evaluation section.
+
+### Loss function: computed only on answers
+
+Each training example consists of an image $\mathbf{X}_v$, an instruction $\mathbf{X}_{\text{instruct}}$ (the question, plus any earlier conversation turns), and an answer $\mathbf{X}_a$ of length $L_a$ tokens. LLaVA trains the LLM to generate the answer one token at a time, just like any autoregressive LLM:
+
+$$
+p(\mathbf{X}_a \mid \mathbf{X}_v, \mathbf{X}_{\text{instruct}})
+= \prod_{i=1}^{L_a} p_{\boldsymbol\theta}\big(x_i \mid \mathbf{X}_v, \mathbf{X}_{\text{instruct}}, \mathbf{X}_{a,<i}\big)
+$$
+
+Reading from left to right: the probability of the full answer equals the product of the probabilities of each token $x_i$. Each token is predicted given the image, the instruction, and the answer tokens preceding it ($\mathbf{X}_{a,<i}$). Here $\boldsymbol\theta$ denotes the trainable parameters (the projector, plus the LLM in stage 2).
+
+Taking the logarithm turns the product into a sum, and negating gives the quantity to minimize:
+
+$$
+\mathcal{L} = -\sum_{i=1}^{L_a} \log p_{\boldsymbol\theta}\big(x_i \mid \mathbf{X}_v, \mathbf{X}_{\text{instruct}}, \mathbf{X}_{a,<i}\big)
+$$
+
+This is standard next-token cross-entropy, except the sum runs **only over the answer tokens**. Image tokens and question tokens stay in the sequence as context, but are masked out of the loss. Why? Because we want the model to learn how to answer, not how to copy the question.
+
+### LLaVA-1.5: three small changes
+
+LLaVA-1.5 (Liu et al., 2023, the "Improved Baselines" paper) keeps the same framework and changes three things:
+
+1. **A two-layer MLP projector** instead of a single linear layer (formula in the Multimodal lesson).
+2. **CLIP ViT-L/14 at $336 \times 336$**, the highest resolution CLIP offered at the time, so each image produces $(336/14)^2 = 24^2 = 576$ tokens.
+3. **Academic datasets mixed in.** The stage-2 dataset grows to 665K examples: LLaVA's 158K, plus visual question answering datasets (VQAv2, GQA, OKVQA, A-OKVQA), OCR datasets (OCRVQA, TextCaps), region grounding datasets (RefCOCO, Visual Genome), and 40K text-only conversations (ShareGPT). Stage 1 uses 558K image-caption pairs. For the 13B model, the authors report that the entire training run takes about one day on a single 8-A100 machine.
+
+The subtle detail is in point 3. Answers in VQAv2 are usually a single word ("yes", "2", "red"). Answers in LLaVA-Instruct are full paragraphs. If you mix them naively, the model cannot tell when to be brief and when to elaborate. The paper points to InstructBLIP as an example: trained heavily on short academic answers, it replies tersely even when the user asks for a detailed description.
+
+LLaVA-1.5's fix is remarkably simple: append a **response formatting prompt** to every VQA-style question:
+
+```text
+Answer the question using a single word or phrase.
+```
+
+Now the model has an explicit signal: when this sentence is present, reply with a word or phrase; when it is absent, reply normally. A single line of text lets you combine academic datasets (reliable, easy-to-grade ground truth) with conversational data (natural, detailed responses) without one ruining the other.
+
+### High resolution: AnyRes
+
+CLIP only accepts square $336 \times 336$ images. Larger images must be shrunk, and small text or tiny objects vanish. LLaVA-1.5-HD in the LLaVA-1.5 paper explored a different idea: **slice the image into a grid of crops**, run each crop through the encoder, and append **a thumbnail of the whole image** so the model still sees the global layout. LLaVA-NeXT (also called LLaVA-1.6, announced in a blog post on January 30, 2024) shipped this approach under the name **AnyRes** (any resolution).
+
+**Step 1: pick a grid.** The model keeps a list of allowed grids, each of size $a$ rows $\times$ $b$ columns of crops. The LLaVA-NeXT blog lists $2 \times 2$, $1 \times \{2, 3, 4\}$, and $\{2, 3, 4\} \times 1$, covering images up to $672 \times 672$, $336 \times 1344$, and $1344 \times 336$. The configurations of the LLaVA-NeXT checkpoints released on Hugging Face list a smaller set of grids, up to $1008 \times 336$, so the code cell below uses the grids from those released checkpoints. The image is resized while preserving aspect ratio to fit the grid that best matches its size and shape, and any leftover border is padded.
+
+**Step 2: count the tokens.** Let $S$ be the side length of one crop and $P$ be the patch size. A single crop yields $T$ tokens:
+
+$$
+T = \left(\frac{S}{P}\right)^2
+$$
+
+An $a \times b$ grid has $ab$ crops, each producing $T$ tokens. Adding the global thumbnail—which is also a square image of size $S \times S$ and therefore also $T$ tokens—gives:
+
+$$
+N_{\text{AnyRes}} = ab \cdot T + T = (ab + 1)\,T
+$$
+
+With $S = 336$ and $P = 14$, we get $T = 576$. A $2 \times 2$ grid yields $(4 + 1) \cdot 576 = 2\,880$ tokens: 5 times a single LLaVA-1.5 image.
+
+**Step 3: implementation details.** The implementation in `transformers` also inserts a **newline token** after each row of features in the crop grid, so the LLM knows where rows break when the 2D grid is flattened into a 1D sequence. A grid with $a$ rows of crops has $a\sqrt{T}$ feature rows, bringing the total to:
+
+$$
+N = (ab + 1)\,T + a\sqrt{T}
+$$
+
+For a $2 \times 2$ grid: $2\,880 + 2 \cdot 24 = 2\,928$. The implementation also strips feature rows and columns that contain only padding, so for images whose aspect ratio does not match the grid, the actual token count is slightly smaller than this formula. The first code cell below computes this formula; the local code cell counts the exact tokens produced by the real processor.
+
+**The price.** Vicuna-1.5, the LLM behind LLaVA-1.5 and several LLaVA-NeXT variants, has a 4,096-token context window (the `max_position_embeddings` field in the checkpoint config). A single $2 \times 2$ image already takes 2,928 tokens—over 70% of the window. On top of that, self-attention cost grows quadratically with sequence length.
+
+### LLaVA-OneVision: sharing the token budget
+
+LLaVA-OneVision (Li et al., 2024) keeps the same encoder → two-layer MLP → LLM recipe, but swaps the components: a SigLIP encoder at $384 \times 384$ and Qwen-2 LLMs (0.5B, 7B, 72B). The patch size is still 14, so each crop yields $\lfloor 384/14 \rfloor^2 = 27^2 = 729$ tokens (the 6 leftover border pixels are dropped).
+
+What is new is a unified **token budget** shared across three regimes: single-image, multi-image, and video.
+
+- **Single image:** AnyRes with large grids. If the total $L = (ab + 1)\,T$ exceeds a threshold $\tau$, each crop's feature map is bilinearly interpolated down to $T_{\text{new}} = \tau / (ab + 1)$ tokens so the total never exceeds $\tau$. In the final training stage, the cap is roughly $729 \times 10$ tokens.
+- **Multi-image:** each image is encoded at its base resolution only, 729 tokens.
+- **Video:** each frame is encoded at base resolution and then pooled down to fewer tokens, so many frames can fit at once.
+
+The authors chose these settings so the maximum token count is roughly balanced across all three regimes. The guiding principle: **the context window is fixed, so the more images you feed in, the fewer tokens each image gets.** Earlier, LLaVA-NeXT-Interleave (Li et al., 2024) had already trained a single model on interleaved multi-image, video, and multi-view 3D data.
+
+### Other variants: connectors and data
+
+Contemporaries of LLaVA differ mainly in two places: **how they connect vision to the LLM** and **what data they train on**.
+
+- **MiniGPT-4** (Zhu et al., 2023): takes the frozen ViT-G/14 encoder (from EVA-CLIP) and Q-Former from BLIP-2, and adds **a single linear projection layer** into Vicuna. Only that linear layer is trained; everything else stays frozen. Stage 2 fine-tunes on roughly 3,500 curated detailed image descriptions, because after stage 1 alone the model often repeated words or produced fragmented sentences.
+- **InstructBLIP** (Dai et al., 2023): also builds on BLIP-2, but feeds **the instruction into the Q-Former as well**, so the visual feature extractor knows what question is being asked. Only the Q-Former is trained; the image encoder and LLM remain frozen. The data comes from 26 public datasets converted into instruction format—13 held for training and 13 held out for zero-shot evaluation.
+- **Qwen-VL** (Bai et al., 2023): uses OpenCLIP's ViT-bigG encoder connected via **a single cross-attention layer** with 256 learnable query vectors, compressing every image into exactly 256 tokens. Stage 2 increases image resolution to $448 \times 448$. The model is additionally trained on bounding-box grounding and reading text in images.
+- **ShareGPT4V** (Chen et al., 2023): the main contribution is **data**. GPT-4V (the vision-enabled GPT-4) wrote 100K highly detailed captions, and a captioner trained on those expanded the set to 1.2M captions. According to the paper, swapping these captions into the fine-tuning mix boosts LLaVA-7B, LLaVA-1.5-13B, and Qwen-VL-Chat-7B on MME and MMBench.
+- **ViP-LLaVA** (Cai et al., 2023): lets users **draw directly on the image** (boxes, arrows, freehand marks) to point at the region they are asking about, requiring no coordinate tokens or separate region encoders.
+
+Two schools of thought emerge for the connector. Q-Former and Qwen-VL's resampler **compress** an image into a fixed token count (32 or 256), making inference cheap and predictable. LLaVA **keeps every patch** (576, and thousands with AnyRes), which costs more compute but never discards visual detail before the LLM gets a chance to look at it.
+
+### Evaluation: benchmarks and hallucination
+
+There is no single number that means "this model understands images well." Different benchmarks probe different skills:
+
+| Benchmark | What it measures |
+|---|---|
+| VQAv2 (Goyal et al., 2017) | Short-answer visual Q&A; each question is paired with two similar images that have different answers, so the model cannot guess from the question alone |
+| GQA (Hudson & Manning, 2019) | Compositional reasoning over relationships between objects in a scene |
+| TextVQA (Singh et al., 2019) | Questions that require reading text in the image: 45,336 questions across 28,408 images |
+| MME (Fu et al., 2023) | 14 perception and cognition subtasks with manually written questions to avoid data leakage from public datasets |
+| MMBench (Liu et al., 2023) | Bilingual (English/Chinese) multiple-choice questions scored objectively with CircularEval |
+| MMMU (Yue et al., 2023) | 11.5K college-level questions spanning 30 academic subjects |
+| LLaVA-Bench (Liu et al., 2023) | Open-ended questions graded by GPT-4, reported as a relative score against text-only GPT-4's own answers |
+
+Read that last row carefully. LLaVA's score of 85.1 on LLaVA-Bench (COCO) is **a relative score against GPT-4**, judged by GPT-4, across 90 questions. It is not a percentage accuracy.
+
+**Object hallucination** happens when a model mentions an object that is not in the image. The POPE paper (Li et al., 2023) showed that many vision-language models suffer severely from this, especially for objects that **appear frequently** in instruction-tuning data or **commonly co-occur** with objects actually present in the image. The authors also point out that long, detailed LLM-generated instruction data likely contributes to the problem.
+
+**POPE** (Polling-based Object Probing Evaluation) turns hallucination measurement into binary yes/no classification:
+
+1. Take the ground-truth objects present in the image, either from dataset annotations or from a segmentation tool such as SEEM.
+2. Sample nonexistent objects in three ways: uniformly at random (**random**); from the most frequent objects in the dataset (**popular**); or from objects that frequently co-occur with the ground-truth objects (**adversarial**)—for example, if the image shows a dining table, ask about a fork.
+3. Query each object with the template `Is there a/an <object> in the image?`, keeping ground-truth Yes and No questions balanced (1:1 ratio).
+
+Because the answer is just Yes or No, grading does not depend on phrasing style. Treat "Yes" as the positive class. Across $n_{\text{yes}}$ ground-truth Yes questions and $n_{\text{no}}$ ground-truth No questions, let $TP$ be the number of Yes questions answered Yes, and $FP$ be the number of No questions answered Yes. Then:
+
+$$
+\text{precision} = \frac{TP}{TP + FP}, \qquad
+\text{recall} = \frac{TP}{n_{\text{yes}}}, \qquad
+\text{Yes ratio} = \frac{TP + FP}{n_{\text{yes}} + n_{\text{no}}}
+$$
+
+Here $FP$ is the exact count of hallucinations. A model that says Yes to everything gets a recall of 1, but a precision of only 0.5 (since $n_{\text{yes}} = n_{\text{no}}$) and a Yes ratio of 1. The POPE paper found several models answering Yes nearly 99% of the time, and showed that scores consistently drop from random to popular to adversarial splits. LLaVA-1.5's own POPE results follow that exact downward trend.
+
+:::note[Key takeaway]
+LLaVA = simple architecture + visual instruction data generated by text-only GPT-4. LLaVA-1.5 adds academic VQA data paired with a formatting prompt. AnyRes trades tokens for resolution: $N = (ab + 1)\,T$, plus newline tokens. POPE measures object hallucination with balanced yes/no questions—always check the Yes ratio alongside precision and recall.
+:::
+
+### Limitations
+
+- **This lesson only covers image-in, text-out.** Image generation belongs to [Image Generation (1): VAE, GAN, CycleGAN, Pix2Pix](/en/cv/vae-gan/) and [Image Generation (2): Diffusion, Stable Diffusion, LoRA](/en/cv/diffusion-models/).
+- **Benchmark numbers depend heavily on evaluation protocol.** This lesson does not rank models; every cited number comes with its paper and year.
+- **Small models that fit on a laptop CPU are much weaker** than the 7B+ models reported in papers. The local code cell below uses a deliberately simple synthetic image.
+
+## Illustration
+
+The diagram below is the sequence-concatenation figure from the Multimodal lesson. For this lesson, focus on the strip of image tokens: in LLaVA-1.5 it is 576 tokens long, while with AnyRes on a $2 \times 2$ grid it stretches to nearly 3,000 tokens, even though the text tokens after it are still just a few dozen.
+
+{/* FIG: image passes through the vision encoder and projector to become image tokens, sharing a single sequence with the LLM's text tokens. */}
+<MultimodalFigure />
+
+The table below shows a sample data entry following the LLaVA-Instruct-158K schema, written for this lesson. Pay attention to the first row: that is everything GPT-4 knows about the image. Every answer below must be derived from that text alone.
+
+| Role | Content |
+|---|---|
+| Context given to GPT-4 | Caption: "A gray cat is lying on a kitchen table. Next to it are two red apples and a knife." Bounding boxes: cat [0.10, 0.35, 0.55, 0.80]; apple [0.60, 0.50, 0.70, 0.62]; apple [0.72, 0.52, 0.82, 0.64]; knife [0.58, 0.70, 0.90, 0.75] |
+| User (conversation) | How many apples are on the table? |
+| Assistant | There are two red apples, located to the right of the cat. |
+| User (detailed description) | Describe the image in detail. |
+| Assistant | A gray cat is stretched out across the left half of a kitchen table. To its right sit two red apples side by side, and just below them lies a horizontal knife… |
+| User (complex reasoning) | Is there anything concerning in this scene? |
+| Assistant | The knife is lying near the edge of the table and close to the cat. If the cat bats at the apples, the knife could get knocked off the table. It would be safer to put the knife away. |
+
+The second table puts the model variants side by side. The "Image tokens" column shows how many tokens the LLM must read per image. Entries marked "computed" come from $(S/P)^2$ and $(ab + 1)\,T$ rather than numbers printed directly in the paper.
+
+| Model | Year | Vision encoder | Connector | Resolution | Image tokens |
+|---|---:|---|---|---|---|
+| LLaVA | 2023 | CLIP ViT-L/14 | Single linear layer | $224 \times 224$ | 256 (computed) |
+| MiniGPT-4 | 2023 | EVA-CLIP ViT-G/14 + Q-Former | Q-Former, then one linear layer | $224 \times 224$ (as in BLIP-2) | 32 (BLIP-2 Q-Former queries) |
+| InstructBLIP | 2023 | ViT-g/14 + Q-Former | Instruction-aware Q-Former | $224 \times 224$ | 32 (as above) |
+| Qwen-VL | 2023 | OpenCLIP ViT-bigG | Single cross-attention layer, 256 queries | $448 \times 448$ | 256 |
+| LLaVA-1.5 | 2023 | CLIP ViT-L/14 | Two-layer MLP | $336 \times 336$ | 576 (computed) |
+| LLaVA-NeXT | 2024 | CLIP ViT-L/14 | Two-layer MLP, AnyRes | Up to $672 \times 672$ | Up to 2,880, excluding newline tokens (computed) |
+| LLaVA-OneVision | 2024 | SigLIP | Two-layer MLP, capped AnyRes | $384 \times 384$ crops | 729 per crop; up to ~$729 \times 10$ per image |
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the pure-Python cell with Python 3.14 (Pyodide), and the local cell with Python 3.14, PyTorch 2.15, and `transformers` 5.22 on CPU. The first cell runs right in the browser; the second runs on your machine. The two cells are independent and share no variables.
+
+### Image token budget
+
+The cell below computes the token count of a single image across three encoder sizes, the AnyRes token counts for several grids of $336 \times 336$ crops (with and without newline tokens), and then checks the formula on LLaVA-OneVision's $384 \times 384$ crops. Finally, it calculates how many images fit inside a 4,096-token context window when reserving 500 tokens for text.
+
+<PythonRunner code={tokenBudgetCode} title="Image tokens: single image, AnyRes, multiple images" />
+
+Reading the output:
+
+- **Single image:** 256, 576, and 729 are $16^2$, $24^2$, and $27^2$. For 384, $384 / 14 \approx 27.4$ is floored to 27.
+- **AnyRes table:** the `no-newline` column is $(ab + 1) \cdot 576$; a $2 \times 2$ grid gives 2,880. The `with-newline` column adds $24a$ newline tokens, so a $2 \times 1$ grid (two rows) adds 48 tokens whereas a $1 \times 2$ grid (one row) only adds 24, even though both have 1,728 patch feature tokens.
+- **The four `check` lines:** 1,485, 2,214, 3,699, and 5,157 match the exact token counts produced by LLaVA-OneVision's processor in the local cell below.
+- **Bottom lines:** a 4,096-token window fits 6 single-crop LLaVA-1.5 images, but only 1 AnyRes $2 \times 2$ image. That is why LLaVA-OneVision drops back to base resolution per image when multiple images are present.
+
+### Asking a LLaVA-style model on your machine
+
+The script below uses the 0.5B LLaVA-OneVision checkpoint (`llava-hf/llava-onevision-qwen2-0.5b-ov-hf`, combining SigLIP with Qwen2-0.5B). On the first run, `transformers` downloads about 1.8 GB. The script draws a synthetic image with PIL (three red circles and one blue square on a white background), counts the image tokens produced by the processor across four image sizes, and then asks the model two questions. Because it uses greedy decoding (`do_sample=False`), the answers are deterministic on the same library versions. CPU installation instructions for PyTorch are in [Build Your First LLM](/en/llm/build-first-llm/).
+
+<LocalCode
+  code={askCode}
+  title="LLaVA-OneVision 0.5B answering questions about a synthetic image"
+  packages={['torch', 'transformers', 'pillow']}
+  hardware="CPU, ~4 GB free RAM; first run downloads 1.8 GB. Takes ~1.5 to 2.5 minutes on a dev machine"
+  sampleVaries={false}
+>
+
+```text
+384x384: 1485 image tokens
+768x384: 2214 image tokens
+768x768: 3699 image tokens
+1152x768: 5157 image tokens
+Q: How many red circles are in the image?
+A: There are three red circles in the image.
+Q: What color is the square?
+A: The square is blue.
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **First four lines:** a $384 \times 384$ image uses a $1 \times 1$ grid plus the thumbnail: $2 \cdot 729 + 27 = 1\,485$ tokens. A $768 \times 384$ image uses a 1-row, 2-column grid: $3 \cdot 729 + 27 = 2\,214$. At $1152 \times 768$, the count reaches 5,157 tokens. No matter how simple the drawing is, the token count depends only on image dimensions.
+- **The two answers:** both are right—three red circles and a blue square. This image is intentionally easy: white background, separated shapes, pure colors. On real photographs with overlapping objects, a 0.5B model miscounts much more easily; do not take two right answers here as proof that the model can reliably count.
+- **Runtime:** on a development machine, the whole script finishes in roughly 1.5 to 2.5 minutes (once the weights are cached), taking a few dozen seconds per question. Almost all of that time is spent prefilling the 1,485 image tokens before generating the first output token; the question text itself is only about a dozen tokens.
+
+## Common pitfalls
+
+:::caution[Assuming LLaVA's data was human-written, or that GPT-4 saw the images]
+LLaVA-Instruct-158K was generated by text-only GPT-4 from captions and bounding boxes. Humans only wrote a few seed examples. As a result, the dataset inherits caption errors (missing objects, wrong colors) along with GPT-4's verbose, confident tone. When a LLaVA-style model invents details that are not in the image, part of the cause lies right here. For high-stakes images (medical scans, documents), verify every detail the model claims.
+:::
+
+:::caution[Cranking up resolution while forgetting that image tokens eat the context window]
+AnyRes helps read small text, but a $2 \times 2$ grid already costs roughly 5 times as many tokens as a single 576-token image. With a 4,096-token window, one such image plus a long conversation fills the entire context, truncating earlier turns. Before sending multiple large images, count the tokens as in the code cell (or inspect `input_ids` from the processor) and downscale images when fine detail is unnecessary.
+:::
+
+:::caution[Reading a benchmark score as if it were accuracy]
+LLaVA's 85.1 on LLaVA-Bench is a relative score against GPT-4, graded by GPT-4; it does not mean the model answered 85.1% of questions correctly. High VQA benchmark scores also say nothing about hallucination: check POPE, and always check the Yes ratio. When comparing two models, only compare numbers from the same benchmark, the same grading protocol, and the same paper.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` field of the frontmatter. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- LLaVA solves the visual instruction data bottleneck using text-only GPT-4: feed in COCO captions and bounding boxes, get back 158K examples across three categories (58K conversation, 23K detailed description, 77K complex reasoning). The training loss is computed only on answer tokens.
+- LLaVA-1.5 upgrades the projector to a two-layer MLP, uses CLIP at $336 \times 336$ (576 tokens), and mixes in academic VQA datasets with the prompt `"Answer the question using a single word or phrase."` so the model knows when to answer briefly.
+- AnyRes (LLaVA-NeXT, LLaVA-OneVision) slices large images into $ab$ crops plus a global thumbnail: $N = (ab + 1)\,T$ tokens, plus newline tokens. High resolution is paid for in tokens; OneVision caps the token budget so single-image, multi-image, and video inputs use comparable budgets.
+- Evaluation requires multiple benchmarks. Object hallucination is measured with POPE—balanced yes/no questions over ground-truth objects and random, popular, or adversarial nonexistent objects—and should always be read alongside precision and the Yes ratio.
+
+**Further reading:**
+
+- Liu, H., Li, C., Wu, Q., Lee, Y. J. (2023). [*Visual Instruction Tuning*](https://arxiv.org/abs/2304.08485), arXiv:2304.08485, Section 3 (GPT-4 data generation) and the appendix with seed prompts. Worth reading to see how GPT-4 is "shown" an image purely through text.
+- Liu, H., Li, C., Li, Y., Lee, Y. J. (2023). [*Improved Baselines with Visual Instruction Tuning*](https://arxiv.org/abs/2310.03744), arXiv:2310.03744, Section 3 (formatting prompt, MLP projector, data mixture) and the LLaVA-1.5-HD section. Concise, with thorough ablation tables.
+- Liu, H., Li, C., Li, Y., Li, B., Zhang, Y., Shen, S., Lee, Y. J. (2024). [*LLaVA-NeXT: Improved reasoning, OCR, and world knowledge*](https://llava-vl.github.io/blog/2024-01-30-llava-next/), LLaVA project blog, Jan 30, 2024. Covers AnyRes grids and the LLaVA-NeXT data mixture.
+- Li, B., Zhang, Y., Guo, D. et al. (2024). [*LLaVA-OneVision: Easy Visual Task Transfer*](https://arxiv.org/abs/2408.03326), arXiv:2408.03326, sections on thresholded AnyRes and token allocation across single-image, multi-image, and video inputs.
+- Li, Y., Du, Y., Zhou, K., Wang, J., Zhao, W. X., Wen, J.-R. (2023). [*Evaluating Object Hallucination in Large Vision-Language Models*](https://arxiv.org/abs/2305.10355), arXiv:2305.10355, EMNLP 2023. The POPE paper: the three negative-sampling strategies and why models frequently hallucinate popular objects.
+
+<LessonProgress />

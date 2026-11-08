@@ -1,0 +1,343 @@
+---
+title: Self-Supervised Learning for Images
+description: Images are cheap; labels are expensive. Learn visual representations without human labels using pretext tasks, contrastive learning (SimCLR, MoCo), BYOL, DINO, and MAE, then evaluate them with a linear probe.
+quiz:
+  - question: 'You train SimCLR with a batch of $B = 512$ images. For a single view $i$, how many terms appear in the denominator of $\ell_{i,j}$, and how many of those are negative examples?'
+    options:
+      - '512 terms, 511 negative examples'
+      - '1,024 terms, 1,022 negative examples'
+      - '1,023 terms, 1,022 negative examples'
+      - '1,023 terms, 511 negative examples'
+    answer: 2
+    explanation: 'The batch has $2B = 1\,024$ views in total. The denominator excludes only view $i$ itself, leaving $2B - 1 = 1\,023$ terms. One of those is the positive partner $j$, and the remaining $2(B-1) = 1\,022$ are negative examples: both augmented views of every other image in the batch serve as negatives, not just one.'
+  - question: 'Someone trains SimCLR using only random cropping as the augmentation, without color jitter. The contrastive loss drops rapidly and the model almost always identifies the positive pair, yet linear probe accuracy is poor. What is the best explanation?'
+    options:
+      - 'The batch size is too large, so the model memorized the dataset'
+      - 'Two crops from the same image share nearly the same color distribution, so the model can match pairs just by comparing color histograms without learning object shapes'
+      - 'The temperature $\tau$ is too large, preventing the loss from decreasing'
+      - 'Random cropping destroys the class label of the image'
+    answer: 1
+    explanation: 'As the SimCLR paper demonstrates, color histograms alone suffice to distinguish crops from different images. When the pretext task has an easy shortcut, the contrastive loss drops low while the learned representation fails to capture semantic content. Adding random color distortion blocks this shortcut, forcing the encoder to rely on shape. A low pretext loss does not automatically guarantee a useful representation.'
+  - question: 'BYOL uses no negative examples. A "lazy" network could output the exact same constant vector for every image, allowing the online branch to predict the target branch with zero error. What in BYOL prevents this collapse in practice?'
+    options:
+      - 'An extra predictor head on the online branch only, combined with a target branch updated via EMA and stop-gradient'
+      - 'A queue of 65,536 keys from previous batches'
+      - 'Masking out 75% of the image patches'
+      - 'Adding ground-truth class labels at the end of every epoch'
+    answer: 0
+    explanation: 'BYOL relies on architectural asymmetry: the online branch has an extra predictor MLP, while the target branch slowly tracks the online weights via exponential moving average (EMA) and receives no gradients (stop-gradient). Although the paper does not prove this prevents collapse under all conditions, empirically it suffices. A queue belongs to MoCo, patch masking belongs to MAE, and none of these methods use class labels during pretraining.'
+  - question: 'In MAE, a $224 \times 224$ image is split into $16 \times 16$ patches and 75% of the patches are masked out. How many patch tokens does the ViT encoder process, and why does this make pretraining so much cheaper?'
+    options:
+      - '196 tokens, because the encoder needs to see the masked positions to reconstruct them'
+      - '147 tokens, because the encoder only drops the masked patches'
+      - '49 tokens; self-attention scales quadratically with token count, cutting attention compute by roughly 16x'
+      - '49 tokens, but total compute stays the same because the decoder still processes all 196 tokens'
+    answer: 2
+    explanation: '$N = (224/16)^2 = 196$, and keeping 25% leaves 49 visible tokens. The encoder only receives those 49 visible patches—no mask tokens are fed into the encoder—so pairwise attention shrinks from $196^2$ to $49^2$, a 16x reduction. While the decoder does process all 196 positions, it is lightweight (under 10% of the per-token compute of the encoder) and is discarded after pretraining.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import ntXentCode from '@code/cv/self-supervised-learning/nt-xent.en.py?raw';
+import simclrCode from '@code/cv/self-supervised-learning/simclr-digits.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand why **self-supervised learning** matters for images, what a **pretext task** is, and how representation quality is measured with a **linear probe** or fine-tuning.
+- Derive SimCLR's NT-Xent loss step by step and explain the roles of **positive pairs**, **negative examples**, and temperature $\tau$.
+- Compare the three main families of visual self-supervised learning: contrastive learning (SimCLR, MoCo), negative-free distillation/bootstrapping (BYOL, DINO), and **masked image modeling** (MAE).
+- Implement a tiny SimCLR in PyTorch and evaluate its learned representations with a scikit-learn linear probe.
+
+## Prerequisites
+
+{/* List populated from prerequisites in roadmap.ts. Do not write manual links here. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+[Image Classification with Vision Transformers](/en/cv/vision-transformer/) slices an image into $N$ **patches**, turns them into a token sequence, and notes that ViTs need huge datasets to beat CNNs. [Data Augmentation in Computer Vision](/en/cv/image-augmentation/) transforms images (cropping, flipping, color jitter, cutout) without changing their semantic meaning: in this lesson, augmentation stops being a mere regularizer and becomes the primary supervision signal itself.
+:::
+
+## Intuition
+
+### A warehouse of unlabeled images
+
+Suppose you have one million photos of circuit boards from a factory line. Capturing images is cheap: the camera runs all day. Labeling them is expensive: an engineer has to inspect each photo and mark "solder bridge," "hairline crack," or "normal." After a month of tedious work, you have labels for 2,000 images.
+
+Supervised learning can only use those 2,000 labeled images. The other 998,000 sit idle on disk. And as we saw in the Vision Transformer lesson, high-capacity models are data-hungry—2,000 images are nowhere near enough.
+
+The question driving this lesson: **is there a way for the 998,000 unlabeled images to teach the model how to "see" first?**
+
+### Asking questions whose answers are already in the image
+
+The core idea: invent a practice task whose ground-truth answer can be extracted automatically from the image itself. For example, rotate an image by a random multiple of 90 degrees and ask the network to predict which rotation was applied. The label "90 degrees" is created by your own code—zero human annotators required.
+
+To tell that a car is upside down, the network has to know that wheels normally sit at the bottom and the roof sits at the top. In other words, solving the rotation puzzle forces the network to learn object shapes and parts.
+
+That practice puzzle is called a **pretext task**. Once pretraining finishes, we throw away the 4-way rotation head and keep the **encoder** that learned how to represent images. Then we use our 2,000 labeled factory photos to train a classifier on top of that encoder.
+
+### Two views of the same cat
+
+Around 2020, a much more powerful family of pretext tasks took center stage. Take a photo of a cat and create two randomly augmented versions: the first crops a corner and shifts the colors; the second flips the image horizontally and blurs it slightly. Each version is called a **view**.
+
+The two views look different at the pixel level, yet both show the same cat. We train the encoder so that the two views of the same image map to nearby vectors, while views of other images in the batch (a dog, a truck) are pushed far apart.
+
+To succeed, the encoder must discard everything that random augmentation alters (exact crop position, color tint, blur) and keep what stays invariant across views (the cat). This is **contrastive learning**—the exact same principle behind CLIP in [Vision and Language (1): CLIP, BLIP, GLIP](/en/cv/clip-blip-glip/), except both sides are augmented views of images.
+
+**The core question of this lesson: how do we learn a strong image encoder purely from unlabeled images without letting the network "cheat" via a trivial shortcut or collapse, and how do we measure what the encoder actually learned?**
+
+## Theory
+
+### Notation
+
+A mini-batch contains $B$ images (the SimCLR paper writes $N$, which we reserve for patch count in CV lessons). Each image $\mathbf{x}$ passes through two random augmentations to produce two views $\tilde{\mathbf{x}}_i$ and $\tilde{\mathbf{x}}_j$. The encoder $f$ maps a view to a **representation** $\mathbf{h} = f(\tilde{\mathbf{x}})$, and a small MLP projection head $g$ maps $\mathbf{h}$ to $\mathbf{z} = g(\mathbf{h})$. Cosine similarity between two vectors is:
+
+$$
+\mathrm{sim}(\mathbf{u}, \mathbf{v}) = \frac{\mathbf{u}^\top \mathbf{v}}{\lVert\mathbf{u}\rVert\,\lVert\mathbf{v}\rVert}
+$$
+
+### Classic pretext tasks: image rotation and jigsaw puzzles
+
+Two representative pretext tasks from before 2020:
+
+- **Predicting image rotations** (Gidaris et al., 2018): rotate the input by 0, 90, 180, or 270 degrees and train a 4-class classifier. Simple, yet it forces the network to learn canonical object orientation.
+- **Solving jigsaw puzzles** (Noroozi & Favaro, 2016): slice an image into a $3 \times 3$ grid of 9 tiles, shuffle them according to one of 1,000 preselected permutations (out of $9! = 362\,880$), and train the network to predict which permutation was used. Reassembling the tiles requires knowing that a cat's head belongs above its body.
+
+Their shared weakness: neural networks are relentless **shortcut** finders. As the jigsaw paper notes, a network can match adjacent tiles by lining up low-level edge continuations or chromatic aberration without understanding the object at all. Hand-designed puzzles only teach representations as rich as the puzzle demands.
+
+### Evaluating representations: linear probe and fine-tuning
+
+Once pretraining produces an encoder $f$, how do we measure whether $\mathbf{h} = f(\mathbf{x})$ is any good? Two standard protocols, both using a labeled dataset:
+
+- **Linear probe** (called the "linear evaluation protocol" in the SimCLR paper): **freeze** the encoder $f$ completely and train only a single linear classification layer on top of $\mathbf{h}$. Because a linear classifier can only slice the feature space with hyperplanes, high linear probe accuracy proves that class information is already cleanly organized in $\mathbf{h}$.
+- **Fine-tuning**: initialize with $f$ and update the entire network end-to-end on labeled data. This is closer to how pretrained backbones are often deployed, but it conflates representation quality with how easily the architecture adapts during supervised training.
+
+### SimCLR: pulling two views together
+
+SimCLR (Chen et al., 2020) has four components: stochastic data augmentation, a base encoder $f$, a **projection head** $g$ (a two-layer MLP with ReLU), and the NT-Xent loss.
+
+**Step 1: form $2B$ views.** Creating two views per image turns a batch of $B$ images into $2B$ projected vectors $\mathbf{z}_1, \dots, \mathbf{z}_{2B}$. For a positive pair $(i, j)$ coming from the same image, SimCLR performs no separate negative sampling: the remaining $2(B-1)$ views in the batch serve directly as negative examples.
+
+**Step 2: cast pair matching as classification.** Starting from view $i$, treat the task as picking its partner $j$ out of all $2B - 1$ other views in the batch (every view except $i$ itself). Each candidate $k$ gets a logit equal to temperature-scaled cosine similarity, $\mathrm{sim}(\mathbf{z}_i, \mathbf{z}_k)/\tau$. Passing those logits through a softmax gives the probability of picking the true partner $j$:
+
+$$
+p_{i,j} = \frac{\exp\!\big(\mathrm{sim}(\mathbf{z}_i, \mathbf{z}_j)/\tau\big)}{\sum_{k=1}^{2B} \mathbb{1}_{[k \ne i]} \exp\!\big(\mathrm{sim}(\mathbf{z}_i, \mathbf{z}_k)/\tau\big)}
+$$
+
+Here the indicator $\mathbb{1}_{[k \ne i]}$ is 1 when $k \ne i$ and 0 when $k = i$: it masks out the self-pair $(i, i)$, whose cosine similarity is trivially 1.
+
+**Step 3: apply cross-entropy.** Because $j$ is the ground-truth partner of $i$, the loss for view $i$ is the negative log probability of $j$:
+
+$$
+\ell_{i,j} = -\log p_{i,j}
+$$
+
+To make $\ell_{i,j}$ small, the numerator must be large (pulling the positive pair together) **and** the denominator must be small (pushing all $2(B-1)$ negatives away). The total batch loss averages $\ell$ over all $2B$ directed positive pairs—both $(i, j)$ and $(j, i)$. The paper calls this **NT-Xent** (normalized temperature-scaled cross-entropy): cross-entropy over $\ell_2$-normalized embeddings scaled by temperature $\tau$.
+
+**Step 4: what temperature $\tau$ does.** Dividing by a small $\tau$ stretches out differences in cosine similarity, making the softmax sharper so the hardest (closest) negative examples receive the largest gradients. At the opposite extreme, as $\tau \to \infty$, every logit $\mathrm{sim}/\tau$ approaches 0, all $2B - 1$ candidates receive nearly equal probability $p_{i,j} \to 1/(2B-1)$, and:
+
+$$
+\ell_{i,j} \to \log(2B - 1)
+$$
+
+whether the positive pair is aligned or not—the loss loses its ability to tell good representations from bad ones. The NumPy cell below checks both regimes.
+
+:::note[Key takeaway]
+NT-Xent is ordinary cross-entropy for the question: "out of the $2B - 1$ other views in this batch, which one came from the same image as me?" The numerator pulls positive pairs together, the denominator pushes $2(B-1)$ negatives apart, and $\tau$ controls how strongly the loss focuses on hard negatives.
+:::
+
+**Three empirical findings from the SimCLR paper** that matter whenever you apply contrastive learning:
+
+- **Augmentation composition is critical.** No single transformation suffices on its own. Combining **random cropping** with **random color distortion** is essential. Why? Because two crops from the same photo share nearly identical pixel color histograms; without color distortion, the network solves the pretext task trivially by matching color histograms and ignores object shapes. Strong color jitter helps SimCLR even though it can hurt supervised training.
+- **Use a projection head, then throw it away.** Computing the contrastive loss on $\mathbf{z} = g(\mathbf{h})$—and then discarding $g$ and using $\mathbf{h}$ for downstream tasks—beats using $\mathbf{z}$ directly by more than 10 percentage points on ImageNet linear probing. The authors' explanation: the contrastive objective forces $\mathbf{z}$ to discard anything varied by augmentation (such as color or orientation), which may still be useful for downstream classification; the nonlinear head $g$ absorbs that information loss so $\mathbf{h}$ can retain richer features.
+- **Large batch sizes help.** Larger batches provide more negative examples per positive pair. The paper tests $B$ from 256 up to 8,192 ($B = 8\,192$ gives 16,382 negatives per positive pair, trained on TPUs), with the biggest gains appearing when training for fewer epochs. On temperature $\tau$: with batch size 4,096 and 100 epochs, $\tau = 0.1$ reaches 64.4% linear probe accuracy, versus 59.7% at $\tau = 0.05$ and 58.0% at $\tau = 1.0$ (at 300+ epochs, $\tau = 0.5$ edges ahead among $\{0.1, 0.5, 1.0\}$).
+
+With a $4\times$-wider ResNet-50, SimCLR reaches 76.5% top-1 linear probe accuracy on ImageNet, matching a standard supervised ResNet-50 (a standard-width ResNet-50 with SimCLR reaches 69.3%).
+
+### MoCo: a queue and a momentum encoder
+
+A batch size of 8,192 images requires multi-device hardware that few practitioners have. MoCo (He et al., 2020) decouples the number of negative examples from the mini-batch size.
+
+**A dictionary queue.** MoCo maintains a **queue** of encoded representations from previous mini-batches, holding $K = 65\,536$ vectors. At each training step, the current batch's key vectors are enqueued and the oldest batch is dequeued. Because negatives come from the queue, even a modest batch size gets tens of thousands of negatives.
+
+**A momentum encoder.** Here is the catch: the vectors sitting in the queue were produced by the key encoder over many earlier steps. If the key encoder's weights changed rapidly via gradient descent, older keys in the queue would be incompatible with newer ones. MoCo therefore uses two encoders: a query encoder $\boldsymbol\theta_q$ updated by backpropagation, and a key encoder $\boldsymbol\theta_k$ that slowly tracks $\boldsymbol\theta_q$:
+
+$$
+\boldsymbol\theta_k \leftarrow \lambda\,\boldsymbol\theta_k + (1 - \lambda)\,\boldsymbol\theta_q
+$$
+
+This update is an **exponential moving average** (EMA): each step retains fraction $\lambda$ of the old key weights and blends in $1 - \lambda$ of the new query weights. (The MoCo paper writes $m$ for this momentum coefficient; we write $\lambda$ here because $m$ denotes dataset size across our lessons.) With $\lambda = 0.999$, the key encoder evolves smoothly so all 65,536 keys in the queue stay mutually consistent. In the paper's ablations, $\lambda \in [0.99, 0.9999]$ works well, $\lambda = 0.9$ drops noticeably, and $\lambda = 0$ (copying $\boldsymbol\theta_q$ directly) causes wild oscillation and fails to converge.
+
+### Without negative examples: BYOL and DINO
+
+Negative examples play a quiet but vital role in contrastive learning: they prevent **representation collapse**. If you only pulled positive pairs together without pushing anything apart, the easiest way to achieve zero loss would be to map every single image to the exact same constant vector. Negatives make that trivial solution expensive. If we drop negative examples, how do we stop collapse?
+
+**BYOL** (Grill et al., 2020) starts from a surprising observation: take a randomly initialized network, **freeze it** as a fixed "target," and train a second "online" network to predict the target network's output on augmented views. Evaluated with a linear probe on ImageNet, the random target network itself scores just 1.4%, yet the online network trained to predict it jumps to 18.8%! The student beat the random teacher. Naturally, the next step is to make the student the new teacher and repeat.
+
+BYOL turns that loop into continuous training:
+
+- The **online** branch has an encoder, a projector, and an additional MLP **predictor**. The **target** branch has only an encoder and a projector, whose weights are an EMA of the online branch (just like MoCo's momentum encoder).
+- Given two views of an image, the online branch processes view 1 and predicts the target branch's projection of view 2. The loss is the squared Euclidean distance between the $\ell_2$-normalized prediction and target vectors, which equals $2 - 2\cos$.
+- Gradients flow only through the online branch; the target branch has a **stop-gradient** applied (treated as a constant).
+
+This architectural asymmetry—an extra predictor on the online branch, plus a slowly moving stop-gradient target—prevents collapse in practice, even though the loss itself has a global minimum at constant vectors. On a standard ResNet-50, BYOL reaches 74.3% ImageNet linear probe accuracy without a single negative example.
+
+**DINO** (Caron et al., 2021) frames negative-free learning as **self-distillation**: **knowledge distillation** with no pretrained teacher, where the teacher is an EMA copy of the student itself.
+
+- Both student and teacher share the same architecture and output a $K$-dimensional probability distribution via a temperature-scaled softmax. The student is trained to match the teacher's distribution using cross-entropy.
+- **Multi-crop:** each image yields 2 global views at $224 \times 224$ (covering more than 50% of the image area) plus several smaller local views at $96 \times 96$ (covering less than 50%). The teacher sees only the global views; the student sees all views. Matching the teacher forces the student to infer the global scene from a small local crop ("local-to-global" correspondence).
+- **Preventing collapse via centering and sharpening** on the teacher's outputs. Collapse in a probability distribution takes two forms: either one dimension dominates for every input, or the distribution becomes completely uniform. **Centering** subtracts an exponential moving average mean vector $\mathbf{c}$ from the teacher's logits before the softmax, preventing any single dimension from dominating—at the cost of nudging outputs toward uniformity. **Sharpening** uses a low teacher temperature ($\tau_t \in [0.04, 0.07]$, compared with $\tau_s = 0.1$ for the student) to make the distribution peaky, counteracting uniformity. Playing the two opposing forces against each other keeps the teacher's outputs balanced and informative.
+
+DINO's most famous discovery: when a Vision Transformer is trained with DINO, **the self-attention maps of the `[CLS]` token in the final layer spontaneously segment foreground objects from the background**. Plotting the attention heads reveals crisp outlines of birds, dogs, and bicycles—even though the model never saw a single class label or segmentation mask during training. The authors show that this property emerges much more cleanly in DINO-trained ViTs than in supervised ViTs or CNNs.
+
+### Mask the image and reconstruct it: MAE
+
+The third major family borrows BERT's recipe from NLP: mask out a portion of the input and train the model to reconstruct the missing pieces. **MAE** (Masked Autoencoders; He et al., 2022) applies this to Vision Transformers:
+
+1. Split the image into non-overlapping patches as in ViT, and randomly mask out **75%** of the patches.
+2. Feed **only the remaining 25% visible patches** into the ViT encoder—no mask tokens are passed to the encoder.
+3. Take the encoded visible tokens, insert a shared learnable **mask token** at every masked position (adding positional embeddings to all tokens), and pass the full sequence through a **lightweight decoder** that reconstructs the raw pixel values of each patch.
+4. Compute MSE loss between the reconstructed pixels and original pixels **on the masked patches only**.
+
+Why mask 75% of the image when BERT masks only 15% of words? Because natural images have enormous spatial redundancy: if you mask a single patch surrounded by eight visible neighbors, the model can fill it in by simple local texture interpolation without understanding the scene. Masking 75% wipes out most neighbors, forcing the encoder to learn global object structure.
+
+Why is MAE so fast to pretrain? Because the heavy ViT encoder processes only one-fourth of the patches! Since self-attention scales quadratically with sequence length, encoding 49 visible patches of a $224 \times 224$ image ($16 \times 16$ patches) instead of all 196 cuts the encoder's attention compute by $16\times$. The decoder sees all 196 positions, but is intentionally narrow and shallow (under 10% of the per-token FLOPs of the encoder) and is discarded after pretraining. Overall wall-clock pretraining is $3\times$ faster or more, and a ViT-H pretrained with MAE fine-tunes to 87.8% top-1 accuracy on ImageNet-1K.
+
+One crucial difference from contrastive methods: MAE's frozen features are **less linearly separable**. On ViT-L, MAE's linear probe accuracy (73.5%) trails MoCo v3, yet fine-tuning just the last transformer block jumps accuracy to 81.0%, and full fine-tuning surpasses MoCo v3. As the authors emphasize, linear probe accuracy and fine-tuning accuracy are "largely uncorrelated." Whenever you compare self-supervised papers, check which evaluation protocol is being reported.
+
+### DINOv2, and where CLIP fits in
+
+**DINOv2** (Oquab et al., 2023) scales self-supervised ViTs to foundation-model territory: it builds an automated curation pipeline to assemble 142 million diverse images (LVD-142M) and combines DINO's image-level objective with an iBOT-style patch-level masked objective. The result is a family of ViT backbones whose **frozen** features work out of the box across classification, semantic segmentation, and depth estimation without fine-tuning.
+
+Where does **CLIP** fit into this picture? CLIP is contrastive learning **across two modalities**: a positive pair is `(image, its caption)`, and negatives are the other captions (and images) in the batch. SimCLR is the exact same contrastive framework **within a single modality**: a positive pair is `(view 1, view 2)` of the same image. The math is nearly identical; the difference lies in what defines invariance—hand-picked image augmentations in SimCLR versus human-written web captions in CLIP.
+
+### Limitations
+
+- **Augmentations bake in your invariance assumptions.** Contrastive encoders learn to discard whatever the augmentation pipeline varies. If your downstream task depends on color (grading fruit ripeness or staining intensity in pathology slides), pretraining with heavy color jitter will strip away the exact signal you need. See [Data Augmentation in Computer Vision](/en/cv/image-augmentation/) for task-aware transform choices.
+- **You still need labeled data at the end.** Self-supervised pretraining produces an encoder $f$, not a task classifier. You still need a labeled dataset for linear probing or fine-tuning, even if it can be much smaller than before.
+- **Pretraining is compute-intensive.** Processing two or more views per image across large batches for hundreds of epochs makes self-supervised pretraining more expensive than supervised training on the same dataset; the payoff comes when you reuse a pretrained backbone or leverage a massive pool of unlabeled images.
+
+## Illustration
+
+The diagram below shows the SimCLR training setup. Follow the two branches emerging from a single input image: both views pass through **the exact same** encoder $f$ and projection head $g$, differing only in the random augmentations applied at the start. The "pull together" arrow connects the two projected vectors of the same image, while the "push apart" arrow repels projections coming from other images in the batch.
+
+{/* FIG: SelfSupervisedFigure
+    Idea: one image, two random augmentations, two views through a shared encoder; the two vectors from the same image are pulled together while vectors from other images are pushed apart.
+    Blocks and arrows: (main flow) input image → splits into "augmentation 1" and "augmentation 2" → two views → shared "encoder f" → representations "h" → "projection head g" → two vectors z; double-headed arrow between the two z vectors labeled "pull together". (secondary flow) a z vector from another image in the batch, connected by a repelling arrow labeled "push apart". Small callout on h: "kept for downstream tasks", on g: "discarded after pretraining".
+    Labels: "Image", "Crop + color jitter", "Flip + blur", "View 1", "View 2", "Encoder (shared)", "Projection head", "Pull together", "Other image in batch", "Push apart".
+    Caption: NT-Xent loss: for each view, identify its partner from the same image out of all $2B - 1$ other views in the batch; after pretraining, discard $g$ and use $\mathbf{h}$. */}
+
+The table below compares the three major self-supervised families. The reported numbers come from each method's original paper on ImageNet-1K and should not be compared head-to-head without noting the different backbones and evaluation protocols.
+
+| Criterion | Contrastive (SimCLR, MoCo) | Negative-free (BYOL, DINO) | Masked Image Modeling (MAE) |
+|---|---|---|---|
+| Learning signal | Pick the positive partner out of many negative examples | Student predicts EMA teacher's output on another view | Reconstruct raw pixels of masked patches |
+| Needs strong augmentations | Yes—most critical ingredient | Yes | Minimal: random patch masking acts as the perturbation |
+| How collapse is prevented | Explicit negative examples | Predictor + stop-gradient EMA (BYOL); centering + sharpening (DINO) | Cannot collapse: target is ground-truth pixel values |
+| Batch-size sensitivity | High in SimCLR; reduced in MoCo via queue | Lower | Low |
+| Typical backbone in paper | ResNet | ResNet (BYOL), ViT (DINO) | ViT |
+| Excels at | Linear probe | Linear probe, $k$-NN; emergent object segmentation in DINO | End-to-end fine-tuning, scaling to huge ViTs |
+| Representative paper number | SimCLR: 76.5% linear (ResNet-50 $4\times$) | BYOL: 74.3% linear (ResNet-50); DINO: 80.1% linear (ViT-B) | MAE: 87.8% fine-tuned (ViT-H) |
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the NumPy cell with Python 3.14 and NumPy 2.4 (in Pyodide), and the PyTorch cell with Python 3.14, PyTorch 2.15, and scikit-learn 1.9 on CPU. The NumPy cell runs right in the browser; the PyTorch cell runs on your machine. The two cells are independent and share no variables.
+
+### NT-Xent loss in NumPy
+
+The cell below creates 4 synthetic "images," each represented by an 8-dimensional content vector (seed 0). Generating two views per image simply adds random Gaussian noise to the content vector. Small noise (`0.1`) produces well-aligned positive pairs (`close`); large noise (`3.0`) produces nearly random views (`far`). The `nt_xent` function implements the exact three-step recipe from the Theory section: compute temperature-scaled cosine similarities, mask out the diagonal with $-\infty$, and compute cross-entropy with the positive partner's column as the target.
+
+<PythonRunner code={ntXentCode} title="NT-Xent loss with aligned vs. noisy positive pairs" />
+
+Reading the output:
+
+- **`log(2N-1) = 1.946`:** with $B = 4$ images (`N = 4` in the code), each view chooses among $2B - 1 = 7$ candidates, so uniform random guessing gives loss $\log 7 \approx 1.946$.
+- **Positive-pair cosine similarity:** $0.99$ in the `close` case versus $0.22$ in the `far` case.
+- **`close` column:** when positive pairs are well aligned, a small temperature $\tau$ drives the loss near 0 ($0.000$ at $\tau = 0.05$, $0.002$ at $\tau = 0.1$). As $\tau$ grows, the loss climbs ($0.627$, $1.166$) and reaches $1.858$ at $\tau = 10$, approaching the random-guessing ceiling $\log 7$: at high temperature, the loss barely rewards aligned pairs.
+- **`far` column:** when positive pairs are poorly aligned, a small temperature penalizes the model heavily—$7.087$ at $\tau = 0.05$, well above $\log 7$—because some negative views happen to lie closer than the positive partner and small $\tau$ magnifies that gap. By $\tau = 10$, the `close` and `far` losses are nearly identical ($1.858$ vs. $1.933$): an overly large $\tau$ washes out the difference between good and bad representations.
+
+### A tiny SimCLR on digits, followed by a linear probe
+
+The script below pretrains a tiny SimCLR encoder on all 1,797 $8 \times 8$ digit images from `load_digits` **without using any class labels**. Each view is created in PyTorch by applying a random sub-pixel shift of up to ~1 pixel, adding Gaussian noise, and masking out a random $3 \times 3$ square (cutout). The encoder $f$ is an MLP $64 \to 256 \to 16$, compressing each image into a 16-dimensional representation $\mathbf{h}$; the projection head $g$ is $16 \to 64 \to 32$. Pretraining runs for 40 epochs with batch size 256 and $\tau = 0.5$. Here is the core augmentation snippet:
+
+```python
+theta = torch.tensor([[1.0, 0, 0], [0, 1.0, 0]]).repeat(n, 1, 1)
+theta[:, :, 2] = (torch.rand(n, 2) - 0.5) * 0.5
+grid = F.affine_grid(theta, list(x.shape), align_corners=False)
+x = F.grid_sample(x, grid, align_corners=False)
+x = x + 0.1 * torch.randn_like(x)
+```
+
+After pretraining comes the linear probe: we freeze $f$, extract the 16-dimensional representation $\mathbf{h}$ for every image, fit a scikit-learn logistic regression classifier on the training half, and score it on the test half. We compare the SimCLR-pretrained encoder against an identical encoder with **random untrained weights** at two label budgets: using only 100 labeled examples, and using all 898 labeled examples of the training split. CPU installation instructions for PyTorch are in [Build Your First LLM](/en/llm/build-first-llm/).
+
+<LocalCode
+  code={simclrCode}
+  title="Tiny SimCLR pretraining and linear probe evaluation"
+  packages={['torch', 'scikit-learn']}
+  hardware="CPU is enough. Takes ~20 to 45 seconds on a dev machine"
+  sampleVaries={false}
+>
+
+```text
+last NT-Xent loss: 1.428
+100 labels, random encoder: 0.740
+100 labels, SimCLR encoder: 0.840
+898 labels, random encoder: 0.843
+898 labels, SimCLR encoder: 0.918
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **`last NT-Xent loss: 1.428`:** a batch of 256 images gives 511 candidates per view, so random guessing would yield $\log 511 \approx 6.24$ (computed). A loss of 1.428 shows the network reliably picks out positive pairs across the random shifts, noise, and cutout masks.
+- **With 100 labels:** the random encoder reaches $0.740$, while the SimCLR encoder reaches $0.840$—a 10-percentage-point jump using the exact same 16-number bottleneck, learned purely from unlabeled images.
+- **With 898 labels:** $0.843$ vs. $0.918$. Even with almost 900 labeled digits, a random projection down to 16 dimensions throws away discriminative structure that supervised linear probing cannot recover, whereas SimCLR's 16 dimensions preserve digit identity.
+
+Repeated runs on the same development machine produce identical numbers; different CPUs or PyTorch versions may differ in the third decimal place.
+
+## Common pitfalls
+
+:::caution[Assuming a low self-supervised loss guarantees a strong downstream representation]
+A low pretext loss only proves the model solved the pretext task—not that it learned features useful for your downstream problem. As we saw with SimCLR without color jitter, an encoder can achieve near-zero contrastive loss by matching color histograms while failing miserably on a linear probe. Worse, in negative-free methods like BYOL or DINO, a collapsed constant representation achieves **exact zero loss** while carrying zero information. Always evaluate checkpoints with a downstream linear probe or k-NN classifier, and monitor the standard deviation of feature dimensions across the batch (if it drops toward 0, the model is collapsing).
+:::
+
+:::caution[Forgetting to check a simple raw-feature baseline]
+Our PyTorch script compares a 16-dimensional SimCLR encoder against a 16-dimensional random encoder, which isolates what contrastive training learned. On tiny $8 \times 8$ digits, however, there is an even simpler baseline: feeding all 64 raw pixels directly into logistic regression. On the exact same split, raw pixels reach $0.874$ with 100 labels and $0.963$ with 898 labels—higher than our 16-dimensional bottleneck. That is because $8 \times 8$ centered digits are tiny and already aligned; the real advantage of self-supervised pretraining shows up on high-resolution natural images where raw pixels are useless for linear classification and unlabeled data is abundant. Whenever you benchmark a representation, compare against both a random-init encoder and simple baselines.
+:::
+
+:::caution[Using the projection head output $\mathbf{z}$ instead of the encoder representation $\mathbf{h}$]
+As the SimCLR paper showed, linear probing on $\mathbf{h}$ (before the projection head $g$) outperforms probing on $\mathbf{z}$ (after $g$) by more than 10 percentage points, because $g$ is trained to strip away transformation-sensitive details that downstream tasks still need. Notice that our linear probe calls `enc(X)` (just $f$), discarding `head`. Likewise, MAE's decoder and BYOL's predictor are pretraining scaffolding and should be discarded afterwards. When loading a pretrained self-supervised checkpoint, always check the documentation to extract features from the backbone rather than the pretraining head.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` field of the frontmatter. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Self-supervised learning creates supervision signals from unlabeled images themselves (pretext tasks) to pretrain an encoder $f$, which is then adapted to downstream tasks using far fewer human labels. Representations are evaluated via linear probing (freezing $f$ and fitting a linear classifier) or end-to-end fine-tuning—two metrics that do not always rank models in the same order.
+- Contrastive learning pulls two augmented views of the same image together while pushing views of other images apart. SimCLR's NT-Xent loss is cross-entropy over temperature-scaled cosine similarities across $2B - 1$ candidates, requiring strong augmentations (random crop + color distortion) and large batches; MoCo replaces huge batches with a queue and a momentum-updated key encoder.
+- Negative-free methods prevent collapse through asymmetry and output regularization: BYOL uses an online predictor with a stop-gradient EMA target, while DINO uses self-distillation with teacher centering and sharpening—yielding ViT attention maps that naturally segment foreground objects.
+- MAE masks 75% of image patches, runs the ViT encoder only on the remaining 25% visible patches, and reconstructs missing pixels with a lightweight decoder—making pretraining fast and scaling cleanly to large ViTs when fine-tuned. CLIP applies the same contrastive principle across image and text modalities.
+
+**Further reading:**
+
+- Chen, T., Kornblith, S., Norouzi, M., Hinton, G. (2020). [*A Simple Framework for Contrastive Learning of Visual Representations*](https://arxiv.org/abs/2002.05709), arXiv:2002.05709, Sections 2 and 3. Introduces SimCLR, the NT-Xent loss, and the ablations on augmentation composition and projection heads.
+- He, K., Fan, H., Wu, Y., Xie, S., Girshick, R. (2020). [*Momentum Contrast for Unsupervised Visual Representation Learning*](https://arxiv.org/abs/1911.05722), arXiv:1911.05722, Section 3. Algorithm 1 gives the entire MoCo training loop—queue and momentum update included—in roughly 20 lines of pseudocode.
+- Grill, J.-B. et al. (2020). [*Bootstrap Your Own Latent: A New Approach to Self-Supervised Learning*](https://arxiv.org/abs/2006.07733), arXiv:2006.07733, Sections 1 and 3. Describes the random-target motivation and the online/target architecture of BYOL.
+- Caron, M. et al. (2021). [*Emerging Properties in Self-Supervised Vision Transformers*](https://arxiv.org/abs/2104.14294), arXiv:2104.14294, Figure 1 and Section 3. Worth looking at Figure 1 alone to see DINO's emergent object segmentation in ViT attention maps.
+- He, K., Chen, X., Xie, S., Li, Y., Dollár, P., Girshick, R. (2022). [*Masked Autoencoders Are Scalable Vision Learners*](https://arxiv.org/abs/2111.06377), arXiv:2111.06377, Sections 3 and 4. Covers MAE's asymmetric encoder-decoder design and compares linear probing against fine-tuning.
+- Oquab, M. et al. (2023). [*DINOv2: Learning Robust Visual Features without Supervision*](https://arxiv.org/abs/2304.07193), arXiv:2304.07193. Shows how curating large unlabeled data and combining image- and patch-level objectives produces general-purpose frozen visual features.
+- Gidaris, S., Singh, P., Komodakis, N. (2018). [*Unsupervised Representation Learning by Predicting Image Rotations*](https://arxiv.org/abs/1803.07728), arXiv:1803.07728; and Noroozi, M., Favaro, P. (2016). [*Unsupervised Learning of Visual Representations by Solving Jigsaw Puzzles*](https://arxiv.org/abs/1603.09246), arXiv:1603.09246. Two classic pretext-task papers.
+
+<LessonProgress />

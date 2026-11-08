@@ -1,12 +1,12 @@
-# Các độ đo xếp hạng: P@k, R@k, RR, AP, nDCG@k cho hai hệ thống
+# Ranking metrics: P@k, R@k, RR, AP, nDCG@k for two systems
 import math
 
-# mức liên quan do người chấm cho truy vấn "hàng bị hỏng thì làm sao"
-# (2: rất liên quan, 1: liên quan; văn bản không có tên ở đây là 0)
+# human relevance grades for the query "what if an item is broken"
+# (2: highly relevant, 1: relevant; unlisted documents have grade 0)
 rel = {7: 2, 1: 1, 4: 1}
 runs = {
-    "A (bm25)": [6, 3, 2, 4, 8],  # top-5 của BM25 ở ô trước
-    "B (dense)": [7, 4, 6, 1, 3],  # một bộ truy xuất dày, giả định
+    "A (bm25)": [6, 3, 2, 4, 8],  # top-5 from BM25 in the previous cell
+    "B (dense)": [7, 4, 6, 1, 3],  # a hypothetical dense retriever
 }
 
 def precision_at(ranked, k):
@@ -19,15 +19,15 @@ def reciprocal_rank(ranked):
     for i, doc in enumerate(ranked, start=1):
         if doc in rel:
             return 1 / i
-    return 0.0  # không tìm thấy văn bản liên quan nào
+    return 0.0  # no relevant document found
 
 def average_precision(ranked):
     hits, total = 0, 0.0
     for i, doc in enumerate(ranked, start=1):
         if doc in rel:
             hits += 1
-            total += hits / i  # precision tại đúng vị trí trúng
-    return total / len(rel)  # chia cho mọi văn bản liên quan
+            total += hits / i  # precision at each relevant hit
+    return total / len(rel)  # divide by all relevant documents
 
 def ndcg_at(ranked, k):
     dcg = sum(rel.get(doc, 0) / math.log2(i + 1)

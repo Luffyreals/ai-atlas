@@ -1,0 +1,202 @@
+---
+title: 'Getting Started: Google Colab and Kaggle'
+description: 'Get started with Google Colab and Kaggle cloud platforms: Jupyter notebooks, free GPU hardware acceleration, magic commands, and data management for AI.'
+quiz:
+  - question: 'When you run `!cd dataset` in a Google Colab code cell, what will the current working directory be in the next code cell?'
+    options:
+      - 'It changes to the `dataset` directory'
+      - 'It remains unchanged in the previous directory'
+      - 'It raises a syntax error because `!` is not valid in Python'
+      - 'It automatically creates a new `dataset` directory if it does not exist'
+    answer: 1
+    explanation: 'The `!` prefix spawns a separate subshell to execute the command and immediately closes it, so changing directories does not affect the active kernel. To change the working directory across the notebook, use the magic command `%cd dataset`.'
+  - question: 'You train a model for 2 hours on Google Colab and save its weights to `/content/model.pt`. After closing your browser for 4 hours and reopening the notebook, what happens to that file?'
+    options:
+      - 'It remains intact because Google Colab automatically backs it up to your Google account'
+      - 'It is lost because the virtual machine was recycled (runtime reset) after sitting idle'
+      - 'It is automatically moved to your Google Drive trash'
+      - 'It is encrypted and requires a Colab Pro subscription to download'
+    answer: 1
+    explanation: 'The local disk on Google Colab (`/content`) is ephemeral storage. When you disconnect or hit the idle timeout, the virtual machine is reclaimed and all data on the temporary disk is permanently wiped unless you saved it to Google Drive.'
+  - question: 'In a Jupyter Notebook, if you run the 3rd code cell before running the 1st code cell (where `X = 10` is defined), what happens in the 3rd cell?'
+    options:
+      - 'The browser automatically finds and executes the 1st cell first'
+      - 'The 3rd cell raises a `NameError` if `X` has not yet been loaded into the kernel memory'
+      - 'The value of `X` defaults to 0'
+      - 'The entire notebook restarts from the beginning'
+    answer: 1
+    explanation: 'Jupyter executes code against the kernel''s current memory state, which depends on the order in which you run cells rather than their top-to-bottom visual order on the page. If a variable has not been defined in the current session, Python raises a `NameError`.'
+  - question: 'What is a key advantage of Kaggle Notebooks compared to Google Colab when working on data science problems?'
+    options:
+      - 'Kaggle does not allow running Python code'
+      - 'Kaggle integrates directly with a massive repository of competition datasets and provides a fixed weekly GPU quota'
+      - 'Kaggle requires a monthly subscription to access GPUs'
+      - 'Kaggle does not support installing third-party libraries via pip'
+    answer: 1
+    explanation: 'Kaggle provides an environment tightly integrated with thousands of community datasets that can be attached with a single click, along with roughly 30 hours of free GPU compute per week.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import benchmarkCode from '@code/python/colab-kaggle/benchmark-env.en.py?raw';
+import storageCode from '@code/python/colab-kaggle/notebook-storage.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand the interactive notebook environment and Jupyter's client–kernel architecture.
+- Confidently use Google Colab and Kaggle Notebooks to write code, run experiments, and leverage free GPUs.
+- Distinguish between shell commands (`!`) and magic commands (`%` and `%%`).
+- Manage files effectively, understand ephemeral virtual machine storage, and persist your data safely.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+You only need a modern web browser (Chrome, Edge, Firefox) and a Google or Kaggle account to get started. You do not need to install Python or have a dedicated graphics card on your personal computer yet.
+:::
+
+## Intuition
+
+When starting out in artificial intelligence (AI), the biggest hurdle for beginners is rarely the algorithms themselves—it is **environment setup**: Python library version conflicts, NVIDIA CUDA driver installations, or memory configuration. If your personal computer lacks a powerful dedicated graphics card, training a deep neural network can take days.
+
+To solve this problem, cloud platforms like **Google Colab** and **Kaggle** provide completely free computing environments right in your web browser:
+
+- You do not need to install any software on your machine.
+- The cloud servers come pre-installed with Python, NumPy, Pandas, Scikit-learn, PyTorch, and TensorFlow.
+- You get access to high-performance **Graphics Processing Units (GPUs)** with just a few clicks.
+
+Instead of typing code into long `.py` script files and rerunning everything from scratch whenever you fix a bug, you work inside interactive **notebooks**. You can break your program into small cells, test individual lines of code, immediately view data plots, and write explanatory notes right alongside your code.
+
+## Theory
+
+### Jupyter Notebook Architecture
+
+A notebook file uses the `.ipynb` (Jupyter Notebook Format) extension. Every notebook consists of two main components:
+
+1. **User Interface (Front-end):** The web browser that renders text blocks (Markdown cells) and executable code blocks (Code cells).
+2. **Compute Engine (Kernel):** A background server process that executes your Python code and holds all variables, functions, and objects in RAM.
+
+When you run a code cell (shortcut `Shift + Enter`), the browser sends that snippet to the kernel. The kernel performs the computation and sends the output (text, tables, charts) back to your screen.
+
+### Google Colab vs. Kaggle Notebooks
+
+Both platforms are built on Jupyter but are optimized for slightly different workflows:
+
+| Feature | Google Colab | Kaggle Notebooks |
+| :--- | :--- | :--- |
+| **Provider** | Google Research | Kaggle (owned by Google) |
+| **Free Hardware** | T4 GPU, CPU, TPU | Dual T4 GPU, P100, CPU |
+| **GPU Quota** | Dynamic usage limits | ~30 hours/week |
+| **Max Session Time** | 12 hours/session (90-min idle timeout) | 9 hours/session (12 hours on background submit) |
+| **Data Storage** | Direct Google Drive mounting | One-click Kaggle Datasets attachment |
+| **Best Suited For** | Learning, rapid prototyping, quick experiments | Data science competitions, sharing community projects |
+
+### Shell Commands and Magic Commands
+
+Inside a notebook environment, alongside standard Python code, you can interact directly with the virtual machine's Linux operating system through:
+
+- **Shell Commands (`!`):** Run a single system command in a subshell. For example, `!pip install transformers` installs a package, and `!nvidia-smi` checks your allocated GPU specifications.
+- **Line Magics (`%`):** Operate on a single line to configure or inspect the kernel environment:
+  - `%pwd`: Print the current working directory.
+  - `%cd /content/sample_data`: Change the kernel's active working directory.
+  - `%time expression`: Measure the execution time of a single statement.
+- **Cell Magics (`%%`):** Operate on the entire contents of the cell:
+  - `%%time`: Measure the total execution time of the whole cell.
+  - `%%writefile script.py`: Save the entire cell's contents to a file on disk.
+
+### Ephemeral Storage and Data Persistence
+
+Virtual machines on Colab and Kaggle run as **ephemeral runtimes**:
+
+- The local disk at `/content` (on Colab) or `/kaggle/working` (on Kaggle) only exists while your current session is active.
+- If you close your browser for too long, lose your internet connection, or hit the maximum session duration, the virtual machine is terminated and every downloaded or generated file on the local disk is wiped clean.
+- **How to persist your data:**
+  - On Colab: Mount your Google Drive with `from google.colab import drive; drive.mount('/content/drive')` and save model checkpoints to `/content/drive/MyDrive/...`.
+  - On Kaggle: Click **Save Version** to commit and publish the notebook, which saves your output artifacts to Kaggle's persistent cloud storage.
+
+## Illustration
+
+The diagram below illustrates the communication flow between your web browser, the kernel server, and storage layers during a cloud notebook session:
+
+```text
+[ Web Browser ]
+  │  (Write code, press Shift + Enter)
+  ▼
+[ Jupyter Server / Kernel (VM) ]
+  ├── System RAM: Holds active variables, functions, and models
+  ├── GPU Accelerator: Runs parallel matrix computations
+  │
+  ├── Ephemeral Disk (/content)
+  │     └─► WIPED when the session disconnects or times out!
+  │
+  └── Persistent Storage
+        ├─► Google Drive (Mounted via drive.mount)
+        └─► Kaggle Dataset / Output Versions
+```
+
+A standard workflow for a cloud AI project:
+
+1. **Initialize the runtime:** Select your hardware accelerator (Runtime $\to$ Change runtime type $\to$ T4 GPU).
+2. **Load data:** Fetch files from an external source or mount your cloud storage directory.
+3. **Run analysis:** Execute cells step by step to explore data and train your model.
+4. **Save artifacts:** Export model checkpoints to persistent storage before closing your browser tab.
+
+## Code examples
+
+The cells below run independently. Click **Run** to execute them directly in your browser using our simulated environment.
+
+The first cell demonstrates an execution speed benchmark—a core habit that helps you understand why measuring computation time matters for data-intensive tasks.
+
+<PythonRunner code={benchmarkCode} title="Benchmarking algorithm execution time" />
+
+The printed output shows how Python's built-in `sum` function with a generator expression runs faster than manually accumulating values in a standard `for` loop. On Colab, you can measure this directly using the `%time` magic command.
+
+The second cell simulates inspecting the working directory and managing temporary files on a virtual machine.
+
+<PythonRunner code={storageCode} title="Inspecting the file system and cleaning up storage" />
+
+The script creates a mock dataset file, checks its size on disk, and safely removes it. Checking file sizes and freeing up disk space is an essential habit when working with multi-gigabyte datasets on Colab or Kaggle.
+
+## Common pitfalls
+
+:::caution[Confusing `!cd` with `%cd`]
+When you run `!cd my_folder`, the system spawns a temporary subshell, changes into `my_folder`, and immediately exits that subshell. Your notebook's actual working directory does not change at all! To change the notebook kernel's working directory, always use the magic command `%cd my_folder`.
+:::
+
+:::caution[Losing hours of training by relying on ephemeral disk]
+Many learners leave a model training overnight and let the browser disconnect. When they return the next morning, everything inside `/content` is gone. Always configure your training loop to save checkpoints directly to a mounted Google Drive folder or download key weight files as soon as training finishes.
+:::
+
+:::caution[Running cells out of order and corrupting variable state]
+The top-to-bottom visual order of cells on your screen does not dictate the execution order in memory. The number inside the square brackets next to a code cell (such as `[5]`) shows when that cell was actually executed. If you edit cell 1 but forget to rerun it, cells below it will continue using the old value stored in RAM, leading to subtle and confusing bugs.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Google Colab and Kaggle provide cloud-based Jupyter Notebook environments with free GPU acceleration.
+- Notebooks separate the browser-based user interface from the background kernel process that executes code.
+- Shell commands (`!`) run one-off operating system utilities, while magic commands (`%` and `%%`) configure and control the active kernel session.
+- Local virtual machine disks are ephemeral; mount Google Drive or save a Kaggle Notebook version to keep your data safe.
+
+**Further reading:**
+
+- Google Colab Team (2024). [*Google Colaboratory Frequently Asked Questions*](https://research.google.com/colaboratory/faq.html). Detailed answers on resource limits and Colab virtual machine architecture.
+- Kaggle Documentation (2024). [*Kaggle Notebooks Documentation*](https://www.kaggle.com/docs/notebooks). Official guide to GPU quotas, attaching datasets, and submitting competition notebooks.
+- Project Jupyter (2024). [*Jupyter Notebook Documentation*](https://docs.jupyter.org/en/latest/). Official open-source documentation covering the `.ipynb` format and kernel mechanics.
+
+<LessonProgress />

@@ -1,0 +1,363 @@
+---
+title: 'Instance and Universal Segmentation: Mask R-CNN, Mask2Former, SAM'
+description: When two people stand shoulder to shoulder, semantic segmentation sees one "person" blob. Instance and panoptic segmentation, PQ, Mask R-CNN, Mask2Former, and SAM.
+quiz:
+  - question: 'A street scene contains sky, road, and four cars. Your system must answer all at once: how many cars there are, which pixels belong to each individual car, and which pixels are road. Which task matches this requirement?'
+    options:
+      - 'Semantic segmentation: one class label per pixel is enough'
+      - 'Instance segmentation: one mask per car'
+      - 'Panoptic segmentation'
+      - 'Object detection: one bounding box per car'
+    answer: 2
+    explanation: 'Semantic segmentation merges all four cars into a single "car" region, so it cannot count them. Instance segmentation separates each car but ignores background "stuff" classes like road and sky. Bounding boxes do not tell you which exact pixels belong to each car. Panoptic segmentation assigns every pixel a class label plus an instance ID for countable "thing" classes like cars.'
+  - question: 'An image shows two people standing side by side whose ground-truth masks have equal area and do not overlap. A model outputs a single mask that tightly covers both people together. What is the Panoptic Quality (PQ) for the person class?'
+    options:
+      - 'PQ = 0.5, because the mask covers every true person pixel'
+      - 'PQ = 0: neither pair has IoU strictly greater than 0.5, leaving 1 FP and 2 FN'
+      - 'PQ = 1, because no pixel is assigned the wrong class'
+      - 'PQ is about 0.67, because it matches one of the two people'
+    answer: 1
+    explanation: 'The merged mask has an IoU of exactly $1/2$ with each individual person, which is not strictly greater than the 0.5 matching threshold, so it matches neither ground-truth instance. The numerator is 0 and the denominator is $0 + 0.5 \cdot 1 + 0.5 \cdot 2$, giving PQ = 0. Evaluated by class-level IoU as in semantic segmentation, it would score 1—highlighting the exact difference between the two tasks.'
+  - question: 'You replace RoIAlign with RoIPool in Mask R-CNN while keeping everything else fixed. What is the most likely outcome?'
+    options:
+      - 'Predicted masks shift by a few pixels relative to the object, causing a clear drop in mask AP while box classification is much less affected'
+      - 'Box classification accuracy drops sharply while mask quality stays nearly unchanged'
+      - 'Nothing changes, because both layers output $7 \times 7$ feature maps'
+      - 'The model crashes, because bounding boxes have floating-point coordinates'
+    answer: 0
+    explanation: 'RoIPool quantizes box coordinates and sub-bin boundaries onto the discrete feature-map grid, misaligning extracted features with the original image pixels. Class labels tolerate small spatial shifts, but pixel-accurate masks do not. In the Mask R-CNN paper, mask AP rises from 26.9 with RoIPool to 30.3 with RoIAlign. RoIPool still runs on floating-point boxes—it simply rounds them.'
+  - question: 'In a crowded scene, two distinct people standing close together typically have bounding boxes with IoU around 0.6, while duplicate boxes on the same person have IoU around 0.85. You set the NMS threshold to 0.5. What happens?'
+    options:
+      - 'It keeps every person and removes all duplicate boxes'
+      - 'It keeps duplicate boxes as well, because 0.85 is greater than 0.5'
+      - 'The result does not depend on the threshold, because NMS only uses confidence scores'
+      - 'It removes duplicate boxes, but also mistakenly suppresses some real people standing next to others'
+    answer: 3
+    explanation: 'NMS discards any box whose IoU with an already-kept higher-scoring box exceeds the threshold. With a 0.5 threshold, both duplicate boxes (0.85) and nearby people (0.6) exceed 0.5, so the second person gets suppressed. A threshold between 0.6 and 0.85 would work here, but real crowds rarely separate so cleanly. DETR and Mask2Former eliminate NMS altogether by matching each ground-truth object to a single query during training.'
+  - question: 'An annotation tool uses SAM. A user clicks 20 points one after another on the same image. Which part of SAM runs 20 times?'
+    options:
+      - 'The ViT image encoder, because each point requires fresh image features'
+      - 'The entire model, because SAM reads the image and point together'
+      - 'Only the prompt encoder and mask decoder; the image embedding is computed once and reused'
+      - 'None of it, because SAM precomputes every possible mask upfront'
+    answer: 2
+    explanation: 'The image embedding does not depend on the prompt, so the heavy ViT image encoder runs just once per image, as shown in our LocalCode script. Each click only runs the lightweight prompt encoder and mask decoder (~50 ms on CPU in a browser according to the paper), making interactive labeling feel instantaneous.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import labelCode from '@code/cv/instance-universal-segmentation/label.en.py?raw';
+import nmsCode from '@code/cv/instance-universal-segmentation/nms.en.py?raw';
+import samCode from '@code/cv/instance-universal-segmentation/sam.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Distinguish three segmentation tasks: semantic segmentation, **instance segmentation**, and **panoptic segmentation**—and compute **Panoptic Quality** ($\text{PQ} = \text{SQ} \times \text{RQ}$).
+- Explain how Mask R-CNN works (detect bounding boxes first, then predict a binary mask inside each box) and why **RoIAlign** replaces RoIPool.
+- Understand query-based **mask classification**—from DETR and MaskFormer to Mask2Former with **masked cross-attention**—unifying all three segmentation tasks in a single architecture.
+- Run **SAM** (*Segment Anything Model*) with **point prompts**, and explain why SAM outputs three candidate masks for a single click.
+
+## Prerequisites
+
+{/* List populated from prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+[Semantic Segmentation](/en/cv/semantic-segmentation/) assigns each pixel one of $K$ classes and evaluates masks using $\text{IoU} = |A \cap B| / |A \cup B|$ between predicted and ground-truth regions. That lesson also introduced Feature Pyramid Networks (FPN) and bilinear interpolation, both of which return here.
+:::
+
+## Intuition
+
+### Two people standing shoulder to shoulder
+
+Suppose you have a photo of two people standing shoulder to shoulder. A strong semantic segmentation model colors every pixel belonging to either person with the exact same "person" label, achieving a class IoU close to 1.
+
+Now ask: **how many people are in the image?** The semantic segmentation model cannot tell you. It knows "this pixel is a person," but not "**which** person this pixel belongs to." For a self-driving car counting pedestrians at a crosswalk, a warehouse robot picking individual apples from a bin, or microscopy software counting dividing cells, knowing where one instance ends and the next begins is the whole point.
+
+What if we just take the semantic "person" mask and split it into connected components, treating each connected island of pixels as one person? That works when objects are separated by background. The moment two people's shoulders touch, their masks merge into **one** connected blob and get counted as a single person. Our first NumPy code cell demonstrates this exact failure.
+
+### Two paradigms (plus a third)
+
+First paradigm: **find each object first, then color inside it**. An **object detector** draws a **bounding box** around each person, and a small segmentation head predicts which pixels inside each box belong to that specific person. Even when two people stand shoulder to shoulder, they get two distinct boxes and therefore two distinct masks. This is **Mask R-CNN**.
+
+Second paradigm: **give the network a fixed set of learnable "slots"** (say, 100 object queries) and ask each slot to output one binary mask across the whole image plus one class label (or "no object"). Each query claims one object or background region directly, without bounding boxes. Better yet, the exact same architecture handles semantic, instance, and panoptic segmentation. This is **MaskFormer** and **Mask2Former**.
+
+Third paradigm: let a human (or another model) **point** at whatever needs segmenting—by clicking a point or drawing a box—and have the network return the mask of that object, even if it belongs to a category never seen as a class label. This is **SAM**.
+
+The central question of this lesson is: **how do we separate individual object instances even when they touch or overlap, how do we measure the quality of that separation, and how do Mask R-CNN, Mask2Former, and SAM solve it?**
+
+## Theory
+
+### Three tasks, three kinds of answers
+
+Kirillov et al. (2019) divide visual categories into two families:
+
+- **Thing** classes (countable objects): people, cars, apples, coins. Each instance has a distinct boundary and identity, and you can count how many there are.
+- **Stuff** classes (amorphous regions): sky, road, grass, water. Nobody asks "how many skies are in this photo?"
+
+This distinction defines three segmentation tasks on an $H \times W$ image:
+
+| Task | Output format | Thing classes | Stuff classes |
+|---|---|---|---|
+| Semantic segmentation | One class ID per pixel | Merges all instances of the same class | Included |
+| Instance segmentation | A set $\{(\mathbf{M}_i, c_i, s_i)\}$ of binary masks, classes, and confidence scores | One mask per object instance | Ignored |
+| Panoptic segmentation | One pair $(\text{class ID}, \text{instance ID})$ per pixel | Distinct instance ID per object | One region per class |
+
+Here $\mathbf{M}_i \in \{0, 1\}^{H \times W}$ is the binary mask of the $i$-th detected instance, $c_i$ is its class, and $s_i$ is its confidence score. Notice that in instance segmentation, predicted masks are allowed to overlap (a detector may output multiple candidate masks ranked by score). In panoptic segmentation, overlaps are forbidden: every pixel belongs to at most one segment.
+
+### Evaluating with Panoptic Quality (PQ)
+
+In semantic segmentation, we used mIoU. However, class-level IoU is blind to merged instances: painting two touching people as a single blob still gets a class IoU of 1. Panoptic segmentation needs a metric that evaluates **individual segments**. Kirillov et al. (2019) introduced **Panoptic Quality (PQ)**, computed per class and then averaged over classes.
+
+**Step 1: segment matching.** A predicted segment $p$ matches a ground-truth segment $g$ of the same class if and only if $\text{IoU}(p, g) > 0.5$. Why strictly greater than $0.5$? Because ground-truth segments do not overlap and predicted panoptic segments do not overlap. If $p$ covers more than half of the union $p \cup g$, there is not enough room left for any other ground-truth segment $g'$ to also achieve $\text{IoU}(p, g') > 0.5$. As the paper proves, the $0.5$ threshold guarantees a **unique matching** without needing the Hungarian algorithm.
+
+**Step 2: partition into TP, FP, FN.** Matched pairs $(p, g)$ are true positives ($\text{TP}$). Unmatched predicted segments are false positives ($\text{FP}$), and unmatched ground-truth segments are false negatives ($\text{FN}$).
+
+**Step 3: the PQ formula.**
+
+$$
+\text{PQ} = \frac{\sum_{(p, g) \in \text{TP}} \text{IoU}(p, g)}{|\text{TP}| + \frac{1}{2}|\text{FP}| + \frac{1}{2}|\text{FN}|}
+$$
+
+The numerator sums the IoUs of all matched pairs: tighter masks push the numerator closer to $|\text{TP}|$. The denominator counts matched pairs plus a half-point penalty for every extra predicted segment and every missed true segment.
+
+**Step 4: factoring into SQ and RQ.** Multiplying and dividing by $|\text{TP}|$ splits PQ into two interpretable factors:
+
+$$
+\text{PQ} =
+\underbrace{\frac{\sum_{\text{TP}} \text{IoU}(p, g)}{|\text{TP}|}}_{\text{SQ}}
+\times
+\underbrace{\frac{|\text{TP}|}{|\text{TP}| + \frac{1}{2}|\text{FP}| + \frac{1}{2}|\text{FN}|}}_{\text{RQ}}
+$$
+
+The first factor, **Segmentation Quality (SQ)**, is the average IoU of matched segments—measuring how tightly matched masks fit their objects. The second factor, **Recognition Quality (RQ)**, is the familiar $F_1$ score of object detection—measuring how accurately instances are found and separated.
+
+Let's apply this to the example in our first NumPy cell: three coins A, B, and C, where B and C touch by 1 pixel. Connected-components labeling outputs two predicted segments: coin A matches perfectly ($\text{IoU} = 1$), while the merged blob B+C has $\text{IoU} = 0.58$ with C and $\text{IoU} = 0.42$ with B. Thus $\text{TP}$ contains $(A, A)$ and $(B+C, C)$, there are $0$ false positives, and coin B is left unmatched as $1$ false negative:
+
+$$
+\text{PQ} = \frac{1 + 0.58}{2 + 0 + \frac{1}{2} \cdot 1} \approx 0.633,
+\qquad \text{SQ} \approx 0.79, \quad \text{RQ} = 0.8
+$$
+
+Even though the semantic "coin" mask is 100% accurate at the pixel level, PQ immediately penalizes the failure to separate B from C.
+
+### Quick primer on object detection
+
+Since our dedicated object detection lesson comes separately, here are the three concepts needed for Mask R-CNN. An object detector outputs candidate bounding boxes $[x_1, y_1, x_2, y_2]$, each with a class label and a confidence score. Overlap between two boxes is measured by box IoU—intersection area divided by union area—where the intersection rectangle has width $\max(0, \min(x_2, x_2') - \max(x_1, x_1'))$ and analogous height.
+
+Because a detector typically fires **multiple overlapping boxes** on the same object, **non-maximum suppression (NMS)** cleans up duplicates: sort boxes by confidence score from highest to lowest, keep the top-scoring box, discard any remaining box whose IoU with it exceeds a threshold, and repeat on the survivors. That threshold is a double-edged sword: set it too low and you erase real objects standing next to each other; set it too high and duplicate detections slip through. Our second NumPy code cell illustrates this exact dilemma.
+
+### Mask R-CNN: detect boxes first, segment inside each box
+
+Mask R-CNN (He et al., 2017) extends Faster R-CNN (Ren et al., 2015), a classic two-stage object detector:
+
+1. **Backbone** (typically a ResNet with an FPN): extracts multi-scale feature maps from the input image.
+2. **Region Proposal Network (RPN):** scans the feature maps and proposes a few hundred to a few thousand candidate boxes that might contain an object.
+3. **RoI feature extraction:** for each candidate box—called a **Region of Interest (RoI)**—crops and resizes the corresponding feature map region into a small fixed-size grid (such as $7 \times 7$ or $14 \times 14$).
+4. **Parallel prediction heads:** on each RoI grid, two existing branches predict the class label and refine the bounding-box coordinates, while Mask R-CNN adds a third parallel branch: the **mask head**.
+
+The mask head is a small fully convolutional network that outputs $K$ binary masks of resolution $m \times m$ (the paper uses $28 \times 28$), one per class. Each pixel passes through a sigmoid activation and is trained with binary cross-entropy loss. Crucially, for a ground-truth RoI of class $k$, **only the $k$-th mask** contributes to the mask loss; at inference time, the classification branch picks the class $c$ and the model reads out mask $c$. The authors found that **decoupling** class prediction ("what is it?") from mask prediction ("which pixels inside the box belong to the object?") was vital: using a per-pixel multi-class softmax across all $K$ classes degraded mask accuracy substantially. The total loss per RoI is simply the sum of the three branches:
+
+$$
+\mathcal{L} = \mathcal{L}_{\text{cls}} + \mathcal{L}_{\text{box}} + \mathcal{L}_{\text{mask}}
+$$
+
+At inference, the predicted $28 \times 28$ soft mask is bilinearly resized to the bounding box's dimensions on the image and thresholded at $0.5$. Because each detected box gets its own mask, two touching people with separate boxes cleanly receive separate masks. The flip side is that mask quality lives or dies by the boxes: if a box is missed or wrongly suppressed by NMS, its mask is lost too.
+
+### RoIAlign: stop rounding coordinates
+
+Step 3 above hides a subtle trap. Suppose the backbone has stride 16, so one feature-map cell corresponds to $16 \times 16$ image pixels. A bounding box has floating-point coordinates on the image, so projecting a coordinate $x$ onto the feature map gives $x / 16$.
+
+**RoIPool** (used in Faster R-CNN) rounds twice. First, it rounds the projected box coordinates to the nearest integer grid cell: a left edge at $x = 33$ becomes $33 / 16 \approx 2.06$, which rounds to 2—corresponding to pixel 32 on the image. Second, when dividing the quantized box into $7 \times 7$ sub-bins, it rounds each bin boundary to integers as well. Each rounding step can shift features by up to half a grid cell—up to 8 pixels on the original image! Whole-box classification tolerates an 8-pixel shift just fine, but pixel-level mask prediction is ruined when extracted features are misaligned with the image.
+
+**RoIAlign** removes every rounding operation. It keeps $x / 16 = 2.06$ in floating point and divides the RoI into $7 \times 7$ equal floating-point bins. Inside each bin, it evaluates 4 regularly spaced sampling points using **bilinear interpolation** from the 4 nearest feature-map cells, then aggregates them with max or average pooling. This tiny change yields a dramatic jump: in the paper's ablation table (ResNet-50-C4), replacing RoIPool with RoIAlign boosts mask AP from 26.9 to 30.3.
+
+### From per-pixel classification to mask classification
+
+**DETR** (*DEtection TRansformer*, Carion et al., 2020) reformulated object detection as direct set prediction. The model maintains $N$ learnable **object queries** ($N = 100$ in the paper) that pass through a Transformer decoder, attending to image features via cross-attention. Each query outputs one bounding box and one class distribution over $K + 1$ classes (including a special "no object" symbol $\varnothing$). During training, a **bipartite matching** step pairs each ground-truth object with the single query that minimizes a combined class + box matching cost. Any second query that tries to predict the same object is paired with $\varnothing$ and penalized—teaching the network never to emit duplicates. As a result, DETR needs **no NMS** and no hand-designed anchor boxes.
+
+**MaskFormer** (Cheng et al., 2021) swaps DETR's box head for a mask head. Given the same $N$ queries, each query $i$ predicts a probability distribution over $K + 1$ classes plus a **mask embedding** vector $\mathbf{e}_i \in \mathbb{R}^{D}$. In parallel, a pixel decoder (such as an FPN) produces per-pixel feature vectors $\mathbf{p}_{h,w} \in \mathbb{R}^{D}$ at high resolution. The binary mask probability of query $i$ at pixel $(h, w)$ is simply a dot product followed by a sigmoid $\sigma$:
+
+$$
+\mathbf{M}_i[h, w] = \sigma\big(\mathbf{e}_i^\top \mathbf{p}_{h,w}\big)
+$$
+
+A large dot product means pixel $(h, w)$ matches the region represented by query $i$. This reformulates **every segmentation task as predicting a set of $( \text{mask}, \text{class} )$ pairs**: semantic segmentation predicts one mask per present class, instance segmentation predicts one mask per object instance, and panoptic segmentation predicts both thing and stuff segments in the exact same format. Only the post-processing merge rules at inference differ. Hence the paper's title: *"Per-Pixel Classification is Not All You Need for Semantic Segmentation."*
+
+### Mask2Former: masked cross-attention
+
+MaskFormer trained slowly and struggled on small objects because standard cross-attention lets every query attend to the entire image, requiring many epochs before a query learns to focus on a single object. **Mask2Former** (Cheng et al., 2022) fixes this with a simple constraint: in each Transformer decoder layer, a query is allowed to attend **only within the foreground region of the mask it predicted in the preceding decoder layer**.
+
+Let $\mathbf{X}_l \in \mathbb{R}^{N \times D}$ denote the $N$ query embeddings after decoder layer $l$. Masked cross-attention adds a binary attention mask $\boldsymbol{\mathcal{M}}_{l-1}$ to the query-key logits before softmax (written here without the $1/\sqrt{d}$ factor, matching Equation 1 of the paper):
+
+$$
+\mathbf{X}_l = \mathrm{softmax}\big(\boldsymbol{\mathcal{M}}_{l-1} + \mathbf{Q}_l \mathbf{K}_l^\top\big)\,\mathbf{V}_l + \mathbf{X}_{l-1}
+$$
+
+Here $\mathbf{Q}_l$ comes from the queries, while $\mathbf{K}_l$ and $\mathbf{V}_l$ come from the image features. Entry $\boldsymbol{\mathcal{M}}_{l-1}(i, (x, y))$ is $0$ if query $i$'s resized mask from layer $l-1$ exceeds $0.5$ at pixel $(x, y)$, and $-\infty$ otherwise. Because $e^{-\infty} = 0$, softmax assigns **exact zero weight** to every pixel outside the query's current mask estimate. A query tracking a small cat gathers features exclusively from the cat region rather than getting diluted by background pixels.
+
+Combined with multi-scale pixel decoder features fed round-robin into successive decoder layers and point-sampled mask loss calculation to save GPU memory, a single Mask2Former architecture sets strong results across all three tasks: 57.8 PQ on COCO panoptic, 50.1 AP on COCO instance, and 57.7 mIoU on ADE20K semantic (Swin-L backbone, 2022). With a ResNet-50 backbone, it reaches 51.9 PQ in just 50 epochs, whereas MaskFormer needed 300 epochs to reach 46.5.
+
+Note what "universal" means here: **one universal architecture**, not a single set of weights for all datasets. As the authors note, Mask2Former is still trained separately on each task/dataset, and a model trained solely on panoptic labels still trails task-specialized instance or semantic models by a small margin.
+
+### SAM: promptable segmentation
+
+Mask R-CNN and Mask2Former can only label categories present in their training set (e.g., 80 thing classes in COCO). **SAM** (*Segment Anything Model*, Kirillov et al., 2023) defines a new task: **promptable segmentation**. Given an image and any **prompt** specifying what to segment—one or more foreground/background clicks, a rough bounding box, or a coarse mask—return a valid segmentation mask for that target, regardless of its object category. SAM outputs **class-agnostic masks** without semantic class names.
+
+SAM's three-module architecture is engineered for interactive speed:
+
+- **Image encoder:** a heavyweight MAE-pretrained Vision Transformer (up to ViT-H) that takes a $1024 \times 1024$ image and outputs a $64 \times 64$ spatial grid of 256-channel embeddings. This heavy step **runs only once per image**.
+- **Prompt encoder:** converts point clicks and bounding boxes into positional encodings summed with learned embeddings for each prompt type.
+- **Mask decoder:** a lightweight two-layer Transformer block that performs two-way cross-attention between prompt tokens and the precomputed image embedding, followed by upsampling and dot-product mask prediction. Once the image embedding is cached, the prompt encoder and mask decoder run in **~50 ms on a CPU inside a web browser**.
+
+A single click is inherently **ambiguous**: if you click on a person's shirt, do you want the button, the shirt, or the entire person? A model forced to output a single mask would average those possibilities into a blurry compromise. SAM resolves ambiguity by predicting **3 masks** for a single point prompt—typically corresponding to whole, part, and subpart—along with a predicted IoU confidence score (`iou_scores`) for each mask so they can be ranked. During training, backpropagation updates only the single predicted mask that has the lowest loss against the ground truth (hindcast / winner-takes-all loss).
+
+Because pixel-accurate masks do not exist at internet scale, the authors built a three-stage **data engine**: first human annotators used SAM interactively to label masks faster, then SAM automatically proposed high-confidence masks alongside annotators, and finally SAM segmented images fully automatically on a grid of points. The resulting **SA-1B** dataset contains **1.1 billion masks across 11 million images**.
+
+**SAM 2** (Ravi et al., 2024) extends promptable segmentation to **video**: it adds a **memory bank** that stores features and mask predictions from past frames, and a memory attention module that conditions the current frame's features on that memory. Click an object on frame 1, and SAM 2 tracks and segments it across the entire video. Trained on the SA-V video dataset (35.5M masks on 50.9K videos), SAM 2 is also more accurate and 6x faster than the original SAM on static images.
+
+:::note[Key takeaway]
+Instance segmentation separates countable objects; panoptic segmentation adds uncountable stuff and evaluates with $\text{PQ} = \text{SQ} \times \text{RQ}$ using unique segment matching at $\text{IoU} > 0.5$. Mask R-CNN detects boxes and segments inside each box using quantization-free RoIAlign. Mask2Former assigns $N$ queries to predict $(\text{mask}, \text{class})$ pairs directly via masked cross-attention, without NMS. SAM segments any prompted target: its heavy image encoder runs once, its lightweight mask decoder runs per prompt and returns 3 masks with predicted IoU scores to handle ambiguity.
+:::
+
+### Limitations
+
+- **Mask R-CNN depends on bounding boxes and NMS.** In crowded scenes with heavy occlusion, overlapping instances of the same class can be mistakenly suppressed by NMS (as shown in our second NumPy cell and Quiz Question 4).
+- **Mask2Former is a universal architecture, not a single zero-shot checkpoint.** It still requires task-specific training and only recognizes its training vocabulary.
+- **SAM does not know semantic class names.** To get labeled instances ("person", "car"), you must pair SAM with a classifier or an open-vocabulary detector such as GLIP from [CLIP, BLIP, GLIP](/en/cv/clip-blip-glip/).
+- **Object detection internals** (RPN anchors, YOLO, single-stage vs. two-stage detectors) are only summarized here to the extent needed for Mask R-CNN.
+
+## Illustration
+
+The diagram below compares all three segmentation tasks on the exact same street scene. Look at the two people standing shoulder to shoulder: in semantic segmentation they share a single merged region; in instance and panoptic segmentation they get two distinct colors; meanwhile, sky and road vanish in instance segmentation.
+
+{/* FIG: SegmentationTasksFigure
+    Idea: the same scene yields three different outputs: semantic (one class per pixel), instance (one mask per countable object), and panoptic (both).
+    Blocks and arrows: a simple geometric street scene (sky band at top, road band at bottom, two people standing shoulder to shoulder, one car), repeated vertically across three panels. Panel 1 "Semantic": sky, road, person, car each get one class color; the two touching people share the EXACT SAME color (focal point: accent outline around the merged person blob). Panel 2 "Instance": white background (stuff ignored), each person gets a distinct color, car gets its own color, labeled "person 1", "person 2", "car 1". Panel 3 "Panoptic": sky and road colored as in Panel 1, individual people and car colored as in Panel 2.
+    Labels: "Semantic: one class per pixel"; "Instance: one mask per object"; "Panoptic: class + instance ID per pixel"; region tags "sky", "road", "person 1", "person 2", "car 1".
+    Caption: Semantic segmentation merges touching people into one region; instance segmentation separates them but drops stuff (sky, road); panoptic segmentation assigns every pixel a (class, instance ID) pair and is evaluated with PQ. */}
+
+The table below compares the three model families side by side.
+
+| Criterion | Mask R-CNN (2017) | Mask2Former (2022) | SAM (2023) |
+|---|---|---|---|
+| Core idea | Detect bounding boxes, then predict a binary mask inside each box | $N$ object queries, each predicting a global mask and a class label | Segment whatever target is indicated by a prompt (point, box, mask) |
+| Tasks supported | Instance segmentation (and object detection) | Semantic, instance, and panoptic with one architecture | Class-agnostic promptable segmentation |
+| Outputs class labels? | Yes, for training classes | Yes, for training classes | No (masks and IoU scores only) |
+| Duplicate removal | Box-level NMS | Bipartite matching during training (no NMS) | Prompt specifies the target; outputs 3 ranked masks per ambiguous prompt |
+| Key strength | Simple, cheap mask head; easily extended to human keypoint estimation | Unified architecture across all three tasks; fast convergence via masked attention | Zero-shot transfer to unseen objects; interactive 50 ms decoding |
+| Trade-off | Bound by box quality and NMS; coarse $28 \times 28$ mask grid | Still trained separately per task; high decoder memory without point sampling | Heavy ViT image encoder; provides no semantic class labels |
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the two NumPy cells with Python 3.14, NumPy 2.4, and SciPy 1.18 (in Pyodide); the SAM script with Python 3.14, PyTorch 2.15, and transformers 5.22 on CPU. The two NumPy cells run directly in your browser, while the SAM script runs on your local machine. Each cell is independent. The first cell takes slightly longer on its initial run while Pyodide loads SciPy.
+
+### From a semantic mask to instances and PQ
+
+The cell below draws three coins of the same class on a $20 \times 34$ grid: coin A sits alone, while coins B and C touch slightly. The semantic mask is the union of all three ground-truth masks. Method 1 extracts connected components via `scipy.ndimage.label` (4-connected). Method 2 erodes the semantic mask by 1 pixel (`binary_erosion`) to sever the thin contact bridge, labels the eroded islands as "seeds," and assigns every pixel of the original semantic mask to its nearest seed via a distance transform. For each method, the script prints the IoU matrix between predicted segments (rows) and true coins (columns), then computes PQ matching our Theory formula.
+
+<PythonRunner code={labelCode} title="Splitting a semantic mask into instances, matching by IoU, and computing PQ" />
+
+Reading the output:
+
+- **Method 1 (`components: 2`):** three coins, but only two connected components. Row 2 of the IoU matrix is the merged B+C blob, which has IoU 0.42 with B and 0.58 with C. Only the pair with C exceeds 0.5, giving `TP=2 FP=0 FN=1` and `PQ=0.633`—matching our hand calculation.
+- **Method 2 (`components after erosion: 3`):** a 1-pixel erosion breaks the bridge between B and C, and growing the three seeds back recovers all three masks perfectly (`PQ=1.000`). Note that rows 2 and 3 swap order (C before B) because `ndimage.label` numbers components top-to-bottom, and the larger coin C reaches a higher row first.
+
+Erosion + nearest-seed assignment is a toy version of the classical **watershed** algorithm. It works here only because B and C touch across a 1-pixel neck. When two objects overlap heavily (like pedestrians in a crowd), eroding enough to separate them destroys the smaller object completely—which is why modern instance segmentation networks learn instance separation end-to-end rather than post-processing a semantic mask.
+
+### Non-maximum suppression (NMS) on bounding boxes
+
+The second cell defines 4 bounding boxes: boxes 0 and 1 are duplicate detections on person A, box 2 covers person B standing right next to A, and box 3 covers person C standing farther away. The script prints the $4 \times 4$ pairwise box IoU matrix and runs NMS at three thresholds.
+
+<PythonRunner code={nmsCode} title="NumPy NMS across three IoU thresholds" />
+
+Reading the output:
+
+- **IoU matrix:** the two duplicate boxes on person A have IoU 0.78. Because person B stands close to A, box 2 has IoU 0.54 with box 0 and 0.64 with box 1. Box 3 (person C) has 0 overlap with the others.
+- **`thr=0.5`:** keeps `[0, 3]`. Duplicate box 1 is rightly removed, but box 2 is also suppressed because $0.54 > 0.5$: **person B is erased**.
+- **`thr=0.6`:** keeps `[0, 2, 3]`—all three true people. Notice that because box 0 (score 0.95) suppresses box 1 (score 0.80) on the very first step, the 0.64 overlap between box 1 and box 2 never gets a chance to suppress box 2.
+- **`thr=0.8`:** keeps all 4 boxes, counting person A twice.
+
+No single NMS threshold works across all crowd densities. Mask R-CNN lives with this limitation, whereas DETR and Mask2Former sidestep NMS through one-to-one bipartite matching during training.
+
+### SAM with point prompts
+
+The script below uses PIL to draw a $256 \times 256$ RGB image containing two touching red circles (A and B) and a blue square (C), along with each object's true binary mask. SAM's ViT image encoder runs **once** to compute `emb`; then we loop over three point prompts (one at the center of each shape) and run only the lightweight prompt encoder and mask decoder for each click. For each point, the script prints the pixel areas of SAM's 3 candidate masks alongside the true area, SAM's self-predicted `iou_scores`, the actual IoU against the ground-truth mask, and the index of the highest-scoring mask. On first run, `transformers` downloads the `facebook/sam-vit-base` checkpoint (~375 MB). For CPU PyTorch installation instructions, see [Build Your First LLM](/en/llm/build-first-llm/).
+
+<LocalCode
+  code={samCode}
+  title="SAM: one image embedding reused across three point prompts"
+  packages={['torch', 'transformers', 'pillow']}
+  hardware="CPU is sufficient. Runs in 1–2 minutes once the checkpoint is cached. The ViT image encoder allocates roughly 0.8 GB for attention maps, so keep a few GB of RAM free"
+  sampleVaries={false}
+>
+
+```text
+image embedding: (1, 256, 64, 64)
+A area: [10250, 10214, 5127] truth: 5145
+  iou_scores: [0.731 0.933 1.016]
+  IoU vs truth: [0.501 0.5   0.997] best: 2
+B area: [11701, 10241, 5111] truth: 5145
+  iou_scores: [0.727 0.954 1.004]
+  IoU vs truth: [0.438 0.501 0.993] best: 2
+C area: [15843, 5751, 5747] truth: 5751
+  iou_scores: [0.89  1.015 0.999]
+  IoU vs truth: [0.363 1.    0.999] best: 1
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **`(1, 256, 64, 64)`:** the processor resizes the image to $1024 \times 1024$ and the ViT-B encoder downsamples it by 16x into a $64 \times 64$ grid of 256-dimensional features, which all three point prompts reuse.
+- **Click on circle A:** mask 2 has area 5,127 pixels (nearly identical to the true area of 5,145) and an actual IoU of 0.997. Meanwhile, masks 0 and 1 have roughly twice that area (10,250 and 10,214 pixels) and an IoU of ~0.5 with circle A: they cover **both touching red circles together**! This is a textbook demonstration of SAM's ambiguity-aware design: a single click on red circle A could reasonably mean "this circle" or "the entire red figure-eight shape." SAM proposes both interpretations and ranks the single circle highest (`best: 2`).
+- **Click on circle B:** mirrors circle A, with `best: 2` achieving 0.993 IoU.
+- **Click on square C:** mask 1 matches the square to the exact pixel (area 5,751, IoU 1.0) and receives the highest predicted score (`best: 1`).
+- **`iou_scores` can slightly exceed 1.0** (e.g., 1.016, 1.015): the IoU prediction head is a linear regression head trained with mean squared error against true IoU, without a sigmoid clamp. Use `iou_scores` to rank the 3 masks rather than treating them as probabilities.
+
+Notice that circles A and B touch just like coins B and C in our first NumPy cell—yet a single click lets SAM separate each circle cleanly with >0.99 IoU.
+
+## Common pitfalls
+
+:::caution[Treating connected components of a semantic mask as object instances]
+A semantic segmentation mask contains zero instance identity. Whenever objects of the same class touch or overlap (pedestrians in a crowd, touching cells, fruit in a pile), connected components merge them into a single blob, as happened with coins B and C in our first code cell. Morphological erosion or watershed post-processing only helps when contact bridges are narrow. Whenever your application needs to count or separate individual objects, use an instance or panoptic segmentation model and evaluate with mask AP or PQ rather than mIoU.
+:::
+
+:::caution[Assuming SAM replaces trained semantic or instance segmentation models]
+SAM outputs class-agnostic masks: it never tells you "this is a pedestrian" or "this is a car," and it requires a spatial prompt telling it where to look (its "segment everything" mode simply sprays a dense grid of point prompts across the image and filters duplicates, returning everything from whole objects down to shirt buttons). If you need automatic class-labeled masks, either pair SAM with an object detector / open-vocabulary model (like GLIP) or train a model like Mask2Former on your target classes.
+:::
+
+:::caution[Always taking SAM's first mask, or treating `iou_scores` as probabilities]
+For a single point prompt, SAM returns 3 masks corresponding to different granularity levels, not sorted by score. In our SAM script above, mask 0 was the worst choice for all three objects (IoU 0.36 to 0.50). Always select the mask with `iou_scores.argmax()` (or pass `multimask_output=False` when your prompt is already unambiguous, such as a tight bounding box or multiple points). And remember that `iou_scores` are unbounded regression estimates of IoU that can exceed 1.0.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Semantic segmentation labels pixels by class; instance segmentation separates countable **thing** objects; panoptic segmentation unifies both by assigning each pixel a $(\text{class}, \text{instance ID})$ pair and evaluating with $\text{PQ} = \text{SQ} \times \text{RQ}$ via unique matching at $\text{IoU} > 0.5$.
+- Mask R-CNN adds a parallel $28 \times 28$ binary mask head to Faster R-CNN—detecting boxes first and segmenting inside each box—while replacing quantized RoIPool with bilinear **RoIAlign** to preserve pixel alignment.
+- Query-based mask classification (MaskFormer, Mask2Former) uses $N$ learnable queries to predict $(\text{mask}, \text{class})$ pairs $\sigma(\mathbf{e}_i^\top \mathbf{p}_{h,w})$ matched one-to-one during training, eliminating NMS. Mask2Former restricts decoder cross-attention to each query's predicted mask region (setting outside logits to $-\infty$ before softmax), unifying semantic, instance, and panoptic segmentation in one architecture.
+- SAM solves promptable segmentation: a heavy ViT image encoder runs once per image, and a fast mask decoder runs per prompt, returning 3 masks with predicted IoU scores to resolve single-point ambiguity. SAM 2 extends this architecture to video with a temporal memory bank.
+
+**Further reading:**
+
+- Kirillov, A., He, K., Girshick, R., Rother, C., Dollár, P. (2019). [*Panoptic Segmentation*](https://arxiv.org/abs/1801.00868), CVPR 2019, Sections 3 and 4. Defines thing vs. stuff, the panoptic task, PQ = SQ × RQ, and the proof that IoU > 0.5 guarantees unique matching.
+- He, K., Gkioxari, G., Dollár, P., Girshick, R. (2017). [*Mask R-CNN*](https://arxiv.org/abs/1703.06870), ICCV 2017, Section 3 and Table 2. Details the class-decoupled mask head, RoIAlign, and ablations.
+- Carion, N. et al. (2020). [*End-to-End Object Detection with Transformers*](https://arxiv.org/abs/2005.12872), ECCV 2020, Section 3. Introduces object queries and bipartite matching loss, the foundation of MaskFormer.
+- Cheng, B., Schwing, A. G., Kirillov, A. (2021). [*Per-Pixel Classification is Not All You Need for Semantic Segmentation*](https://arxiv.org/abs/2107.06278), NeurIPS 2021; and Cheng, B., Misra, I., Schwing, A. G., Kirillov, A., Girdhar, R. (2022). [*Masked-attention Mask Transformer for Universal Image Segmentation*](https://arxiv.org/abs/2112.01527), CVPR 2022, Sections 3 and 4.6. MaskFormer, Mask2Former, and the authors' discussion of task-specific training limitations.
+- Kirillov, A. et al. (2023). [*Segment Anything*](https://arxiv.org/abs/2304.02643), ICCV 2023, Sections 3 and 4; and Ravi, N. et al. (2024). [*SAM 2: Segment Anything in Images and Videos*](https://arxiv.org/abs/2408.00714), arXiv:2408.00714. Covers SAM's three-part architecture, ambiguity-aware multi-mask output, the SA-1B data engine, and video memory attention.
+
+<LessonProgress />

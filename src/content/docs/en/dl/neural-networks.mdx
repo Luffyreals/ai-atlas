@@ -1,0 +1,430 @@
+---
+title: 'Neural Networks: Perceptron, MLP, Forward Propagation, Activation Functions'
+description: 'A two-switch staircase light is the XOR problem a single perceptron cannot solve. Neurons, perceptrons, MLPs, forward propagation, activation functions, softmax, cross-entropy.'
+quiz:
+  - question: 'You stack three `nn.Linear` layers in a row, 10 → 50 → 50 → 1, with no activation function in between. What kind of function of $\mathbf{x}$ can this network represent?'
+    options:
+      - 'Any continuous function, because it has 3 layers and over 3000 parameters'
+      - 'A cubic polynomial, because each layer adds one degree'
+      - 'Only functions of the form $\mathbf{w}^\top\mathbf{x} + b$, just like a single linear layer'
+      - 'A piecewise linear function, like a network with ReLU'
+    answer: 2
+    explanation: 'Composing two affine transformations still yields an affine transformation: $\mathbf{W}^{[2]}(\mathbf{W}^{[1]}\mathbf{x} + \mathbf{b}^{[1]}) + \mathbf{b}^{[2]} = (\mathbf{W}^{[2]}\mathbf{W}^{[1]})\mathbf{x} + (\mathbf{W}^{[2]}\mathbf{b}^{[1]} + \mathbf{b}^{[2]})$. Repeating for the third layer collapses the whole network into $\mathbf{w}^\top\mathbf{x} + b$. Extra parameters do not help: the universal approximation theorem requires a nonlinear activation function.'
+  - question: 'You run the perceptron learning rule on 100 two-class points starting from $\mathbf{w} = \mathbf{0}$, $b = 0$. After 1000 epochs, the number of misclassified samples per epoch has never hit 0. What is the most reasonable conclusion?'
+    options:
+      - 'The learning rate $\eta$ is too large; lowering $\eta$ will make it converge'
+      - 'Most likely no line (hyperplane) separates the two classes, so the learning rule keeps making updates forever'
+      - 'It just needs more epochs, because the perceptron always converges'
+      - 'You need to add a sigmoid function to the perceptron output'
+    answer: 1
+    explanation: 'The perceptron convergence theorem only guarantees termination when the data is linearly separable; XOR in the first code cell also makes 4 errors per epoch forever. Changing $\eta$ does not help: starting from 0, every update is multiplied by $\eta$, so $\mathbf{w}$ and $b$ are merely scaled by the same positive factor while the sign of $z$ (the prediction) never changes. Adding a sigmoid still produces a linear decision boundary.'
+  - question: 'A hidden layer has 32 neurons and receives input from a previous layer of 64 neurons. Under the convention $\mathbf{z}^{[l]} = \mathbf{W}^{[l]}\mathbf{a}^{[l-1]} + \mathbf{b}^{[l]}$, what is the shape of $\mathbf{W}^{[l]}$, and how many parameters does this layer have?'
+    options:
+      - '$64 \times 32$, 2048 parameters'
+      - '$64 \times 32$, 2112 parameters'
+      - '$32 \times 64$, 2048 parameters'
+      - '$32 \times 64$, 2080 parameters'
+    answer: 3
+    explanation: 'Each row of $\mathbf{W}^{[l]}$ is the weight vector of one neuron in layer $l$, whose length equals the number of neurons in the previous layer. Thus $\mathbf{W}^{[l]}$ has 32 rows and 64 columns: $2048$ weights plus $32$ biases (one per neuron) gives $2080$. The number 2048 forgets the biases; 2112 counts one bias per input neuron.'
+  - question: 'In a 3-class classification problem, the output layer produces logits $\mathbf{z} = [2.0, 1.0, 0.1]^\top$. If you add 5 to all three logits, how do the softmax probabilities and cross-entropy loss change?'
+    options:
+      - 'They do not change, because $e^{z_k + 5} = e^{5}e^{z_k}$ and the factor $e^{5}$ cancels between numerator and denominator'
+      - 'The first class gets a probability closer to 1, because its logit is larger'
+      - 'All three probabilities increase'
+      - 'Cross-entropy decreases, because the logit of the true class increased'
+    answer: 0
+    explanation: 'Softmax depends only on the differences between logits. Adding the same constant to every logit leaves the probabilities at $[0.659, 0.242, 0.099]$, so the cross-entropy loss is unchanged as well. "All three probabilities increase" is impossible because probabilities must sum to 1. For the true class probability to rise, its logit must increase relative to the other logits.'
+  - question: 'What does the universal approximation theorem guarantee?'
+    options:
+      - 'Gradient descent will always find good weights if the network is wide enough'
+      - 'There exists a single-hidden-layer MLP with enough neurons that approximates any given continuous function on a bounded domain to arbitrary accuracy'
+      - 'A single-hidden-layer network is always better than a deep network with the same number of parameters'
+      - 'A sufficiently large network will never overfit'
+    answer: 1
+    explanation: 'The theorem only states that such weights exist. It does not say how many neurons are required (potentially astronomically many), does not guarantee gradient descent will find them, and says nothing about unseen test data. In practice, deep networks usually require far fewer parameters than shallow ones to represent the same function.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import perceptronCode from '@code/dl/neural-networks/perceptron.en.py?raw';
+import xorForwardCode from '@code/dl/neural-networks/xor-forward.en.py?raw';
+import mlpDigitsCode from '@code/dl/neural-networks/mlp-digits.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Understand what an **artificial neuron** computes: a weighted sum plus a bias passed through an **activation function**, and how a perceptron learns via the **perceptron learning rule**.
+- Prove for yourself why a single perceptron cannot solve XOR, and why adding one **hidden layer** solves it.
+- Write **forward propagation** of a **multilayer perceptron (MLP)** in matrix form, count its parameters, and implement it in NumPy.
+- Know the common activation functions, why they must be nonlinear, how to pair output layers with cross-entropy loss, and what the **universal approximation theorem** does and does not say.
+
+## Prerequisites
+
+{/* List taken from prerequisites in roadmap.ts. Do not write manual links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+**Logistic regression** computes $z = \mathbf{w}^\top\mathbf{x} + b$ and passes it through the **sigmoid** $\sigma(z) = 1/(1 + e^{-z})$ to obtain the probability of class 1. **Softmax regression** generalizes this to $K$ classes: each class gets a raw score $z_k$ called a **logit**, and **softmax** converts the $K$ logits into $K$ probabilities summing to 1. Both learn via [gradient descent](/en/ml/gradient-descent/) on **cross-entropy**, the average of $-\ln$ of the probability assigned to the true class.
+:::
+
+## Intuition
+
+### The staircase light
+
+Your staircase has two switches: one at the bottom of the stairs, one at the top. Flipping either switch toggles the light: flip the bottom switch on your way up, then flip the top switch when you reach the landing. Recording each switch position as 0 or 1 so that both at 0 means the light is off gives this truth table:
+
+| Bottom switch $x_1$ | Top switch $x_2$ | Light $y$ |
+|---:|---:|---:|
+| 0 | 0 | 0 (off) |
+| 0 | 1 | 1 (on) |
+| 1 | 0 | 1 (on) |
+| 1 | 1 | 0 (off) |
+
+The light turns on when **exactly one** switch is at 1. This logical operation is called **XOR** (exclusive or).
+
+### Trying a "sum-and-threshold" rule
+
+The simplest way for a machine to make a decision from two numbers $x_1, x_2$ is to assign each a weight, sum them up, and compare the total against a threshold. If the score meets the threshold, the light turns on. For several familiar logic gates, this works:
+
+- **AND** (on when both are flipped): weights 1 and 1, threshold 1.5. Only $(1, 1)$ reaches a score of 2.
+- **OR** (on when at least one is flipped): weights 1 and 1, threshold 0.5.
+
+With XOR, no matter how you tune the numbers, it fails. To make $(1, 0)$ and $(0, 1)$ turn on, each weight alone must reach the threshold. To keep $(0, 0)$ off, the threshold must be positive. But then $(1, 1)$ gets a score equal to the sum of both weights — even larger — so it turns on too. Geometrically, if you plot the four points at the corners of a unit square, the two "on" points sit on one diagonal and the two "off" points sit on the other. A "sum-and-threshold" rule splits the plane with a **single straight line**, and no single line can separate the two diagonals of a square.
+
+### Combining two rules
+
+Stated in plain words, XOR is easy: the light is on when "**at least one** switch is on" **and** "**not both** switches are on". The first clause is OR; the second is "not AND". Each clause is a simple sum-and-threshold rule. Add a third rule that takes the outputs of the first two, and you have XOR. That is the core idea of a multilayer neural network: simple units arranged in layers, where each layer builds on the outputs of the layer before it.
+
+The goal of this lesson is to **stack simple "sum-and-decide" neurons into multiple layers so the network can represent rules a single neuron cannot — like the staircase light — and write the entire computation cleanly in matrix form so it scales to real tasks like reading handwritten digits.**
+
+## Theory
+
+### The artificial neuron
+
+A biological neuron receives signals from many other neurons. When the combined stimulation is strong enough, it fires an impulse down its axon. McCulloch and Pitts (1943) modeled this very crudely: take a weighted sum of the inputs and compare it to a threshold. Modern **neural networks** keep only that mathematical skeleton; they do not simulate the biological brain.
+
+An **artificial neuron** takes a vector $\mathbf{x} = [x_1, \dots, x_n]^\top$ of $n$ inputs and performs two steps:
+
+$$
+z = \mathbf{w}^\top\mathbf{x} + b = \sum_{j=1}^{n} w_j x_j + b, \qquad a = g(z)
+$$
+
+- $\mathbf{w}$ is the **weight** vector and $b$ is the **bias**. The bias plays the role of "minus the threshold": "score $\geq$ threshold $\theta$" is identical to "$z \geq 0$" with $b = -\theta$.
+- $z$ is the weighted sum, also called the **pre-activation**.
+- $g$ is the **activation function**, and $a$ is the neuron's output, called the **activation**.
+
+You have already met this neuron. With $g(z) = z$, it is linear regression. With $g = \sigma$, it is logistic regression. The set of points where $z = 0$ is a line when $n = 2$ and a **hyperplane** in higher dimensions: that is the neuron's **decision boundary**.
+
+### The perceptron and the perceptron learning rule
+
+The **perceptron** (Rosenblatt, 1958) is a neuron whose activation function is the **step function**:
+
+$$
+\mathrm{step}(z) = \begin{cases} 1 & \text{if } z \geq 0 \\ 0 & \text{if } z < 0 \end{cases}
+\qquad\qquad
+\hat{y} = \mathrm{step}(\mathbf{w}^\top\mathbf{x} + b)
+$$
+
+Rosenblatt also gave a rule for learning $\mathbf{w}$ and $b$ from labeled data $y \in \{0, 1\}$. Loop over each sample, compute $\hat{y}$, and update:
+
+$$
+\mathbf{w} \leftarrow \mathbf{w} + \eta\,(y - \hat{y})\,\mathbf{x}, \qquad b \leftarrow b + \eta\,(y - \hat{y})
+$$
+
+Because $y - \hat{y}$ takes only three possible values, this rule breaks down into three cases:
+
+- **Correct prediction** ($y - \hat{y} = 0$): change nothing.
+- **Predicted 0 when true label is 1** ($y - \hat{y} = 1$): add $\eta\mathbf{x}$ to $\mathbf{w}$ and $\eta$ to $b$. Recomputing $z$ on this same sample with the new parameters gives $(\mathbf{w} + \eta\mathbf{x})^\top\mathbf{x} + (b + \eta) = z + \eta\left(\lVert\mathbf{x}\rVert^2 + 1\right)$. Thus $z$ increases, pushing the sample toward "1".
+- **Predicted 1 when true label is 0** ($y - \hat{y} = -1$): subtract instead, reducing $z$ by the same amount and pushing the sample toward "0".
+
+For example, take AND with $\eta = 1$, starting from $\mathbf{w} = [0, 0]^\top$, $b = 0$. In the first epoch:
+
+| Sample $(x_1, x_2)$ | $y$ | $z$ | $\hat{y}$ | Updated to |
+|---|---:|---:|---:|---|
+| $(0, 0)$ | 0 | 0 | 1 | wrong: $\mathbf{w} = [0, 0]^\top$, $b = -1$ |
+| $(0, 1)$ | 0 | $-1$ | 0 | right, unchanged |
+| $(1, 0)$ | 0 | $-1$ | 0 | right, unchanged |
+| $(1, 1)$ | 1 | $-1$ | 0 | wrong: $\mathbf{w} = [1, 1]^\top$, $b = 0$ |
+
+This epoch makes 2 errors. Repeating until an entire epoch makes zero errors, the first code cell stops at epoch 6.
+
+**When does the learning rule stop?** A dataset is **linearly separable** if there exists a hyperplane that classifies every sample of both classes correctly. The **perceptron convergence theorem** (Novikoff, 1962) states: if the data is linearly separable, the perceptron learning rule makes at most a finite number of updates and then stops, regardless of sample order. If the data is not linearly separable, it loops forever as the weights cycle back and forth.
+
+### Why a single perceptron cannot solve XOR
+
+The Intuition section gave the geometric picture; now let us prove it algebraically. Suppose there exist $w_1, w_2, b$ such that a perceptron classifies all four XOR samples correctly. With the step function, $\hat{y} = 1$ when $z \geq 0$ and $\hat{y} = 0$ when $z < 0$. The four samples impose four inequalities:
+
+$$
+\begin{aligned}
+(0, 0) \to 0:&\quad b < 0 \\
+(0, 1) \to 1:&\quad w_2 + b \geq 0 \\
+(1, 0) \to 1:&\quad w_1 + b \geq 0 \\
+(1, 1) \to 0:&\quad w_1 + w_2 + b < 0
+\end{aligned}
+$$
+
+Adding the second and third inequalities gives $w_1 + w_2 + 2b \geq 0$. Moving one $b$ to the right-hand side yields $w_1 + w_2 + b \geq -b$. By the first inequality, $b < 0$, so $-b > 0$. Hence $w_1 + w_2 + b > 0$, which directly contradicts the fourth inequality. No parameters can satisfy all four: **XOR is not linearly separable**.
+
+Replacing the step function with a sigmoid and predicting "class 1 when $\sigma(z) \geq 0.5$" does not save it either, because $\sigma(z) \geq 0.5$ holds precisely when $z \geq 0$: the decision boundary is still the straight line $z = 0$. In 1969, Minsky and Papert's book *Perceptrons* analyzed such limitations of single-layer perceptrons in detail, contributing to a decade-long chill in neural network research.
+
+### Multilayer perceptrons
+
+Let us return to "combining two rules". Use two perceptrons in the first layer and one perceptron in the second layer:
+
+- $h_1 = \mathrm{step}(x_1 + x_2 - 0.5)$: equals 1 when at least one switch is on (OR).
+- $h_2 = \mathrm{step}(x_1 + x_2 - 1.5)$: equals 1 when both switches are on (AND).
+- $\hat{y} = \mathrm{step}(h_1 - h_2 - 0.5)$: equals 1 when $h_1 = 1$ and $h_2 = 0$.
+
+Checking all four inputs:
+
+| $(x_1, x_2)$ | $(h_1, h_2)$ | $h_1 - h_2 - 0.5$ | $\hat{y}$ | XOR |
+|---|---|---:|---:|---:|
+| $(0, 0)$ | $(0, 0)$ | $-0.5$ | 0 | 0 |
+| $(0, 1)$ | $(1, 0)$ | $0.5$ | 1 | 1 |
+| $(1, 0)$ | $(1, 0)$ | $0.5$ | 1 | 1 |
+| $(1, 1)$ | $(1, 1)$ | $-0.5$ | 0 | 0 |
+
+Look at the $(h_1, h_2)$ column. The first layer has **transformed the representation** of the data: the two "on" inputs both map to the same point $(1, 0)$, while the two "off" inputs map to $(0, 0)$ and $(1, 1)$. In the $(h_1, h_2)$ plane, these three points are linearly separable, and the output neuron simply draws a line between them. That is what a multilayer network can do that a single neuron cannot: early layers **learn new features**, and the final layer solves an easier problem in that feature space.
+
+Such a network is called a **multilayer perceptron (MLP)**:
+
+- The **input layer** simply holds the raw inputs $x_1, \dots, x_n$ and performs no computation.
+- The **hidden layers** sit in between. They are called "hidden" because the training data does not specify what values their neurons should output.
+- The **output layer** produces the prediction $\hat{y}$.
+
+Every neuron receives inputs from **every** neuron in the immediately preceding layer, so each such layer is called a **fully connected layer** (or **dense layer**). Information flows strictly forward from input to output with no loops, so an MLP is also called a **feed-forward network**. The network above is written compactly as 2-2-1 (neurons per layer) and is called a **2-layer** network: by standard convention, we do not count the input layer.
+
+The name "multilayer perceptron" is a historical holdover. Modern MLPs do not use step functions; they use smooth activation functions, for reasons explained in the Activation functions section below.
+
+### Matrix form of forward propagation
+
+With 2 inputs, writing out each neuron by hand is fine. The digit-recognition task in the third code cell has 64 inputs and 64 hidden neurons: we need a more compact notation.
+
+**Notation.** Number the layers $l = 0, 1, \dots, N_L$, where layer 0 is the input layer and layer $N_L$ is the output layer. Layer $l$ has $n^{[l]}$ neurons; the input layer has $n^{[0]} = n$, the number of input features. A bracketed superscript $[l]$ indexes the layer, distinct from $(i)$ which indexes a sample.
+
+**One layer.** The $k$-th neuron of layer $l$ has a weight vector $\mathbf{w}^{[l]}_k$ (of length $n^{[l-1]}$) and a bias $b^{[l]}_k$. It takes the activation vector $\mathbf{a}^{[l-1]}$ from the previous layer and computes $z^{[l]}_k = \left(\mathbf{w}^{[l]}_k\right)^\top\mathbf{a}^{[l-1]} + b^{[l]}_k$. Stack the row vectors $\left(\mathbf{w}^{[l]}_k\right)^\top$ as the **rows** of a matrix $\mathbf{W}^{[l]}$, and stack the biases $b^{[l]}_k$ into a column vector $\mathbf{b}^{[l]}$. Matrix-vector multiplication computes all dot products at once, one per row, so the entire layer fits in two lines:
+
+$$
+\begin{aligned}
+\mathbf{z}^{[l]} &= \mathbf{W}^{[l]}\mathbf{a}^{[l-1]} + \mathbf{b}^{[l]} \\
+\mathbf{a}^{[l]} &= g^{[l]}\!\left(\mathbf{z}^{[l]}\right)
+\end{aligned}
+$$
+
+The activation function $g^{[l]}$ is applied **elementwise** to $\mathbf{z}^{[l]}$. Hidden layers usually share the same function $g$; the output layer often uses a different one (see Output layers below).
+
+**Shape check.** $\mathbf{W}^{[l]}$ has $n^{[l]}$ rows (one per neuron in layer $l$) and $n^{[l-1]}$ columns (one per input from layer $l-1$):
+
+$$
+\underbrace{\mathbf{z}^{[l]}}_{n^{[l]} \times 1} = \underbrace{\mathbf{W}^{[l]}}_{n^{[l]} \times n^{[l-1]}}\ \underbrace{\mathbf{a}^{[l-1]}}_{n^{[l-1]} \times 1} + \underbrace{\mathbf{b}^{[l]}}_{n^{[l]} \times 1}
+$$
+
+**The whole network.** Start with $\mathbf{a}^{[0]} = \mathbf{x}$, apply the two equations above for $l = 1, 2, \dots, N_L$, and read off the prediction $\hat{\mathbf{y}} = \mathbf{a}^{[N_L]}$. Computing layer by layer from input to output is called **forward propagation** (or the **forward pass**).
+
+Our XOR network writes out as:
+
+$$
+\mathbf{W}^{[1]} = \begin{bmatrix} 1 & 1 \\ 1 & 1 \end{bmatrix}, \quad
+\mathbf{b}^{[1]} = \begin{bmatrix} -0.5 \\ -1.5 \end{bmatrix}, \quad
+\mathbf{W}^{[2]} = \begin{bmatrix} 1 & -1 \end{bmatrix}, \quad
+\mathbf{b}^{[2]} = \begin{bmatrix} -0.5 \end{bmatrix}
+$$
+
+For $\mathbf{x} = [1, 0]^\top$: $\mathbf{z}^{[1]} = [1 - 0.5,\ 1 - 1.5]^\top = [0.5, -0.5]^\top$, which passes through the step function to give $\mathbf{a}^{[1]} = [1, 0]^\top$. Next, $z^{[2]} = 1 \cdot 1 - 1 \cdot 0 - 0.5 = 0.5$, giving $\hat{y} = 1$ — matching the third row of our table.
+
+**Batching multiple samples at once.** Stack $m$ samples as the $m$ **columns** of a matrix $\mathbf{A}^{[0]} = \left[\mathbf{x}^{(1)}, \dots, \mathbf{x}^{(m)}\right]$ of shape $n \times m$. The $i$-th column of $\mathbf{W}^{[l]}\mathbf{A}^{[l-1]}$ is $\mathbf{W}^{[l]}$ times the $i$-th column of $\mathbf{A}^{[l-1]}$, so a single matrix multiplication runs forward propagation for all $m$ samples simultaneously:
+
+$$
+\mathbf{Z}^{[l]} = \mathbf{W}^{[l]}\mathbf{A}^{[l-1]} + \mathbf{b}^{[l]}, \qquad \mathbf{A}^{[l]} = g^{[l]}\!\left(\mathbf{Z}^{[l]}\right)
+$$
+
+Here $\mathbf{b}^{[l]}$ is added to **every column** via NumPy broadcasting. The second code cell implements this exact calculation. Computers multiply matrices extraordinarily fast — especially on GPUs — so matrix notation is not just tidy algebra; it is how neural networks are actually executed.
+
+**Parameter count.** Layer $l$ has $n^{[l]} \times n^{[l-1]}$ weights and $n^{[l]}$ biases, for a total of $n^{[l]}\left(n^{[l-1]} + 1\right)$ parameters. The 64-64-10 MLP in the third code cell has $64 \times 65 + 10 \times 65 = 4160 + 650 = 4810$ parameters.
+
+### Activation functions
+
+**Why they must be nonlinear.** Suppose we drop the activation function in the hidden layer, setting $g(z) = z$. Substituting $\mathbf{a}^{[1]} = \mathbf{W}^{[1]}\mathbf{x} + \mathbf{b}^{[1]}$ into the second layer gives:
+
+$$
+\begin{aligned}
+\mathbf{z}^{[2]} &= \mathbf{W}^{[2]}\left(\mathbf{W}^{[1]}\mathbf{x} + \mathbf{b}^{[1]}\right) + \mathbf{b}^{[2]} \\
+&= \left(\mathbf{W}^{[2]}\mathbf{W}^{[1]}\right)\mathbf{x} + \left(\mathbf{W}^{[2]}\mathbf{b}^{[1]} + \mathbf{b}^{[2]}\right)
+\end{aligned}
+$$
+
+The second line distributes $\mathbf{W}^{[2]}$ and regroups terms. Setting $\mathbf{W} = \mathbf{W}^{[2]}\mathbf{W}^{[1]}$ and $\mathbf{b} = \mathbf{W}^{[2]}\mathbf{b}^{[1]} + \mathbf{b}^{[2]}$, the two layers collapse into a **single** linear layer $\mathbf{W}\mathbf{x} + \mathbf{b}$. By induction, stacking any number of linear layers is no more expressive than a single linear layer, and still cannot solve XOR. Nonlinear activation functions are what allow hidden layers to fold and warp the input space — just as the XOR hidden layer merged the two "on" corners onto a single point.
+
+**Common activation functions.** Here are their values at several sample points (Leaky ReLU shown with $\alpha = 0.01$):
+
+| Function | $z = -2$ | $z = -0.5$ | $z = 0$ | $z = 0.5$ | $z = 2$ |
+|---|---:|---:|---:|---:|---:|
+| Step | 0 | 0 | 1 | 1 | 1 |
+| Sigmoid $\sigma$ | 0.119 | 0.378 | 0.5 | 0.622 | 0.881 |
+| tanh | −0.964 | −0.462 | 0 | 0.462 | 0.964 |
+| ReLU | 0 | 0 | 0 | 0.5 | 2 |
+| Leaky ReLU | −0.02 | −0.005 | 0 | 0.5 | 2 |
+| GELU | −0.046 | −0.154 | 0 | 0.346 | 1.954 |
+
+- **Step function.** Flat everywhere except at the jump at 0, so its derivative is 0 everywhere it is differentiable. Gradient descent needs a nonzero slope to know which way to nudge parameters, so a multilayer network with step functions cannot be trained by gradient descent. The perceptron learning rule only works for a single layer because only the output layer has ground-truth labels to compare against.
+- **Sigmoid** $\sigma(z) = \dfrac{1}{1 + e^{-z}}$, with values in $(0, 1)$. Smooth, but it **saturates** when $\lvert z\rvert$ is large: the curve flattens out and its derivative approaches 0. Today sigmoid is mainly used at the output layer of binary classification and inside the gates of GRUs and LSTMs.
+- **tanh** $\tanh(z) = \dfrac{e^{z} - e^{-z}}{e^{z} + e^{-z}} = 2\sigma(2z) - 1$, with values in $(-1, 1)$. A rescaled, shifted sigmoid symmetric around 0, so its outputs stay centered near 0. It still saturates in both tails. Often used in recurrent networks.
+- **ReLU** (rectified linear unit) $\mathrm{ReLU}(z) = \max(0, z)$. Cheap to compute, does not saturate for positive values, and has been the default choice for hidden layers since the early 2010s (Nair & Hinton, 2010; Glorot et al., 2011). Weakness: for $z < 0$, both its output and derivative are 0. If a neuron gets pushed into $z < 0$ for every training sample, its weights never receive a gradient again — a phenomenon called **dying ReLU**.
+- **Leaky ReLU** $\max(\alpha z, z)$ with a small $\alpha$, typically $0.01$ (Maas et al., 2013). Keeps a small nonzero slope on the negative side so neurons cannot die completely.
+- **GELU** (Gaussian error linear unit, Hendrycks & Gimpel, 2016) $\mathrm{GELU}(z) = z\,\Phi(z)$, where $\Phi$ is the cumulative distribution function of the standard normal distribution (the probability that a standard normal variable is at most $z$). For large positive $z$, $\Phi(z) \approx 1$ so GELU behaves like $z$; for large negative $z$, $\Phi(z) \approx 0$ so GELU approaches 0. Near 0, the curve bends smoothly and dips slightly negative, reaching about $-0.17$ at $z \approx -0.75$. GELU is the standard activation in BERT and GPT; you will meet it again inside the Transformer MLP block in [Build Your First LLM](/en/llm/build-first-llm/) and [The LLaMA Family](/en/llm/llama-family/).
+
+No single activation function wins on every task. A safe starting point: **ReLU for hidden layers** in MLPs and CNNs, GELU for Transformers, and tanh/sigmoid inside recurrent gates. [Training Neural Networks](/en/dl/training-neural-networks/) explains why sigmoid saturation makes deep networks hard to train.
+
+### Output layers and loss functions
+
+Hidden layers learn features; the output layer turns those features into the exact type of prediction your task requires. The three standard pairings are:
+
+| Task | Output layer | Loss function |
+|---|---|---|
+| Regression (predict a real number) | 1 neuron, $g(z) = z$ | MSE |
+| Binary classification | 1 neuron, sigmoid | Binary cross-entropy |
+| $K$-class classification | $K$ neurons, softmax | Cross-entropy |
+
+**Softmax.** The output layer has $K$ neurons producing $K$ logits $z_1, \dots, z_K$. Softmax converts them into a probability distribution:
+
+$$
+\hat{y}_k = \mathrm{softmax}(\mathbf{z})_k = \frac{e^{z_k}}{\sum_{j=1}^{K} e^{z_j}}
+$$
+
+Exponentiation makes every number positive, dividing by the sum normalizes the total to 1, and larger logits receive larger probabilities. Unlike the elementwise activations above, softmax is **not** computed independently per neuron: each $\hat{y}_k$ depends on all $K$ logits. For example, $\mathbf{z} = [2.0, 1.0, 0.1]^\top$ gives $\hat{\mathbf{y}} \approx [0.659, 0.242, 0.099]^\top$.
+
+**Cross-entropy.** For a sample whose true class is $c$, the loss is $-\ln$ of the probability the network assigned to class $c$. Representing the label as a **one-hot vector** $\mathbf{y}$ (1 at index $c$, 0 elsewhere), the average loss over $m$ samples is:
+
+$$
+\mathcal{L} = -\frac{1}{m}\sum_{i=1}^{m}\sum_{k=1}^{K} y^{(i)}_k \ln \hat{y}^{(i)}_k
+$$
+
+In the inner sum over $k$, only the true class term survives (all other $y^{(i)}_k$ are 0), so each sample contributes $-\ln \hat{y}^{(i)}_{c}$. In the example above, if the true class is class 1, the loss is $-\ln 0.659 \approx 0.417$; if the true class is class 3, the loss is $-\ln 0.099 \approx 2.317$. Confident correct predictions give loss near 0; confident wrong predictions incur a huge penalty. When $K = 2$ with a single sigmoid output $\hat{y} = P(y = 1)$, this reduces to binary cross-entropy: $-\frac{1}{m}\sum_i\left[y^{(i)}\ln\hat{y}^{(i)} + \left(1 - y^{(i)}\right)\ln\left(1 - \hat{y}^{(i)}\right)\right]$.
+
+Stepping back to view the whole network: a softmax output layer paired with cross-entropy **is literally softmax regression**, except its input is no longer the raw vector $\mathbf{x}$, but $\mathbf{a}^{[N_L - 1]}$ — the features learned by the hidden layers.
+
+### The universal approximation theorem
+
+The XOR network needed just one hidden layer. How far can a single hidden layer go? The **universal approximation theorem** answers: with a suitable nonlinear activation function, an MLP with **one hidden layer** and **enough neurons** can approximate any continuous function on a closed and bounded domain to any desired accuracy. Cybenko (1989) proved this for sigmoid; Hornik, Stinchcombe, and White (1989) extended it to a broader class of activations; and Leshno et al. (1993) showed that any continuous non-polynomial activation works — including ReLU.
+
+We will not prove the theorem formally, but the intuition with ReLU is easy to see. A single ReLU neuron is a hinge that bends at one point. The difference $\mathrm{ReLU}(z) - \mathrm{ReLU}(z - 1)$ forms a ramp that rises from 0 to 1 and then stays flat. By adding many such ramps placed at different locations and scaled to different heights, you can stitch together a piecewise linear curve that hugs any continuous curve as closely as you like. More neurons mean more segments and a tighter fit.
+
+Pay close attention to what the theorem **does not** say:
+
+- **It does not say how many neurons are needed.** For many functions, a single hidden layer requires an exponentially large number of neurons. In practice, **deep** networks represent the same functions with far fewer parameters than wide, shallow networks.
+- **It does not say how to find the weights.** The theorem only guarantees that a good set of weights **exists**. Whether gradient descent can find them is a separate question.
+- **It says nothing about unseen data.** Fitting the training set arbitrarily well can easily result in [overfitting](/en/ml/overfitting-underfitting/).
+
+### What is still missing: learning the weights
+
+We set the XOR weights by hand. The digit classifier has 4810 parameters, and modern networks have millions to billions: setting weights by hand is impossible. The roadmap forward is clear: pick a loss function $\mathcal{L}$ (cross-entropy) and use [gradient descent](/en/ml/gradient-descent/) to minimize it. That requires $\partial\mathcal{L}/\partial\mathbf{W}^{[l]}$ and $\partial\mathcal{L}/\partial\mathbf{b}^{[l]}$ for **every** layer, where each parameter influences $\mathcal{L}$ through all subsequent layers. The algorithm that computes all of these gradients efficiently is **backpropagation**, the subject of [Training Neural Networks](/en/dl/training-neural-networks/).
+
+Furthermore, an MLP treats every input feature as an independent slot: it has no built-in notion that two pixels sit next to each other in an image or that two words appear adjacent in a sentence. [Convolutional Neural Networks (CNN)](/en/dl/cnn/) and [Recurrent Neural Networks (RNN)](/en/dl/rnn/) build spatial and sequential structure directly into the network architecture.
+
+## Illustration
+
+The diagram conceptually places two views side by side. On the left is a single artificial neuron: following the arrows, inputs $x_j$ are multiplied by weights $w_j$, summed with the bias $b$ into $z$, and passed through $g$ to produce $a$. On the right is a 2-3-1 MLP: each hidden-layer node is an instance of the neuron on the left, and each arrow between two layers represents a weight — one entry of $\mathbf{W}^{[l]}$.
+
+{/* FIG: MlpFigure
+    Idea: a single neuron computes "weighted sum + bias -> activation"; an MLP stacks such neurons into fully connected layers. */}
+
+The table below shows the forward propagation output from the second code cell: a 2-2-1 XOR network using sigmoid instead of a step function, with larger weights so the sigmoid behaves sharply like a step. Look at the hidden-layer column: the two "on" inputs $(0, 1)$ and $(1, 0)$ map to the **exact same** hidden representation $(0.953, 0.047)$. Because the hidden layer merges them, the output layer only has to separate three points with a straight line.
+
+| $(x_1, x_2)$ | Hidden layer $\mathbf{a}^{[1]}$ | Output $\hat{y}$ | XOR |
+|---|---|---:|---:|
+| $(0, 0)$ | $(0.047, 0.000)$ | 0.011 | 0 |
+| $(0, 1)$ | $(0.953, 0.047)$ | 0.983 | 1 |
+| $(1, 0)$ | $(0.953, 0.047)$ | 0.983 | 1 |
+| $(1, 1)$ | $(1.000, 0.953)$ | 0.011 | 0 |
+
+## Code examples
+
+The cells below run independently, and each generates or loads its own data. The first two cells use only NumPy and run directly in the browser. The third cell uses PyTorch and runs on your machine.
+
+The first cell implements the perceptron and the perceptron learning rule, then trains it on AND, OR, and XOR for up to 20 epochs each. For each gate it prints the number of epochs run, the learned $\mathbf{w}$ and $b$, the error count per epoch, and the final predictions.
+
+<PythonRunner code={perceptronCode} title="Perceptron learning AND, OR, and XOR" />
+
+- **AND** converges in 6 epochs (errors per epoch: 2, 3, 3, 2, 1, 0), stopping at $\mathbf{w} = [2, 1]^\top$, $b = -3$. These weights are not symmetric like the "weights 1 and 1, threshold 1.5" example from the Intuition section, but they work just as well: only $(1, 1)$ reaches $z = 0 \geq 0$. When data is linearly separable, infinitely many lines separate the classes, and the perceptron stops at the first one it finds.
+- **OR** converges in 4 epochs at $\mathbf{w} = [1, 1]^\top$, $b = -1$.
+- **XOR** makes 3, 3, and then **4 errors on every single epoch** up to epoch 20. The weights cycle endlessly; when the loop stops at $\mathbf{w} = [-1, 0]^\top$, $b = 0$, the predictions are $[1, 1, 0, 0]$ — right on only 2 of 4 samples, no better than a coin flip. Just as we proved, no valid parameter setting exists for it to converge to.
+
+The second cell builds a 2-2-1 network that solves XOR with hand-picked weights and sigmoid activations: the hidden layer has $\mathbf{W}^{[1]} = \begin{bmatrix} 6 & 6 \\ 6 & 6 \end{bmatrix}$ and $\mathbf{b}^{[1]} = [-3, -9]^\top$; the output layer has $\mathbf{W}^{[2]} = [10, -10]$ and $b^{[2]} = -5$. All four samples are stacked as columns of $\mathbf{A}^{[0]}$, and forward propagation runs the exact two lines $\mathbf{Z} = \mathbf{W}\mathbf{A} + \mathbf{b}$ and $\mathbf{A} = \sigma(\mathbf{Z})$ per layer. The final section strips out the activation function to verify that two linear layers collapse into a single linear layer $\mathbf{W}^{[2]}\mathbf{W}^{[1]}$.
+
+<PythonRunner code={xorForwardCode} title="2-2-1 MLP solving XOR via matrix forward propagation" />
+
+The output probabilities are $[0.011, 0.983, 0.983, 0.011]$: thresholding at 0.5 matches XOR. The first row of `A1` acts like OR and the second row acts like AND, by design. Stripping out the activation prints `same output: True`: the two linear layers produce the exact same numbers as a single layer with $\mathbf{W} = [0, 0]$ and $b = 55$. Here $\mathbf{W}$ happens to be zero because the two rows of $\mathbf{W}^{[1]}$ are identical; with general weights $\mathbf{W}$ would be nonzero, but still just one linear layer incapable of solving XOR.
+
+The third cell trains a 64-64-10 MLP with ReLU on scikit-learn's `load_digits` dataset: 1797 grayscale $8 \times 8$ images (64 inputs) labeled 0 through 9. The network is built with `nn.Sequential`: `nn.Linear(64, 64)` computes $\mathbf{W}^{[1]}\mathbf{a} + \mathbf{b}^{[1]}$ and `nn.ReLU()` applies $g$. The loss `nn.CrossEntropyLoss` takes raw logits directly, and the optimizer is mini-batch gradient descent (`torch.optim.SGD`, batch size 32, $\eta = 0.2$, 30 epochs). The call `loss.backward()` computes the gradients of $\mathcal{L}$ with respect to all parameters; treat it as a black box for now — the next lesson opens it up.
+
+<LocalCode
+  code={mlpDigitsCode}
+  title="PyTorch MLP recognizing handwritten digits"
+  packages={['torch', 'scikit-learn']}
+  hardware="CPU is enough, no GPU required. Takes about 30 seconds to 3 minutes on a laptop depending on system load"
+  sampleVaries={false}
+>
+
+```text
+parameters: 4810
+epoch  1  train loss 1.4863
+epoch  5  train loss 0.2110
+epoch 10  train loss 0.2626
+epoch 20  train loss 0.0631
+epoch 30  train loss 0.0416
+test accuracy: 0.9756 (450 images)
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **Parameter count:** 4810, matching our manual count $64 \times 65 + 10 \times 65$ in the Theory section.
+- **Training loss** drops from 1.4863 after epoch 1 down to 0.0416 after epoch 30. As a baseline, an untrained network guessing uniformly across 10 classes has loss $\ln 10 \approx 2.303$. Notice that the loss at epoch 10 (0.2626) is slightly higher than at epoch 5 (0.2110): each step uses a mini-batch of only 32 samples, so the trajectory fluctuates, just like SGD in [Gradient Descent](/en/ml/gradient-descent/).
+- **Test accuracy** reaches 0.9756 (439 out of 450 unseen test images). For comparison, softmax regression (`LogisticRegression` in scikit-learn) on the same split gets 0.9689: this dataset is small and clean, so adding a hidden layer gives a modest boost.
+
+Because the random seed is fixed, repeated runs on the same machine give identical numbers; across different hardware or PyTorch versions, the numbers may vary slightly. Try replacing `nn.ReLU()` with `nn.Tanh()` or `nn.GELU()`, or changing the hidden layer width, and run it again.
+
+## Common pitfalls
+
+:::caution[Forgetting the activation function between linear layers]
+`nn.Sequential(nn.Linear(64, 64), nn.Linear(64, 10))` looks like a two-layer network, but as we proved in the Activation functions section, it collapses into a **single** linear layer — softmax regression with redundant parameters. The code runs without complaint and the loss still goes down, raising no error. Always place a nonlinear activation like `nn.ReLU()` between consecutive `nn.Linear` layers (except after the final output layer — see the next box).
+:::
+
+:::caution[Adding softmax before `nn.CrossEntropyLoss`]
+PyTorch's `nn.CrossEntropyLoss` expects raw **logits** and applies log-softmax internally for numerical stability. If your network already ends with `nn.Softmax`, softmax gets applied twice. The second softmax receives probabilities restricted to $[0, 1]$, so even when the network is 100% confident, the highest probability after the second softmax is at most $e/(e + 9) \approx 0.232$ for 10 classes, and the loss cannot drop below about 1.46. Gradients also shrink, slowing training dramatically. Return raw logits from your final layer; call `torch.softmax(logits, dim=1)` separately only when you need human-readable probabilities, or take `argmax` directly on the logits to get the predicted class.
+:::
+
+:::caution[Reading the universal approximation theorem as "one hidden layer is all you need"]
+The theorem says such a network **exists**, not that it is small, not that gradient descent will find it, and not that it will generalize to new data. Widening a single hidden layer also does nothing to encode the spatial grid of an image or the sequential order of a sentence. That is why practitioners use deep networks, CNNs for vision, and Transformers for sequences, even though a single hidden layer is theoretically "universal".
+:::
+
+## Quick check
+
+{/* Questions live in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- An artificial neuron computes $z = \mathbf{w}^\top\mathbf{x} + b$ and $a = g(z)$. The perceptron uses a step function and the update rule $\mathbf{w} \leftarrow \mathbf{w} + \eta(y - \hat{y})\mathbf{x}$; this rule converges only on linearly separable data, so it cannot learn XOR.
+- An MLP stacks neurons into fully connected layers. Forward propagation starts at $\mathbf{a}^{[0]} = \mathbf{x}$ and iterates $\mathbf{z}^{[l]} = \mathbf{W}^{[l]}\mathbf{a}^{[l-1]} + \mathbf{b}^{[l]}$, $\mathbf{a}^{[l]} = g^{[l]}(\mathbf{z}^{[l]})$, where $\mathbf{W}^{[l]}$ has shape $n^{[l]} \times n^{[l-1]}$. Hidden layers learn new representations where the task becomes linearly separable.
+- Activation functions must be nonlinear, or the entire network collapses into a single linear layer. ReLU is the default for hidden layers; sigmoid and tanh saturate in the tails; Leaky ReLU avoids dying neurons; GELU is standard in Transformers.
+- $K$-class classification pairs $K$ output neurons with softmax and cross-entropy loss $-\ln\hat{y}_c$. The universal approximation theorem guarantees that a sufficiently wide one-hidden-layer MLP can approximate any continuous function, but leaves finding the weights to backpropagation in the next lesson.
+
+**Further reading:**
+
+- Vũ Hữu Tiệp (2017). [*Machine Learning cơ bản*, Lesson 9: Perceptron Learning Algorithm](https://machinelearningcoban.com/2017/01/21/perceptron/) and [Lesson 14: Multi-layer Perceptron and Backpropagation](https://machinelearningcoban.com/2017/02/24/mlp/). Vietnamese reference with a proof of perceptron convergence and the XOR example. Note the different conventions: labels are $\pm 1$, and layer $l$'s weight matrix has shape $d^{(l-1)} \times d^{(l)}$ (the transpose of our $\mathbf{W}^{[l]}$).
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. (2023). [*Dive into Deep Learning*, Section 5.1: Multilayer Perceptrons](https://d2l.ai/chapter_multilayer-perceptrons/mlp.html). Plots and derivatives of ReLU, sigmoid, and tanh with runnable code. Stacks samples as rows ($\mathbf{X}\mathbf{W} + \mathbf{b}$), matching PyTorch.
+- Goodfellow, I., Bengio, Y., Courville, A. (2016). [*Deep Learning*, Chapter 6: Deep Feedforward Networks](https://www.deeplearningbook.org/contents/mlp.html). Section 6.1 solves XOR with a small ReLU network; Section 6.4.1 discusses the universal approximation theorem and why depth helps.
+- Nielsen, M. (2015). [*Neural Networks and Deep Learning*, Chapter 4: A visual proof that neural nets can compute any function](http://neuralnetworksanddeeplearning.com/chap4.html). Interactive visual explanation of the universal approximation theorem.
+- Original papers: Rosenblatt, F. (1958). [*The perceptron: A probabilistic model for information storage and organization in the brain*](https://doi.org/10.1037/h0042519). *Psychological Review* 65(6), 386–408. Cybenko, G. (1989). [*Approximation by superpositions of a sigmoidal function*](https://doi.org/10.1007/BF02551274). *Mathematics of Control, Signals and Systems* 2(4), 303–314. Hendrycks, D., Gimpel, K. (2016). [*Gaussian Error Linear Units (GELUs)*](https://arxiv.org/abs/1606.08415). arXiv:1606.08415.
+
+<LessonProgress />

@@ -1,0 +1,336 @@
+---
+title: Docker and the Cloud
+description: Your app runs on your machine but breaks on someone else's. Package it into a Docker image, pass keys at run time, and push it to a registry and the cloud.
+quiz:
+  - question: 'You build an image from the Dockerfile in this lesson, but accidentally remove `ENV GRADIO_SERVER_NAME=0.0.0.0`. When you run `docker run --rm -p 127.0.0.1:7860:7860 --env-file .env.llm atlas-chat`, the logs show `Running on local URL:  http://127.0.0.1:7860`, yet your browser on the host cannot open `http://localhost:7860`. Why?'
+    options:
+      - 'Because you need a second `EXPOSE 7860` line for Docker to open the port'
+      - 'Because port 7860 on your machine is already in use by another program'
+      - 'Because inside the container, `127.0.0.1` is the container itself; traffic from your host arrives on the container''s network interface, which the app is not listening on'
+      - 'Because you must write `-p 7860:7860` without `127.0.0.1:` in front'
+    answer: 2
+    explanation: 'Every container has its own isolated network namespace. Docker forwards host traffic to the container''s network interface, not to `127.0.0.1` inside the container, so the app must listen on `0.0.0.0`. In testing, requests sent from inside the container still receive HTTP 200, while requests from the host fail. `EXPOSE` is only documentation. And if port 7860 on the host were already taken, `docker run` would fail immediately before printing the Gradio log.'
+  - question: 'Your project directory contains a `.env.llm` file with your API key. Your Dockerfile has `COPY . .`, and you forgot to create `.dockerignore`. You build the image and run it with `--env-file .env.llm`. Running `docker image inspect` shows no key under `Env`. Which conclusion is correct?'
+    options:
+      - 'The image is safe: the key only exists inside the running container'
+      - 'The key is still baked into the image as the file `/app/.env.llm`; anyone with the image can read it'
+      - 'Docker automatically skips dotfiles starting with a period during `COPY`'
+      - 'A key is only exposed when set via `ENV`; files copied with `COPY` cannot be read by others'
+    answer: 1
+    explanation: '`COPY . .` copies everything in the build context that `.dockerignore` does not exclude, including dotfiles. `docker image inspect` only displays image metadata such as `Env`, not filesystem contents, which is why the key does not appear there. However, running `docker run ... ls -a /app` immediately reveals `.env.llm`. Pushing that image to a public registry leaks your key to the world.'
+  - question: 'Someone writes a Dockerfile with a single `COPY . .` instruction followed immediately by `RUN pip install --no-cache-dir -r requirements.txt`. They edit one character in `app.py` and rebuild. What happens?'
+    options:
+      - 'Only the `app.py` copy step reruns, while `pip install` is reused from the build cache'
+      - 'Docker raises an error because an image with that tag already exists'
+      - 'Any currently running container automatically picks up the new code'
+      - 'The `pip install` step runs again from scratch, because the layer right before it (`COPY . .`) changed'
+    answer: 3
+    explanation: 'Docker evaluates Dockerfile instructions in order. As soon as it hits the first instruction whose inputs changed, it invalidates the cache for that instruction and every instruction after it. Editing `app.py` changes `COPY . .`, which forces `pip install` to rerun. That is why the Dockerfile in this lesson copies `requirements.txt` and installs packages first, before copying the application code. The first option is only true with that two-step order.'
+  - question: 'You deploy your image to a cloud container service. The service sets `PORT=8080` and routes incoming traffic to that port. Your app hardcodes `demo.launch(server_port=7860)` and your Dockerfile has `EXPOSE 7860`. What usually happens?'
+    options:
+      - 'The service cannot reach the app (typically reporting that the container failed to start), because nothing is listening on port 8080'
+      - 'Everything works, because the service reads `EXPOSE 7860` and routes traffic to port 7860'
+      - 'Everything works, because Gradio automatically reads the `PORT` variable'
+      - 'The app automatically switches to port 8080'
+    answer: 0
+    explanation: 'The cloud service follows its runtime contract: it sends traffic to the port specified in `PORT`. `EXPOSE` is merely documentation. Gradio reads `GRADIO_SERVER_PORT`, not `PORT`, which is why the code in this lesson reads `PORT` explicitly and falls back to 7860 when `PORT` is unset. Many services let you configure a custom target port in their settings, but you have to configure that yourself.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import ContainerImageFigure from '@components/figures/ContainerImageFigure.astro';
+import appCode from '@code/llm/docker-cloud/app.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Distinguish an **image** (a read-only, layered package) from a **container** (a running instance of an image).
+- Write a **Dockerfile** for a Gradio application, build an image with `docker build`, and run it with `docker run`.
+- Pass an API key into a container **at run time**, and explain why an API key must never be baked into an image.
+- Understand what a cloud container service expects from your image: listening on the port in `PORT`, binding to `0.0.0.0`, and treating the container filesystem as ephemeral.
+
+## Prerequisites
+
+{/* List populated from prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In [Building UIs with Gradio and Streamlit](/en/llm/gradio-streamlit/), you built a Gradio chat app. Calling `demo.launch()` starts a web server on port 7860 and, by default, binds only to `127.0.0.1` so only your own machine can reach it. The app reads the three **environment variables** `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `LLM_MODEL`, just as in [Using Text Generation APIs](/en/llm/text-api/).
+:::
+
+## Intuition
+
+Your chat app works great on your laptop. You send the `.py` file to a friend. An hour later they message back: "Line 28 crashes." Their machine has Gradio 5 installed, while you wrote the code for Gradio 6. After they upgrade Gradio, another error pops up: their Python version is 3.9, older than what `openai` requires.
+
+The Python script is identical. What differs is the **environment**: the Python version, package versions, system libraries, and operating system.
+
+**Docker** solves this by packaging your program **together with** its environment into a single unit called an **image**. An image bundles a minimal Linux userland, the exact Python version, the exact pip packages, and your application code. Wherever Docker runs, that image runs identically. Each time you start an image, you get a **container**.
+
+Think of an image as a printed cookbook: once printed, its pages are read-only. A container is a meal cooked from that book. From one cookbook, you can cook as many meals as you want, and each one starts out the same. If you throw out a meal, the cookbook is untouched, ready to cook a fresh copy.
+
+An image is also the standard unit that cloud container platforms accept: you hand them an image, and they run it behind a public HTTPS URL. There is just one thing that must **never** be baked into the image: your API key. Because images are built to be shared and stored on remote registries, secrets must be injected separately at the exact moment a container starts.
+
+**The problem: package a Gradio app into a Docker image that runs identically everywhere Docker is available, pass the API key at run time rather than baking it into the image, and prepare the image to run on a cloud platform so others can use it.**
+
+## Theory
+
+This lesson has no mathematical formulas. The "theory" is how Docker builds images and runs containers. Examples were tested with Docker 29 (October 2026). Installation instructions are on Docker's official [Get Docker](https://docs.docker.com/get-started/get-docker/) page.
+
+### Images and containers
+
+An **image** is a **read-only** package made of multiple **layers** stacked on top of one another. The bottom layer is the **base image**, such as `python:3.12-slim`—a minimal Debian system with Python 3.12 pre-installed. Each build instruction (copying files, installing packages) adds a new layer on top. Each layer records only the differences relative to the layer below it.
+
+A **container** is a running instance of an image. Docker takes the read-only layers of the image, places a thin **writable layer** on top, and runs the startup command. Any files created or modified by the running program live in this top writable layer. Deleting the container deletes its writable layer while leaving the underlying image completely unchanged. Three practical consequences follow immediately:
+
+- **One image, many containers.** Running the same image twice gives you two independent containers, each with its own isolated writable layer.
+- **Editing code on your host machine does not update a container.** A container runs from the snapshot inside the built image. To pick up code changes, you must rebuild the image and start a new container.
+- **Data written inside a container is temporary.** Chat histories or uploaded files saved to the container's local filesystem vanish as soon as the container is removed.
+
+{/* FIG: an image is a stack of read-only layers; each container started from it adds only its own temporary writable layer on top. */}
+<ContainerImageFigure />
+
+### Dockerfile: the recipe for building an image
+
+A **Dockerfile** is a plain-text file where each line is an instruction telling Docker how to assemble an image. Here is the Dockerfile for our chat app, which you will build in the Code examples section:
+
+```dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+ENV GRADIO_SERVER_NAME=0.0.0.0
+ENV PYTHONUNBUFFERED=1
+EXPOSE 7860
+CMD ["python", "app.py"]
+```
+
+| Instruction | What it does | When it runs |
+|---|---|---|
+| `FROM` | Selects the base image | Build time |
+| `WORKDIR` | Sets the working directory inside the image (creating it if needed) | Build time |
+| `COPY` | Copies files from your project directory into the image | Build time |
+| `RUN` | Executes a command inside a build layer, e.g. `pip install` | Build time |
+| `ENV` | Sets an environment variable **persisted inside the image** | Active at both build time and run time |
+| `EXPOSE` | **Documents** which port the app listens on; does not publish any port | Does not execute anything |
+| `CMD` | Default command executed when a container starts | Run time |
+
+The most common point of confusion is `RUN` versus `CMD`. `RUN pip install` executes **once, at build time**, and the installed packages become a frozen layer of the image. `CMD ["python", "app.py"]` **does not run at build time**; it is recorded in the image metadata as the default command to launch whenever a container starts. If a Dockerfile has multiple `CMD` lines, only the last one takes effect. Writing `CMD` as a JSON array (exec form) tells Docker to launch `python` directly without wrapping it in a shell.
+
+Three more details worth noting:
+
+- **Base image `python:3.12-slim`.** The `slim` variant strips out extra Debian packages to keep the image small, at the cost of omitting compilers (so pip packages that need to compile C extensions from source may fail unless you install build tools or use the full image). Always pin a specific version tag rather than `latest`: `latest` moves over time as new major versions are released, so building today and building next month could produce different Python versions. `3.12-slim` still receives 3.12.x security patches without jumping to 3.13; for bit-for-bit reproducibility, pin a digest (`python:3.12-slim@sha256:…`). We pick 3.12 here because both Gradio 6.30 (requires Python ≥ 3.10) and Streamlit 1.66 (requires Python ≥ 3.11) support it.
+- **`requirements.txt`** lists your Python dependencies, one per line. Inside a container image, pin the exact versions you tested (`gradio==6.30.0`) for the same reason you pin the base image tag. Passing `--no-cache-dir` tells pip not to keep downloaded wheel archives inside the image layer, keeping the image smaller.
+- **The two `ENV` lines.** `GRADIO_SERVER_NAME=0.0.0.0` tells Gradio to listen on all network interfaces (see Ports below). `PYTHONUNBUFFERED=1` tells Python to flush output immediately. In testing without `PYTHONUNBUFFERED=1`, `docker logs` showed nothing—not even Gradio's `"Running on local URL"` line—because Python buffers standard output when not attached to an interactive terminal. Neither of these variables is a secret, so they belong in the Dockerfile.
+
+### Instruction order and build cache
+
+When you rebuild an image, Docker steps through the Dockerfile instructions in order. As long as an instruction's inputs have not changed (same instruction text, same copied file contents), Docker reuses the existing layer from its **build cache**. The moment Docker encounters the first instruction whose inputs changed, it rebuilds that instruction and **every instruction that follows it**.
+
+That is why our Dockerfile copies `requirements.txt` and runs `pip install` **before** running `COPY . .` for the rest of the code: you edit `app.py` all the time, but rarely change your dependency list. When you edit `app.py`, only the `COPY . .` layer rebuilds, while the slow `pip install` step (45 to 85 seconds in our tests, depending on network speed) is served instantly from the build cache.
+
+### `.dockerignore`: what must stay out of the image
+
+When you run `docker build .`, the trailing dot specifies the **build context**: the directory whose files Docker sends to the builder. `COPY . .` copies everything from that build context into the image—including dotfiles like `.env.llm` and directories like `.venv/` and `.git/`.
+
+A `.dockerignore` file placed next to your Dockerfile lists patterns to exclude from the build context. Its syntax is similar to `.gitignore`, except patterns are anchored at the root of the build context; prefix a pattern with `**/` to match it in any subdirectory:
+
+```text
+**/.env*
+**/.venv*/
+.git/
+**/__pycache__/
+```
+
+The `**/.env*` line is critical: it prevents environment files containing API keys from entering the build context, whether they sit in the project root or inside a subfolder. If you only wrote `.env*`, Docker would only exclude dotfiles in the root directory—in our tests, a nested `pkg/.env.llm` file still slipped into the image. The remaining lines keep your image small and clean.
+
+### Ports: `EXPOSE`, `-p`, and `0.0.0.0`
+
+Every container runs inside its own isolated **network namespace**. Inside a container, `127.0.0.1` (localhost) refers to **that container itself**, not to your host machine. Making a containerized web app reachable requires two things at once:
+
+1. **The app inside the container must listen on `0.0.0.0`**, meaning all network interfaces of the container. Docker forwards incoming traffic to the container's virtual network interface, not to `127.0.0.1` inside the container, so an app listening only on `127.0.0.1` ignores all traffic coming from outside the container. Gradio reads its bind address from `GRADIO_SERVER_NAME`, which is why our Dockerfile sets `ENV GRADIO_SERVER_NAME=0.0.0.0`.
+2. **You must publish the port when running the container**, using `-p <host_port>:<container_port>`, such as `-p 7860:7860`. Writing `EXPOSE 7860` in the Dockerfile does not publish the port; it only serves as documentation.
+
+Note that `-p 7860:7860` binds port 7860 on all interfaces of your host machine, meaning other devices on your local network may be able to reach your app (depending on your firewall) and spend your API quota. When testing locally on your own machine, bind only to the host's loopback address: `-p 127.0.0.1:7860:7860`.
+
+### Environment variables and secrets
+
+A **secret** is any sensitive value such as an API key or password. Our app needs `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `LLM_MODEL`. There are three ways you might be tempted to pass them, and only one of them is safe for secrets:
+
+- **`ENV OPENAI_API_KEY=...` in the Dockerfile: wrong.** Values set via `ENV` are permanently recorded in the image metadata. Anyone who pulls the image can read them with `docker image inspect`.
+- **`ARG` (build-time arguments) or `COPY .env.llm`: also wrong.** Docker's documentation explicitly warns against using `ARG` for passwords or keys because their values remain visible in `docker history`. And any file copied via `COPY` is stored in an image layer that anyone running the image can read.
+- **Injecting at run time: right.** Passing `docker run -e OPENAI_API_KEY ...` forwards the variable from your current shell session, or `docker run --env-file .env.llm ...` reads variables from a local file on your host. The key never touches the image. (It is still visible in the running container's config via `docker inspect <container>` to anyone with Docker access on that host, but the image you share contains no trace of it.)
+
+Your Python code does not change at all: it still reads `os.environ["OPENAI_API_KEY"]`, only now Docker supplies the value when starting the container.
+
+In a file passed to `--env-file`, each line has the form `NAME=value`, and lines starting with `#` are ignored as comments. Note that Docker **does not strip quotes** in env-files: in our test with Docker 29.8, a line reading `B="abc"` sets the variable `B` to the literal five-character string `"abc"`, quotes included. A `#` in the middle of a line is also treated as part of the value, not an inline comment.
+
+Occasionally you need a secret **during the build itself**—for instance, to install a package from a private repository. For that case, Docker provides `docker build --secret` paired with `RUN --mount=type=secret`, which mounts the secret temporarily without saving it into any layer. Our app does not need build-time secrets.
+
+### Registries: where images are shared
+
+A **registry** is an online repository for container images—like GitHub, but for built images. Docker Hub is the default registry: when you write `FROM python:3.12-slim`, Docker pulls that base image from Docker Hub. Other popular registries include GitHub Container Registry and the container registries operated by major cloud providers.
+
+A full image reference looks like `<registry>/<account>/<name>:<tag>`; omitting `<registry>/` defaults to Docker Hub. The workflow is: build once locally, attach a registry name with `docker tag`, authenticate with `docker login`, and upload with `docker push`. Any other machine can then `docker pull` and run the image without rebuilding. Remember that anyone can pull a public image and inspect every file inside its layers—one more reason secrets must never be baked into an image.
+
+### Running containers in the cloud
+
+Many cloud platforms accept a container image and run it as a managed web service. At a high level, they all work the same way: you point the service at your image (usually hosted in a registry), configure environment variables and secrets in the platform's dashboard, and the platform starts a container and routes traffic to it from an HTTPS URL. We do not endorse a specific cloud provider or quote prices here, since pricing and free tiers change constantly—check your chosen provider's official documentation.
+
+Every container platform defines a **container runtime contract** that your image must satisfy. Taking Google Cloud's [Cloud Run container contract](https://docs.cloud.google.com/run/docs/container-contract) as a representative example:
+
+- **The platform tells your container which port to listen on via the `PORT` environment variable** (8080 by default on Cloud Run), and your app must listen on `0.0.0.0` on that port. If your app hardcodes port 7860 while the platform sends traffic to 8080, the deployment fails its startup check. Because Gradio does not read `PORT` automatically, our code reads it explicitly: `PORT = int(os.environ.get("PORT", "7860"))`.
+- **The container filesystem is ephemeral.** Any files written to disk vanish when the container instance stops. Persistent data must be stored in an external database or object storage service.
+- **Container instances can be stopped at any time** when idle, and the platform may spin up multiple instances in parallel when traffic spikes.
+- **API keys are configured in the platform's environment variable or secret manager settings**, playing the same role as `--env-file` on your laptop.
+
+Once your app is live on a public URL, anyone who discovers the address can chat with it—and every message is billed to your API key. Protect public demos with authentication (such as Gradio's `auth` parameter in `launch`, covered in the previous lesson) and configure a hard spending limit on your API provider's billing page.
+
+:::note[Key takeaway]
+An image is a read-only multi-layer package built once from a Dockerfile; a container is a running instance with a temporary writable layer. Inside a container, bind your server to `0.0.0.0` and publish the port on the host with `docker run -p`. Inject API keys at run time (`--env-file` locally, or secret settings in the cloud), never via `ENV`, `ARG`, or `COPY`, and exclude `**/.env*` in `.dockerignore`. In the cloud, read the listening port from `PORT` and never rely on the container's local disk for permanent storage.
+:::
+
+### Limitations
+
+- **The container runs as `root` by default.** Docker's security best practices recommend creating and switching to a non-root user via the `USER` instruction; we omit it here to keep the first Dockerfile short.
+- **Image size.** Our built image takes 676 MB on disk, with the `pip install` layer alone accounting for 386 MB (Gradio pulls in pandas, NumPy, Pillow, and more). Multi-stage builds can help trim image size when needed.
+- **CPU architecture.** Building an image on an ARM machine (such as an Apple Silicon Mac) produces an ARM image by default, which will fail to start on an x86_64 cloud server; build with `--platform linux/amd64` when targeting x86_64 servers (note that cross-platform emulation makes the build slower).
+- **Slow `docker stop`.** `docker stop` sends a `SIGTERM` signal. When Python runs as PID 1 inside a container without a signal handler, it ignores `SIGTERM`, so Docker waits for the grace period to expire before forcefully killing the container (exit code 137). Pressing Ctrl+C in an interactive terminal sends `SIGINT`, which stops Python cleanly.
+- **No persistent storage yet**, so chat history still disappears when the container stops. Packaging and serving your own model weights inside a container is the topic of [Deploying Your Own Model](/en/llm/deploy-custom-model/).
+
+## Illustration
+
+The table below shows actual test runs of this lesson's Dockerfile on our test machine (Docker 29.8.1). Focus on the last column: using the exact same built image, changing only the `docker run` flags completely changes the outcome. (Host ports were randomized during testing and are written as 7860 here for readability; `fake.env` is an env-file with a dummy key.)
+
+| Experiment | Command (abbreviated) | Outcome |
+|---|---|---|
+| Correct run | `docker run -p 127.0.0.1:7860:7860 --env-file fake.env atlas-chat` | Page returns HTTP 200. Log: `Running on local URL:  http://0.0.0.0:7860` |
+| Missing API key | `docker run atlas-chat` | Container exits immediately with code 1; log ends with `KeyError: 'OPENAI_API_KEY'` |
+| Missing `-p` port flag | `docker run --env-file fake.env atlas-chat` | App runs inside the container, but `docker ps` shows `7860/tcp` with no host port mapped |
+| App binds to `127.0.0.1` | add `-e GRADIO_SERVER_NAME=127.0.0.1` | From host: connection reset, no response. From inside container: still returns HTTP 200 |
+| Custom port via `PORT` | `-e PORT=8080 -p 127.0.0.1:8080:8080` | Returns HTTP 200. Log: `Running on local URL:  http://0.0.0.0:8080` |
+| Check image metadata for key | `docker image inspect atlas-chat` | `Env` lists only base-image variables and our two `ENV` lines; no API key present |
+| Without `.dockerignore` | `docker run atlas-chat ls -a /app` | Shows `.env.llm`, `.venv`, `__pycache__`. With `.dockerignore`: only `Dockerfile`, `.dockerignore`, `app.py`, `requirements.txt` |
+| Edit `app.py` and rebuild | `docker build -t atlas-chat .` | `WORKDIR`, `COPY requirements.txt`, and `pip install` all report `CACHED`. Only `COPY . .` reruns; total rebuild takes ~3 seconds |
+
+Notice how the "Check image metadata for key" and "Without `.dockerignore`" rows complement each other: seeing no key in `docker image inspect` does not prove an image is clean, because `inspect` only checks image config metadata, not the files copied into its layers.
+
+## Code examples
+
+The code in this lesson was last tested in October 2026 with Docker 29.8, base image `python:3.12-slim` (Python 3.12.15), `openai` 3.37, and `gradio` 6.30.0. None of the steps run in the browser: everything runs on your machine with Docker installed. The `docker` commands below are identical in bash and PowerShell.
+
+### Step 1: the application
+
+Create a new folder such as `atlas-chat/` and save the code below as `app.py`. This is the Gradio chat app from the previous lesson with two small adjustments: the listening port is read from `PORT` (falling back to 7860 when unset), and a comment notes that the bind address is controlled by `GRADIO_SERVER_NAME`. The starter `examples` list is omitted for brevity.
+
+<LocalCode
+  code={appCode}
+  title="Gradio chat app, container-ready"
+  file="app.py"
+  packages={['openai', 'gradio>=6']}
+/>
+
+You can still run `python app.py` directly on your machine just like in the previous lesson: when `GRADIO_SERVER_NAME` is unset, Gradio defaults to `127.0.0.1`, which is what you want outside a container. If `OPENAI_API_KEY` or `LLM_MODEL` is missing, the script exits immediately with a `KeyError`, both on your host and inside a container (matching the "Missing API key" row in the Illustration table).
+
+### Step 2: three files for Docker
+
+Next to `app.py`, create `requirements.txt` pinning the exact package versions tested:
+
+```text
+openai==3.37.0
+gradio==6.30.0
+```
+
+Create a `Dockerfile` (with no file extension) containing the 9 lines from the Theory section, and a `.dockerignore` file containing the 4 lines from the `.dockerignore` section. Your folder should now look like this:
+
+```text
+atlas-chat/
+├── .dockerignore
+├── .env.llm          (excluded by .dockerignore; never enters the image)
+├── Dockerfile
+├── app.py
+└── requirements.txt
+```
+
+Create `.env.llm` with your three variables, without quotes around the values. If this folder is a Git repository, add `.env*` to `.gitignore` as well.
+
+```dotenv
+OPENAI_API_KEY=<your-key>
+OPENAI_BASE_URL=<provider-api-url>
+LLM_MODEL=<model-name>
+```
+
+If you use OpenAI directly, delete the `OPENAI_BASE_URL` line completely; leaving an empty `OPENAI_BASE_URL=` passes an empty string to the SDK and causes a connection error. See [Using Text Generation APIs](/en/llm/text-api/) for the provider table and `OPENAI_BASE_URL` values.
+
+### Step 3: build and run
+
+Inside the `atlas-chat/` directory, run:
+
+```sh
+docker build -t atlas-chat .
+docker run --rm -p 127.0.0.1:7860:7860 --env-file .env.llm atlas-chat
+```
+
+The first command builds an image tagged `atlas-chat` from the current directory. The initial build takes one to two minutes depending on your connection: Docker pulls the base image and pip installs 56 packages (Gradio and its dependencies). The second command starts a container: `--rm` removes the container automatically when it stops, `-p` publishes the port to localhost, and `--env-file` injects your credentials at run time. When the container starts, its log prints:
+
+```text
+* Running on local URL:  http://0.0.0.0:7860
+* To create a public link, set `share=True` in `launch()`.
+```
+
+Remember that `0.0.0.0` is the bind address inside the container, not a URL to type into your browser. On your machine, open `http://localhost:7860`; press Ctrl+C in the terminal to stop the container. To run the container in the background, add `-d`, and manage it with `docker ps` (to list running containers and their `<id>`), `docker logs <id>`, and `docker stop <id>`. Whenever you edit `app.py`, rerun both commands: rebuild the image (which finishes in seconds thanks to the build cache) and start a new container.
+
+### Step 4: push to a registry
+
+For Docker Hub, replace `<account>` with your Docker Hub username:
+
+```sh
+docker login
+docker tag atlas-chat <account>/atlas-chat:1.0
+docker push <account>/atlas-chat:1.0
+```
+
+`docker tag` does not copy any data; it simply attaches a second name to the same local image. If the repository does not exist yet on Docker Hub, `docker push` creates it using your account's Default privacy setting (which defaults to public on new free accounts—check that setting before pushing if you want a private repository). Once pushed, any machine with Docker can run your app via `docker run ... <account>/atlas-chat:1.0`, and Docker will pull the image automatically. (During verification for this lesson, we tested pushing and pulling against a local `registry:3` container rather than Docker Hub.) To deploy to a cloud container service, follow that provider's guide: point it to your pushed image, set the environment variables and secrets, and verify the port configuration.
+
+## Common pitfalls
+
+:::caution[The container is running, but the browser cannot connect]
+Check three things. First, is the app inside the container binding to `127.0.0.1` (logs show `http://127.0.0.1:7860`)? Set `GRADIO_SERVER_NAME=0.0.0.0`, or for Streamlit run `streamlit run app.py --server.address=0.0.0.0`. Second, did you forget `-p` because you assumed `EXPOSE` opens the port? If `docker ps` shows no `->` arrow in the `PORTS` column, no host port is mapped. Third, did you map the wrong container port, such as `-p 8501:8501` for a Gradio app listening on 7860? The number to the right of the colon `:` must match the port the app listens on inside the container.
+:::
+
+:::caution[Baking API keys into the image]
+Writing `ENV OPENAI_API_KEY=...`, passing a key via `ARG`, or running `COPY . .` without `.dockerignore` leaves your key inside the built image. If you push that image to a public registry, anyone can extract your key. Rebuilding and pushing a new tag does not erase the old layers from the registry: **revoke the leaked key immediately** on your provider's dashboard, generate a new key, and then fix your build files. From day one: pass keys only at run time via `--env-file` or `-e`, and always include `**/.env*` in `.dockerignore`.
+:::
+
+:::caution[Treating a container like a permanent virtual machine]
+Editing `app.py` on your laptop and restarting an existing container still runs the old code, because the container runs from the frozen image—you must run `docker build` again. Likewise, any chat logs or user files written to the container's local disk vanish whenever the container is removed or scaled down by a cloud platform. Store anything that must persist in an external database or storage service.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Docker packages your application together with its environment. An image is a read-only stack of layers; a container is a running instance of an image with an ephemeral writable layer on top.
+- In a Dockerfile, pin the `FROM` base image version, copy `requirements.txt` and run `pip install` before copying source code so edits reuse the build cache. `RUN` executes at build time, `CMD` executes when a container starts, and `EXPOSE` is documentation only.
+- Inside a container, bind your server to `0.0.0.0` and publish the port with `docker run -p`. Pass API keys at run time with `--env-file`, never via `ENV`, `ARG`, or `COPY`, and block `**/.env*` in `.dockerignore`.
+- Registries distribute built images (`docker tag`, `docker push`). Cloud container platforms run your image according to their runtime contract: read the listening port from `PORT`, treat local disk as temporary, and store keys in the platform's secret manager.
+
+**Further reading:**
+
+- Docker. [*Building best practices*](https://docs.docker.com/build/building/best-practices/). Covers choosing base images, pinning versions, `.dockerignore`, running as a non-root `USER`, and multi-stage builds.
+- Docker. [*Dockerfile reference*](https://docs.docker.com/reference/dockerfile/), sections on `FROM`, `COPY`, `RUN`, `ENV`, `ARG`, `EXPOSE`, and `CMD`. Authoritative reference for each instruction, including security warnings on `ARG` and secrets.
+- Docker. [*Build secrets*](https://docs.docker.com/build/building/secrets/). How to use secrets safely at build time without leaving them in image layers.
+- Gradio. [*Deploying Gradio with Docker*](https://www.gradio.app/guides/deploying-gradio-with-docker). Official guide showing `GRADIO_SERVER_NAME` (tested here with Python 3.12 and Gradio 6.30.0). For Streamlit, see [*Deploy Streamlit using Docker*](https://docs.streamlit.io/deploy/tutorials/docker).
+- Google Cloud. [*Container runtime contract*](https://docs.cloud.google.com/run/docs/container-contract). Cloud Run's runtime specification covering `PORT`, ephemeral filesystems, and instance lifecycle—a concrete example of what cloud container platforms expect from your image.
+
+<LessonProgress />

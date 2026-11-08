@@ -1,0 +1,362 @@
+---
+title: BERT
+description: The word "bay" in "chim bay" (bird flies) and "máy bay" (airplane) needs two different vectors. BERT reads both sides of a sentence, learns by masking tokens, and fine-tunes across tasks.
+quiz:
+  - question: 'A pre-training batch has $10\,000$ regular tokens (excluding `[CLS]` and `[SEP]`). Under BERT''s masking scheme, how many positions on average contribute to the MLM loss, and at how many positions does the model actually see the `[MASK]` token?'
+    options:
+      - '$10\,000$ positions contribute to the loss, $1\,500$ positions see `[MASK]`'
+      - '$1\,500$ positions contribute to the loss, $1\,500$ positions see `[MASK]`'
+      - '$1\,500$ positions contribute to the loss, $1\,200$ positions see `[MASK]`'
+      - '$1\,200$ positions contribute to the loss, $1\,200$ positions see `[MASK]`'
+    answer: 2
+    explanation: 'BERT selects 15% of positions—$1\,500$ tokens—and all selected positions contribute to the loss, including those replaced by a random token or left unchanged. Among the selected positions, only 80% are replaced with `[MASK]`: $0.8 \times 1\,500 = 1\,200$. The "$1\,500$ and $1\,500$" option forgets the two 10% branches; the "$1\,200$ and $1\,200$" option forgets that unchanged and randomly replaced positions still have to predict the original token.'
+  - question: 'Why doesn''t BERT replace every selected position with `[MASK]`?'
+    options:
+      - 'Because `[MASK]` never appears during fine-tuning or inference, so the model must build good representations for real visible tokens too, not only for `[MASK]` positions'
+      - 'To save compute: unchanged positions do not need a loss calculation'
+      - 'So the model can practice generating text left-to-right like GPT'
+      - 'Because adding `[MASK]` to the vocabulary significantly increases the parameter count'
+    answer: 0
+    explanation: 'If every selected position became `[MASK]`, the model would only need to work hard on `[MASK]` slots; on real tokens, it would know it is never tested. At fine-tuning time `[MASK]` disappears, creating a pre-train/fine-tune mismatch. The random and unchanged branches force the model to stay on guard at every position. Unchanged selected positions still incur loss, so the compute-saving option is false. In the paper''s ablation table, 100% `[MASK]` drops feature-based NER from 94.9 to 94.0.'
+  - question: 'Why can''t BERT be pre-trained with next-token prediction like GPT?'
+    options:
+      - 'Because BERT has no softmax layer over the vocabulary'
+      - 'Because BERT uses WordPiece whereas GPT uses BPE'
+      - 'Because next-token prediction requires more data than BERT had'
+      - 'Because BERT''s attention is unmasked: position $i$ can already see token $i + 1$, so the model could simply copy it'
+    answer: 3
+    explanation: 'Every position in an encoder attends to every other position. If the target at position $i$ were token $i + 1$, the answer would already be visible in the input, and the model would learn to copy across layers instead of understanding the sentence. That is why BERT must hide the target tokens themselves (masking) and predict them from bidirectional context. BERT does have a vocabulary softmax (in the MLM head), and the subword tokenizer is unrelated.'
+  - question: 'Given a question "What date does the order arrive?" and a long email where the answer is a contiguous substring of the email, what is the best output head when fine-tuning BERT?'
+    options:
+      - 'Pass the `[CLS]` vector through a $K$-class classifier'
+      - 'Use two learned vectors to score every token as the start and end of the answer, then pick the pair $(i, j)$ with $j \ge i$ that maximizes the combined score'
+      - 'Generate the answer token by token from left to right, like GPT'
+      - 'Use the input token embeddings before passing through any encoder layers'
+    answer: 1
+    explanation: 'This is extractive span prediction: the answer is the span from token $i$ to token $j$ inside the passage. BERT adds just two vectors $\mathbf{w}_{\text{start}}$ and $\mathbf{w}_{\text{end}}$ that score each $\mathbf{h}_i$ as a start or end position. `[CLS]` only produces a single label for the whole sequence and cannot point to positions. BERT does not generate text autoregressively, and input embeddings know nothing about the question yet.'
+  - question: 'A Word2Vec embedding table has an entry for the token "bay". What is the cosine between the Word2Vec vector of "bay" in "Con chim bay qua sông" (The bird flies across the river) and in "Máy bay hạ cánh" (The airplane lands)?'
+    options:
+      - 'Around $0.56$, just like BERT in the lesson''s code cell'
+      - 'Close to $0$, because the two meanings are completely different'
+      - '$1$, because both occurrences look up the exact same row of the table'
+      - 'Undefined, because Word2Vec requires the full sentence to produce a vector'
+    answer: 2
+    explanation: 'A static embedding is a lookup table: the same token always returns the exact same vector regardless of surrounding words, so the cosine is 1. BERT is different: the final-layer vector of "bay" depends on every token in the sentence, which is why the "chim bay" and "máy bay" pair drops to a cosine of 0.562 in the lesson''s code cell. That $0.56$ belongs to BERT, not Word2Vec.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import maskingCode from '@code/nlp/bert/masking.en.py?raw';
+import fillMaskCode from '@code/nlp/bert/fill-mask.en.py?raw';
+import AttentionMaskFigure from '@components/figures/AttentionMaskFigure.astro';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand why **contextual embeddings** are needed, and why BERT is a Transformer **encoder-only** model that reads both sides of a sentence.
+- Explain BERT's two pre-training tasks: **masked language modeling** (MLM) with its 15% and 80/10/10 rule, and **next sentence prediction** (NSP).
+- Fine-tune BERT using its three standard output patterns: sequence classification from `[CLS]`, token-level labeling, and extractive span prediction.
+- Implement BERT-style token masking in NumPy, and use `pipeline("fill-mask")` to inspect how BERT fills in blanks and produces context-dependent vectors.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+**Self-attention** lets each position take a weighted average of information from all positions in the same sequence. Each token is projected into a **query**, **key**, and **value**; stacked into matrices $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$, attention computes $\mathrm{softmax}(\mathbf{Q}\mathbf{K}^\top/\sqrt{d})\,\mathbf{V}$, where $d$ is the per-head key dimension and softmax is applied row by row. **Multi-head attention** runs $H$ such heads in parallel and concatenates their outputs. An **encoder block** consists of self-attention followed by a **feed-forward network** (FFN), each wrapped with a **residual connection** and **layer normalization**. Because self-attention is permutation-equivariant, each token is added to a **position embedding** at the input. Encoder–decoder models are covered in [Seq2Seq Models](/en/llm/seq2seq/), and causally masked decoder blocks are covered in [Building Your First LLM](/en/llm/build-first-llm/).
+:::
+
+## Intuition
+
+### One word, many meanings
+
+Read the three Vietnamese sentences below:
+
+| Sentence | What "bay" means |
+|---|---|
+| Con chim **bay** qua sông. *(The bird **flies** across the river.)* | to fly through the air |
+| Máy **bay** hạ cánh lúc tám giờ. *(The **airplane** lands at eight o'clock.)* | part of the compound noun "máy bay" (airplane) |
+| Anh thợ cầm cái **bay** trát vữa. *(The mason holds a **trowel** to plaster mortar.)* | a bricklayer's trowel |
+
+In [Word2Vec, GloVe, FastText](/en/nlp/word2vec-glove-fasttext/), each token has **a single row** in the embedding table. All three occurrences of "bay" above look up that exact same row and receive the exact same vector—an average over every sense "bay" ever had in the training corpus. We call that a **static embedding**.
+
+A human reader never interprets "bay" in isolation; we know which sense is meant from the surrounding words. What we want is a vector **for each occurrence**, computed from the entire sentence.
+
+### Reading both sides
+
+Cover one syllable and try to guess it: "Hà Nội là \_\_\_ đô của Việt Nam." *(Hanoi is the \_\_\_ capital-city of Vietnam.)*
+
+If you only read the left context, "Hà Nội là \_\_\_" ("Hanoi is \_\_\_") could be "một" (a), "nơi" (a place), "thành" (part of *thành phố*, city)... It is the syllable "đô" on the **right** that makes the answer almost certainly "thủ" (forming *thủ đô*, capital). Many expressions depend on what comes after: "máy" in "máy bay" (airplane) vs. "máy giặt" (washing machine), or "bàn" in "bàn tay" (hand) vs. "bàn học" (desk).
+
+GPT reads strictly from left to right: when computing the vector at a position, it can only see earlier tokens. That is mandatory when generating text, because future tokens do not exist yet. But when **understanding** a complete sentence that is already in front of you (classifying a review, tagging named entities, extracting an answer from a paragraph), throwing away the right half of the context is an unnecessary handicap.
+
+### If you can see both sides, how do you learn?
+
+GPT learns by predicting the next token. If every position can already see the entire sentence, that training objective collapses: the next token is sitting right in view, so the model can just copy it.
+
+BERT's solution works like a fill-in-the-blank worksheet in school: **hide a few words**, then ask the model to reconstruct them using the context on both sides. Devlin et al. (2019) call this a masked language model, noting that it is inspired by the cloze task of Taylor (1953).
+
+The problem of this lesson is: **train a model that assigns each token a vector informed by the entire sentence, using unlabeled raw text by masking out tokens and predicting them back; then use that pretrained model as the starting point for labeled downstream tasks.**
+
+## Theory
+
+### Architecture: a stack of encoder blocks
+
+BERT (Bidirectional Encoder Representations from Transformers) is the encoder half of the original Transformer (Vaswani et al., 2017)—with no decoder and no cross-attention. Its self-attention has **no causal mask**: every position attends to every position in the sequence across all layers. (The BERT paper denotes the number of layers by $L$, hidden size by $H$, and attention heads by $A$; to stay consistent with our LLM lessons, we write $D$ for the hidden dimension, $H$ for the number of heads, and $d = D/H$ for the dimension per head.)
+
+| Hyperparameter | BERT-base | BERT-large |
+|---|---:|---:|
+| Encoder blocks | 12 | 24 |
+| Hidden dimension $D$ | 768 | 1024 |
+| Attention heads $H$ | 12 | 16 |
+| Dimension per head $d$ | 64 | 64 |
+| Parameters (paper, rounded) | 110M | 340M |
+
+The feed-forward network inside each block has intermediate dimension $4D$ (3072 in BERT-base) with a GELU activation. Counting parameters by hand for BERT-base with its 30,522-token vocabulary (the actual released vocab file; the paper rounds to 30,000):
+
+- **Embeddings:** $30\,522 \times 768 + 512 \times 768 + 2 \times 768$ for token, position, and segment tables, plus layer normalization: about 23.8M.
+- **One encoder block:** four $768 \times 768$ matrices in attention (including biases) take 2.36M; the $768 \to 3072 \to 768$ FFN takes 4.72M; plus two layer norms (3,072 numbers) gives about 7.09M per block. Across 12 blocks, that is 85.1M.
+- **Pooler layer** on `[CLS]` (a $768 \times 768$ linear layer + tanh used for NSP): about 0.59M.
+
+The total is 109,482,240 parameters—matching the paper's "110M." The same calculation for BERT-large gives about 335.1M (the ALBERT paper cites 334M, while the BERT paper rounds to 340M). Most parameters live in the encoder blocks; the embedding tables account for roughly one-fifth.
+
+### Input representation: token, segment, and position
+
+BERT accepts **one** or **two** text segments, called sentence A and sentence B (in practice they are arbitrary spans of text, often longer than a single grammatical sentence). The text is tokenized with WordPiece (see [Tokenization](/en/nlp/tokenization/)) and framed with two special tokens:
+
+- `[CLS]` always stands at position 0. It is a **classification token**: its final-layer vector serves as the aggregate representation of the entire sequence whenever a task needs one label for the whole input.
+- `[SEP]` marks the end of each segment, separating A from B.
+
+For example, with the pair of short clauses "trời mưa" (it rains) and "đường ngập" (the road floods), assuming one token per syllable:
+
+| Position $i$ | Token | Segment $s_i$ |
+|---:|---|---|
+| 0 | `[CLS]` | A |
+| 1 | trời | A |
+| 2 | mưa | A |
+| 3 | `[SEP]` | A |
+| 4 | đường | B |
+| 5 | ngập | B |
+| 6 | `[SEP]` | B |
+
+The input vector at position $i$ is the **sum of three embeddings**:
+
+$$
+\mathbf{e}_i = \mathbf{E}^{\text{tok}}[x_i] + \mathbf{E}^{\text{seg}}[s_i] + \mathbf{E}^{\text{pos}}[i]
+$$
+
+- $\mathbf{E}^{\text{tok}}$ has $|V|$ rows, one per vocabulary token; $x_i$ is the token ID at position $i$. This is a standard static embedding table.
+- $\mathbf{E}^{\text{seg}}$ has just 2 rows: one for segment A and one for segment B. This **segment embedding** tells the model which segment a token belongs to, complementing the `[SEP]` delimiter.
+- $\mathbf{E}^{\text{pos}}$ has 512 learned rows, which is why BERT can process at most 512 tokens per sequence.
+
+Each table has $D$ columns. After passing through 12 encoder blocks, position $i$ emerges as a vector $\mathbf{h}_i \in \mathbb{R}^{D}$ (written $T_i$ in the paper, with $C$ for the `[CLS]` vector). Whereas $\mathbf{e}_i$ only knows about token $x_i$, $\mathbf{h}_i$ has mixed information from the entire sequence across 12 layers of bidirectional self-attention. **$\mathbf{h}_i$ is the contextual embedding** we wanted in the Intuition section. (Notation note: in the Word2Vec lesson, $d$ was the dimension of a static embedding; here $D$ is the model's hidden dimension 768, while $d$ is the per-head dimension 64.)
+
+### Masked language modeling (MLM)
+
+**Step 1: select positions.** In each sequence, randomly select 15% of the token positions (never selecting `[CLS]` or `[SEP]`). Call this selected set $\mathcal{M}$. Google's original code picks an exact 15% quota per sequence; Hugging Face's `transformers` library flips an independent $0.15$ coin per token, so the count fluctuates around 15%.
+
+**Step 2: corrupt the selected positions.** For each position $i \in \mathcal{M}$, roll a three-way die:
+
+- 80% of the time: replace the token with `[MASK]`;
+- 10% of the time: replace it with a random token from the vocabulary;
+- 10% of the time: leave the token unchanged.
+
+Call the corrupted sequence $\tilde{\mathbf{x}}$.
+
+**Step 3: predict the original tokens at the selected positions.** Pass $\tilde{\mathbf{x}}$ through the encoder to get $\mathbf{h}_i$. An MLM head (a small dense layer followed by a linear projection to $|V|$ logits, reusing the token embedding weights) plus softmax produces a distribution $p_{\boldsymbol{\theta}}(\cdot \mid \tilde{\mathbf{x}})$ over the vocabulary at position $i$. The loss is cross-entropy **averaged only over $\mathcal{M}$**:
+
+$$
+\mathcal{L}_{\text{MLM}}(\boldsymbol{\theta}) = -\frac{1}{|\mathcal{M}|} \sum_{i \in \mathcal{M}} \ln p_{\boldsymbol{\theta}}(x_i \mid \tilde{\mathbf{x}})
+$$
+
+Here $x_i$ is the **original** uncorrupted token, not the token in $\tilde{\mathbf{x}}$. Positions outside $\mathcal{M}$ contribute nothing to the loss—the model is not quizzed on them.
+
+Compare this with GPT: GPT computes a loss at **every** position, conditioned on the prefix to its left. BERT computes a loss at only 15% of positions, conditioned on the entire (corrupted) sequence. Each sentence therefore supplies fewer training signals per pass. The paper notes that MLM converges slightly slower in terms of training steps than a left-to-right model, but surpasses it in downstream accuracy very early on.
+
+**Why not replace 100% of selected positions with `[MASK]`?** The `[MASK]` token only exists during pre-training. During fine-tuning and inference, the input is clean real text with no `[MASK]` tokens at all. If every selected token were replaced with `[MASK]`, the model could learn a lazy shortcut: only build a predictive representation when the input is `[MASK]`, and ignore the task on real tokens. The two 10% branches break that shortcut:
+
+- **Random replacement (10%):** any visible real token might actually be a decoy, forcing the model to verify every token against its surrounding context.
+- **Unchanged (10%):** sometimes the right answer is the visible token itself, anchoring the representation of a real token to its true identity.
+
+Because the model does not know which positions are in $\mathcal{M}$, it must maintain a strong contextual representation at **every** position. Across all tokens in a sequence, $0.15 \times 0.8 = 12\%$ are replaced by `[MASK]`, $0.15 \times 0.1 = 1.5\%$ are replaced by a random word, and $1.5\%$ are kept as-is while still being predicted. The authors note that 1.5% random noise is small enough not to hurt language understanding.
+
+Appendix C.2 of the paper reports an ablation over these ratios. With full fine-tuning, accuracy barely changes (MNLI scores 84.2 with 80/10/10 vs. 84.3 with 100% `[MASK]`). But when BERT's weights are frozen and its vectors are used directly as features for named entity recognition, 100% `[MASK]` drops to 94.0 F1 compared with 94.9 for 80/10/10—the exact setting where a mismatch between pre-training and inference representations hurts most.
+
+### Next sentence prediction (NSP)
+
+Many tasks reason about the relationship between **two** sentences: does sentence B follow from sentence A (natural language inference), or does passage B contain the answer to question A? MLM does not directly teach sentence-pair relationships. BERT therefore adds a second pre-training task: given segment A, 50% of the time segment B is the span that **actually** followed A in the corpus (label `IsNext`), and 50% of the time B is a random span drawn from another document (label `NotNext`). The vector $\mathbf{h}_{\text{CLS}}$ is fed through a binary classifier, and the total pre-training loss is the sum of the MLM and NSP losses.
+
+In the BERT paper's ablations, removing NSP hurt performance on QNLI (88.4 down to 84.9) and several other tasks. However, RoBERTa (Liu et al., 2019) revisited this carefully and found the opposite: removing the NSP loss while packing full contiguous document sentences up to 512 tokens **matched or slightly improved** downstream accuracy. They suggested that the original ablation may have removed the NSP loss while still feeding disconnected segment pairs. ALBERT (Lan et al., 2020) diagnosed why NSP is too easy: a random segment from another document usually has a completely different **topic** from A, so the model can solve NSP by topic matching alone without learning discourse coherence. ALBERT replaced NSP with **sentence-order prediction** (SOP): two consecutive segments from the same document, either in their original order or swapped.
+
+:::note[Key takeaway]
+BERT is a stack of encoder blocks with unmasked bidirectional self-attention. Its input sums token, segment, and position embeddings, framed by `[CLS]` at the start and `[SEP]` after each segment. MLM selects 15% of positions—replacing 80% with `[MASK]`, 10% with a random token, and keeping 10% unchanged—and computes cross-entropy loss only on those selected positions against the original tokens. NSP classifies from `[CLS]` whether B follows A, though later models dropped it.
+:::
+
+### Fine-tuning: three output patterns
+
+After pre-training, BERT produces contextual vectors $\mathbf{h}_1, \dots, \mathbf{h}_L$ for any input sequence of length $L$. Fine-tuning attaches a tiny task-specific head on top and trains **all** parameters (both the BERT backbone and the new head) end-to-end on labeled data, typically for just a few epochs. Almost every NLP task fits one of three output patterns:
+
+**1. One label for the whole sequence.** Sentiment analysis, spam detection, or sentence-pair classification (entailment, paraphrase). For $K$ classes, we add a single matrix $\mathbf{W} \in \mathbb{R}^{K \times D}$ on top of `[CLS]`:
+
+$$
+\hat{\mathbf{y}} = \mathrm{softmax}(\mathbf{W}\mathbf{h}_{\text{CLS}})
+$$
+
+Why `[CLS]`? It is not tied to any specific word in the sentence, attends to every token across all 12 layers, and was already trained during NSP to summarize the whole input. [Sentiment Analysis](/en/nlp/sentiment-analysis/) uses this pattern.
+
+**2. One label per token.** Named entity recognition or part-of-speech tagging: "Nguyễn Du quê ở Hà Tĩnh" needs a person tag on "Nguyễn Du" and a location tag on "Hà Tĩnh". The same linear classifier $\mathbf{W}$ is applied independently to each $\mathbf{h}_i$. When WordPiece splits a word into multiple subwords, the BERT paper feeds only the first subword's vector to the classifier. See [Named Entity Recognition (NER)](/en/nlp/named-entity-recognition/) for details.
+
+**3. A span inside the passage.** Extractive question answering: the question is segment A, the passage is segment B, and the answer is a contiguous span inside B. We add just two learned vectors $\mathbf{w}_{\text{start}}, \mathbf{w}_{\text{end}} \in \mathbb{R}^{D}$. The probability that token $i$ is the start of the answer is:
+
+$$
+p_{\text{start}}(i) = \frac{\exp(\mathbf{w}_{\text{start}}^\top \mathbf{h}_i)}{\sum_{k} \exp(\mathbf{w}_{\text{start}}^\top \mathbf{h}_k)}
+$$
+
+where the sum runs over passage tokens; the end probability is computed the same way with $\mathbf{w}_{\text{end}}$. At inference time, we pick the pair $(i, j)$ with $j \ge i$ that maximizes $\mathbf{w}_{\text{start}}^\top \mathbf{h}_i + \mathbf{w}_{\text{end}}^\top \mathbf{h}_j$. See [Question Answering](/en/nlp/question-answering/) for details.
+
+Notice the common thread: almost all the knowledge lives in the pretrained BERT weights, while the newly added head has only $K \times D$ or $2D$ parameters. That is why a single pre-training run transfers to so many tasks. Upon release in late 2018, BERT-large reached an 80.5 GLUE score (7.7 points above the previous state of the art) and 93.2 F1 on SQuAD v1.1.
+
+### The BERT family
+
+Subsequent models refined specific parts of BERT's recipe:
+
+| Model | Year, authors | Key changes |
+|---|---|---|
+| RoBERTa | 2019, [Liu et al.](https://arxiv.org/abs/1907.11692) | Drops NSP; uses **dynamic masking** (resampling masked positions every time a sequence is fed, rather than fixing masks once during preprocessing); larger batches, longer training, over 160 GB of text; byte-level BPE |
+| ALBERT | 2020, [Lan et al.](https://arxiv.org/abs/1909.11942) | Factorizes the embedding table into two smaller matrices ($\lvert V \rvert \times E$ then $E \times D$ with $E \ll D$); **shares parameters** across all layers; replaces NSP with SOP. ALBERT-large has 18M parameters vs. 334M for BERT-large. Fewer parameters do not mean fewer FLOPs, since every layer still executes; in the paper's table, ALBERT-large trails BERT-large (82.4 vs. 85.2 average), xlarge (60M) barely edges ahead (85.5) while running slower, and xxlarge (235M) wins clearly (88.7) at roughly $3\times$ the wall-clock cost |
+| DistilBERT | 2019, [Sanh et al.](https://arxiv.org/abs/1910.01108) | **Knowledge distillation** from BERT-base into a 6-layer student (~66M parameters): 40% smaller, 60% faster, retaining about 97% of BERT-base's GLUE score |
+| ELECTRA | 2020, [Clark et al.](https://arxiv.org/abs/2003.10555) | A small MLM generator replaces masked tokens with plausible alternatives; the main discriminator predicts for **every** token whether it is original or replaced. Learns from 100% of tokens instead of 15%, with no `[MASK]` tokens seen by the discriminator |
+
+### BERT for Vietnamese
+
+There are two main families of models for Vietnamese:
+
+- **Multilingual models.** Google's **mBERT** (`bert-base-multilingual-cased`) was trained on Wikipedia across 104 languages with a shared WordPiece vocabulary of roughly 119,000 tokens. Counting from its config file gives about 178M parameters, more than half of which (91.8M) sit in the token embedding table. **XLM-R** ([Conneau et al., 2020](https://aclanthology.org/2020.acl-main.747/)) trained on over 2 TB of CommonCrawl text across 100 languages and substantially outperforms mBERT (averaging +14.6 points on XNLI).
+- **Monolingual Vietnamese models.** **PhoBERT** (Nguyen and Nguyen, 2020) comes in base (135M parameters) and large (370M) sizes, trained with the RoBERTa recipe on 20 GB of Vietnamese text. Its key design choice addresses a linguistic property of Vietnamese: spaces separate **syllables**, not **words**, so "thủ đô" (capital) is two space-separated syllables forming a single word. PhoBERT applies **Vietnamese word segmentation** first using VnCoreNLP's RDRSegmenter (`"Hà_Nội là thủ_đô của Việt_Nam"`) before applying BPE subword tokenization. Consequently, **any text fed to PhoBERT at fine-tuning or inference time must be segmented with the same word segmenter**. Across Vietnamese POS tagging, dependency parsing, NER, and natural language inference benchmarks, PhoBERT outperforms XLM-R despite having fewer parameters and despite XLM-R having seen 137 GB of Vietnamese text (nearly $7\times$ more).
+
+### Limitations
+
+- **BERT does not naturally generate text.** It fills in blanks inside an existing template rather than writing left to right. Open-ended generation belongs to causal decoders like GPT (see [GPT and Distributed Training](/en/nlp/gpt-distributed-training/)) and encoder–decoder models.
+- **512-token limit.** Longer documents must be chunked. Self-attention cost grows quadratically with sequence length; long-context solutions are covered in [Advanced Transformers](/en/nlp/advanced-transformers/).
+- **Raw vectors from an un-fine-tuned BERT make poor sentence embeddings.** See the third box under Common pitfalls.
+
+## Illustration
+
+The core architectural difference between BERT and GPT lies in the attention mask. In the figure below, each row is the token being updated and each column is a token it is allowed to attend to. Compare the cell at row "chim", column "bay": BERT can see it, whereas GPT blocks it.
+
+{/* FIG: BERT's encoder lets every token attend to every token (full grid); GPT's decoder restricts each token to itself and preceding tokens (lower triangle). */}
+<AttentionMaskFigure />
+
+In GPT's grid, only the bottom row sees the entire sentence: only the last token has full context. In BERT's grid, every row sees the full sentence, from the first token to the last. The trade-off: with a full grid you cannot train by predicting the next token, which is why BERT needs MLM.
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the token-masking cell with Python 3.14 and NumPy 2.4 (in Pyodide), and the mBERT cell with Python 3.14, `transformers` 5.22, and PyTorch 2.14 on CPU. The masking cell runs directly on this page; the mBERT script requires PyTorch and downloads weights from Hugging Face Hub, so run it on your own machine.
+
+### Masking tokens with the 15% and 80/10/10 rule
+
+The cell below implements Steps 1 and 2 of MLM on a Vietnamese sentence pre-split by syllable for readability (real BERT uses WordPiece). Each regular token is selected independently with probability $0.15$, matching how Hugging Face's `transformers` implements dynamic masking, so the number of selected tokens in a single sentence fluctuates around 15%. The second half of the script checks the empirical proportions across 2,000 simulated sentences of 126 tokens each.
+
+<PythonRunner code={maskingCode} title="Selecting and masking tokens for MLM" />
+
+Reading the output:
+
+- **The sample sentence has 24 regular tokens, and 3 positions are selected** (12.5%, since a single short sentence has noticeable sampling variance around 15%). Positions 3 ("là") and 18 ("và") become `[MASK]`. Position 11 ("có") is replaced by the random word "năm", turning the phrase into "nơi năm hơn một nghìn năm"—grammatically off, yet composed entirely of real words. The model must spot the anomaly from context and predict the original word "có".
+- **Loss is computed only at these 3 positions**, with targets "là", "có", and "và". The other 21 positions incur no loss.
+- **Across 2,000 sentences**, the selection rate is 0.1507; among selected positions, 0.797 become `[MASK]`, 0.101 become a random token, and 0.102 are kept unchanged—matching the theoretical 15% and 80/10/10 split up to sampling noise.
+
+None of the 3 selected positions in the single sentence happened to fall into the 10% unchanged branch. When a position does land there, its input token and target label are identical—but the model does not know that and still has to predict it.
+
+### Filling blanks with multilingual BERT
+
+The script below uses mBERT (`google-bert/bert-base-multilingual-cased`), which handles both Vietnamese and English. The first part calls `pipeline("fill-mask")` on two sentences containing `[MASK]` and prints the top 5 predicted tokens. The second part loads the bare encoder (`AutoModel`, without the MLM head), extracts `last_hidden_state` (the vectors $\mathbf{h}_i$) for three sentences containing "bay", and compares the contextual vectors of "bay" using cosine similarity.
+
+<LocalCode
+  code={fillMaskCode}
+  title="fill-mask and contextual vectors with mBERT"
+  packages={['transformers', 'torch']}
+  hardware="CPU is sufficient. First run downloads ~717 MB (714 MB weights file). Runs in about a minute on a dev laptop, mostly spent loading the model"
+  sampleVaries={false}
+>
+
+```text
+Hà Nội là [MASK] đô của Việt Nam.
+  thủ      0.935
+  Thủ      0.031
+  kinh     0.012
+  đô       0.004
+  đại      0.002
+I drink a cup of [MASK] every morning.
+  coffee   0.664
+  drink    0.093
+  milk     0.056
+  wine     0.052
+  beer     0.021
+(8, 768) ['[CLS]', 'Con', 'chim', 'bay', 'qua', 'sông', '.', '[SEP]']
+(10, 768) ['[CLS]', 'Đà', '##n', 'chim', 'bay', 'về', 'phía', 'nam', '.', '[SEP]']
+(12, 768) ['[CLS]', 'Má', '##y', 'bay', 'hạ', 'cánh', 'lúc', 'tá', '##m', 'giờ', '.', '[SEP]']
+cos(bird flies, birds fly) = 0.729
+cos(bird flies, airplane)  = 0.562
+cos(birds fly, airplane)   = 0.539
+cos(bay, ve)               = 0.542
+mean cos, any token pair   = 0.325
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **Vietnamese sentence:** "thủ" gets probability 0.935. This is the exact example from the Intuition section: the prediction is near-certain thanks to the syllable "đô" **to its right**. The second candidate "Thủ" differs only in capitalization because this model is cased. "kinh" (0.012) also makes sense ("kinh đô", royal capital).
+- **English sentence:** "coffee" leads with 0.664. Second place is "drink" (0.093): the model copies a word already present in the sentence, even though "a cup of drink" is unnatural. Then come "milk", "wine", and "beer". A sensible top-1 prediction does not guarantee every candidate in the top 5 is idiomatic.
+- **Shape `(8, 768)`:** the first sentence has 8 tokens including `[CLS]` and `[SEP]`, each represented by a 768-dimensional vector. Notice how mBERT's WordPiece tokenizer splits several Vietnamese syllables into subwords: "Máy" becomes `Má` and `##y`, "tám" becomes `tá` and `##m`. [Tokenization](/en/nlp/tokenization/) explains why.
+- **Cosine similarities:** "bay" in the two bird-flying sentences is closest (0.729). "bay" in "chim bay" (bird flies) versus "máy bay" (airplane) drops to 0.562 and 0.539. With a static embedding table, all three cosines would be 1.000 because every occurrence looks up the same row.
+- **Two baselines for calibrating those numbers.** Comparing "bay" from sentence 1 against a completely unrelated word, "về" from sentence 2, gives 0.542—almost identical to the 0.562 between "chim bay" and "máy bay." In other words, to mBERT, the "bay" in "máy bay" is about as far from the "bay" in "chim bay" as an unrelated word is. The broader baseline—the mean cosine across all token pairs between sentences 1 and 3 (including `[CLS]`, `[SEP]`, and the period)—is 0.325.
+
+Two honest caveats. First, BERT's hidden representations are **anisotropic**: vectors cluster inside a narrow cone rather than spreading evenly around the origin, so the cosine between two arbitrary tokens is already substantially positive ([Ethayarajh, 2019](https://arxiv.org/abs/1909.00512)), as the 0.325 baseline shows. Always compare cosines **relative to one another and to a baseline**, never in isolation. Second, three sentences are an illustration, not a benchmark.
+
+When you run the script, `transformers` also prints two weight-loading reports to `stderr` listing `UNEXPECTED` keys—parameters saved in the checkpoint that the instantiated model class does not use. First, `pipeline` loads `BertForMaskedLM` and ignores `bert.pooler.*` and `cls.seq_relationship.*` (the NSP head), since filling blanks only needs the MLM head. Second, `AutoModel` loads `BertModel` (the encoder plus pooler) and ignores `cls.predictions.*` (the MLM head) and `cls.seq_relationship.*`, since we only asked for the encoder. The checkpoint stores all pre-training heads together; each model class picks out the pieces it needs. This is normal, not an error.
+
+## Common pitfalls
+
+:::caution[Using BERT for open-ended text generation]
+BERT has no causal mask and was never trained to predict the next token left-to-right. Appending `[MASK]` to the end of a prompt and filling it iteratively produces text, but poorly and slowly: every new token requires re-encoding the entire sequence, and the model never practiced coherent multi-token continuation. For text generation, use a decoder-only model like GPT or an encoder–decoder model like T5. BERT shines at **understanding** existing text: classification, sequence labeling, and extractive question answering.
+:::
+
+:::caution[Feeding unsegmented Vietnamese text into PhoBERT]
+PhoBERT was pre-trained on word-segmented Vietnamese text where compounds are joined with underscores, such as `"thủ_đô"` and `"Việt_Nam"`. Passing unsegmented `"thủ đô"` (two separate syllables) feeds the model token sequences it rarely saw during pre-training, silently degrading accuracy without raising any error. Always segment Vietnamese text with the exact tool PhoBERT used (VnCoreNLP's RDRSegmenter, which requires Java) before calling the tokenizer. Similarly, different model families use different mask tokens: BERT and mBERT use `[MASK]`, whereas RoBERTa, XLM-R, and PhoBERT use `<mask>`. Read `tokenizer.mask_token` instead of hardcoding the string.
+:::
+
+:::caution[Using raw `[CLS]` vectors from an un-fine-tuned BERT as sentence embeddings]
+The `[CLS]` token was only pre-trained to feed the binary NSP head, and only becomes a task-meaningful summary after fine-tuning. [Reimers and Gurevych (2019)](https://arxiv.org/abs/1908.10084) evaluated un-fine-tuned BERT on semantic textual similarity (STS) benchmarks and found that taking the `[CLS]` vector—or averaging BERT's token vectors—and comparing with cosine performs **worse than simply averaging static GloVe embeddings**. For semantic search or sentence clustering, use a model fine-tuned specifically for sentence embeddings (such as Sentence-BERT); see [Information Retrieval](/en/nlp/information-retrieval/).
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` field of the frontmatter. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Static embeddings assign one vector per word type. BERT assigns one vector $\mathbf{h}_i$ per **token occurrence**, computed from the entire sequence through a stack of bidirectional Transformer encoder blocks (BERT-base: 12 layers, $D = 768$, 12 heads, ~110M parameters).
+- Input representations sum token, segment, and learned position embeddings, framed by `[CLS]` at the start and `[SEP]` after each segment, up to 512 tokens.
+- MLM selects 15% of positions—turning 80% into `[MASK]`, 10% into a random token, and keeping 10% unchanged to mitigate pre-train/fine-tune mismatch—and computes $\mathcal{L}_{\text{MLM}}$ only at those selected positions against the original tokens. NSP was included in original BERT, though RoBERTa showed it can be dropped.
+- Fine-tuning adds a lightweight head: sequence classification from $\mathbf{h}_{\text{CLS}}$, token labeling from each $\mathbf{h}_i$, or extractive span prediction with learned start/end vectors. For Vietnamese, popular choices include mBERT, XLM-R, and PhoBERT (which requires prior word segmentation).
+
+**Further reading:**
+
+- Nguyen, D. Q., Nguyen, A. T. (2020). [*PhoBERT: Pre-trained language models for Vietnamese*](https://aclanthology.org/2020.findings-emnlp.92/), Findings of EMNLP 2020, Sections 2 and 3. Explains why Vietnamese requires word segmentation before BPE, details the 20 GB corpus, and compares against XLM-R across four Vietnamese NLP tasks.
+- Devlin, J., Chang, M.-W., Lee, K., Toutanova, K. (2019). [*BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding*](https://aclanthology.org/N19-1423/), NAACL 2019, Sections 3, 5.1, and Appendices A.1, C.2. The original paper covering architecture, MLM, NSP, fine-tuning, and ablations on NSP and masking rates. (The paper writes $T_i$ where this lesson writes $\mathbf{h}_i$, and $H$ where this lesson writes $D$.)
+- Liu, Y. et al. (2019). [*RoBERTa: A Robustly Optimized BERT Pretraining Approach*](https://arxiv.org/abs/1907.11692), arXiv:1907.11692, Section 4. Dynamic masking, removing NSP, and larger batches—showing how under-trained original BERT was.
+- Clark, K., Luong, M.-T., Le, Q. V., Manning, C. D. (2020). [*ELECTRA: Pre-training Text Encoders as Discriminators Rather Than Generators*](https://arxiv.org/abs/2003.10555), ICLR 2020, Sections 1 and 2. Why learning from only 15% of tokens is sample-inefficient, and how replaced-token detection learns from every token.
+- Hugging Face. [*Pipelines*](https://huggingface.co/docs/transformers/main_classes/pipelines), `transformers` documentation, `FillMaskPipeline` section. Reference for `top_k`, `targets`, and output fields.
+
+<LessonProgress />

@@ -40,7 +40,7 @@ import preprocessCode from '@code/ml/data-preprocessing/preprocess.en.py?raw';
 import leakageCode from '@code/ml/data-preprocessing/leakage.en.py?raw';
 import imbalancedCode from '@code/ml/data-preprocessing/imbalanced.en.py?raw';
 
-## Objectives
+## Goals
 
 After this lesson, you will be able to:
 
@@ -218,7 +218,7 @@ All resampling and augmentation techniques must be applied **strictly to trainin
 - **Imbalance techniques cannot manufacture new information.** Class weighting and resampling primarily rebalance the precision–recall trade-off; substantial improvements demand acquiring more minority samples or higher-fidelity features.
 - **Augmentation requires domain expertise.** Unchecked transformations risk corrupting ground-truth labels.
 
-## Visualization
+## Illustration
 
 The reference guide below summarizes standard preprocessing steps, their learned training statistics, and associated scikit-learn classes:
 
@@ -233,7 +233,7 @@ The reference guide below summarizes standard preprocessing steps, their learned
 | Class weighting | Class counts $m_c$ | `class_weight="balanced"` | Imbalanced classification |
 | Resampling / Augmentation | Target sample subsets | Custom scripts / `imblearn` | Imbalanced datasets, small sample regimes |
 
-## Code Examples
+## Code examples
 
 The three cells below run independently.
 
@@ -270,7 +270,7 @@ The training set contains 74 positive samples out of 1,400; the test set contain
 - **Random oversampling**: Produces results identical to `class_weight="balanced"`, confirming their mathematical equivalence.
 - **Lowered threshold ($t = 0.2$)**: Achieves the highest F1 score (0.788) with recall 0.839 and precision 0.743. In production, thresholds must be tuned on validation splits rather than test data.
 
-## Common Pitfalls
+## Common pitfalls
 
 :::caution[Fitting Preprocessors Across the Full Dataset]
 Calling `StandardScaler().fit_transform(X)` before `train_test_split` leaks test distribution statistics into training parameters. Calling `fit_transform` on the test split is even worse, scaling test data by different parameters than the training set. Always split data first, then bind transformers and estimators within a `Pipeline`.
@@ -284,13 +284,13 @@ Replicating minority samples before splitting places identical copies across bot
 Assigning arbitrary integers (e.g., 0, 1, 2) to nominal categories forces linear models to assume artificial metric spacing. Use `OneHotEncoder` for nominal categories, reserving `OrdinalEncoder` strictly for inherently ranked variables.
 :::
 
-## Quick Check
+## Quick check
 
 {/* Questions defined in the `quiz` frontmatter field. */}
 
 <Quiz />
 
-## Summary and Further Reading
+## Summary and further reading
 
 **Key Takeaways:**
 

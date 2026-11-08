@@ -1,0 +1,230 @@
+---
+title: 'NumPy and Pandas'
+description: 'Master NumPy and Pandas for AI: multidimensional ndarray, vectorization, broadcasting, DataFrames, missing value imputation, and high-speed data aggregation.'
+quiz:
+  - question: 'Why is adding two 1,000,000-element NumPy arrays 50 to 100 times faster than using a Python `for` loop to add two equivalent `list` objects?'
+    options:
+      - 'Because NumPy automatically compiles Python into Assembly and disables memory safety checks'
+      - 'Because NumPy stores homogeneous elements in contiguous C memory blocks and leverages CPU SIMD vector instructions'
+      - 'Because NumPy runs all arithmetic operations on the GPU by default'
+      - 'Because Python lists only support string elements'
+    answer: 1
+    explanation: 'A Python `list` stores an array of pointers to boxed number objects scattered across memory (creating heavy pointer-chasing and type-checking overhead). By contrast, a NumPy `ndarray` packs homogeneous primitive values into a contiguous C/Fortran memory buffer, enabling fast CPU cache locality and parallel SIMD instructions.'
+  - question: 'Given array $A$ with shape `(4, 1)` and array $B$ with shape `(3,)`, what is the resulting shape of the broadcasted addition `A + B`?'
+    options:
+      - 'It raises a `ValueError` because the dimensions do not match'
+      - '`(4, 3)`'
+      - '`(4, 1)`'
+      - '`(3, 4)`'
+    answer: 1
+    explanation: 'Under NumPy''s broadcasting rules, array $B$ with shape `(3,)` is right-aligned to `(1, 3)`. Comparing dimensions from right to left: the trailing dimensions are 1 and 3 (compatible, stretched to 3), and the leading dimensions are 4 and 1 (compatible, stretched to 4). The resulting array has shape `(4, 3)`.'
+  - question: 'Given a DataFrame `df` with custom string index labels `df.index = ["k1", "k2", "k3"]`, which row do `df.iloc[0]` and `df.loc["k1"]` return?'
+    options:
+      - 'Both commands return the first row of the DataFrame'
+      - '`df.iloc[0]` raises a syntax error because the index contains strings'
+      - '`df.loc["k1"]` returns the last row, while `df.iloc[0]` returns the first row'
+      - 'Both commands return a column instead of a row'
+    answer: 0
+    explanation: '`iloc` (integer location) always indexes by 0-based physical integer position (`0` is the first row). `loc` (label location) indexes by index label (`"k1"` is the label of the first row). Both expressions return the exact same first row.'
+  - question: 'Which of the following is the standard way to fill missing values (`NaN`) in the `"age"` column with that column''s median in Pandas?'
+    options:
+      - '`df["age"].dropna(inplace=True)`'
+      - '`df["age"] = df["age"].fillna(df["age"].median())`'
+      - '`df["age"].replace(0, df["age"].mean())`'
+      - '`df["age"].isna() = df["age"].median()`'
+    answer: 1
+    explanation: 'The `.fillna()` method replaces `NaN` entries with a specified value. Passing `df["age"].median()` into `.fillna()` preserves all rows while remaining robust against extreme outliers compared to using the mean.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import vectorCode from '@code/python/numpy-pandas/vectorization.en.py?raw';
+import dfOpsCode from '@code/python/numpy-pandas/dataframe-ops.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand NumPy's multidimensional `ndarray`, its contiguous memory layout, and why it dramatically outperforms pure Python lists.
+- Master **Vectorization** and **Broadcasting** to write loop-free linear algebra code.
+- Work fluently with Pandas `Series` and `DataFrame` structures, slicing data accurately with `.loc` and `.iloc`.
+- Clean and summarize real-world tabular datasets for AI: detect and impute missing values (`NaN`), and aggregate data with `.groupby()`.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In earlier lessons, you worked with built-in collections like `list` and `dict`. In this lesson, you will step into high-performance numerical computing with **NumPy** and tabular data wrangling with **Pandas**—the two foundational libraries behind every AI data pipeline.
+:::
+
+## Intuition
+
+Why can't we train neural networks using standard Python `list` objects?
+
+Consider a simple task: multiplying a $1000 \times 1000$ image matrix by a weight matrix.
+- With nested `for` loops in pure Python, the interpreter has to execute 1 billion multiply-add operations. On every single step, Python checks data types, dereferences pointers, and allocates new boxed objects—taking tens of seconds.
+- With **NumPy**, all 1 million numbers sit side by side as raw binary bytes in a contiguous block of RAM. The CPU can process chunks of numbers simultaneously in a single hardware instruction (**SIMD** – Single Instruction, Multiple Data), finishing the calculation in milliseconds!
+
+**NumPy** is the mathematical engine underneath virtually every machine learning and deep learning library, while **Pandas** is your data workbench for cleaning, transforming, and exploring real-world datasets before feeding them into a model.
+
+## Theory
+
+### NumPy and the N-Dimensional Array (`ndarray`)
+
+The `ndarray` (N-dimensional array) is NumPy's core data structure:
+- Every element in an array must share the **same data type** (homogeneous, such as `float32` or `int64`).
+- The dimensions of the array are stored in `.shape` (a tuple of integers).
+- The element data type is stored in `.dtype`.
+
+#### Vectorization: Loop-Free Array Computing
+
+**Vectorization** means expressing operations across entire arrays at once instead of iterating element by element in a Python `for` loop.
+
+Instead of writing:
+
+```python
+# Slow (Python for-loop):
+c = [a[i] * b[i] for i in range(len(a))]
+```
+
+You write:
+
+```python
+# Fast vectorized computation (NumPy C-speed):
+c = a * b
+```
+
+#### Broadcasting
+
+Broadcasting allows NumPy to perform arithmetic between arrays of different shapes without making wasteful copies in memory.
+
+**Broadcasting rules:** When aligning two arrays, NumPy compares their dimension sizes from **right to left**:
+1. The two dimensions are equal: compatible.
+2. One of the dimensions is 1: that dimension is virtually stretched to match the other.
+3. The dimensions differ and neither is 1: NumPy raises `ValueError: operands could not be broadcast together`.
+
+For example, adding a vector of shape $(3,)$ to a matrix of shape $(4, 3)$ automatically views the vector as $(1, 3)$ and broadcasts it across all 4 rows to produce a $(4, 3)$ result.
+
+### Pandas: Tabular Data Analysis and Manipulation
+
+Pandas provides two primary data structures:
+- **Series:** A 1D labeled array with an index.
+- **DataFrame:** A 2D table of rows and columns (similar to an Excel spreadsheet or SQL table).
+
+#### Indexing Data: `.loc` vs. `.iloc`
+
+To avoid ambiguity, Pandas separates indexing into two explicit accessors:
+- **`df.loc[...]`:** **Label-based** indexing. You pass row index labels and column names.
+- **`df.iloc[...]`:** **Integer position-based** indexing from `0` to `n - 1`.
+
+```python
+# Select the row with index label "HN" and column "price":
+val = df.loc["HN", "price"]
+
+# Select the 0th row and 2nd column by physical integer position:
+val = df.iloc[0, 2]
+```
+
+#### Handling Missing Data
+
+Real-world datasets almost always contain missing values (`NaN` – Not a Number, or `None`). Essential methods include:
+- `df.isna().sum()`: Count missing values in each column.
+- `df.dropna()`: Drop rows or columns containing missing values.
+- `df.fillna(value)`: Impute missing entries with a replacement value (such as the column `.mean()` or `.median()`).
+
+#### Grouping and Aggregation with `.groupby()`
+
+Pandas implements the **Split-Apply-Combine** pattern via `.groupby()`:
+
+```python
+# Group by apartment type and compute average area
+df.groupby("type")["area"].mean()
+```
+
+You can also chain `.agg()` to compute multiple summary statistics across different columns in a single call.
+
+## Illustration
+
+How NumPy broadcasting stretches compatible array shapes:
+
+```text
+Matrix A (3 × 3):                Vector B (1 × 3):
+┌───┬───┬───┐                    ┌───┬───┬───┐
+│ 1 │ 2 │ 3 │                    │ 10│ 20│ 30│
+├───┼───┼───┤                    └───┴───┴───┘
+│ 4 │ 5 │ 6 │         +                │ (Virtually broadcast across 3 rows)
+├───┼───┼───┤                          ▼
+│ 7 │ 8 │ 9 │                    ┌───┬───┬───┐
+└───┴───┴───┘                    │ 10│ 20│ 30│
+                                 ├───┼───┼───┤
+                                 │ 10│ 20│ 30│
+                                 ├───┼───┼───┤
+                                 │ 10│ 20│ 30│
+                                 └───┴───┴───┘
+```
+
+The Split-Apply-Combine workflow in Pandas `.groupby()`:
+
+```text
+[ Raw Data ] ──► SPLIT (Partition rows by category: A, B)
+                    ├── Group A ──► APPLY: Compute mean ──┐
+                    └── Group B ──► APPLY: Compute mean ──┴──► COMBINE: Merge into summary table
+```
+
+## Code examples
+
+The cells below run independently. Click **Run** to see the output immediately.
+
+The first cell uses NumPy to run a vectorized linear model forward pass: multiplying feature matrix $\mathbf{X}$ by weight vector $\mathbf{w}$, adding bias $b$ via broadcasting, and computing Mean Squared Error (MSE) in just a few lines:
+
+<PythonRunner code={vectorCode} title="Vectorized linear model computation with NumPy" />
+
+Every matrix multiplication and error calculation happens instantaneously without a single `for` loop—the exact mechanism machine learning libraries use to process millions of training samples.
+
+The second cell demonstrates cleaning and aggregating housing data with Pandas: imputing missing values with the median, filtering rows with `.loc`, and computing grouped statistics with `.groupby()`.
+
+<PythonRunner code={dfOpsCode} title="Data preprocessing and group aggregation with Pandas" />
+
+The output displays the average price and transaction count per district, giving you a clean summary of the dataset in seconds.
+
+## Common pitfalls
+
+:::caution[Shape mismatch errors in matrix multiplication]
+The `@` operator performs linear algebra matrix multiplication: the number of columns in the left matrix must equal the number of rows in the right matrix ($A_{(m \times k)} @ B_{(k \times n)} \to C_{(m \times n)}$). Confusing matrix multiplication `@` with element-wise multiplication `*` when dimensions do not align raises `ValueError: matmul: Input operand 1 has a mismatch in its core dimension 0`.
+:::
+
+:::caution[Iterating over DataFrame rows with a `for` loop]
+Writing `for index, row in df.iterrows():` to compute column values row by row slows execution down by orders of magnitude. Always use vectorized Pandas/NumPy expressions such as `df["col_c"] = df["col_a"] + df["col_b"]`.
+:::
+
+:::caution[Triggering `SettingWithCopyWarning`]
+When you modify a filtered subset of a DataFrame (e.g., `sub_df["price"] = 10`), Pandas cannot always tell whether you intend to modify a temporary view or the original table. Call `.copy()` explicitly if you want an independent DataFrame (`sub_df = df[cond].copy()`), or use `df.loc[cond, "price"] = 10` to update the original DataFrame directly.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- NumPy's `ndarray` stores homogeneous data in contiguous C memory blocks, achieving massive speedups through CPU cache locality and SIMD instructions.
+- Vectorization replaces manual Python loops with concise, C-speed array expressions.
+- Broadcasting stretches compatible array dimensions automatically without copying data in memory.
+- Pandas provides `DataFrame` and `Series` for expressive tabular manipulation using `.loc`, `.iloc`, `.fillna()`, and `.groupby()`.
+
+**Further reading:**
+
+- Harris, C. R., et al. (2020). [*Array programming with NumPy*](https://doi.org/10.1038/s41586-020-2649-2). *Nature*, 585(7825), 357–362. The landmark paper detailing NumPy's architecture and scientific impact.
+- McKinney, W. (2010). [*Data Structures for Statistical Computing in Python*](https://doi.org/10.25080/Majora-92bf1922-00a). *Proceedings of the 9th Python in Science Conference (SciPy 2010)*. The original paper introducing Pandas.
+- NumPy Developers (2024). [*NumPy User Guide: Broadcasting*](https://numpy.org/doc/stable/user/basics.broadcasting.html). Official documentation on NumPy's broadcasting rules.
+
+<LessonProgress />

@@ -1,0 +1,334 @@
+---
+title: Text Normalization
+description: Two "Hòa" strings look identical on screen yet compare unequal in Python. NFC vs. NFD, Vietnamese tone placement, case folding, URL/number placeholders, stemming, stopwords, and when not to normalize.
+quiz:
+  - question: 'The string `"Huế"` typed in precomposed NFC form has `len` equal to 3. After `unicodedata.normalize(''NFD'', s)`, what is its `len`?'
+    options:
+      - '3, because NFD does not alter characters that are already precomposed'
+      - '4, because the accented vowel splits into two code points'
+      - '5'
+      - '6'
+    answer: 2
+    explanation: 'NFD decomposes every precomposed character into its base letter plus combining marks. The vowel `"ế"` carries two diacritics—a circumflex (`U+0302`) and an acute tone mark (`U+0301`)—so it decomposes into three code points: `e`, `U+0302`, and `U+0301`. Together with `"H"` and `"u"`, the total length is 5. Length 4 is what you get for `"Hòa"` (one diacritic), whereas a Vietnamese vowel carrying both a vowel hat/horn and a tone mark splits into three.'
+  - question: 'Your search index contains a document titled `"Hóa đơn tháng 10"`. A user types the unaccented query `"hoa don"` and gets zero results. What is the best fix?'
+    options:
+      - 'Fold case and strip diacritics on both the indexed search field and the incoming user query when matching, while keeping the original accented title for display'
+      - 'Strip diacritics only on the user''s query, since the document titles in the index are already spelled properly'
+      - 'Apply NFC normalization to both the index and the query so they use the same Unicode encoding'
+      - 'Apply the Porter stemmer to both sides so inflected word forms map to the same stem'
+    answer: 0
+    explanation: 'Matching only works when both the indexed field and the query pass through the exact same normalization function $f$. Stripping diacritics on both sides maps both `"Hóa đơn"` and `"hoa don"` to `"hoa don"`. Stripping only the query leaves `"hoa don"` vs. `"hóa đơn"`, which still fails to match. NFC preserves diacritics so it does not bridge accented and unaccented text, and Porter stemming strips English suffixes (`-ing`, `-ed`) rather than Vietnamese diacritics.'
+  - question: 'You remove stopwords using a list that includes `"không"` ("not"), then train a bag-of-words sentiment classifier. What happens to the two reviews `"món này không ngon"` ("this dish is not good") and `"món này ngon"` ("this dish is good")?'
+    options:
+      - 'They remain distinct because word order is preserved'
+      - 'The classifier learns to recover the negation from the surrounding words'
+      - 'They remain distinct because the word `"món"` carries sentiment'
+      - 'They become the exact same input vector and are guaranteed to receive the exact same prediction'
+    answer: 3
+    explanation: 'Once `"không"` is stripped, both reviews reduce to `"món này ngon"`. Because the model receives identical feature vectors for both inputs, it must output the exact same prediction for both. Information discarded during normalization cannot be recovered downstream; for sentiment analysis, negation words like `"không"`, `"chẳng"`, and `"chưa"` must never be stripped.'
+  - question: 'You train a text classifier on a corpus normalized to new-style Vietnamese tone placement (`"hoà"`, `"khoẻ"`). In production, your inference preprocessing applies only `unicodedata.normalize("NFC", text)`. A user submits `"hòa"`. What happens?'
+    options:
+      - 'Everything works fine, because NFC maps both `"hòa"` and `"hoà"` to the same sequence of code points'
+      - 'The model sees `"hòa"` as an unfamiliar/out-of-vocabulary token because the inference normalization function differs from the training normalization function'
+      - 'Python raises a `UnicodeError` because `"hòa"` is not in the model''s vocabulary'
+      - 'Everything works fine, because the two strings look almost identical on screen so the model treats them as equal'
+    answer: 1
+    explanation: 'Both `"hòa"` and `"hoà"` are already in NFC, but the grave accent sits on `"ò"` (`U+00F2`) in the first string and on `"à"` (`U+00E0`) in the second. NFC does not move tone marks between vowels, so `"hòa"` remains distinct from the `"hoà"` tokens seen during training. Fix this by packaging all normalization steps into a single function `normalize(text)` and calling that exact function in both training and inference.'
+  - question: 'The Porter stemmer maps both `"university"` and `"universe"` to `"univers"`, while leaving `"ran"` unchanged as `"ran"`. Which statement accurately describes this behavior?'
+    options:
+      - 'Porter looks up words in an etymological dictionary and knows `"university"` and `"universe"` share a Latin root'
+      - 'Both outputs are bugs in the specific implementation; the original Porter algorithm does not do this'
+      - 'They illustrate the two classic errors of rule-based stemming in opposite directions: overstemming (merging words with different meanings) and understemming (failing to merge irregular inflections like `"ran"` and `"run"`)'
+      - 'They show that stemming merges more aggressively and is therefore always superior to lemmatization'
+    answer: 2
+    explanation: 'Porter is a purely rule-based suffix stripper with no dictionary. Stripping `-ity` and `-e` causes it to overstem `"university"` and `"universe"` into the same stem `"univers"`, while irregular past-tense forms like `"ran"` share no suffix rule with `"run"` and are left unmerged (understemming). A lemmatizer uses a lexicon and part-of-speech tag to map `"ran"` to `"run"` while keeping `"university"` and `"universe"` separate, at the cost of extra runtime and language-specific resources.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import unicodeCode from '@code/nlp/text-normalization/unicode.en.py?raw';
+import pipelineCode from '@code/nlp/text-normalization/pipeline.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Explain why two strings that look identical on screen can compare as unequal in Python, and use **Unicode normalization** (NFC and NFD) to unify them. Recognize why Vietnamese tone placement (`"hòa"` vs. `"hoà"`) is a separate issue that Unicode normalization alone does not resolve.
+- Build a modular **text normalization** pipeline (Unicode NFC, case folding, URL/email/number placeholders, punctuation handling, whitespace collapsing) and explain why step ordering matters.
+- Distinguish **stemming** from **lemmatization**, explain why an isolating language like Vietnamese rarely needs either, and handle **stopwords** safely.
+- Recognize when **not** to normalize aggressively: subword language models, named entity recognition, and sentiment analysis.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+## Intuition
+
+### Two "Hòa" strings that are not equal
+
+Imagine searching a customer table for `"Hòa"` and getting zero matches—even though `"Hòa"` is staring right back at you in the first row on screen.
+
+The culprit is that computers do not store visual glyph shapes; they store sequences of Unicode integers called **code points**. And the accented letter `"ò"` can be represented in two different ways:
+
+| Representation | Visual appearance | Code point sequence | `len` in Python |
+|---|---|---|---:|
+| Precomposed `"ò"` | Hòa | `U+0048 U+00F2 U+0061` | 3 |
+| Base `"o"` + combining grave accent | Hòa | `U+0048 U+006F U+0300 U+0061` | 4 |
+
+Both rows render as the exact same characters on screen, yet they are two different integer sequences in memory. Python's `==` operator compares strings code point by code point, so it returns `False`.
+
+And Vietnamese has a second twist. Some writers spell `"Hòa"` with the grave accent over `"o"`, while others spell `"Hoà"` with the grave accent over `"a"`. Human readers treat both as the exact same word, yet to a computer one string contains `"ò"` (`U+00F2`) and the other contains `"à"` (`U+00E0`).
+
+### One review, many surface spellings
+
+User-generated text on the web is messier still. Consider three customer reviews expressing the exact same thought:
+
+- `"Sp OK lắm!!!"`
+- `"sp ok lắm"`
+- `"SP   ok  lắm !"`
+
+To a count-based model like bag-of-words or TF-IDF ([Vector Semantics and Embeddings](/en/nlp/vector-semantics-embeddings/)), `"OK"`, `"ok"`, `"Sp"`, `"sp"`, and `"SP"` are five unrelated vocabulary items, splitting statistical evidence across surface variants and inflating the vocabulary without adding meaning.
+
+Yet normalizing too aggressively is just as dangerous. Stripping all Vietnamese diacritics collapses `"mà"` (*but*) and `"má"` (*mother*) into `"ma"` (*ghost*). Stripping `"không"` (*not*) as a "high-frequency stopword" turns `"sản phẩm không tốt"` (*"the product is not good"*) into `"sản phẩm tốt"` (*"the product is good"*).
+
+The problem for this lesson is: **choose a transformation that maps equivalent surface spellings of the same concept to a single canonical string without colliding words that mean different things, and apply that exact transformation consistently everywhere.**
+
+## Theory
+
+### Normalization as a function
+
+Think of text normalization as a function $f$ from strings to strings. Ideally, $f$ should satisfy three properties:
+
+1. **Completeness (recall):** if two strings $a$ and $b$ are equivalent for your task (written $a \sim b$), they should map to the same canonical output:
+
+$$
+a \sim b \;\Rightarrow\; f(a) = f(b)
+$$
+
+2. **Soundness (precision):** if $a$ and $b$ carry different meanings for your task ($a \not\sim b$), then $f(a) \neq f(b)$. Stripping diacritics violates soundness whenever tone distinctions matter: $f(\text{"mà"}) = f(\text{"má"}) = \text{"ma"}$.
+3. **Idempotence:** normalizing an already-normalized string changes nothing: $f(f(a)) = f(a)$. That way, calling $f$ twice by mistake never corrupts your data.
+
+Properties 1 and 2 pull in opposite directions: the more aggressively $f$ merges variants, the higher the risk of merging distinct words by mistake. Worse, what counts as "equivalent" ($a \sim b$) depends on the task: a search engine should probably match unaccented `"hoa don"` against `"Hóa đơn"`, whereas a named-entity recognizer needs to keep uppercase `"Hòa"` (a person's name) distinct from lowercase `"hòa"` (*peace / draw*). There is no single universal normalizer for every NLP task.
+
+One rule, however, is universal: **training and inference must call the exact same function $f$**.
+
+### Unicode: precomposed characters vs. combining marks
+
+Unicode assigns every character a unique integer called a **code point**, written `U+` followed by hexadecimal digits. Accented Vietnamese letters can be encoded in two ways:
+
+- **Precomposed characters:** a single code point represents the base vowel together with its diacritics—for instance, `"ò"` is `U+00F2` and `"ệ"` is `U+1EC7`. Unicode includes precomposed code points for every accented vowel in the Vietnamese alphabet.
+- **Decomposed sequences (base character + combining marks):** the plain ASCII vowel is followed by one or more zero-width combining diacritic code points—for instance, `"o"` (`U+006F`) followed by `U+0300` (`COMBINING GRAVE ACCENT`), or `"e"` (`U+0065`) followed by `U+0323` (dot below) and `U+0302` (circumflex) for `"ệ"`.
+
+Unicode defines these two representations as **canonically equivalent**: they represent the exact same abstract character and must be rendered identically. Decomposed Vietnamese text appears in the wild more often than you might expect—produced by the "Unicode tổ hợp" mode of Vietnamese input methods, converted from legacy Windows-1258 encodings, or copied out of macOS filenames and PDF documents.
+
+Unicode Standard Annex #15 (UAX #15) defines four **Unicode normalization forms**:
+
+| Form | What it does | Example |
+|---|---|---|
+| **NFD** | Canonical decomposition into base characters + combining marks | `"ò"` $\to$ `"o"` + `U+0300` |
+| **NFC** | Canonical decomposition followed by canonical composition into precomposed characters | `"o"` + `U+0300` $\to$ `"ò"` |
+| **NFKD** | Compatibility decomposition (NFD + replacing formatting/ligature variants) | `"ﬁ"` $\to$ `"f"` + `"i"` |
+| **NFKC** | Compatibility decomposition followed by canonical composition | `"²"` $\to$ `"2"`, fullwidth `"Ａ"` $\to$ `"A"` |
+
+Any two canonically equivalent strings are guaranteed to produce the exact same NFC string (and the exact same NFD string), with zero loss of meaning. **Converting to NFC should be the very first step of almost every Vietnamese text pipeline.** Both the [Unicode Normalization FAQ](https://www.unicode.org/faq/normalization.html) and W3C recommendations designate NFC as the standard form for web and general text exchange.
+
+**Compatibility equivalence** (NFKD / NFKC) goes further by folding typographic variants—such as ligatures (`"ﬁ"`), superscripts (`"²"`), and fullwidth CJK Latin letters (`"Ａ"`)—into plain characters. Notice that NFKC is a lossy transformation: `"x²"` becomes `"x2"`. SentencePiece tokenizers apply an NFKC-based normalizer (`nmt_nfkc`) by default ([SentencePiece normalization docs](https://github.com/google/sentencepiece/blob/master/doc/normalization.md)); see [Tokenization](/en/nlp/tokenization/).
+
+### Vietnamese tone placement: old style vs. new style
+
+NFC unifies precomposed `"ò"` with decomposed `"o" + U+0300`, but it **does not** unify `"Hòa"` and `"Hoà"`. Both strings are already valid NFC, using two different precomposed characters: `"ò"` (`U+00F2`) vs. `"à"` (`U+00E0`).
+
+Two orthographic conventions for Vietnamese tone placement coexist in everyday writing:
+
+- **Old style (traditional / aesthetic):** places the tone mark near the visual center of the vowel cluster: `"hòa"`, `"khỏe"`, `"thủy"`. This remains the default in most popular input methods and news outlets.
+- **New style (phonological):** places the tone mark on the **main vowel** (the syllable nucleus): `"hoà"`, `"khoẻ"`, `"thuỷ"`. This style is used in many Ministry of Education textbooks.
+
+(See the tone-placement section of the [Wikipedia article on the Vietnamese alphabet](https://en.wikipedia.org/wiki/Vietnamese_alphabet) for background.)
+
+In practice, the two styles disagree only on a small set of open rhymes—primarily **word-final `oa`, `oe`, and `uy`**. When a final consonant follows (as in `"hoàng"`, `"khoảng"`, `"thuyền"`), both styles place the tone on the second vowel; after `qu-` (where `u` is part of the initial consonant, as in `"quý"`), only `"ý"` occurs; and whenever a vowel carries a circumflex or horn (`ê`, `ô`, `ơ`), that vowel always takes the tone mark (`"thuế"`).
+
+To standardize tone placement across a corpus, NFD gives us a neat trick:
+
+1. Convert the text to **NFD** so every tone mark becomes a standalone combining character (`\u0300`, `\u0301`, `\u0303`, `\u0309`, `\u0323`). On plain `o`, `u`, `y` without vowel hats/horns, the combining tone mark sits immediately after the first vowel (whereas on `"ồ"` in `"hồn"`, the circumflex `\u0302` sits between `o` and the tone mark, so our pattern naturally skips it).
+2. Use a [regular expression](/en/nlp/regex/) to find word-final `o + tone + a/e` and `u + tone + y`, and swap the tone mark with the second vowel (`\1\3\2`).
+3. Convert back to **NFC**.
+
+Whether your project standardizes on old style or new style matters less than picking **one** style and applying it consistently across both training and inference. Our first code cell demonstrates the NFD-swap rule for word-final `oa`, `oe`, and `uy`.
+
+### Case, whitespace, URLs, and numbers
+
+**Case folding.** Lowercasing merges `"OK"`, `"Ok"`, and `"ok"`. Python offers two methods: `str.lower()` and `str.casefold()`. On Vietnamese and ASCII they produce the same result, while `casefold()` also handles international edge cases like German `"ß"` $\to$ `"ss"`. Prefer `str.casefold()` whenever normalizing for case-insensitive matching.
+
+**Whitespace normalization.** Scraped text often contains repeated spaces, tabs (`\t`), newlines, or non-breaking spaces (`U+00A0`). The one-liner `" ".join(s.split())` collapses every run of Unicode whitespace into a single ASCII space and trims leading/trailing whitespace (note that zero-width space `U+200B` is not classified as whitespace by Unicode and must be stripped explicitly if present).
+
+**Placeholder tokens.** Nearly every URL, email address, or long number in a corpus is unique; keeping them verbatim creates thousands of singleton vocabulary entries. Replacing them with `<url>`, `<email>`, and `<num>` via regex lets a classical model learn the general role of a link or number. **Order matters:** because URLs and emails often contain digits (`https://example.vn/sp?id=123`), you must replace URLs and emails *before* replacing numbers.
+
+**Punctuation.** Stripping punctuation merges `"lắm!!!"` with `"lắm"`, but also erases exclamation intensity and emoticons like `":("`. Whether to strip or keep punctuation depends on your downstream task.
+
+### Stemming and lemmatization
+
+In morphologically rich languages like English, a single lexeme takes different surface forms (**inflections**) for tense, number, or person: `"run"`, `"runs"`, `"running"`, `"ran"`. In information retrieval, a user searching for `"running"` usually wants documents containing `"runs"` as well. Two classical techniques collapse inflected forms:
+
+- **Stemming** chops off suffixes using heuristic rewrite rules without consulting a dictionary. Martin Porter's 1980 algorithm (**Porter stemmer**) is the classic English stemmer, applying a cascade of rules such as stripping `-ing` or turning `-ies` into `-i`. Its output is a **stem**, which need not be a valid English word.
+- **Lemmatization** maps an inflected word to its canonical dictionary headword (**lemma**) using a morphological lexicon and the word's part of speech: `"ran"` $\to$ `"run"`, `"was"` $\to$ `"be"`, `"mice"` $\to$ `"mouse"`, adjective `"better"` $\to$ `"good"`.
+
+The table below compares NLTK's `PorterStemmer` with WordNet lemmatization on several English words:
+
+| Surface word(s) | Porter stemmer | Lemma |
+|---|---|---|
+| `running`, `runs` | `run` | `run` |
+| `ran` | `ran` | `run` |
+| `studies`, `studying` | `studi` | `study` |
+| `was` | `wa` | `be` |
+| `university`, `universe` | `univers` | `university`, `universe` |
+| `mice` | `mice` | `mouse` |
+
+Rule-based stemming is fast and needs no lexicon, but makes two opposite errors: **overstemming** (collapsing unrelated words like `"university"` and `"universe"` into `"univers"`) and **understemming** (leaving irregular forms like `"ran"` and `"run"` separate). Lemmatization avoids both errors at the cost of requiring a dictionary and POS tagger for the target language.
+
+**Vietnamese needs neither stemming nor lemmatization.** Vietnamese is an **isolating (analytic) language**: words never inflect for tense, number, or gender. Tense and plurality are expressed by separate function words (`"đã chạy"`, `"đang chạy"`, `"sẽ chạy"`; `"con mèo"`, `"những con mèo"`), while the verb `"chạy"` never changes form. The structural challenge in Vietnamese is not stripping suffixes, but grouping syllables into compound words ([Tokenization](/en/nlp/tokenization/)).
+
+### Stopwords
+
+**Stopwords** are high-frequency function words that carry grammatical structure rather than topic content—such as `"the"`, `"is"`, `"of"` in English, or `"thì"`, `"là"`, `"của"`, `"các"` in Vietnamese. Dropping stopwords shrinks inverted indexes and helps bag-of-words / TF-IDF topic models focus on content nouns and verbs.
+
+However, what counts as "low content" depends entirely on the task. Many off-the-shelf stopword lists include negation and intensifier words like `"không"` (*not*), `"chẳng"` (*not*), `"chưa"` (*not yet*), and `"rất"` (*very*). In [Sentiment Analysis](/en/nlp/sentiment-analysis/), stripping those words flips `"sản phẩm không tốt"` (*not good*) into `"sản phẩm tốt"` (*good*). Always inspect a stopword list before applying it, or skip stopword removal altogether when using modern neural models.
+
+### Stripping Vietnamese diacritics
+
+Stripping all tone and vowel diacritics is the most aggressive normalization you can apply to Vietnamese: `"ma, má, mà, mả, mã, mạ"` (*ghost, mother, but, tomb, code, rice seedling*) all collapse to `"ma"`, and `"đ"` $\to$ `"d"` merges `"đi"` (*go*) with `"di"` (as in `"di chuyển"`, *move*).
+
+- **Useful** as an auxiliary search index field so users typing unaccented queries (`"hoa don"`) still find `"Hóa đơn"` (apply to both index and query, while keeping accented text for display).
+- **Harmful** when feeding text into a model that needs to understand meaning, since diacritics carry core lexical distinctions in Vietnamese.
+
+### When not to normalize aggressively
+
+Many heavy normalization steps (lowercasing, punctuation stripping, stopword removal, stemming, `<num>` replacement) originated in the era of sparse bag-of-words matrices. Modern neural NLP changes the trade-off:
+
+- **Subword tokenizers and LLMs train on nearly raw text.** Because BPE, WordPiece, and Unigram split unfamiliar surface forms into shared subword pieces (and byte-level BPE handles every UTF-8 byte), out-of-vocabulary words are no longer a bottleneck, and contextual embeddings easily learn that `"OK"` and `"ok"` are related. Aggressive normalization throws away information the model could have used. For pretrained Transformers and LLMs, stick to **minimal normalization**: Unicode NFC (and whatever built-in normalizer the model's own `AutoTokenizer` runs).
+- **Case carries signal for Named Entity Recognition (NER).** In `"chị Hòa"`, the capital `"H"` is a strong cue that `"Hòa"` is a proper name rather than the verb `"hòa"` (*to draw/tie*). As the [official BERT README](https://github.com/google-research/bert/blob/master/README.md) notes, cased models are preferred for NER and part-of-speech tagging—and for Vietnamese specifically, BERT's `uncased` tokenizer strips all accents too, so you should always use a cased or Vietnamese-specific model.
+- **Sentiment analysis relies on punctuation, casing, and negation.** Exclamation marks `"!!!"`, emoticons `":("`, all-caps emphasis `"CHẬM"` (*SLOW*), and negation words all carry strong sentiment cues.
+
+:::note[Key takeaway]
+Always normalize Vietnamese text to Unicode **NFC** first. Every further step—tone-placement standardization, case folding, placeholder tokens, punctuation stripping, stopword removal, or accent stripping—is a task-specific trade-off between completeness and soundness. Package your chosen steps into a single function $f$ and apply that exact $f$ at both training and inference time.
+:::
+
+### Limitations
+
+- **Our regex tone-placement rule covers only a common subset.** A complete Vietnamese orthography converter must parse full syllable structure (onset, medial glide, main vowel, coda) and must run **before** underscore word segmentation (since `_` in `"hòa_bình"` is a `\w` character, preventing `\b` from matching after `"a"`).
+- **Informal abbreviations and teencode** (`"ko"` $\to$ `"không"`, `"dc"` $\to$ `"được"`, `"sp"` $\to$ `"sản phẩm"`) cannot be inferred by Unicode or regex rules; they require a domain-specific dictionary or a contextual model.
+- **Placeholder regexes can lose task-relevant numbers.** Turning `"10đ"` and `"1.250.000đ"` into `<num> đ` discards the actual price; keep numbers intact when numeric magnitude matters.
+
+## Illustration
+
+The table below traces the output of the second code cell as the 6-step pipeline transforms the sentence `"Shop của chị Hòa  KHÔNG tệ,\tgiá 1.250.000đ."`, where `"Hòa"` in the input is encoded in decomposed NFD form. Watch the `len` column to spot the invisible Unicode change at step 1. Because browsers collapse multiple spaces inside HTML tables, consecutive spaces and trailing spaces are rendered as `␣`, and the tab character `\t` after `"tệ,"` is rendered as `→`:
+
+| Step | `len` | String after step |
+|---|---:|---|
+| `input` | 44 | `Shop của chị Hòa␣␣KHÔNG tệ,→giá 1.250.000đ.` |
+| `nfc` | 43 | `Shop của chị Hòa␣␣KHÔNG tệ,→giá 1.250.000đ.` |
+| `lower` | 43 | `shop của chị hòa␣␣không tệ,→giá 1.250.000đ.` |
+| `slot` | 41 | `shop của chị hòa␣␣không tệ,→giá␣␣<num> đ.` |
+| `punct` | 41 | `shop của chị hòa␣␣không tệ␣→giá␣␣<num> đ␣` |
+| `space` | 37 | `shop của chị hòa không tệ giá <num> đ` |
+| `strip_tone` (off by default) | 37 | `shop cua chi hoa khong te gia <num> d` |
+
+Walking through the rows:
+
+- **`nfc`** changes nothing visually on screen, yet `len` drops from 44 to 43 because decomposed `"o"` + `U+0300` has been composed into `"ò"` (`U+00F2`).
+- **`slot`** replaces `"1.250.000"` with `" <num> "`, padding spaces around the placeholder so it stays separate from the currency symbol `"đ"`.
+- **`punct`** replaces commas and periods with spaces while preserving the angle brackets of `<num>`.
+- **`space`** collapses all repeated spaces and tabs into single spaces, trimming the length to 37.
+- **`strip_tone`** (if enabled) turns `"hòa"` into `"hoa"` and `"không tệ"` into `"khong te"`, collapsing the proper name `"Hòa"` with `"hoa"` (*flower*).
+
+The other two sample sentences in the code cell highlight the trade-off across tasks:
+
+| Raw input | After default pipeline |
+|---|---|
+| `Sp OK lắm!!!␣␣␣10đ, xem tại https://example.vn/sp?id=123` | `sp ok lắm <num> đ xem tại <url>` |
+| `Giao hàng CHẬM quá :(␣␣Gọi 0912.345.678 hoặc hotro@example.vn` | `giao hàng chậm quá gọi <num> hoặc <email>` |
+
+On the second sentence, lowercasing and punctuation removal erase both the all-caps emphasis on `"CHẬM"` and the sad emoticon `":("`—helpful cleanup for a topic classifier, but a loss of signal for sentiment analysis.
+
+## Code examples
+
+The code in this lesson was last tested in November 2026 on Pyodide (Python 3.14) using only the built-in `re` and `unicodedata` modules. Both cells run directly in the page and are self-contained.
+
+### NFC, NFD, and tone placement
+
+The cell below constructs two visually identical `"Hòa"` strings—`a` using precomposed `"ò"` (`\u00f2`) and `b` using `"o"` plus combining grave accent (`\u0300`)—and inspects their equality, lengths, and code points before and after `unicodedata.normalize`. The second half implements `tone_on_main_vowel` using the NFD regex swap for word-final `oa`, `oe`, and `uy`.
+
+<PythonRunner code={unicodeCode} title="Two 'Hòa' strings: NFC, NFD, and tone placement" />
+
+Reading the output:
+
+- **`Hòa Hòa False` followed by `3 4`:** the two strings print identically, yet `a == b` is `False` and `b` is one code point longer (`U+00F2` in `a` vs. `U+006F U+0300` in `b`, where `U+0300` is `COMBINING GRAVE ACCENT`).
+- **`True True`:** converting `b` to NFC makes it equal to `a`, and converting `a` to NFD makes it equal to `b`.
+- **`Hòa Hoà False`:** `c = "Ho\u00e0"` is already in NFC, but its grave accent sits on `"à"`, so `a == c` is `False`.
+- **`"Hoà thuận, khoẻ mạnh, thuỷ thủ, HOÁ ĐƠN, mùa hoàng hôn"`:** `tone_on_main_vowel` shifts the tone mark on `"hòa"`, `"khỏe"`, `"thủy"`, and uppercase `"HÓA"`, while leaving `"thủ"`, `"mùa"` (rhyme `ua`), and `"hoàng"` (closed syllable ending in `-ng`) untouched. The final line prints `True`: `"Hòa"` and `"Hoà"` now normalize to the exact same string.
+
+Notice why NFD makes the tone-shift rule so compact: in NFC, shifting a tone across vowels would require a lookup table of dozens of precomposed vowel pairs (`òa` $\to$ `oà`, `óa` $\to$ `oá`, ...), whereas in NFD the tone mark is temporarily a separate character between the two vowels, so a two-line regex swap `\1\3\2` handles all five tones and both cases at once before recomposing to NFC.
+
+### Toggleable normalization pipeline
+
+The second cell implements a 6-step normalization pipeline where each step can be toggled on or off in the `ON` dictionary at the top of the file. For each sample sentence, it prints the step name, string length, and `repr(t)` after each active step.
+
+<PythonRunner code={pipelineCode} title="Toggleable text normalization pipeline" />
+
+Three implementation details to note:
+
+- **Order inside `slot`:** `URL` runs first, then `EMAIL`, then `NUM`. If `NUM` ran first, `"id=123"` inside the URL would turn into `"id= <num> "` and break the URL match in half.
+- **`punct` protects placeholder tokens:** the alternation `(<\w+>)|[^\w\s]` matches a placeholder like `<num>` in group 1 and returns `m.group(1)` unchanged, while replacing any other non-word, non-whitespace punctuation character with a space.
+- **`strip_tone`** decomposes to NFD, strips all characters in Unicode category `"Mn"` (Mark, Nonspacing), and explicitly maps `"đ"` / `"Đ"` to `"d"` / `"D"` because the crossbar in `"đ"` (`U+0111`) is a stroke through the base letter rather than a combining mark.
+
+Try editing `ON` in the runner and re-running:
+
+1. Set `"strip_tone": True` to see the final row of the Illustration table (`'shop cua chi hoa khong te gia <num> d'`).
+2. Set `"nfc": False` and watch the third sentence: because `"Ho\u0300a"` stays in NFD, the `punct` step treats the combining grave accent `\u0300` as a non-`\w` character and replaces it with a space, corrupting `"Hòa"` into `'ho a'`. That is why NFC must always run first!
+3. Set `"lower": False` to keep `"KHÔNG"` and `"CHẬM"` uppercase.
+
+## Common pitfalls
+
+:::caution[Running regexes or tokenizers before normalizing to NFC]
+In NFD form, combining tone and vowel marks do not match `\w`. A punctuation stripper like `re.sub(r"[^\w\s]", " ", s)` will silently replace every NFD diacritic with a space, turning `"Ho\u0300a"` into `"Ho a"`, and `\w+` will split it into two pieces. Always call `unicodedata.normalize("NFC", s)` as the very first step when ingesting text—including before exact deduplication or hashing in [Pretraining Data Preparation](/en/llm/pretraining-data/).
+:::
+
+:::caution[Normalizing during training, then forgetting a step at inference]
+If you clean your training data in a notebook (say, applying NFC + tone-placement standardization + case folding) and then re-implement a slightly different preprocessing snippet in your web server (say, NFC + lowercasing without tone standardization), inputs like `"hòa"` will miss the `"hoà"` vocabulary entry learned during training—degrading accuracy silently without raising any runtime error. Put your normalization logic in **one** shared function `normalize(text)` and call it in both places (and on both documents and queries in search).
+:::
+
+:::caution[Stripping negation stopwords or punctuation in sentiment analysis]
+Standard Vietnamese stopword lists often include `"không"`, `"chẳng"`, `"chưa"`, and `"rất"`. Removing them turns `"không tốt"` (*not good*) into `"tốt"` (*good*), while stripping punctuation erases `":("` and `"!!!"`. For sentiment or intent classification, keep negations and intensifiers, and consider mapping emoticons/emojis to dedicated tokens rather than deleting them.
+:::
+
+:::caution[Using an uncased / accent-stripping tokenizer on Vietnamese]
+The original English `bert-base-uncased` tokenizer lowercases text *and* strips all Unicode accents (`Mn` marks), collapsing `"mà"`, `"má"`, and `"mạ"` into `"ma"` before the model ever sees them. For Vietnamese, always choose a cased or Vietnamese-native pretrained model (such as `bert-base-multilingual-cased`, XLM-R, or PhoBERT) and let the model's own tokenizer handle casing.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Normalization is a function $f$ that maps equivalent surface strings to a single canonical form ($a \sim b \Rightarrow f(a) = f(b)$) without colliding strings that differ in meaning. Training and inference must apply the exact same $f$.
+- Accented Vietnamese letters can be encoded as precomposed characters or as base letters plus combining marks. Unicode **NFC** and **NFD** unify both encodings losslessly; converting to NFC should be step 1 of every Vietnamese pipeline, whereas NFKC additionally folds compatibility characters and can be lossy.
+- Old-style (`"hòa"`) and new-style (`"hoà"`) tone placement are distinct NFC strings; standardizing them is easy via a regex swap on NFD. Use `str.casefold()` for case folding, and replace URLs and emails before replacing numbers.
+- Stemming (Porter) and lemmatization collapse English inflections, which isolating Vietnamese words do not have. Heavy normalization (lowercasing, stripping punctuation, stopwords, or diacritics) helps sparse count-based search/topic models but often hurts subword LLMs, NER, and sentiment analysis.
+
+**Further reading:**
+
+- Whistler, K. (ed.) (2026). [*Unicode Standard Annex #15: Unicode Normalization Forms*](https://unicode.org/reports/tr15/), Unicode 18.0.0, Sections 1 and 1.2. The authoritative specification of canonical equivalence, compatibility equivalence, and the four forms NFC, NFD, NFKC, and NFKD.
+- Python Software Foundation. [*`unicodedata` — Unicode Database*](https://docs.python.org/3.14/library/unicodedata.html), Python 3.14 documentation. Reference for `normalize`, `name`, and `category`.
+- Jurafsky, D., Martin, J. H. (2026 draft). [*Speech and Language Processing*](https://web.stanford.edu/~jurafsky/slp3/), 3rd ed., Chapter 2 "Words and Tokens", Sections 2.2–2.4. Covers morphemes, inflection, Unicode code points and UTF-8, case folding, lemmatization, and the Porter stemmer.
+- Porter, M. F. (1980). An algorithm for suffix stripping. *Program*, 14(3), 130–137. See the [author's official Porter Stemmer page](https://tartarus.org/martin/PorterStemmer/) for the paper and reference implementations.
+- Bird, S., Klein, E., Loper, E. (2009). [*Natural Language Processing with Python*](https://www.nltk.org/book/ch03.html), Chapter 3, Section 3.6 "Normalizing Text". Compares Porter and Lancaster stemmers with WordNet lemmatization in NLTK.
+
+<LessonProgress />

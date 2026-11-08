@@ -44,7 +44,7 @@ import knnNumpyCode from '@code/ml/k-nearest-neighbors/knn-numpy.en.py?raw';
 import chooseKCode from '@code/ml/k-nearest-neighbors/choose-k.en.py?raw';
 import scalingCode from '@code/ml/k-nearest-neighbors/scaling.en.py?raw';
 
-## Objectives
+## Goals
 
 After this lesson, you will be able to:
 
@@ -244,7 +244,7 @@ KNN predicts from $k$ nearest training samples: majority voting for classificati
 - **Degrades in high dimensions** due to the curse of dimensionality.
 - **Provides zero feature interpretability.** Unlike linear regression weights, KNN provides no direct measure of feature importance.
 
-## Visualization
+## Illustration
 
 The interactive tool below displays 35 training points (solid dots) and 15 test points (open circles) from the two moons dataset. Background coloring indicates the class predicted by KNN across space, tracing decision boundaries where colors change. The slider adjusts $k$ across odd integers from 1 to 35, updating training and test accuracies below. You can drag the query marker (crosshair) anywhere: it connects to its $k$ nearest neighbors, displaying vote counts per class. Try the following:
 
@@ -258,7 +258,7 @@ The interactive tool below displays 35 training points (solid dots) and 15 test 
     Interactivity: Slider k over odd values 1, 3, ..., 35 re-renders prediction grid, updating train/test accuracy. Drag or click crosshair query point, drawing connector lines to k nearest neighbors with vote tallies.
     Dataset: make_moons(n_samples=50, noise=0.3, random_state=11), 35 train points, 15 test points. Euclidean distance, uniform weights; default query (-0.4, 0.6). */}
 
-## Code Examples
+## Code examples
 
 The three cells below execute independently.
 
@@ -288,7 +288,7 @@ The third cell evaluates the `load_wine` dataset: 178 bottles, 13 features, 3 cu
 
 Notice that `StandardScaler` resides **inside** the pipeline, ensuring means and variances are recomputed per fold to prevent validation leakage.
 
-## Common Pitfalls
+## Common pitfalls
 
 :::caution[Omitting Feature Standardization]
 Failing to scale features allows large-scale variables to dominate distance calculations simply due to measurement units. In the wine experiment, unscaled proline accounts for 99.76% of distances, depressing test accuracy to 0.722 compared to 0.963 when scaled. Always encapsulate preprocessing and estimation in a pipeline: `make_pipeline(StandardScaler(), KNeighborsClassifier(...))`.
@@ -302,13 +302,13 @@ Selecting $k$ via training accuracy will always choose $k = 1$ (1.000 accuracy) 
 An even $k$ can produce vote ties (e.g., 2 vs. 2). Scikit-learn breaks ties by arbitrarily picking the smaller class index without warning. Always use odd values of $k$ for binary problems. In multi-class problems where ties remain possible, `weights='distance'` breaks ties continuously by proximity.
 :::
 
-## Quick Check
+## Quick check
 
 {/* Questions defined in the `quiz` frontmatter field. */}
 
 <Quiz />
 
-## Summary and Further Reading
+## Summary and further reading
 
 **Key Takeaways:**
 

@@ -40,7 +40,7 @@ import compareCode from '@code/ml/optimizers/compare.en.py?raw';
 import pathsCode from '@code/ml/optimizers/paths.en.py?raw';
 import minibatchCode from '@code/ml/optimizers/minibatch.en.py?raw';
 
-## Objectives
+## Goals
 
 After this lesson, you will be able to:
 
@@ -247,7 +247,7 @@ At $t = 0$, $\eta_0 = \eta_{\max}$; at $t = T$, $\eta_T = \eta_{\min}$.
 - **First-order limitations.** All four methods remain strictly first-order gradient algorithms, mitigating but not eliminating condition number bottlenecks. Feature scaling remains essential.
 - **Non-convex landscapes.** Complex networks feature non-convex saddle points and local minima where global convergence guarantees do not hold.
 
-## Visualization
+## Illustration
 
 The diagram below plots loss contours for $\mathcal{L} = \frac{1}{2}\left(w_1^2 + 100\,w_2^2\right)$ and the first 60 optimization steps starting from $(-8, 1.5)$:
 
@@ -262,7 +262,7 @@ The diagram below plots loss contours for $\mathcal{L} = \frac{1}{2}\left(w_1^2 
 
 The second code cell animates this comparison across all four optimizers alongside log-loss trajectories.
 
-## Code Examples
+## Code examples
 
 The three cells below run independently.
 
@@ -292,7 +292,7 @@ The third cell trains an `MLPClassifier` neural network (32 hidden neurons, ~2,4
 
 After 20 epochs: SGD reaches loss 1.4786 with test accuracy 0.680; Momentum achieves loss 0.1815 and test accuracy 0.947; Adam drives loss down to 0.0321 with test accuracy 0.971.
 
-## Common Pitfalls
+## Common pitfalls
 
 :::caution[Switching Optimizers Without Re-tuning the Learning Rate]
 Each optimizer interprets $\eta$ differently. Under Momentum ($\beta = 0.9$), effective step length scales to $\approx 10\,\eta\,\lVert\mathbf{g}\rVert$, whereas Adam maintains steps near $\eta$ regardless of gradient scale. When switching optimizers, always reset $\eta$ to standard defaults: $10^{-3}$ for Adam, and $10^{-2}$ to $10^{-1}$ for SGD with momentum.
@@ -306,13 +306,13 @@ Omitting bias correction causes early updates to be 2 to 6.5 times larger than $
 While Adam adapts learning rates per coordinate axis, it cannot untangle diagonal correlations between non-orthogonal features. Standardizing inputs as shown in [Gradient Descent](/en/ml/gradient-descent/) remains computationally inexpensive and universally recommended.
 :::
 
-## Quick Check
+## Quick check
 
 {/* Questions defined in the `quiz` frontmatter field. */}
 
 <Quiz />
 
-## Summary and Further Reading
+## Summary and further reading
 
 **Key Takeaways:**
 

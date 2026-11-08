@@ -1,18 +1,18 @@
-# Ngân sách token ảnh của các mô hình kiểu LLaVA: tính bằng Python thuần.
+# Image token budget for LLaVA-style models, computed in pure Python.
 
 
 def crop_tokens(side, patch):
-    # Một mảnh ảnh vuông cạnh `side`, patch `patch`: g x g token
+    # One square crop of side `side`, patch size `patch`: g x g tokens
     g = side // patch
     return g * g, g
 
 
 def anyres(rows, cols, side=336, patch=14, newline=True):
-    # Lưới rows x cols mảnh, cộng một ảnh thu nhỏ để nhìn toàn cảnh
+    # A rows x cols grid of crops, plus one thumbnail for the full view
     t, g = crop_tokens(side, patch)
     n = (rows * cols + 1) * t
     if newline:
-        n += rows * g  # một token "xuống dòng" cho mỗi hàng đặc trưng
+        n += rows * g  # one "newline" token after each feature row
     return n
 
 
@@ -31,7 +31,7 @@ print("check vs LLaVA-OneVision processor (384px crops)")
 for r, c in [(1, 1), (1, 2), (2, 2), (2, 3)]:
     print(f"  {r}x{c}: {anyres(r, c, side=384)}")
 
-window, text = 4096, 500  # cửa sổ ngữ cảnh và phần dành cho chữ
+window, text = 4096, 500  # context window and tokens reserved for text
 print(f"images that fit in {window} tokens (text {text})")
 for name, n in [("336px single", 576), ("AnyRes 2x2", anyres(2, 2))]:
     print(f"  {name}: {n} tokens each -> fits {(window - text) // n}")

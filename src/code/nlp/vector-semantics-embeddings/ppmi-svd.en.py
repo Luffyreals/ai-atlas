@@ -1,19 +1,19 @@
-# Đồng xuất hiện cửa sổ ±2, PPMI, cosine và SVD rút gọn trên corpus nhỏ
+# Window ±2 co-occurrence, PPMI, cosine, and truncated SVD on a small corpus
 import numpy as np
 
 np.set_printoptions(precision=2, suppress=True)
 corpus = [
-    "tôi ăn một bát phở nóng", "bát phở này rất ngon",
-    "tôi ăn một bát bún nóng", "mẹ nấu bún rất ngon",
-    "nhà tôi nuôi một con mèo", "con mèo nằm ngủ cả ngày",
-    "nhà tôi nuôi một con chó", "con chó sủa cả đêm",
-    "tôi đi xe_máy trên đường", "xe_máy chạy rất nhanh",
-    "tôi lái ô_tô trên đường", "ô_tô chạy về quê",
+    "tôi ăn một bát phở nóng", "bát phở này rất ngon",  # data: vi
+    "tôi ăn một bát bún nóng", "mẹ nấu bún rất ngon",  # data: vi
+    "nhà tôi nuôi một con mèo", "con mèo nằm ngủ cả ngày",  # data: vi
+    "nhà tôi nuôi một con chó", "con chó sủa cả đêm",  # data: vi
+    "tôi đi xe_máy trên đường", "xe_máy chạy rất nhanh",  # data: vi
+    "tôi lái ô_tô trên đường", "ô_tô chạy về quê",  # data: vi
 ]
-sents = [line.split() for line in corpus]  # từ ghép đã nối bằng "_"
+sents = [line.split() for line in corpus]  # compound words joined by "_"
 vocab = sorted({w for sent in sents for w in sent})
 idx = {w: i for i, w in enumerate(vocab)}
-s, d = 2, 3                          # cửa sổ ±s, giữ d chiều sau SVD
+s, d = 2, 3                          # ±s window, keep d dims after SVD
 F = np.zeros((len(vocab), len(vocab)))
 for sent in sents:
     for i, w in enumerate(sent):
@@ -24,9 +24,9 @@ for sent in sents:
 N = F.sum()
 pw = F.sum(axis=1, keepdims=True) / N
 pc = F.sum(axis=0, keepdims=True) / N
-with np.errstate(divide="ignore"):   # log2(0) = -inf, bị max cắt về 0
+with np.errstate(divide="ignore"):   # log2(0) = -inf, clipped to 0 by max
     ppmi = np.maximum(np.log2(F / N / (pw * pc)), 0)
-# SVD rút gọn: mỗi từ còn d số thay cho |V| số
+# Truncated SVD: each word has d numbers instead of |V|
 U, S, Vt = np.linalg.svd(ppmi)
 emb = U[:, :d] * S[:d]
 
@@ -36,9 +36,9 @@ def cos(M, a, b):
 
 print(f"|V| = {len(vocab)}, nonzero = {(F > 0).mean():.0%}")
 print("singular values:", S[:5])
-for a, b in [("phở", "bún"), ("mèo", "chó"), ("xe_máy", "ô_tô"),
-             ("phở", "mèo"), ("phở", "xe_máy"), ("chó", "ô_tô")]:
+for a, b in [("phở", "bún"), ("mèo", "chó"), ("xe_máy", "ô_tô"),  # data: vi
+             ("phở", "mèo"), ("phở", "xe_máy"), ("chó", "ô_tô")]:  # data: vi
     print(f"{a:>6} {b:<6} ppmi {cos(ppmi, a, b):.2f}"
           f"  svd {cos(emb, a, b):.2f}")
-for w in ["phở", "bún", "mèo", "chó", "xe_máy", "ô_tô"]:
+for w in ["phở", "bún", "mèo", "chó", "xe_máy", "ô_tô"]:  # data: vi
     print(f"{w:>6}", emb[idx[w]])

@@ -1,0 +1,224 @@
+---
+title: 'Basic Syntax: Variables, Input/Output, Conditions, Loops, Logical Operators'
+description: 'Master Python fundamentals for AI: variables, data types, logical operators, short-circuit evaluation, conditional branching, and optimization loops.'
+quiz:
+  - question: 'Given two lists `x = [1, 2, 3]` and `y = [1, 2, 3]`, what do `x == y` and `x is y` evaluate to, respectively?'
+    options:
+      - '`True` and `True`'
+      - '`True` and `False`'
+      - '`False` and `True`'
+      - '`False` and `False`'
+    answer: 1
+    explanation: 'The `==` operator compares the values (contents) of two objects (both contain 1, 2, 3, so it returns `True`). The `is` operator compares memory identity (`id(x) == id(y)`): because `x` and `y` are two separate list objects allocated at different memory addresses, it returns `False`.'
+  - question: 'Does the expression `False and (10 / 0 > 1)` raise a `ZeroDivisionError`, and why?'
+    options:
+      - 'Yes, because Python always evaluates the entire expression from left to right before deciding'
+      - 'No, thanks to short-circuit evaluation: because the left operand is `False`, Python stops immediately and returns `False`'
+      - 'Yes, but only when the expression is placed inside an `if` statement'
+      - 'No, because Python automatically converts `10 / 0` into infinity (`inf`)'
+    answer: 1
+    explanation: 'With the logical `and` operator, if the first operand is `False`, the entire expression is guaranteed to be `False`. Python short-circuits evaluation and never executes the right operand `10 / 0`.'
+  - question: 'Why does the expression `0.1 + 0.2 == 0.3` evaluate to `False` in Python?'
+    options:
+      - 'Because the `print` function rounds numbers incorrectly'
+      - 'Because IEEE 754 floating-point representation cannot exactly represent repeating binary fractions'
+      - 'Because Python automatically casts `0.3` to the integer `0`'
+      - 'Because the `==` operator cannot be used with `float` numbers'
+    answer: 1
+    explanation: 'Computers represent floating-point numbers in binary following the IEEE 754 standard. Decimal fractions like 0.1 and 0.2 become repeating fractions in binary, making `0.1 + 0.2` equal to approximately `0.30000000000000004` rather than `0.3`. When comparing floats, use `math.isclose()`.'
+  - question: 'Which sequence of numbers is produced by `list(range(2, 11, 3))`?'
+    options:
+      - '`[2, 5, 8, 11]`'
+      - '`[2, 5, 8]`'
+      - '`[3, 6, 9]`'
+      - '`[2, 4, 6, 8, 10]`'
+    answer: 1
+    explanation: 'The `range(start, stop, step)` function begins at `start = 2`, increments by `step = 3` at each step, and always stops strictly before `stop = 11`. The generated values are 2, 5, 8. The next value, 11, hits the `stop` boundary and is excluded.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import gradLoopCode from '@code/python/basic-syntax/gradient-step-loop.en.py?raw';
+import filterCode from '@code/python/basic-syntax/data-filtering.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand that a Python variable is a reference label pointing to an object in memory, and distinguish primitive data types (`int`, `float`, `bool`, `str`).
+- Use arithmetic operators and distinguish value equality (`==`) from object identity (`is`).
+- Apply logical operators (`and`, `or`, `not`) and leverage short-circuit evaluation.
+- Write clean conditional branches (`if` – `elif` – `else`) and loops (`for`, `while`) combined with `range()`, `enumerate()`, `break`, and `continue`.
+- Apply control flow syntax directly to build an AI model parameter optimization loop.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+Python is an interpreted, dynamically typed language. You do not need to declare data types ahead of time; Python infers each variable's type automatically when you assign a value at runtime.
+:::
+
+## Intuition
+
+Imagine you are training an AI model to identify high-potential customers. The system has to make a continuous stream of logical decisions:
+
+- "If a customer's credit score is above 700 and their income exceeds $60,000, assign them to Group A."
+- "Repeat the weight adjustment step 100 times, but if the gradient slope drops close to zero, stop immediately to save compute time."
+
+Every AI algorithm, no matter how sophisticated—from linear regression to large language models (LLMs)—is built from the most fundamental building blocks of programming: **storing data in variables**, **checking conditions**, and **repeating computations in loops**.
+
+Understanding Python's syntax and underlying execution model will help you avoid costly logical bugs when processing millions of training examples.
+
+## Theory
+
+### Variables and Object References
+
+In languages like C++ or Java, a variable acts like a box that holds a value: assigning a value pours data into the box. In Python, however:
+
+> **A variable is a name tag attached to a specific object in RAM.**
+
+When you write `x = 10`, Python creates an integer object with value `10` in memory and attaches the label `x` to that object.
+
+- `type(x)`: Returns the data type of the object referenced by `x`.
+- `id(x)`: Returns the unique identifier (corresponding to the memory address) of that object.
+
+```python
+a = [1, 2, 3]
+b = a  # b attaches a label to the exact same list object as a!
+b.append(4)
+# Now a is also [1, 2, 3, 4]
+```
+
+### Primitive Data Types
+
+1. **Integers (`int`):** Arbitrary-precision integers that do not overflow like fixed 32-bit or 64-bit integers in other languages.
+2. **Floating-point numbers (`float`):** Follow the 64-bit double-precision IEEE 754 standard. Be mindful of binary approximation errors: never use `==` to compare two floats directly in machine learning algorithms; use an epsilon tolerance threshold or `math.isclose(a, b)`.
+3. **Booleans (`bool`):** Take one of two truth values: `True` or `False`.
+4. **Strings (`str`):** Immutable sequences of Unicode characters. Use f-strings (`f"Value: {val:.2f}"`) for clean, readable formatting.
+
+### Logical Operators and Short-Circuit Evaluation
+
+Python provides three logical operators: `and`, `or`, and `not`.
+
+**Truthy and Falsy rules:** In a conditional context, the following values evaluate to `False`:
+- Numbers `0`, `0.0`
+- Empty collections: `""`, `[]`, `()`, `{}`, `set()`
+- Constants `None` and `False`
+
+Every other value evaluates to `True`.
+
+**Short-Circuit Evaluation:**
+- For `A or B`: If `A` is truthy, Python immediately returns `True` (or the value of `A`) without ever evaluating `B`.
+- For `A and B`: If `A` is falsy, Python immediately concludes the result is `False` (or the value of `A`) and skips `B`.
+
+This behavior is especially handy when guarding data access against missing values:
+
+```python
+if data is not None and len(data) > 0:
+    process(data)
+```
+
+### Control Flow: Conditionals and Loops
+
+Python uses indentation (standardly 4 spaces) to define code blocks rather than curly braces `{}`:
+
+1. **Branching with `if` – `elif` – `else`:** Evaluates conditions top-to-bottom and executes only the first block whose condition is true.
+2. **`for` loops:** Iterate over each element of an iterable (such as a range or a list):
+   - `range(stop)` or `range(start, stop, step)`: Generates a sequence of integer indices.
+   - `enumerate(iterable)`: Yields `(index, item)` pairs, widely used for tracking training steps or epochs.
+   - `zip(list1, list2)`: Pairs up corresponding elements from two sequences simultaneously.
+3. **`while` loops:** Repeat as long as a condition remains true—commonly used when running an optimization algorithm until convergence.
+4. **`break` and `continue`:**
+   - `break`: Exits the enclosing loop immediately.
+   - `continue`: Skips the remaining statements in the current iteration and jumps to the next iteration.
+
+## Illustration
+
+The table below summarizes core arithmetic, comparison, and logical operators in Python:
+
+| Operator | Syntax | Role in AI Computing | Example |
+| :--- | :--- | :--- | :--- |
+| **True division** | `/` | Divides and always returns a `float` | `7 / 2 -> 3.5` |
+| **Floor division** | `//` | Divides and rounds down to an integer, often used for batch sizing | `7 // 2 -> 3` |
+| **Modulo** | `%` | Returns the remainder, useful for logging every $N$ epochs | `step % 10 == 0` |
+| **Exponentiation** | `**` | Raises to a power (such as squared error in loss functions) | `error ** 2` |
+| **Value equality** | `==`, `!=` | Checks whether two objects have equal contents | `y_pred == y_true` |
+| **Identity comparison** | `is`, `is not` | Checks whether two references point to the same object (especially `None`) | `model is None` |
+| **Logical operators** | `and`, `or`, `not` | Combines multiple conditions when filtering data samples | `score > 0.8 and not flagged` |
+
+A basic convergence optimization loop in machine learning:
+
+```text
+[ Initialize weight w ]
+        │
+        ▼
+   ┌──► [ Compute loss gradient: grad = 2 * w ]
+   │    │
+   │    ▼
+   │  { Check: abs(grad) < tolerance? }
+   │    ├─► TRUE  ──► [ Converged! Exit loop: break ] ──► (End)
+   │    │
+   │    └─► FALSE
+   │         │
+   │         ▼
+   │       [ Update weight: w = w - lr * grad ]
+   └─────────┘ (Repeat for next epoch)
+```
+
+## Code examples
+
+The cells below run independently. Click **Run** to see the simulation output immediately.
+
+The first cell uses a `for` loop, an early-stopping `break` condition, and arithmetic operators to find the minimum of $f(w) = w^2$ via its derivative (gradient).
+
+<PythonRunner code={gradLoopCode} title="Basic gradient descent optimization loop" />
+
+Here, the function reaches its minimum at $w = 0$. At each epoch, the algorithm updates $w$ in the direction opposite to the gradient. Once the gradient magnitude falls below `tolerance = 1e-4`, `break` terminates the loop immediately, saving unnecessary computation.
+
+The second cell demonstrates using logical operators (`and`, `not`) and `enumerate()` to filter valid prediction samples from raw data.
+
+<PythonRunner code={filterCode} title="Filtering data with comparison and logical operators" />
+
+The script counts how many samples satisfy the criteria and computes the pass rate percentage. This exact filtering pattern appears constantly during data preprocessing before feeding samples into a machine learning model.
+
+## Common pitfalls
+
+:::caution[Confusing `==` with `is`]
+The `==` operator checks whether two variables have equal **values**. The `is` operator checks whether two variables point to the exact same **memory address** in RAM. When checking whether a variable is `None`, PEP 8 conventions require writing `if x is None:` rather than `if x == None:`.
+:::
+
+:::caution[Comparing floating-point numbers with `==`]
+Because of IEEE 754 binary representation rounding, `0.1 + 0.2 == 0.3` evaluates to `False`. In machine learning training loops, when checking whether a loss function has converged between epochs, always use a tolerance threshold such as `abs(loss_new - loss_old) < 1e-5` or `math.isclose()`.
+:::
+
+:::caution[Infinite loops and off-by-one errors]
+In a `while` loop, forgetting to update the condition variable inside the loop body will trap your program in an infinite loop. Also remember that `range(start, stop)` stops at `stop - 1`: writing `range(1, 5)` produces `1, 2, 3, 4` and excludes `5`.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Variables in Python are references pointing to objects in memory; keep value equality (`==`) distinct from object identity (`is`).
+- Floating-point numbers carry IEEE 754 binary approximation errors, so always use tolerance thresholds when checking convergence.
+- Short-circuit evaluation in `and` and `or` speeds up conditional checks and prevents unsafe memory accesses.
+- Conditional `if` – `elif` – `else` blocks combined with `for` loops (`range`, `enumerate`, `zip`) form the backbone of every AI optimization loop.
+
+**Further reading:**
+
+- Python Software Foundation (2024). [*The Python Tutorial: More Control Flow Tools*](https://docs.python.org/3/tutorial/controlflow.html). Official tutorial on loops, conditionals, and `range`.
+- David Goldberg (1991). [*What Every Computer Scientist Should Know About Floating-Point Arithmetic*](https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html). Classic paper explaining floating-point representation and rounding errors.
+- Python Software Foundation (2024). [*Built-in Types - Truth Value Testing*](https://docs.python.org/3/library/stdtypes.html#truth-value-testing). Official reference on Truthy/Falsy rules and boolean operations in Python.
+
+<LessonProgress />

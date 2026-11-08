@@ -1,0 +1,298 @@
+---
+title: 'Probability and Statistics'
+description: 'Master probability and statistics for AI: Gaussian and Bernoulli distributions, expectation, variance, Bayes'' Theorem, and Maximum Likelihood Estimation (MLE).'
+quiz:
+  - question: 'Let $X$ be a continuous random variable following the standard normal distribution $X \sim \mathcal{N}(0, 1)$. What is the probability that $X$ takes the exact value $1.5$ ($P(X = 1.5)$)?'
+    options:
+      - '$0.1295$'
+      - '$0$'
+      - '$0.5$'
+      - '$1.0$'
+    answer: 1
+    explanation: 'For any continuous random variable, the area under the curve at a single point of zero width is zero ($\int_{x_0}^{x_0} f(x) dx = 0$). Therefore, the probability of hitting any exact real number is always 0. The value $f(1.5) \approx 0.1295$ is the probability density function (PDF) height, not a probability. Probability is only nonzero over an interval, such as $P(1.49 \le X \le 1.51)$.'
+  - question: 'In a population where a rare disease has a prevalence of $1\%$, a diagnostic test has $95\%$ sensitivity and a $5\%$ false-positive rate. If a randomly tested person receives a positive result, what is the approximate probability that they actually have the disease?'
+    options:
+      - 'About $95\%$'
+      - 'About $50\%$'
+      - 'About $16.1\%$'
+      - 'Nearly $100\%$'
+    answer: 2
+    explanation: 'This is the classic Base Rate Fallacy. Out of 10,000 people: 100 have the disease ($95$ test true positive) and 9,900 are healthy ($9900 \times 5\% = 495$ test false positive). Out of $95 + 495 = 590$ total positive results, only $95$ actually have the disease, giving $95 / 590 \approx 16.1\%$.'
+  - question: 'In machine learning, when we assume prediction errors (noise) between true labels and model outputs follow a Gaussian normal distribution, Maximum Likelihood Estimation (MLE) leads directly to which familiar loss function?'
+    options:
+      - 'Hinge Loss'
+      - 'Mean Squared Error (MSE)'
+      - 'Cross-Entropy Loss'
+      - 'Cosine Similarity'
+    answer: 1
+    explanation: 'Assuming noise $\epsilon = y - \hat{y} \sim \mathcal{N}(0, \sigma^2)$, the likelihood contains the exponential term $e^{-(y - \hat{y})^2 / (2\sigma^2)}$. Taking the natural log and negating to turn maximizing likelihood into minimizing loss leaves the parameter-dependent sum $\sum (y - \hat{y})^2$, which is Mean Squared Error (MSE). This proves that minimizing MSE has a rigorous probabilistic justification.'
+  - question: 'When optimizing parameters via MLE, why do we always maximize the Log-Likelihood ($\sum \ln p(x^{(i)})$) instead of multiplying the probabilities $\prod p(x^{(i)})$ directly?'
+    options:
+      - 'Because logarithms turn all negative numbers into positive numbers'
+      - 'Because multiplying thousands of probabilities in $[0, 1]$ causes floating-point numerical underflow, and the logarithm turns products into sums that are much easier to differentiate'
+      - 'Because the logarithm changes the location of the optimal parameter solution'
+      - 'Because computers do not support matrix multiplication'
+    answer: 1
+    explanation: 'Multiplying thousands or millions of small probabilities (e.g., $0.01^{1000}$) rapidly underflows to 0 in floating-point arithmetic. Because $\ln(x)$ is strictly increasing, the parameter that maximizes $L(\theta)$ also maximizes $\ln L(\theta)$. Furthermore, differentiating a sum $\sum \ln p_i$ is far simpler than differentiating a massive product.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import gaussianCode from '@code/math/probability-statistics/gaussian-distribution.en.py?raw';
+import bayesMleCode from '@code/math/probability-statistics/bayes-mle.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Clearly distinguish between **discrete** and **continuous** random variables, and understand Probability Mass Functions (PMF) versus Probability Density Functions (PDF).
+- Master the core probability distributions in AI: the **Gaussian** (normal), **Bernoulli**, and **Uniform** distributions, along with the Central Limit Theorem.
+- Compute key statistical quantities: **Expectation (Mean)**, **Variance**, **Standard Deviation**, and **Covariance**.
+- Apply **Bayes' Theorem** to update beliefs from observed evidence and avoid the base rate fallacy.
+- Understand **Maximum Likelihood Estimation (MLE)** and derive the probabilistic origins of two classic loss functions: MSE and Cross-Entropy.
+
+## Prerequisites
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In [Calculus](/en/math/calculus/), you mastered derivatives and gradients to find the minimum of a function. In this lesson, we apply those calculus tools to **Probability Theory** to derive Maximum Likelihood Estimation (MLE) for training AI models.
+:::
+
+## Intuition
+
+The real world is full of uncertainty and noise:
+- A temperature sensor never reads the exact same number twice even in a stable room; its readings fluctuate slightly around the true temperature.
+- When a user clicks an online ad, we cannot know with 100% certainty whether they will buy; we can only predict a **probability**.
+- A handwritten digit classifier looking at a smudged "8" does not make a blind guess; it outputs a distribution: $85\%$ digit 8, $12\%$ digit 3, $3\%$ digit 0.
+
+Probability and statistics provide the mathematical language that enables AI to quantify uncertainty, model real-world noise, and make optimal decisions from finite evidence.
+
+## Theory
+
+### 1. Random Variables: Discrete and Continuous
+
+A **random variable** $X$ is a function that assigns a numerical value to each outcome in a sample space.
+
+#### Discrete Random Variables
+
+Take distinct, countable values — for example, a class label $y \in \{0, 1, 2\}$ or the number of tokens in a sentence.
+- Described by a **Probability Mass Function (PMF)**: $p(x) = P(X = x)$.
+- Probabilities across the entire sample space sum to 1:
+  $$
+  \sum_{x} P(X = x) = 1, \quad 0 \le P(X = x) \le 1
+  $$
+
+#### Continuous Random Variables
+
+Take values across a continuous interval on the real line $\mathbb{R}$ — for example, house price, execution time, or weight.
+- Described by a **Probability Density Function (PDF)**, denoted $f(x)$.
+- The total area under the PDF curve equals 1:
+  $$
+  \int_{-\infty}^{+\infty} f(x) \, dx = 1, \quad f(x) \ge 0
+  $$
+- **Crucial rule:** The probability at any single exact point is $P(X = x_0) = 0$! Probability is only meaningful over an interval $[a, b]$:
+  $$
+  P(a \le X \le b) = \int_a^b f(x) \, dx
+  $$
+
+---
+
+### 2. Core Distributions in AI
+
+#### The Gaussian (Normal) Distribution ($\mathcal{N}(\mu, \sigma^2)$)
+
+The iconic symmetric bell curve, completely characterized by two parameters: its mean $\mu$ (the center of the bell) and its variance $\sigma^2$ (the spread of the bell):
+
+$$
+f(x) = \frac{1}{\sigma \sqrt{2\pi}} \exp\left( -\frac{(x - \mu)^2}{2\sigma^2} \right)
+$$
+
+**Central Limit Theorem:** The sum (or average) of a large number of independent random variables — regardless of their individual distributions — converges toward a Gaussian normal distribution. This is why natural noise and measurement errors in machine learning are almost universally modeled with a Gaussian.
+
+#### The Bernoulli Distribution
+
+Models a binary trial with two outcomes: success ($y = 1$) with probability $p$, and failure ($y = 0$) with probability $1 - p$:
+
+$$
+P(Y = y) = p^y (1 - p)^{1 - y}, \quad y \in \{0, 1\}
+$$
+
+This is the foundational distribution of binary classification and the Binary Cross-Entropy loss function.
+
+---
+
+### 3. Expectation, Variance, and Covariance
+
+- **Expectation (Mean $\mathbb{E}[X]$ or $\mu$):** The probability-weighted average value of a random variable. For continuous variables: $\mathbb{E}[X] = \int_{-\infty}^{+\infty} x f(x) \, dx$; for discrete variables: $\mathbb{E}[X] = \sum x p(x)$.
+- **Variance ($\mathrm{Var}(X)$ or $\sigma^2$):** Measures how far values spread out around the mean:
+  $$
+  \mathrm{Var}(X) = \mathbb{E}\left[(X - \mathbb{E}[X])^2\right] = \mathbb{E}[X^2] - (\mathbb{E}[X])^2
+  $$
+- **Standard Deviation ($\sigma$):** The square root of the variance, $\sigma = \sqrt{\mathrm{Var}(X)}$, which shares the same measurement units as the original data.
+- **Covariance ($\mathrm{Cov}(X, Y)$):** Measures whether two random variables vary together in the same direction or opposite directions:
+  $$
+  \mathrm{Cov}(X, Y) = \mathbb{E}\left[(X - \mu_X)(Y - \mu_Y)\right]
+  $$
+  If $\mathrm{Cov}(X, Y) > 0$, $Y$ tends to increase when $X$ increases.
+
+---
+
+### 4. Bayes' Theorem: Updating Beliefs from Evidence
+
+Conditional probability $P(A \mid B)$ is the probability that event $A$ occurs given that event $B$ has already occurred:
+
+$$
+P(A \mid B) = \frac{P(A \cap B)}{P(B)}
+$$
+
+From this definition, **Bayes' Theorem** lets us invert the direction of conditioning:
+
+$$
+P(\theta \mid \mathcal{D}) = \frac{P(\mathcal{D} \mid \theta) P(\theta)}{P(\mathcal{D})}
+$$
+
+In machine learning and Bayesian inference:
+- $P(\theta)$: **Prior** — our initial belief about parameter $\theta$ before observing any data.
+- $P(\mathcal{D} \mid \theta)$: **Likelihood** — the probability of observing dataset $\mathcal{D}$ if the true parameter were $\theta$.
+- $P(\theta \mid \mathcal{D})$: **Posterior** — our updated belief about $\theta$ after observing the data $\mathcal{D}$.
+- $P(\mathcal{D})$: **Evidence** — the normalizing constant ensuring the posterior integrates to 1.
+
+:::note[Key takeaway]
+The golden rule of Bayesian thinking: $\text{Posterior} \propto \text{Likelihood} \times \text{Prior}$. Newly observed evidence continuously refines and updates the model's prior beliefs.
+:::
+
+---
+
+### 5. Maximum Likelihood Estimation (MLE)
+
+Suppose we collect a dataset of $m$ independent samples $\mathcal{D} = \{x^{(1)}, x^{(2)}, \dots, x^{(m)}\}$. We ask: **Which parameter vector $\boldsymbol{\theta}$ was most likely to have generated this dataset?**
+
+The **Likelihood function** is the product of the probabilities of all samples:
+
+$$
+L(\boldsymbol{\theta}) = \prod_{i=1}^m p(x^{(i)} \mid \boldsymbol{\theta})
+$$
+
+To avoid multiplying tiny numbers into floating-point underflow and to simplify differentiation, we take the natural logarithm to obtain the **Log-Likelihood**:
+
+$$
+\ell(\boldsymbol{\theta}) = \ln L(\boldsymbol{\theta}) = \sum_{i=1}^m \ln p(x^{(i)} \mid \boldsymbol{\theta})
+$$
+
+The Maximum Likelihood Estimate is the parameter vector that maximizes this objective:
+
+$$
+\hat{\boldsymbol{\theta}}_{\text{MLE}} = \arg\max_{\boldsymbol{\theta}} \sum_{i=1}^m \ln p(x^{(i)} \mid \boldsymbol{\theta})
+$$
+
+#### Mathematical Origins of MSE and Cross-Entropy
+
+1. **Origin of MSE Loss:**
+   Suppose our model predicts $\hat{y}^{(i)} = f(\mathbf{x}^{(i)})$ and the true label is corrupted by Gaussian noise: $y^{(i)} \sim \mathcal{N}(\hat{y}^{(i)}, \sigma^2)$.
+   The log-likelihood of the dataset is:
+   $$
+   \ell = \sum_{i=1}^m \ln \left( \frac{1}{\sigma \sqrt{2\pi}} \exp\left(-\frac{(y^{(i)} - \hat{y}^{(i)})^2}{2\sigma^2}\right) \right) = -m \ln(\sigma \sqrt{2\pi}) - \frac{1}{2\sigma^2} \sum_{i=1}^m (y^{(i)} - \hat{y}^{(i)})^2
+   $$
+   Maximizing $\ell$ is mathematically equivalent to **minimizing the sum of squared errors** $\sum (y^{(i)} - \hat{y}^{(i)})^2$ — which is MSE Loss!
+
+2. **Origin of Cross-Entropy Loss:**
+   Suppose a binary label $y^{(i)} \in \{0, 1\}$ follows a Bernoulli distribution with predicted probability $\hat{y}^{(i)} = P(Y=1)$.
+   The log-likelihood is:
+   $$
+   \ell = \sum_{i=1}^m \left[ y^{(i)} \ln \hat{y}^{(i)} + (1 - y^{(i)}) \ln(1 - \hat{y}^{(i)}) \right]
+   $$
+   Negating this expression (minimizing $-\ell$) gives the exact **Binary Cross-Entropy Loss** formula!
+
+### Limitations
+
+- **i.i.d. assumption:** Standard MLE assumes samples are Independent and Identically Distributed. For text or time-series data (such as stock prices), later tokens or steps depend heavily on earlier ones, requiring autoregressive sequence models.
+- **Overfitting on small samples:** If you flip a coin 3 times and get 3 heads, MLE concludes the probability of heads is $100\%$ ($\hat{p}_{\text{MLE}} = 1.0$). Incorporating a reasonable prior via Bayesian inference (MAP estimation) prevents such extreme conclusions when data is scarce.
+
+## Illustration
+
+The diagram below illustrates the bell-shaped Gaussian distribution and the probability tree behind Bayes' Theorem:
+
+```text
+1. GAUSSIAN NORMAL DISTRIBUTION N(μ, σ²):
+            f(x)
+             ▲          Peak at x = μ
+             │              ╭───╮
+             │             ╭╯   ╰╮
+             │            ╭╯     ╰╮    Interval [μ - σ, μ + σ]
+             │          ╭─╯       ╰─╮  contains ~68.2% of the data!
+             │      ───╯             ╰───
+             └───────────┼────┼────┼──────────► x
+                       μ-σ    μ   μ+σ
+
+2. BAYES' THEOREM IN DIAGNOSIS (BASE RATE FALLACY):
+    10,000 People in the population
+      ├── 1% Diseased (100 people) ──► 95% sensitivity ──► 95 True Positives
+      └── 99% Healthy (9,900 people) ─► 5% false alarm ──► 495 False Positives
+    ==> Out of 95 + 495 = 590 positive results, only 95 actually have the disease!
+```
+
+## Code examples
+
+The cells below run independently. The first cell may take a few extra seconds on its first run while the browser loads `scipy` and `matplotlib`.
+
+The first cell draws 5000 random samples from a Gaussian distribution $\mathcal{N}(2.0, 1.5^2)$, computes the empirical mean and variance, and plots the sample histogram against the theoretical PDF curve.
+
+<PythonRunner
+  code={gaussianCode}
+  title="Simulating a Gaussian distribution, computing expectation, and plotting the PDF"
+  figureAlt={['Histogram of Gaussian random samples overlaid with the symmetric bell-shaped theoretical probability density curve']}
+/>
+
+The printed output shows:
+- Theoretical mean $\mu = 2.0000$, while the empirical mean across 5000 random samples is $1.9702$.
+- Theoretical variance $\sigma^2 = 1.5^2 = 2.2500$, while the empirical variance is $2.2471$.
+- Both empirical statistics closely match their theoretical counterparts, illustrating the Law of Large Numbers.
+
+The second cell solves the medical diagnosis problem using Bayes' Theorem (computing the posterior probability $P(D \mid +)$ where $D$ is having the disease) and demonstrates Maximum Likelihood Estimation (MLE) for a Bernoulli distribution.
+
+<PythonRunner code={bayesMleCode} title="Computing Bayesian posterior probability and Bernoulli MLE" />
+
+The printed output shows:
+- The total probability of a positive test $P(+)$ is $0.0590$ ($0.95\%$ true positives plus $4.95\%$ false positives).
+- The posterior probability of actually having the disease given a positive result is only $0.1610$ ($16.10\%$). Even with a $95\%$-accurate test, the rarity of the disease means false positives outnumber true positives by more than 5 to 1.
+- Across 10 Bernoulli trials with 8 successes, the MLE estimate is $\hat{p}_{\text{MLE}} = 0.8000$.
+- The Log-Likelihood at $\hat{p} = 0.8$ reaches $-5.0040$, noticeably higher than $-6.9315$ at the baseline guess $p = 0.5$, confirming that $\hat{p} = 0.8$ best explains the observed data.
+
+## Common pitfalls
+
+:::caution[The Base Rate Fallacy]
+When evaluating predictions from a classifier (or medical test), ignoring the prior probability (Base Rate) is the most common mistake. A credit-card fraud detector with $99\%$ accuracy sounds impressive, but if only $0.01\%$ of real transactions are fraudulent, the vast majority of fraud alerts will still be false alarms!
+:::
+
+:::caution[Confusing Probability with Likelihood]
+Probability measures the chance of observing future data when the model parameters are held fixed: $P(\mathcal{D} \mid \boldsymbol{\theta})$. Conversely, Likelihood evaluates how plausible different parameter values are after the observed data has been collected and fixed: $L(\boldsymbol{\theta} \mid \mathcal{D})$.
+:::
+
+:::caution[Confusing probability density $f(x)$ with probability $P(X = x)$]
+For a continuous random variable, the probability density height $f(x)$ at a point can easily exceed $1.0$ (for example, a uniform distribution on $[0, 0.2]$ has density $f(x) = 5.0$). What must equal $1.0$ is the total integrated area under the curve. The value $f(x)$ represents relative probability concentration around $x$, not the probability at $x$.
+:::
+
+## Quick check
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Random variables quantify uncertainty; continuous random variables have zero probability at any single point and are described by a probability density function (PDF).
+- The Gaussian distribution sits at the heart of statistics thanks to the Central Limit Theorem; the Bernoulli distribution models binary classification.
+- Bayes' Theorem provides the exact rule for updating prior beliefs with observed evidence.
+- Maximum Likelihood Estimation (MLE) is the probabilistic root of standard machine learning losses: MSE arises from Gaussian noise and Cross-Entropy arises from Bernoulli likelihood.
+
+**Further reading:**
+
+- Joseph K. Blitzstein, Jessica Hwang (2019). [*Introduction to Probability*](https://projects.iq.harvard.edu/stat110/home) (PDF), Harvard University's classic, intuitive textbook on probability.
+- Marc Peter Deisenroth, A. Aldo Faisal, Cheng Soon Ong (2020). [*Mathematics for Machine Learning*](https://mml-book.github.io/) (PDF), Chapter 6: Probability and Distributions.
+- David J. C. MacKay (2003). [*Information Theory, Inference, and Learning Algorithms*](http://www.inference.org.uk/itprnn/book.pdf) (PDF), Chapter 2 (Probability, Ergodicity, and Information) and Chapter 3 (Inference and Maximum Likelihood).
+- Grant Sanderson (3Blue1Brown) (2020). [*Bayes theorem, the geometry of changing beliefs*](https://www.3blue1brown.com/lessons/bayes-theorem), a visual geometric explanation of Bayes' Theorem and conditional probability.
+
+<LessonProgress />

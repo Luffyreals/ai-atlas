@@ -1,0 +1,379 @@
+---
+title: 'Model Evaluation and PEFT: LoRA, Quantization, Distillation, Pruning'
+description: After fine-tuning, how do you know the model is actually better, and how do you fine-tune when GPU memory is scarce? Benchmarks, LLM judges, test-set contamination, LoRA, QLoRA, quantization, distillation, and pruning.
+quiz:
+  - question: 'You fine-tune a model on tens of thousands of Q&A pages crawled from the web. Its score on a public multiple-choice benchmark jumps from 45% to 70%. Before trusting this number, what should you do first?'
+    options:
+      - 'Measure perplexity on the training set to make sure the model has finished learning'
+      - 'Increase the number of few-shot examples in the prompt to make the score more stable'
+      - 'Find benchmark questions that share overlapping spans (e.g., a contiguous 13-word span) with the fine-tuning data, then compare the score on the clean subset against the contaminated subset'
+      - 'Ask a strong LLM to re-grade the answers'
+    answer: 2
+    explanation: 'Public benchmarks live on the web, so crawled data can contain the test questions themselves. The GPT-3 team did exactly this: they separated out a clean subset with no 13-word (13-gram) overlap and compared scores. If the score on the clean subset is much lower, the gain may just be memorization. Training-set perplexity says nothing about the test exam, and an LLM judge cannot tell whether the model has already seen the test questions.'
+  - question: 'A linear layer has $\mathbf{W}_0 \in \mathbb{R}^{2048 \times 8192}$, i.e., $d_{\text{out}} = 2048$ and $d_{\text{in}} = 8192$. You attach LoRA with $r = 16$. How many trainable parameters does this layer have?'
+    options:
+      - '$16 \cdot 2048 \cdot 8192$, about 268 million'
+      - '$16 \cdot (2048 + 8192) = 163\,840$'
+      - '$2048 \cdot 8192 = 16\,777\,216$'
+      - '$16 \cdot 16 = 256$'
+    answer: 1
+    explanation: '$\mathbf{B}$ has $2048 \times 16$ numbers and $\mathbf{A}$ has $16 \times 8192$ numbers, totaling $16 \cdot (2048 + 8192) = 163\,840$—less than 1% of the parameters in $\mathbf{W}_0$. $16\,777\,216$ is the size of $\mathbf{W}_0$ itself, which remains present but frozen. Multiplying $r$ by $d_{\text{out}} \cdot d_{\text{in}}$ mistakes $\mathbf{B}\mathbf{A}$ for $r$ full matrices.'
+  - question: 'A matrix has all entries in $[-1, 1]$, except for one entry equal to $50$. You apply 4-bit absmax quantization ($q_{\max} = 7$) with a single scale factor for the entire matrix. What happens to the other entries?'
+    options:
+      - 'The entry $50$ is clipped to $7$, while the other entries keep their precision'
+      - 'Nothing bad happens, because each entry''s error is always less than $1/14$'
+      - 'They are rounded more accurately because the value range is wider'
+      - 'Nearly all of them become $0$, because each quantization step has width $50/7 \approx 7.1$'
+    answer: 3
+    explanation: '$s = 7/50 = 0.14$, so an entry $w$ becomes $\operatorname{round}(0.14\,w)$. For $|w| \le 1$, $|0.14\,w| < 0.5$, so every such entry rounds to $0$. Absmax never clips any entry: the largest entry maps directly to $q_{\max}$. The error bound is $1/(2s) = 50/14 \approx 3.6$, not $1/14$, because the bound scales with the maximum absolute value.'
+  - question: 'After fine-tuning with LoRA, you merge $\mathbf{W} = \mathbf{W}_0 + \frac{\alpha}{r}\mathbf{B}\mathbf{A}$ in every layer and export the model. Compared to the base model, how does the merged model behave?'
+    options:
+      - 'Same parameter count and same inference speed; only the weight values differ'
+      - 'Much smaller, because each layer only retains $r(d_{\text{in}} + d_{\text{out}})$ parameters'
+      - 'Slower, because each layer must compute the extra branch $\mathbf{B}\mathbf{A}\mathbf{x}$'
+      - 'You must keep $\mathbf{A}$ and $\mathbf{B}$ alongside the model for inference to work properly'
+    answer: 0
+    explanation: '$\mathbf{W}_0 + \frac{\alpha}{r}\mathbf{B}\mathbf{A}$ has the exact same shape $d_{\text{out}} \times d_{\text{in}}$ as $\mathbf{W}_0$, so the merged model runs identically to a standard model. LoRA shrinks the trainable parameter count and the adapter checkpoint file, not the model itself; to make the deployed model smaller, you need quantization, distillation, or pruning. The extra branch $\mathbf{B}\mathbf{A}\mathbf{x}$ only adds overhead before merging, and once merged, $\mathbf{A}$ and $\mathbf{B}$ are already baked into $\mathbf{W}$.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LoraFigure from '@components/figures/LoraFigure.astro';
+import loraQuantCode from '@code/llm/evaluation-peft/lora-quant.en.py?raw';
+import loraLayerCode from '@code/llm/evaluation-peft/lora-layer.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Distinguish measuring how well a model predicts text (loss, perplexity) from measuring how well it performs tasks (**benchmarks**, **LLM-as-a-judge**), and spot when scores are suspicious—especially due to **test-set contamination**.
+- Understand **PEFT** (parameter-efficient fine-tuning) and derive **LoRA** (low-rank adaptation) yourself: the formula $\mathbf{W}_0 + \frac{\alpha}{r}\mathbf{B}\mathbf{A}$, parameter count, initialization, and weight merging.
+- Calculate the error of 8-bit and 4-bit absmax **quantization**, explain why a single outlier ruins an entire matrix, and see how QLoRA combines quantization with LoRA.
+- Grasp the core ideas behind **knowledge distillation** and **pruning**: what each technique saves and what it costs.
+
+## Prerequisites
+
+{/* List taken from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+The [Build Your First LLM](/en/llm/build-first-llm/) lesson trained a language model using cross-entropy $\mathcal{L} = -\frac{1}{m}\sum_{t=1}^{m} \ln p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$ and interpreted it as perplexity $\mathrm{PPL} = \exp(\mathcal{L})$. The [GPT Family and Multi-Task Fine-Tuning](/en/llm/gpt-family-finetuning/) lesson used that exact loss to **fine-tune** a model on prompt–response pairs by updating all of its parameters.
+:::
+
+## Intuition
+
+### Two questions after fine-tuning
+
+Suppose you want an assistant that answers questions about your company's products. You pick an open 7-billion-parameter model, collect a few thousand example Q&A pairs, and plan to fine-tune it as in the previous lesson. Immediately, two questions arise.
+
+**How do you know the fine-tuned version is better than the base model?** A lower training loss proves nothing on its own, because the model might just be memorizing. What if you test it on a public multiple-choice exam from the internet, and that exam was accidentally included in the web data you crawled? And how do you grade open-ended answers like "explain the return policy"?
+
+**Where does the memory come from?** Storing 7 billion weights in 16-bit precision (2 bytes per number) already takes about 14 GB. Full fine-tuning also stores a gradient for every parameter, and Adam keeps two additional states per parameter. As a rough estimate, if everything stayed in 16-bit, that would be 4 copies of the model size—around 56 GB, not counting intermediate activations; in practice it is even more because Adam states are typically kept in 32-bit. A consumer GPU cannot hold that, and every new task would produce another 14 GB checkpoint.
+
+Picture the base model as a thick printed book. Full fine-tuning is like reprinting the entire book just to revise a few chapters. There are cheaper alternatives: **clip in a thin note sheet** and read both together (LoRA); **print with smaller type**, accepting slight blurriness (quantization); **write a slimmer summary book** (distillation); or **cross out unimportant lines** (pruning).
+
+The problem of this lesson is: **how do we measure whether a model is genuinely better without fooling ourselves with numbers? And how do we fine-tune, store, and run a large model with far less memory while preserving its quality?**
+
+## Theory
+
+### Evaluating with loss and perplexity
+
+The most direct evaluation reuses the training objective itself on text the model **has never seen**:
+
+$$
+\mathrm{PPL} = \exp\!\left(-\frac{1}{m}\sum_{t=1}^{m} \ln p_{\boldsymbol{\theta}}(x_t \mid x_{<t})\right)
+$$
+
+Inside the parentheses is the average cross-entropy over $m$ positions of the test set; taking $\exp$ gives the effective number of equally likely choices the model is hesitating between. The [Build Your First LLM](/en/llm/build-first-llm/) lesson derived this formula; remember that perplexities are only comparable when measured with the **same tokenizer and the same test set**.
+
+Perplexity is cheap, automatic, and sensitive. However, it measures **how well the model predicts text**, not **how well it follows instructions or completes tasks**. Recall the example from [GPT Family and Multi-Task Fine-Tuning](/en/llm/gpt-family-finetuning/): when training InstructGPT, validation loss increased after the first epoch even as human evaluation scores kept improving.
+
+### Benchmarks: standardized exams
+
+A **benchmark** is a standardized set of questions with reference answers. Every model takes the same exam and is graded the same way, making results comparable. A widely cited example is **MMLU** (Hendrycks et al., 2021): four-choice multiple-choice questions spanning 57 tasks, from elementary mathematics and US history to computer science and law. When it was released, the largest GPT-3 model beat random guessing by just under 20 percentage points on average.
+
+When reading a benchmark score, ask three questions:
+
+1. **What is the random-guessing baseline?** On a four-choice exam, random guessing gets about 25%, so 40% is only 15 points above chance.
+2. **What prompt and how many examples were used?** Zero-shot and 5-shot (five examples in the prompt) yield different scores. Only compare numbers measured under the same protocol, and note the paper and year.
+3. **Has the model already seen the exam?** See the contamination section below.
+
+Multiple-choice benchmarks also have a structural limitation: they can only grade questions with a single fixed answer. A prompt like "Write an apology email to a customer" has no single answer key to match against.
+
+### LLM-as-a-judge
+
+Having humans grade open-ended answers is the gold standard, but it is slow and expensive. **LLM-as-a-judge** feeds the question and the candidate answers to a strong LLM and asks it to assign a score or pick the better of two responses. Zheng et al. (2023) built two evaluation suites: **MT-bench**, a set of multi-turn open-ended questions, and **Chatbot Arena**, where users chat with two anonymous models side by side and vote. According to the authors' summary, strong judges like GPT-4 agree with human preferences over 80% of the time—matching the level of agreement between two humans.
+
+However, the same paper catalogs the **biases** of LLM judges: **position bias** (favoring the answer in a specific slot, such as the first one), **verbosity bias** (favoring longer answers even when they are not better), **self-enhancement bias** (favoring answers generated by itself), and **limited reasoning ability** when grading math or logic problems. One simple mitigation for position bias discussed in the paper is to grade each pair twice with the order swapped. If the winner flips when you swap the order, do not count it as a win.
+
+### Test-set contamination
+
+Pre-training data is scraped from the web, and benchmark questions and answers also live on the web. A model may have **seen the exam** during training, in which case a high score only proves memorization. This is **test-set contamination**.
+
+The GPT-3 team (Brown et al., 2020, Section 4) searched for and tried to remove overlaps with the development and test sets of all benchmarks in their paper, but **a bug in the filtering pipeline** left the removal incomplete. Retraining the models was too expensive, so they measured the impact of the remaining overlap instead.
+
+They flagged any benchmark example that shared a contiguous 13-word span (**13-gram**, roughly speaking; Appendix C uses between 8 and 13 words depending on the dataset) with the training data; for examples shorter than 13 words, they checked for full-example overlap. Removing all flagged examples (intentionally erring on the conservative side) produced a **clean subset**, and they compared the score on the clean subset with the score on the full dataset: if the clean score is substantially lower, contamination may be inflating the result.
+
+According to the authors, most benchmarks showed negligible score differences, though they found signs of contamination on PIQA and Winograd (which they marked with asterisks). The takeaway for us is **how to check**, not the conclusion that "contamination doesn't matter", because that conclusion was specific to their 2020 dataset.
+
+For your own projects: keep a **held-out test set** that is never used for training or hyperparameter tuning, as in [Overfitting and Underfitting](/en/ml/overfitting-underfitting/), and check for n-gram overlaps between your fine-tuning data and any public benchmark before trusting the score.
+
+### PEFT: training only a tiny fraction
+
+**PEFT** is the umbrella term for methods that train only a tiny fraction of parameters—either newly added or selected from the model—while keeping the remaining weights **frozen** (not updated). You do not need to store gradients or optimizer states for frozen parameters, and for each downstream task you only save the small learned diff.
+
+### LoRA: low-rank updates
+
+**Step 1: what full fine-tuning learns.** Consider a linear layer, such as the query projection matrix in attention:
+
+$$
+\mathbf{h} = \mathbf{W}_0 \mathbf{x}, \qquad \mathbf{W}_0 \in \mathbb{R}^{d_{\text{out}} \times d_{\text{in}}}
+$$
+
+$\mathbf{W}_0$ is the pre-trained weight matrix, and $d_{\text{in}}$, $d_{\text{out}}$ are the input and output dimensions. (The paper writes $d \times k$; we use $d_{\text{out}} \times d_{\text{in}}$ to match PyTorch's `nn.Linear`.) Full fine-tuning replaces $\mathbf{W}_0$ with $\mathbf{W}_0 + \Delta\mathbf{W}$, where $\Delta\mathbf{W}$ has the same shape: $d_{\text{out}} \cdot d_{\text{in}}$ numbers to learn.
+
+**Step 2: constrain the update to have low rank.** LoRA factors the update into the product of two narrow matrices:
+
+$$
+\Delta\mathbf{W} = \mathbf{B}\mathbf{A}, \qquad \mathbf{B} \in \mathbb{R}^{d_{\text{out}} \times r}, \quad \mathbf{A} \in \mathbb{R}^{r \times d_{\text{in}}}
+$$
+
+The number $r$ is the **rank** of LoRA, chosen to be much smaller than $d_{\text{in}}$ and $d_{\text{out}}$. Why does $\mathbf{B}\mathbf{A}$ have rank at most $r$? Write $\mathbf{B}\mathbf{A}\mathbf{x} = \mathbf{B}(\mathbf{A}\mathbf{x})$: $\mathbf{A}\mathbf{x}$ is a vector of just $r$ numbers, and $\mathbf{B}$ uses those $r$ numbers as coefficients to take a linear combination of its $r$ columns. No matter what $\mathbf{x}$ is, the result is always a combination of those $r$ columns: the update can only push the output along $r$ directions.
+
+Why hope that a small $r$ is enough? Hu et al. **hypothesized** that when adapting to a specific task, the weight change has a low "intrinsic rank". This is an empirical hypothesis tested by experiment, not a mathematical theorem.
+
+**Step 3: forward pass.**
+
+$$
+\mathbf{h} = \mathbf{W}_0 \mathbf{x} + \frac{\alpha}{r}\,\mathbf{B}\mathbf{A}\mathbf{x}
+$$
+
+Both branches take the same input $\mathbf{x}$ and their outputs are summed. We compute $\mathbf{A}\mathbf{x}$ first ($r$ numbers) and then multiply by $\mathbf{B}$, so during training we never materialize the full $d_{\text{out}} \times d_{\text{in}}$ matrix $\mathbf{B}\mathbf{A}$. The factor $\frac{\alpha}{r}$ scales the update, where $\alpha$ is a constant chosen in advance. According to the paper, with Adam, tuning $\alpha$ is roughly equivalent to tuning the learning rate, so they set $\alpha$ to the first $r$ they tried and left it fixed; dividing by $r$ reduces the need to retune hyperparameters when changing $r$.
+
+{/* FIG: LoRA freezes the original matrix and only learns two narrow matrices; their product forms a parallel branch added to the output. */}
+<LoraFigure />
+
+**Step 4: counting parameters.** $\mathbf{B}$ has $d_{\text{out}} \cdot r$ numbers and $\mathbf{A}$ has $r \cdot d_{\text{in}}$ numbers. Summing them and factoring out $r$:
+
+$$
+\underbrace{d_{\text{out}}\, r}_{\mathbf{B}} + \underbrace{r\, d_{\text{in}}}_{\mathbf{A}} = r\,(d_{\text{in}} + d_{\text{out}})
+$$
+
+Compared to $d_{\text{in}} d_{\text{out}}$ in full fine-tuning, the ratio is $\frac{r(d_{\text{in}} + d_{\text{out}})}{d_{\text{in}} d_{\text{out}}}$. For a square $D \times D$ matrix, this simplifies to $\frac{2rD}{D^2} = \frac{2r}{D}$. A $4096 \times 4096$ matrix has $16\,777\,216$ parameters; LoRA with $r = 8$ learns only $8 \cdot 8192 = 65\,536$ parameters, or $\frac{16}{4096} \approx 0.39\%$.
+
+For the 175-billion-parameter GPT-3: according to Brown et al. (2020, Table 2.1), the model has 96 layers and $D = 12288$. In most experiments, Hu et al. attached LoRA only to the query matrix $\mathbf{W}_q$ and value matrix $\mathbf{W}_v$ in each attention layer, both of size $D \times D$, with $r = 4$:
+
+$$
+96 \cdot 2 \cdot 4 \cdot (12288 + 12288) = 18\,874\,368
+$$
+
+This matches the "18M" trainable parameter budget reported in the paper. Storing that many numbers in 16-bit takes about 38 MB; the paper reports a checkpoint size of roughly 35 MB per task.
+
+**Step 5: initialization, and why gradients still flow.** The paper initializes $\mathbf{A}$ with random Gaussian values and sets $\mathbf{B} = \mathbf{0}$. Then $\mathbf{B}\mathbf{A} = \mathbf{0}$: at the start of training, the LoRA layer produces the **exact** same output as the base model, so fine-tuning begins precisely where the pre-trained model left off.
+
+Does $\mathbf{B} = \mathbf{0}$ make the gradients zero? Let $\mathbf{u} = \mathbf{A}\mathbf{x}$ (the $r$-dimensional bottleneck vector), and let $\mathbf{g} = \frac{\partial \mathcal{L}}{\partial \mathbf{h}}$ be the upstream gradient flowing back from later layers. We use the standard rule for a linear layer $\mathbf{h} = \mathbf{M}\mathbf{u}$: entry $M_{ij}$ appears only in $h_i = \sum_j M_{ij} u_j$ with coefficient $u_j$, so $\frac{\partial \mathcal{L}}{\partial M_{ij}} = g_i u_j$, written compactly as $\mathbf{g}\mathbf{u}^\top$.
+
+- **With respect to $\mathbf{B}$:** the LoRA branch is $\frac{\alpha}{r}\mathbf{B}\mathbf{u}$, a linear layer with matrix $\frac{\alpha}{r}\mathbf{B}$ and input $\mathbf{u}$, so $\frac{\partial \mathcal{L}}{\partial \mathbf{B}} = \frac{\alpha}{r}\mathbf{g}\mathbf{u}^\top$ (the factor $\frac{\alpha}{r}$ appears because each $B_{ij}$ is multiplied by $\frac{\alpha}{r}$). Since $\mathbf{A}$ is random, $\mathbf{u} \ne \mathbf{0}$, so this gradient is non-zero.
+- **With respect to $\mathbf{A}$:** propagating backward through $\mathbf{B}$ first gives the gradient with respect to $\mathbf{u}$ as $\frac{\alpha}{r}\mathbf{B}^\top\mathbf{g}$; applying the outer-product rule to $\mathbf{u} = \mathbf{A}\mathbf{x}$ yields $\frac{\partial \mathcal{L}}{\partial \mathbf{A}} = \frac{\alpha}{r}\mathbf{B}^\top\mathbf{g}\,\mathbf{x}^\top$. At step 0, $\mathbf{B} = \mathbf{0}$, so this gradient **equals 0**.
+
+Thus on the very first step only $\mathbf{B}$ updates; once $\mathbf{B} \ne \mathbf{0}$, $\mathbf{A}$ starts receiving non-zero gradients on subsequent steps. That is also why you cannot initialize both matrices to zero: both gradients would remain zero forever. The PyTorch cell in the Code examples section verifies this directly.
+
+**Step 6: merging for inference.** Once training finishes, compute once:
+
+$$
+\mathbf{W} = \mathbf{W}_0 + \frac{\alpha}{r}\,\mathbf{B}\mathbf{A}
+$$
+
+Because $\mathbf{W}$ has the exact same shape as $\mathbf{W}_0$, the merged model runs identically to the base model with **zero extra latency**. The paper notes that 100 fine-tuned GPT-3 tasks require only 350 GB for the base model plus $100 \times 35$ MB—about 354 GB total instead of 35 TB. However, the 350 GB base model **must still be present** at runtime: LoRA does not shrink the model.
+
+**Which weight matrices should get LoRA?** Hu et al. only considered attention matrices, and under a fixed 18M-parameter budget on GPT-3, adapting both $\mathbf{W}_q$ and $\mathbf{W}_v$ with $r = 4$ outperformed putting the entire budget into $\mathbf{W}_q$ or $\mathbf{W}_k$ with $r = 8$. However, Dettmers et al. (2023, the QLoRA paper) found that adapting "only query and value" **failed** to match full fine-tuning on large base models; they had to attach LoRA to **all linear layers** of the Transformer block, whereas varying $r$ had almost no effect in their experiments. Because the setups differ, treat neither finding as a universal law.
+
+:::note[Key takeaway]
+LoRA freezes $\mathbf{W}_0$ and learns a low-rank update: $\mathbf{h} = \mathbf{W}_0\mathbf{x} + \frac{\alpha}{r}\mathbf{B}\mathbf{A}\mathbf{x}$. Each adapted matrix learns only $r(d_{\text{in}} + d_{\text{out}})$ parameters instead of $d_{\text{in}} d_{\text{out}}$. Setting $\mathbf{B} = \mathbf{0}$ initially ensures training starts from the exact base model. Merging $\mathbf{W}_0 + \frac{\alpha}{r}\mathbf{B}\mathbf{A}$ adds zero inference latency, but does not make the model smaller.
+:::
+
+### Quantization
+
+Quantization stores each number using fewer bits—for example, converting 16-bit floating-point numbers into 8-bit integers (int8) or 4-bit integers (int4). Counting weights alone, a 7-billion-parameter model takes about 14 GB at 16-bit, 7 GB at 8-bit, and 3.5 GB at 4-bit (parameter count times bytes per parameter, excluding runtime activations and cache). The price you pay is **rounding error**.
+
+The simplest scheme is **absmax** quantization (Dettmers et al., 2022, Section 2.1, written for 8-bit; here written for $b$ bits). A signed $b$-bit integer uses the symmetric range $[-q_{\max}, q_{\max}]$ where $q_{\max} = 2^{b-1} - 1$: 127 for 8-bit and 7 for 4-bit. We scale the tensor so that the entry with the largest absolute value maps directly to $q_{\max}$:
+
+$$
+s = \frac{q_{\max}}{\max_{i,j} |W_{ij}|}
+$$
+
+$$
+\mathbf{W}_{\text{int}} = \operatorname{round}(s\,\mathbf{W}), \qquad \hat{\mathbf{W}} = \frac{\mathbf{W}_{\text{int}}}{s}
+$$
+
+$s$ is the **scale** factor. We store the integer matrix $\mathbf{W}_{\text{int}}$ along with the single float $s$; at compute time we **dequantize** back to $\hat{\mathbf{W}}$.
+
+**How large is the error?** The $\operatorname{round}$ operation changes any real number by at most $\frac{1}{2}$. Since $\hat{W}_{ij} - W_{ij} = \frac{\operatorname{round}(s W_{ij}) - s W_{ij}}{s}$:
+
+$$
+\lvert \hat{W}_{ij} - W_{ij} \rvert \le \frac{1}{2s} = \frac{\max_{i,j} |W_{ij}|}{2\, q_{\max}}
+$$
+
+The $\le$ comes from the $\frac{1}{2}$ rounding bound; the $=$ substitutes the definition of $s$. No entry is ever clipped, because $|s W_{ij}| \le q_{\max}$. This formula tells us two things. First, going from 8-bit to 4-bit drops $q_{\max}$ from 127 to 7—about an $18\times$ reduction—so the maximum error bound increases by about $18\times$. Second, the error bound **is proportional to the largest entry**.
+
+**Outliers.** Basic absmax uses a single scale $s$ for the entire matrix. One huge **outlier** makes $s$ tiny, which makes every quantization step wide; all normal entries get rounded coarsely, and many collapse to 0. It is like using a ruler marked only every 5 meters so it can measure a 40-meter building: anything a few centimeters long measures as "0 marks". The NumPy cell in the Code examples section demonstrates this numerically.
+
+This is not merely theoretical. Dettmers et al. (2022) discovered that starting around 6.7 billion parameters, every Transformer layer develops a small number of features with huge magnitudes. These features appear in the inputs to matrix multiplications (the activations), not the weights; because their **LLM.int8()** method quantizes both weights and activations, activation outliers ruin 8-bit matrix multiplication. To fix this, LLM.int8() uses separate scale factors per row and per column, and separates out the outlier dimensions to multiply them in 16-bit (while over 99.9% of values are still multiplied in 8-bit); according to the authors, this runs models up to 175B parameters with no degradation in accuracy. **GPTQ** (Frantar et al., 2022) takes a different route, performing one-shot post-training quantization of weights down to 3 or 4 bits.
+
+### QLoRA: quantization plus LoRA
+
+LoRA shrinks the trainable parameters, but the frozen base model still sits in memory at 16-bit. **QLoRA** (Dettmers et al., 2023) quantizes the base model as well: the frozen base weights are stored in 4-bit, while gradients flow back through them to the 16-bit LoRA **adapters** (the $\mathbf{A}, \mathbf{B}$ pairs attached to each layer). The paper's introduction notes that standard 16-bit fine-tuning of a 65B model requires over 780 GB of GPU memory; QLoRA fine-tunes a 65B model on a single 48 GB GPU while matching 16-bit fine-tuning quality in their experiments. It introduces three technical components:
+
+- **4-bit NormalFloat (NF4):** places the 16 quantization levels at the quantiles of a standard normal distribution rather than spacing them evenly like int4, because pre-trained weights typically follow a zero-centered bell curve.
+- **Double quantization:** splitting weights into blocks of 64 numbers, each with its own scale factor, was an existing technique; by the absmax bound, an outlier then only affects its own 64-element block. QLoRA's addition is to quantize those scale factors themselves, reducing the scale overhead from 0.5 bits to about 0.127 bits per parameter.
+- **Paged optimizers:** use unified CPU–GPU memory paging to handle transient memory spikes during long-sequence training.
+
+Notice one crucial detail: **storing weights in 4-bit does not mean computing in 4-bit.** Before each matrix multiplication, the NF4 weights are dequantized into BFloat16 (a 16-bit floating-point format). Quantization here saves **storage and memory footprint**.
+
+### Knowledge distillation
+
+If you want the model to be genuinely smaller and faster at runtime, you can train a small model to imitate a large one: **knowledge distillation**, introduced in its modern form by Hinton, Vinyals, and Dean (2015) on classification tasks.
+
+The large model, called the **teacher**, outputs a full probability distribution over classes. Using the paper's classic example: an image of a handwritten digit 2 might be assigned a small probability of being a 3 and a much smaller probability of being a 7, capturing the insight that "this 2 looks a bit like a 3"—information that a hard one-hot label completely discards. The small model, called the **student**, is trained to match that probability distribution, known as **soft targets**. Because the non-target probabilities are often tiny near 0, the paper raises the **temperature** $T$:
+
+$$
+\mathrm{softmax}_T(\mathbf{z})_i = \frac{\exp(z_i / T)}{\sum_j \exp(z_j / T)}
+$$
+
+A larger $T$ flattens the distribution and brings out the relative differences among small probabilities. This is the exact same temperature formula from [Using Text Generation APIs](/en/llm/text-api/), used for a different purpose: there $T$ shapes sampling at inference time, whereas here it softens targets while training the student.
+
+Let $\mathbf{z}$ and $\hat{\mathbf{z}}$ be the logits of the teacher and student, with $\mathbf{p}_T = \mathrm{softmax}_T(\mathbf{z})$ and $\hat{\mathbf{p}}_T = \mathrm{softmax}_T(\hat{\mathbf{z}})$. The paper describes in words a weighted average of two cross-entropy terms; written as an equation (using $\lambda$ for the mixing weight):
+
+$$
+\mathcal{L} = \lambda\, T^2\, \mathrm{CE}(\mathbf{p}_T, \hat{\mathbf{p}}_T) + (1 - \lambda)\, \mathrm{CE}(\mathbf{y}, \hat{\mathbf{p}}_1)
+$$
+
+The first term trains the student to match the teacher's soft targets at the same high temperature $T$, where $\mathrm{CE}(\mathbf{p}, \hat{\mathbf{p}}) = -\sum_i p_i \ln \hat{p}_i$ just as in [Build Your First LLM](/en/llm/build-first-llm/), except $\mathbf{p}$ is now a soft distribution rather than one-hot. The second term is standard cross-entropy against the ground-truth label $\mathbf{y}$ at $T = 1$. Why the $T^2$ factor? The paper shows that the gradient magnitudes of the soft-target term scale as $1/T^2$, so multiplying by $T^2$ keeps the relative contribution of both terms balanced when you change $T$.
+
+At inference time, the student uses $T = 1$. On MNIST, the paper reports that a large teacher network made 67 test errors; a smaller net trained normally made 146 errors; the same smaller net trained with soft targets at $T = 20$ made only 74 errors. Those results are for 2015 digit classification; we do not cover sequence-level distillation at LLM scale here.
+
+### Pruning
+
+A third way to shrink a model is to remove weights altogether. Han et al. (2015) use a three-step pipeline: **train** the network to learn which connections matter; **prune** all connections whose absolute weight falls below a threshold (setting them to 0 permanently), turning dense matrices into **sparse** matrices; and **retrain** the remaining weights. The paper stresses the final step: using the pruned network without retraining degrades accuracy substantially. According to their summary, this reduced parameters by $9\times$ on AlexNet and $13\times$ on VGG-16 with no loss of accuracy on ImageNet for 2015 vision models.
+
+For large language models, full retraining is prohibitively expensive. **SparseGPT** (Frantar and Alistarh, 2023) prunes large models like OPT-175B and BLOOM-176B in one shot **without retraining** to at least 50% **sparsity** (the fraction of weights equal to 0) with minimal accuracy loss; it also supports structured 2:4 sparsity, where every contiguous group of 4 weights contains at least 2 zeros. Note that an unstructured sparse matrix is still multiplied like a dense matrix unless your hardware and kernels explicitly exploit the zeros; semi-structured patterns like 2:4 are much easier for modern GPUs to accelerate.
+
+### Limitations
+
+- **Every evaluation metric has blind spots.** Combine multiple metrics and always keep a clean, held-out test set (see the second callout in Common pitfalls).
+- **LoRA assumes the needed update has low rank,** and deciding which layers to adapt remains an empirical question.
+- **Model compression trades quality for size.** Re-evaluate on your own task after every compression step. Serving compressed models in production is covered in [Deploying LLMs: Multi-GPU and Distributed Serving](/en/llm/llm-deployment/).
+
+## Illustration
+
+The table below puts all four techniques side by side. Look at the fourth column: only quantization and distillation are guaranteed to make the deployed runtime model smaller; pruning only reduces size and latency when stored and executed in a supported sparse format; LoRA saves memory during training and when storing multiple task adapters.
+
+| Technique | What it does | Requires training? | Smaller model at runtime? | Trade-off |
+|---|---|---|---|---|
+| LoRA | Freezes $\mathbf{W}_0$, learns rank-$r$ matrices $\mathbf{B}, \mathbf{A}$ | Yes, only $\mathbf{A}$ and $\mathbf{B}$ | No. Once merged, same size as base | Update restricted to rank $r$; still needs the base model |
+| Quantization | Stores weights using fewer bits | Not required: absmax, GPTQ work post-training | Yes: 7B parameters drop from 14 GB (16-bit) to 3.5 GB (4-bit) | Rounding error, sensitive to outliers |
+| Distillation | Small student learns from large teacher's soft targets | Yes, trains the entire student model | Yes, the student is a smaller architecture | Needs teacher forward passes, data, and a full training run |
+| Pruning | Zeros out less important weights | Han 2015: yes (retraining); SparseGPT: no | Only if stored in a sparse format | Only faster when hardware and kernels support the sparsity pattern |
+
+QLoRA combines row one and row two: a 4-bit quantized base model to fit in GPU memory, plus 16-bit LoRA adapters to learn the task.
+
+## Code examples
+
+The code in this lesson was last tested in October 2026: the NumPy cell with Python 3.14 and NumPy 2.4 (in Pyodide), and the PyTorch cell with Python 3.14 and PyTorch 2.14 on CPU. The first cell runs right in your browser; the second requires PyTorch and runs on your machine.
+
+### Counting LoRA parameters and measuring absmax error
+
+The cell below reproduces two calculations from the Theory section. The first part counts LoRA parameters for a $4096 \times 4096$ matrix at $r = 1, 8, 64$, and then for GPT-3. The second part applies 8-bit and 4-bit absmax quantization to a $256 \times 256$ standard normal matrix, printing the **RMSE** (root mean squared error), the maximum absolute error, the theoretical bound $\frac{1}{2s}$, and the fraction of entries rounded to 0. Finally, it sets a single entry to 40 and re-measures the error across the remaining normal entries.
+
+<PythonRunner code={loraQuantCode} title="LoRA parameter count and absmax quantization error" />
+
+Reading the output:
+
+- **First three lines:** $8\,192$, $65\,536$, and $524\,288$ parameters—or 0.05%, 0.39%, and 3.12% of $16\,777\,216$—for **one** matrix. The line `GPT-3, r = 4: 18874368` matches the calculation in Step 4.
+- **int8:** with `max |W| = 4.732`, the RMSE is 0.0108 and the max error is 0.0186, matching the bound $\frac{4.732}{2 \cdot 127}$ to 4 decimal places. The empirical max hits the theoretical bound because $65\,536$ entries are enough for some value to land right halfway between two quantization levels.
+- **int4:** the RMSE is 0.1951, about $18\times$ larger than int8, just as the ratio $\frac{127}{7}$ predicts. 26.3% of entries collapse to 0.
+- **With an outlier of 40:** the bound jumps to 0.1575 (int8) and 2.8571 (int4), i.e., $\frac{40}{254}$ and $\frac{40}{14}$. The RMSE on the normal entries increases about $8\times$ for int8 (0.0908) and reaches 0.9920 for int4: 99.6% of entries become 0, because every entry with absolute value below 2.857 rounds to 0. The error is now as large as the standard deviation (1.0) of the data itself: the matrix is practically wiped out.
+
+This uses a synthetic random matrix rather than real model weights; the numbers illustrate the mathematical mechanism. Try changing `40.0` to `10.0` to see the damage shrink.
+
+### A custom LoRA layer in PyTorch
+
+The script below implements `LoRALinear` directly from the Theory section: it wraps an `nn.Linear` layer, freezes its weights, and adds a random $\mathbf{A}$ (scaled by 0.01) and $\mathbf{B} = \mathbf{0}$ with $r = 4$ and $\alpha = 8$. The base layer has shape $64 \times 64$; the target function is $\mathbf{W}_0$ plus a rank-2 perturbation. Only $\mathbf{A}$ and $\mathbf{B}$ are trained with Adam for 300 steps on **10 training examples**, then evaluated on 200 held-out test examples.
+
+<LocalCode
+  code={loraLayerCode}
+  title="LoRALinear layer: freezing W_0, learning A and B"
+  packages={['torch']}
+  hardware="CPU is sufficient, runs in a few seconds"
+  sampleVaries={false}
+>
+
+```text
+same at start: True
+test loss before: 1.14020
+grad A zero: True | grad B zero: False
+step 0: train loss 2.39636
+step 100: train loss 0.00005
+step 200: train loss 0.00000
+step 299: train loss 0.00000
+trainable 512 of 4608
+test loss after: 0.87876
+merge ok: True
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **`same at start: True`**: because $\mathbf{B} = \mathbf{0}$, the LoRA layer produces the exact same output as the base layer before training begins.
+- **`grad A zero: True | grad B zero: False`**: on the very first step only $\mathbf{B}$ has a non-zero gradient, confirming Step 5.
+- **`trainable 512 of 4608`**: only $4 \cdot (64 + 64) = 512$ parameters are trainable; the remaining $4\,096$ belong to the frozen $\mathbf{W}_0$.
+- **`merge ok: True`**: merging $\mathbf{W}_0 + \frac{\alpha}{r}\mathbf{B}\mathbf{A}$ into a single matrix gives the exact same output as running the two parallel branches (up to floating-point precision around $10^{-6}$).
+- **Training loss drops to 0, but test loss only decreases from 1.14020 to 0.87876.** (The step-0 training loss differs from the initial test loss simply because it averages over a different set of 10 samples.) Even though the true update is easy (rank 2, and $r = 4$), 10 training samples only constrain the update along 10 of the 64 input directions, so on unseen inputs the model is only partially correct. This toy script verifies that the **mechanics** work; it does not prove that LoRA generalizes from 10 samples. If you change `torch.randn(10, 64)` to `torch.randn(100, 64)`, our test run reaches a post-training test loss of 0.00001.
+
+In real projects, you do not need to write this layer from scratch. Hugging Face's `peft` library (version 0.21.2 at the time of writing, October 2026) implements LoRA and many other PEFT methods; `bitsandbytes` (0.50.2) handles 8-bit and 4-bit quantization; and Unsloth is another popular open-source toolkit supporting fast LoRA and QLoRA training. Because we do not run those libraries in this lesson, consult the documentation for the exact version you install.
+
+## Common pitfalls
+
+:::caution[Thinking LoRA makes the model smaller]
+The base model must still sit in memory at runtime; if you want a smaller model, you need quantization, distillation, or pruning. A related misconception is "4-bit means computing in 4-bit": QLoRA stores weights in 4-bit to save memory, but dequantizes them back to 16-bit before each matrix multiplication.
+:::
+
+:::caution[Trusting scores without checking how they were measured]
+A training loss of 0 (as in the PyTorch cell above), a high public benchmark score, or an LLM judge preferring your new model can all be misleading. Before claiming "the new model is better": evaluate on a clean held-out test set, check for n-gram overlap against public benchmarks, and run LLM judges twice with swapped response orders.
+:::
+
+:::caution[Quantizing an entire tensor with a single scale factor]
+Using one scale factor for a whole matrix lets a single outlier dictate the rounding step for every other entry: in the NumPy cell, a single value of 40 turned 99.6% of entries into 0 at 4-bit precision. Practical methods use per-row/per-column scales (LLM.int8()), small block-wise scales (QLoRA), or mixed-precision outlier decomposition. Likewise, never assume that "8-bit worked so 4-bit will too", or that "50% pruned weights means $2\times$ faster inference": always benchmark on your own model and hardware.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Perplexity $\mathrm{PPL} = \exp(\mathcal{L})$ on unseen text measures how well a model predicts text. Benchmarks like MMLU and LLM judges measure task performance, though LLM judges suffer from position, verbosity, and self-enhancement biases.
+- Test-set contamination inflates benchmark scores. The GPT-3 team checked for contamination by removing examples with 13-word (13-gram) overlaps and comparing scores. Always maintain a private held-out test set.
+- LoRA learns $\mathbf{h} = \mathbf{W}_0\mathbf{x} + \frac{\alpha}{r}\mathbf{B}\mathbf{A}\mathbf{x}$ with $\mathbf{W}_0$ frozen: only $r(d_{\text{in}} + d_{\text{out}})$ trainable parameters per matrix, initialized with $\mathbf{B} = \mathbf{0}$, and mergeable for zero-latency inference. QLoRA keeps the frozen base model in 4-bit NF4 while learning 16-bit LoRA adapters.
+- Absmax quantization has a per-entry error bound of $\frac{\max|W|}{2q_{\max}}$, making it vulnerable to outliers. Distillation trains a smaller student on a teacher's soft targets at temperature $T$. Pruning removes small weights, though fewer parameters do not automatically translate into faster runtime without sparse hardware support.
+
+**Further reading:**
+
+- Hu, E. J., Shen, Y., Wallis, P., et al. (2021). [*LoRA: Low-Rank Adaptation of Large Language Models*](https://arxiv.org/abs/2106.09685), arXiv:2106.09685, Sections 4 and 7. Formula, initialization, GPT-3 parameter counts, and which weight matrices to adapt.
+- Dettmers, T., Pagnoni, A., Holtzman, A., Zettlemoyer, L. (2023). [*QLoRA: Efficient Finetuning of Quantized LLMs*](https://arxiv.org/abs/2305.14314), arXiv:2305.14314, Sections 2–4. NF4, double quantization, and attaching LoRA to all linear layers.
+- Dettmers, T., Lewis, M., Belkada, Y., Zettlemoyer, L. (2022). [*LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale*](https://arxiv.org/abs/2208.07339), arXiv:2208.07339, NeurIPS 2022, Sections 2–4. Absmax quantization and emergent outlier features.
+- Hinton, G., Vinyals, O., Dean, J. (2015). [*Distilling the Knowledge in a Neural Network*](https://arxiv.org/abs/1503.02531), arXiv:1503.02531, Sections 1–3. Soft targets and temperature scaling.
+- Brown, T. B., Mann, B., Ryder, N., et al. (2020). [*Language Models are Few-Shot Learners*](https://arxiv.org/abs/2005.14165), arXiv:2005.14165, Section 4. Measuring test-set contamination via 13-gram overlap.
+- Zheng, L., Chiang, W.-L., Sheng, Y., et al. (2023). [*Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena*](https://arxiv.org/abs/2306.05685), arXiv:2306.05685. LLM judges and their biases.
+- Additional references cited in this lesson: [MMLU](https://arxiv.org/abs/2009.03300) (Hendrycks et al., 2021), [weight pruning](https://arxiv.org/abs/1506.02626) (Han et al., 2015), [GPTQ](https://arxiv.org/abs/2210.17323) (Frantar et al., 2022), [SparseGPT](https://arxiv.org/abs/2301.00774) (Frantar and Alistarh, 2023), and Hugging Face's [PEFT documentation](https://huggingface.co/docs/peft/index).
+
+<LessonProgress />

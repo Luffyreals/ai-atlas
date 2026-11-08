@@ -1,0 +1,367 @@
+---
+title: 'Vision and Language (1): CLIP, BLIP, GLIP'
+description: Classify images into labels never seen during training. CLIP aligns images and text via contrastive learning, BLIP both understands and captions, and GLIP grounds phrases into boxes.
+quiz:
+  - question: 'CLIP''s image and text embeddings are both unit-normalized, so their cosine similarity lies in $[-1, 1]$. If you fix the temperature at $\tau = 1$ instead of letting the model learn $\tau$, what happens to the loss on a batch of $N = 1,000$ pairs?'
+    options:
+      - 'Nothing bad: the true pair still has the highest cosine similarity, so the loss still goes to 0'
+      - 'The model trains faster, because smaller logits keep gradients stable'
+      - 'The loss cannot get small, because the true pair''s logit exceeds a wrong pair''s logit by at most 2, preventing softmax from concentrating probability on the true pair'
+      - 'The loss becomes negative, because cosine similarity can be negative'
+    answer: 2
+    explanation: 'With $\tau = 1$, every logit lies in $[-1, 1]$. Even if the matched pair has cosine $+1$ and all 999 mismatched pairs have cosine $-1$, the softmax probability of the matched pair is at most $e^{1} / (e^{1} + 999\,e^{-1}) \approx 0.007$, leaving the loss stuck near $4.9$. Our NumPy code cell shows the same phenomenon at $N = 4$: with $\tau = 1$, the matched loss is 0.930, barely below uniform guessing ($\ln 4 \approx 1.386$). Dividing by a small $\tau$ stretches the logit differences.'
+  - question: 'You have a pretrained CLIP model and want to classify photos into three new categories—"folding bike", "road bike", and "e-bike"—without any labeled training images. What is the right zero-shot CLIP approach?'
+    options:
+      - 'Pass three prompts like "a photo of a folding bike" through the text encoder, and pick the label whose text embedding has the highest cosine similarity with the image embedding'
+      - 'Attach a 3-way linear layer after the image encoder and train that layer'
+      - 'Retrain CLIP from scratch with the three new labels'
+      - 'It is impossible, because those three class names were not in the 400M training pairs'
+    answer: 0
+    explanation: 'In CLIP, the text encoder acts as a zero-shot weight generator: each label prompt becomes a unit vector, and classification is simply taking the dot product with the image embedding followed by argmax—no labeled images or gradient updates needed. Training a new linear head requires labeled data (linear probing, not zero-shot). How accurate it is on fine-grained bike subtypes is a separate question: fine-grained classification is a known weak spot documented in the CLIP paper.'
+  - question: 'Suppose a CLIP training batch happens to contain two pairs with nearly identical captions: "a dog on the grass" and "a dog playing on grass". How does the symmetric InfoNCE loss treat these two pairs?'
+    options:
+      - 'It detects that the two captions mean the same thing and masks out the off-diagonal pair'
+      - 'It merges the two images into a single training example'
+      - 'It has no effect, because each row only looks at the diagonal entry'
+      - 'It treats image 1 with caption 2 as a negative pair and pushes them apart, even though they actually match'
+    answer: 3
+    explanation: 'InfoNCE labels only the diagonal entry $(i, i)$ as positive. Every off-diagonal entry $(i, j)$ with $j \ne i$ appears in the denominator of the softmax and receives a positive gradient that pushes its similarity down—even when caption $j$ accurately describes image $i$. BLIP (following ALBEF) softens this false-negative penalty using soft pseudo-targets from a momentum encoder.'
+  - question: 'A web-scraped image has the raw alt-text caption "IMG_2031.jpg sale 50%". In BLIP''s CapFilt pipeline, what happens to this image-text pair?'
+    options:
+      - 'The filter deletes the image entirely, because noisy alt-text implies a bad image'
+      - 'The captioner generates a new synthetic caption for the image, and the filter uses its ITM head to score both the raw web caption and the synthetic caption—discarding whichever captions are predicted not to match the image'
+      - 'The filter spell-checks the raw caption and keeps it'
+      - 'The model trains directly on the raw caption, because more data is always better'
+    answer: 1
+    explanation: 'CapFilt keeps the web images and cleans the text. The captioner (an image-grounded decoder) writes a synthetic caption for each web image, while the filter (an image-grounded encoder fine-tuned with ITC and ITM) removes any caption—original or synthetic—that its ITM head predicts as unmatched. "IMG_2031.jpg sale 50%" is almost certainly filtered out, while the synthetic caption describing the visual content is kept.'
+  - question: 'You need a system that takes the prompt "find every yellow hard hat" and returns a bounding box around each yellow hard hat in a construction-site photo. Which of the three models in this lesson fits this output format?'
+    options:
+      - 'CLIP, because it compares images with text'
+      - 'BLIP, because it can generate text descriptions'
+      - 'GLIP, because it scores every image region against every word token in the prompt, returning bounding boxes grounded to phrases'
+      - 'All three work equally well'
+    answer: 2
+    explanation: 'CLIP produces a single vector for the entire image, so it can only score whole-image match, not localize where objects are. BLIP generates captions or scores whole image-caption pairs, without bounding boxes. GLIP replaces a detector''s fixed classification weights with region-word alignment scores $\mathbf{S}_{\text{ground}} = \mathbf{O}\mathbf{P}^\top$, grounding phrases directly to bounding boxes.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import contrastiveCode from '@code/cv/clip-blip-glip/contrastive.en.py?raw';
+import clipZeroShotCode from '@code/cv/clip-blip-glip/clip_zero_shot.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand **contrastive learning** between images and text: two encoders, an $N \times N$ cosine similarity matrix, and matched pairs along the diagonal.
+- Derive CLIP's symmetric **InfoNCE** loss and explain the role of the learnable **temperature** parameter $\tau$.
+- Use CLIP for **zero-shot classification** (with zero labeled training images) using prompts like `"a photo of a {label}"`, and explain why prompt ensembling improves accuracy.
+- Distinguish CLIP, BLIP, and GLIP—what each model learns, what it outputs, and when to use it—and recognize CLIP's known failure modes (counting, spatial relations, and typographic attacks).
+
+## Prerequisites
+
+{/* List populated from prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+[Image Classification with Transformers](/en/cv/vision-transformer/) split an image into patches and used the output vector at the **`[CLS]` token** as a summary representation of the whole image; in this lesson, that vector (after a linear projection) is our "image embedding." [Multimodal LLMs](/en/llm/multimodal/) briefly mentioned CLIP to explain why LLaVA borrows its pretrained vision encoder; here we open the hood and see how CLIP itself is trained.
+:::
+
+## Intuition
+
+### A classifier locked to a fixed label list
+
+A standard image classifier trained on ImageNet has exactly 1,000 output neurons. It knows `"golden retriever"` and `"tabby cat"`. Ask it whether a photo shows a `"folding bike"`, however, and it is helpless: none of its 1,000 outputs corresponds to that concept. Adding a new class means collecting labeled photos and retraining the classifier head.
+
+Meanwhile, the internet already contains hundreds of millions of images **paired with free-form text**: captions, HTML alt-text, and article titles. That text is noisy, but it describes visual concepts in open-ended natural language rather than a closed list of integer IDs.
+
+### A matching game
+
+Imagine playing a card game. Someone hands you 4 photos and 4 captions shuffled out of order. Your job is to match each photo with its true caption.
+
+To win this game consistently, you do not need a fixed list of class numbers. You simply need to understand images and understand text well enough to tell when a photo and a sentence **describe the same thing**. Now imagine playing that game with batches of 32,768 photos and 32,768 captions at a time, across hundreds of millions of pairs. Along the way, you end up learning a remarkably broad visual-linguistic vocabulary.
+
+Once you have mastered the matching game, image classification becomes just another round of matching: turn each candidate class name into a caption (`"a photo of a folding bike"`, `"a photo of a cat"`) and see which caption best matches the photo. Want to add a brand-new class? Just write one more sentence.
+
+### Beyond matching: what comes next?
+
+Matching answers "do this image and this sentence go together?"—but leaves two major capabilities open: **writing** a new caption from scratch for an image (rather than picking from a list), and **localizing** where a mentioned phrase sits inside the image with a bounding box. **BLIP** tackles the first job; **GLIP** tackles the second.
+
+The central question of this lesson is: **how do we learn a shared embedding space from web image-text pairs so that matching images and sentences land near each other—and then how do we extend that idea to zero-shot classification (CLIP), caption generation (BLIP), and phrase-grounded object detection (GLIP)?**
+
+## Theory
+
+### Notation
+
+A training **mini-batch** consists of $N$ paired examples $(\text{image}_i, \text{text}_i)$ (note that $N$ here is the batch size, not the patch count from the ViT lesson). An image encoder $f$ (a ViT or ResNet) and a text encoder $g$ (a Transformer) map image $i$ and caption $j$ into vectors of the same dimension $D_e$ in a **joint embedding space**. Dividing each vector by its Euclidean norm gives unit vectors:
+
+$$
+\mathbf{u}_i = \frac{f(\text{image}_i)}{\lVert f(\text{image}_i) \rVert},
+\qquad
+\mathbf{v}_j = \frac{g(\text{text}_j)}{\lVert g(\text{text}_j) \rVert}
+$$
+
+Because both $\mathbf{u}_i$ and $\mathbf{v}_j$ have unit length, their dot product $\mathbf{u}_i^\top \mathbf{v}_j$ equals their **cosine similarity**, bounded in $[-1, 1]$.
+
+### Step 1: the $N \times N$ similarity matrix
+
+Collect the dot products of all $N^2$ possible image-caption pairs in the batch into a matrix $\mathbf{S} \in \mathbb{R}^{N \times N}$:
+
+$$
+S_{ij} = \mathbf{u}_i^\top \mathbf{v}_j
+$$
+
+Row $i$ compares image $i$ against all $N$ captions; column $j$ compares caption $j$ against all $N$ images. The $N$ diagonal entries $S_{ii}$ are the **true (positive) pairs**, while the $N^2 - N$ off-diagonal entries are **mismatched (negative) pairs**. No human class labels are required: the pairing within the batch itself provides the supervision.
+
+### Step 2: each row is an $N$-way classification problem
+
+Look at row $i$: "out of the $N$ captions in this batch, which one belongs to image $i$?" That is an $N$-class classification problem whose ground-truth answer is column $i$. Dividing the similarities by a temperature $\tau > 0$ and applying **softmax** across row $i$ gives a probability distribution:
+
+$$
+p_{ij} = \frac{\exp(S_{ij} / \tau)}{\sum_{k=1}^{N} \exp(S_{ik} / \tau)}
+$$
+
+The loss for row $i$ is the standard **cross-entropy** loss for target class $i$, namely $-\ln$ of the probability assigned to the true caption $i$:
+
+$$
+\mathcal{L}_i^{\text{img} \to \text{txt}} = -\ln p_{ii} = -\ln \frac{\exp(S_{ii} / \tau)}{\sum_{k=1}^{N} \exp(S_{ik} / \tau)}
+$$
+
+This "one positive sample against $N-1$ in-batch negatives scored by softmax" objective is called **InfoNCE** (van den Oord et al., 2018).
+
+### Step 3: symmetrizing across columns
+
+We can play the exact same game in reverse: "out of the $N$ images in this batch, which one belongs to caption $j$?" That applies softmax down **column** $j$ of the same matrix:
+
+$$
+\mathcal{L}_j^{\text{txt} \to \text{img}} = -\ln \frac{\exp(S_{jj} / \tau)}{\sum_{k=1}^{N} \exp(S_{kj} / \tau)}
+$$
+
+Notice that the denominator now sums over the row index $k$ down column $j$, while the numerator is still the diagonal entry $S_{jj}$. CLIP averages both directions across the batch:
+
+$$
+\mathcal{L} = \frac{1}{2}\left(\frac{1}{N}\sum_{i=1}^{N}\mathcal{L}_i^{\text{img} \to \text{txt}} + \frac{1}{N}\sum_{j=1}^{N}\mathcal{L}_j^{\text{txt} \to \text{img}}\right)
+$$
+
+In code, this is nothing more than standard cross-entropy on $\mathbf{S}/\tau$ and on $\mathbf{S}^\top/\tau$ with target labels $0, 1, \dots, N-1$. The CLIP paper's famous pseudocode expresses the entire loss in under ten lines.
+
+### Step 4: gradients pull the diagonal up and push off-diagonals down
+
+Why does this loss shape the embedding space the way we want? Rewrite the row-$i$ loss by splitting the log of the fraction into a difference of two logs:
+
+$$
+\mathcal{L}_i^{\text{img} \to \text{txt}} = -\frac{S_{ii}}{\tau} + \ln \sum_{k=1}^{N} \exp\!\left(\frac{S_{ik}}{\tau}\right)
+$$
+
+Now differentiate with respect to any entry $S_{ik}$ in row $i$. The first term depends only on $S_{ii}$, contributing $-1/\tau$ when $k = i$ and $0$ when $k \ne i$. The second term is a log-sum-exp, whose derivative with respect to $S_{ik}$ is $\frac{1}{\tau} \cdot \frac{\exp(S_{ik}/\tau)}{\sum_{k'} \exp(S_{ik'}/\tau)} = p_{ik}/\tau$. Combining both gives:
+
+$$
+\frac{\partial \mathcal{L}_i^{\text{img} \to \text{txt}}}{\partial S_{ik}} = \frac{p_{ik} - [k = i]}{\tau}
+$$
+
+where $[k = i]$ is $1$ on the diagonal and $0$ off the diagonal. Because gradient descent steps in the **negative** gradient direction:
+
+- The **diagonal entry** has gradient $(p_{ii} - 1)/\tau < 0$, so $S_{ii}$ is **pulled up** until $p_{ii} \to 1$.
+- Every **off-diagonal entry** ($k \ne i$) has gradient $p_{ik}/\tau > 0$, so $S_{ik}$ is **pushed down**—and the push is proportional to $p_{ik}$. A wrong caption that currently looks deceptively similar to image $i$ (a **hard negative** with large $p_{ik}$) receives the strongest downward push.
+
+Larger batches expose each image to more hard negatives per step; CLIP trained with a massive batch size of $N = 32,768$.
+
+### Step 5: temperature $\tau$
+
+Because cosine similarities are bounded in $[-1, 1]$, setting $\tau = 1$ means two logits can differ by at most 2. Softmax over such narrow logit differences stays relatively flat: even if a model aligns every pair perfectly, the loss cannot drop near zero. Dividing by a small $\tau$ stretches the logit range: at $\tau = 0.01$, the maximum logit gap becomes 200.
+
+On the flip side, if $\tau$ is too tiny, a single noisy negative pair whose cosine happens to edge out the true pair creates a huge gradient spike that destabilizes training. Rather than tuning $\tau$ as a fixed hyperparameter, CLIP **learns** $\tau$ during training by parameterizing $1/\tau = e^{t}$ (so $\tau$ stays strictly positive). Following the paper, $\tau$ is initialized to $0.07$ and clipped so that $1/\tau \le 100$ to prevent training instability. In our `LocalCode` cell below, inspecting the pretrained CLIP checkpoint prints `1/tau = 100.0`—showing that the learned scale hit the exact ceiling of 100.
+
+Note that $\tau$ plays the exact same mathematical role here as the sampling temperature $T$ in our LLM lessons (dividing logits before softmax).
+
+### CLIP: pretraining data and results
+
+CLIP (*Contrastive Language-Image Pre-training*, Radford et al., 2021) was trained from scratch on **400 million** image-text pairs collected from the web. The authors trained five ResNet variants and three Vision Transformer variants (ViT-B/32, ViT-B/16, ViT-L/14) alongside a Transformer text encoder. Their largest model (ViT-L/14 fine-tuned at $336 \times 336$ resolution) achieved **76.2% zero-shot top-1 accuracy on ImageNet**, matching the accuracy of a supervised ResNet-50 without ever training on a single one of ImageNet's 1.28 million labeled images.
+
+### Zero-shot classification
+
+Suppose a downstream task has $K$ candidate classes. Turn each class name $k$ into a text prompt, pass it through the text encoder, and normalize to get $\mathbf{v}_k$. Given a test image with normalized embedding $\mathbf{u}$:
+
+$$
+\hat{y} = \arg\max_{k} \; \mathbf{u}^\top \mathbf{v}_k,
+\qquad
+P(y = k \mid \text{image}) = \frac{\exp(\mathbf{u}^\top \mathbf{v}_k / \tau)}{\sum_{k'=1}^{K} \exp(\mathbf{u}^\top \mathbf{v}_{k'} / \tau)}
+$$
+
+This is simply a single row of the similarity matrix $\mathbf{S}$, with the $K$ class prompts standing in for captions. As the CLIP paper observes, you can view zero-shot CLIP as a bias-free **multinomial logistic regression classifier** whose weight matrix $[\mathbf{v}_1, \dots, \mathbf{v}_K]$ is **synthesized on the fly by the text encoder** from natural-language class names.
+
+**Why prompt engineering matters.** Web captions are rarely single isolated words, so feeding a bare class name like `"crane"` creates a distribution shift and leaves polysemous words ambiguous (a construction crane or a wading bird?). Using the default template `"A photo of a {label}."` boosts ImageNet accuracy by 1.3% right away, and domain-specific templates like `"A photo of a {label}, a type of pet."` help even more.
+
+**Prompt ensembling.** Instead of relying on a single template, you can write $M$ diverse templates for each class (`"a photo of a big {label}"`, `"a blurry photo of a {label}"`, `"a close-up photo of a {label}"`, …), average their normalized text embeddings, and re-normalize the mean vector:
+
+$$
+\bar{\mathbf{v}}_k = \frac{\sum_{m=1}^{M} \mathbf{v}_k^{(m)}}{\left\lVert \sum_{m=1}^{M} \mathbf{v}_k^{(m)} \right\rVert}
+$$
+
+(Dividing by $M$ before normalizing cancels out, so the $1/M$ factor is omitted.) Because the ensemble average $\bar{\mathbf{v}}_k$ is computed once in embedding space and cached, inference on new images costs no more than using a single prompt. Across 80 prompt templates, the CLIP paper reports an additional 3.5% gain on ImageNet over the single default prompt—nearly 5% combined.
+
+### Known limitations of CLIP
+
+- **Counting and abstract spatial tasks.** The CLIP paper notes that zero-shot CLIP struggles on object counting (CLEVRCounts) and estimating distance to the nearest car (KITTI Distance), sometimes performing near random chance. Our `LocalCode` script tests counting on three circles.
+- **Word order and relational attribution.** Because an image is compressed into a single global vector and web-caption retrieval rarely requires parsing syntax, Yuksekgonul et al. (2023) showed that contrastive vision-language models often behave like **bags of words**: they struggle to distinguish *"the horse is eating the grass"* from *"the grass is eating the horse,"* scoring near or below chance on relational benchmarks.
+- **Text inside images (typographic attacks vs. MNIST).** CLIP reads printed English text inside photos surprisingly well—so well that Goh et al. (2021) demonstrated **typographic attacks**: sticking a piece of paper with the word `"iPod"` onto a Granny Smith apple causes CLIP to classify the apple as an iPod. Conversely, on handwritten MNIST digits, zero-shot CLIP reaches only 88% accuracy, trailing simple logistic regression on raw pixels.
+- **Polysemy and fine-grained categories.** Standalone labels like `"boxer"` (dog breed vs. athlete) or fine-grained distinctions between car models and flower species remain weaker than task-supervised models.
+
+### BLIP: unified understanding and caption generation
+
+Because CLIP has only two encoders and no text decoder, it can score candidate sentences but cannot generate a caption. **BLIP** (*Bootstrapping Language-Image Pre-training*, Li et al., 2022) unifies **understanding** (retrieval, visual question answering) and **generation** (image captioning) within a **Multimodal Mixture of Encoder-Decoder (MED)** architecture that operates in three modes with three joint objectives:
+
+| Mode | Training objective | Role |
+|---|---|---|
+| Unimodal encoders (image encoder + text encoder) | **ITC** (Image-Text Contrastive): CLIP-style contrastive loss | Aligns global image and text embeddings for fast retrieval |
+| Image-grounded text encoder (inserts cross-attention to image features) | **ITM** (Image-Text Matching): binary classification ("matched" vs. "unmatched") | Fine-grained token-to-patch alignment, sampling high-ITC in-batch pairs as **hard negatives** |
+| Image-grounded text decoder (causal self-attention + cross-attention) | **LM** (Language Modeling): next-token cross-entropy loss | Generates natural-language captions conditioned on the image |
+
+The text encoder and text decoder share all parameters except their self-attention layers (bidirectional for encoding vs. causal for decoding). Following ALBEF (Li et al., 2021), BLIP's ITC loss uses a momentum encoder to generate **soft pseudo-targets**, mitigating the false-negative issue when multiple captions in a batch describe similar images.
+
+**CapFilt: bootstrapping clean captions from noisy web data.** Web alt-text is full of noise (`"IMG_2031.jpg"`, `"sale 50%"`). BLIP takes a pretrained MED model, fine-tunes two copies on human-annotated COCO data, and cleans the web dataset in two steps:
+
+1. **Captioner** (MED in LM decoder mode): generates a synthetic caption for each web image using nucleus (top-$p$) sampling, which the authors found produces more diverse and informative training text than beam search.
+2. **Filter** (MED in ITM mode): scores both the original web alt-text and the synthetic caption, discarding whichever ones the ITM head predicts as unmatched to the image.
+
+Combining the surviving clean pairs with human-labeled data yields a bootstrapped dataset used to pretrain a stronger model (scaling from 14M images up to 129M images).
+
+**BLIP-2** (Li et al., 2023) goes one step further for the LLM era: it **freezes** both a pretrained vision encoder and a pretrained LLM, training only a lightweight 188M-parameter bridge called a **Q-Former** (*Querying Transformer*). The Q-Former uses 32 learnable query vectors (each 768-dimensional) that interact with each other via self-attention and attend to the frozen image features via cross-attention, distilling the entire image into just $32 \times 768$ visual tokens—far more compact than the $257 \times 1,024$ patch tokens of ViT-L/14. A single linear layer projects those 32 tokens into the LLM's word-embedding space as a "soft visual prompt." How BLIP-2 and LLaVA connect vision encoders to LLMs is the focus of [Vision and Language (2): LLaVA and Variants](/en/cv/llava/).
+
+### GLIP: phrase grounding as object detection
+
+Both CLIP and BLIP operate on whole images. **Object detection**, by contrast, requires localizing where each object sits via a **bounding box** and a class label. A classical detector extracts feature vectors for $R$ candidate image regions, $\mathbf{O} \in \mathbb{R}^{R \times d}$, and multiplies them by a fixed classification weight matrix $\mathbf{W} \in \mathbb{R}^{c \times d}$ for $c$ predefined classes:
+
+$$
+\mathbf{S}_{\text{cls}} = \mathbf{O}\,\mathbf{W}^\top \in \mathbb{R}^{R \times c}
+$$
+
+**GLIP** (*Grounded Language-Image Pre-training*, Li et al., 2022) observes that object detection is simply a special case of **phrase grounding** (locating which image regions correspond to which noun phrases in a sentence). Simply concatenate all candidate class names into a single text prompt—`"person. bicycle. car. ... toothbrush"`—pass the prompt through a language encoder to get $M$ contextual word token vectors $\mathbf{P} \in \mathbb{R}^{M \times d}$, and replace $\mathbf{W}$ with $\mathbf{P}$:
+
+$$
+\mathbf{S}_{\text{ground}} = \mathbf{O}\,\mathbf{P}^\top \in \mathbb{R}^{R \times M}
+$$
+
+Entry $(r, m)$ scores the alignment between image region $r$ and word token $m$. Notice the parallel: GLIP plays the exact same dot-product matching game as CLIP's $\mathbf{S}$, but at the **region–word** level instead of the **image–sentence** level. Because the prompt is free-form text, detecting any new set of categories at test time only requires changing the prompt string.
+
+Two architectural ingredients distinguish GLIP from a naive region-CLIP:
+
+- **Deep cross-modality fusion.** In CLIP, image and text features never interact until the final dot product. In GLIP, multiple cross-attention fusion layers interleave the top stages of the vision and language backbones, so region features are already conditioned on what the text prompt is asking for before boxes are scored.
+- **Scaling grounding data with self-training.** Human-annotated phrase-grounding datasets are small (~3M pairs), so the authors trained a teacher GLIP model on gold data and used it to predict pseudo-boxes for noun phrases parsed from 24 million web image-text pairs—training the student on 27 million grounded examples in total.
+
+Without seeing a single COCO training image, GLIP-L achieved 49.8 zero-shot box AP on COCO val2017 and 26.9 AP on the long-tailed LVIS benchmark (2022 paper).
+
+:::note[Key takeaway]
+CLIP computes the $N \times N$ cosine matrix $S_{ij} = \mathbf{u}_i^\top \mathbf{v}_j$ and minimizes symmetric row- and column-wise cross-entropy on $\mathbf{S}/\tau$ (InfoNCE). Zero-shot classification evaluates one row of $\mathbf{S}$ against class-name prompts. BLIP adds ITM and LM objectives to unify understanding and caption generation, using CapFilt to clean noisy web text. GLIP brings contrastive alignment down to the region–word level via $\mathbf{S}_{\text{ground}} = \mathbf{O}\mathbf{P}^\top$ for open-vocabulary object detection.
+:::
+
+### Scope and limitations
+
+- This lesson focuses on how vision and language representations are aligned; object-detector box regression and proposal internals belong to object detection.
+- Feeding visual tokens into autoregressive LLMs (LLaVA, BLIP-2 Q-Former) is covered in [Vision and Language (2): LLaVA and Variants](/en/cv/llava/).
+- Contrastive learning **without text**—using two augmented views of the same image—is covered in [Self-Supervised Learning in Vision](/en/cv/self-supervised-learning/).
+
+## Illustration
+
+The diagram below illustrates a training batch of $N$ image-caption pairs in CLIP. Focus on the $N \times N$ matrix in the center: the diagonal entries are the true pairs (pulled toward $+1$), while all $N^2 - N$ off-diagonal entries are mismatched pairs (pushed down). Each row is an image-to-text classification problem; each column is a text-to-image classification problem.
+
+{/* FIG: ClipContrastiveFigure — N images pass through the image encoder to produce unit vectors u_1..u_N (left column), and N captions pass through the text encoder to produce v_1..v_N (top row); the N x N matrix of dot products u_i^T v_j highlights the diagonal cells (matched pairs, pulled up) and mutes off-diagonal cells (mismatched pairs, pushed down), with annotations for "row-wise softmax" and "column-wise softmax". */}
+
+The table below compares CLIP, BLIP, and GLIP side by side. Notice how each model's training objective directly dictates what it can output at inference time.
+
+| Criterion | CLIP (2021) | BLIP (2022) | GLIP (2022) |
+|---|---|---|---|
+| Training objective | Symmetric image–sentence InfoNCE | Joint ITC + ITM + causal LM | Region–word alignment (grounding) + box regression |
+| Where vision & text meet | Only at the final cosine dot product | Cross-attention inside the text encoder/decoder | Deep cross-attention fusion across late backbone layers |
+| Output | One global vector per image, one per sentence | Pair match score, embeddings, or generated caption | Bounding boxes grounded to phrases in the prompt |
+| Pretraining data (paper) | 400M web image–text pairs | 14M to 129M images bootstrapped with CapFilt | 27M grounding pairs (24M web pairs with teacher pseudo-boxes) |
+| Best suited for | Zero-shot image classification, text-to-image retrieval, frozen vision tower for LLMs | Image captioning, visual question answering, fine-grained retrieval | Open-vocabulary object detection, phrase grounding |
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the NumPy cell with Python 3.14 and NumPy 2.4 (in Pyodide); the CLIP script with Python 3.14, PyTorch 2.15, and transformers 5.22 on CPU. The NumPy cell runs directly in your browser, while the CLIP script runs on your local machine. The two cells are independent.
+
+### Similarity matrix and InfoNCE in NumPy
+
+The cell below simulates 4 underlying "concepts" (`cat`, `dog`, `car`, `tree`, seed 0), generating one image embedding and one text embedding per concept by adding independent Gaussian noise so matched pairs are correlated. It unit-normalizes the embeddings, computes the $4 \times 4$ cosine matrix $\mathbf{S}$, evaluates the symmetric InfoNCE loss across three temperatures $\tau \in \{1.0, 0.1, 0.01\}$ for both the true pairing and a cyclically shifted wrong pairing (image $i$ paired with caption $i+1$), and finally runs zero-shot classification on a fresh noisy `"dog"` image.
+
+<PythonRunner code={contrastiveCode} title="Cosine similarity matrix, symmetric InfoNCE, and zero-shot classification" />
+
+Reading the output:
+
+- **$4 \times 4$ cosine matrix:** the largest entry in every row sits on the diagonal (`0.81, 0.77, 0.71, 0.66`), even though some off-diagonal entries (such as `0.41` in row 2) are non-trivial.
+- **`log N = 1.386`:** the baseline loss $-\ln(1/4) = \ln 4$ when softmax assigns uniform $1/4$ probability to all 4 candidates.
+- **`tau=1.0`:** the true pairing achieves a loss of only `0.930`—not far below $\ln 4$—because cosine differences in $[-1, 1]$ are too narrow without temperature scaling, confirming Step 5.
+- **`tau=0.1` and `tau=0.01`:** the matched loss drops to `0.023` and `0.000`, while the mismatched loss shoots up to `6.815` and `67.923`. Small $\tau$ makes softmax sharp and confident, rewarding right matches and heavily penalizing mismatches.
+- **Zero-shot classification:** the new `"dog"` image has cosines `[-0.57, 0.78, 0.23, 0.25]` with the 4 label vectors; dividing by CLIP's initial $\tau = 0.07$ and applying softmax puts `0.9991` probability on `"dog"`. The final line takes `argmax` along each row of $\mathbf{S}$, recovering `['cat', 'dog', 'car', 'tree']`.
+
+### Real CLIP: zero-shot classification on synthetic shapes
+
+The script below loads OpenAI's `openai/clip-vit-base-patch32` checkpoint via Hugging Face `transformers` (~600 MB of weights; depending on your `transformers` cache behavior, up to ~1.2 GB on first download). Using PIL, it draws three $224 \times 224$ images—a red circle, a blue square, and a yellow triangle—and classifies them zero-shot against 5 text prompts that include distractor combinations of the same colors and shapes. Finally, it tests CLIP's counting ability on an image containing 3 red circles. For CPU PyTorch installation instructions, see [Build Your First LLM](/en/llm/build-first-llm/).
+
+<LocalCode
+  code={clipZeroShotCode}
+  title="Zero-shot CLIP on synthetic shapes and counting"
+  packages={['torch', 'transformers', 'pillow']}
+  hardware="CPU is sufficient. First run takes a few minutes to download the checkpoint; subsequent runs finish in under a minute on a development machine"
+  sampleVaries={false}
+>
+
+```text
+1/tau = 100.0
+red circle: 0.940 0.056 0.001 0.002 0.001 -> a red circle
+blue square: 0.000 0.042 0.000 0.957 0.000 -> a blue square
+yellow triangle: 0.000 0.000 0.000 0.000 1.000 -> a yellow triangle
+3 circles: 0.043 0.070 0.504 0.384 -> three red circles
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **`1/tau = 100.0`:** the checkpoint's learned `logit_scale` equals $\ln 100$, sitting right at the paper's maximum clamp of 100. In `transformers`, `out.logits_per_image` is already $\mathbf{S}/\tau$, so `.softmax(dim=1)` directly implements the zero-shot probability formula.
+- **Single shapes:** all three are classified with high confidence (`0.940`, `0.957`, `1.000`). The five probabilities on each line correspond to `"a red circle"`, `"a blue circle"`, `"a red square"`, `"a blue square"`, and `"a yellow triangle"`. Notice where the small leftover probability goes: for the red circle, `"a blue circle"` gets `0.056` (same shape, different color); for the blue square, `"a blue circle"` gets `0.042` (same color, different shape).
+- **Counting (`3 circles`):** `"three red circles"` wins with `0.504`, but `"four red circles"` still claims `0.384` of the probability mass. Compared to the `0.94–1.00` confidence on single shapes, the model is noticeably less certain when counting objects—consistent with the counting limitation documented in the CLIP paper. Try changing `n=3` to `5` or `6` in the script to see where counting breaks down.
+
+## Common pitfalls
+
+:::caution[Forgetting to normalize embeddings, or comparing softmax probabilities across different label sets]
+If you skip L2 normalization when calling `model.get_image_features` and `model.get_text_features` directly, their dot product is no longer cosine similarity—vectors with larger norms will dominate the score regardless of semantic alignment. Always divide both embeddings by their `.norm(dim=-1, keepdim=True)`. Also remember that zero-shot probabilities come from a softmax **over the specific candidate labels you passed in**: a score of `0.94` means "94% relative to these 5 prompts," not an absolute calibrated confidence. Adding or removing a candidate label changes every probability in the row.
+:::
+
+:::caution[Assuming zero-shot CLIP works out of the box on every domain]
+CLIP aligns concepts that appear frequently in web captions. It is weak on exact counting, spatial prepositions (*"to the left of"*), handwritten digits, and specialized scientific or medical imagery (such as chest X-rays or satellite bands), and it is vulnerable to typographic attacks when text is visible in the scene. Always evaluate on a small labeled validation set in your target domain before deploying, and experiment with domain-specific prompt templates (`"a satellite photo of {label}"`) or prompt ensembling before concluding that CLIP fails.
+:::
+
+:::caution[Using CLIP when your task requires spatial localization]
+CLIP compresses an entire image into a single vector, so it can tell you *whether* a cat is present, but not *where* the cat is or *how many* cats there are. If you need bounding boxes for open-vocabulary phrases, use a grounded detector like GLIP; if you need generated descriptions or visual question answering, use BLIP or the vision-language models in [Vision and Language (2): LLaVA and Variants](/en/cv/llava/).
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- CLIP learns by playing an in-batch matching game: given $N$ image–text pairs, the cosine matrix $S_{ij} = \mathbf{u}_i^\top \mathbf{v}_j$ has positives on the diagonal and negatives off the diagonal, trained with symmetric row- and column-wise cross-entropy on $\mathbf{S}/\tau$ (InfoNCE). Gradients pull diagonal entries up and push hard negatives down hardest.
+- The temperature $\tau$ controls softmax sharpness: too large leaves the loss flat, too small destabilizes gradients. CLIP learns $\tau$ from an initial value of $0.07$, clamped so $1/\tau \le 100$.
+- Zero-shot classification encodes class-name prompts (`"a photo of a {label}"`) into text vectors and picks the highest cosine similarity; prompt ensembling averages multiple templates in embedding space for a free accuracy boost. Known weak spots include counting, spatial relations, typographic attacks, and specialized domains.
+- BLIP combines ITC, ITM, and causal LM objectives to unify understanding and caption generation while cleaning noisy web text via CapFilt; BLIP-2 bridges a frozen vision encoder and a frozen LLM with a lightweight Q-Former. GLIP reformulates object detection as phrase grounding via region–word alignment $\mathbf{S}_{\text{ground}} = \mathbf{O}\mathbf{P}^\top$.
+
+**Further reading:**
+
+- Radford, A. et al. (2021). [*Learning Transferable Visual Models From Natural Language Supervision*](https://arxiv.org/abs/2103.00020), ICML 2021, Section 2.3 (Figure 3 pseudocode), Section 3.1.4 (prompt engineering and ensembling), and Section 6 (limitations). The foundational CLIP paper—exceptionally clear and thorough.
+- van den Oord, A., Li, Y., Vinyals, O. (2018). [*Representation Learning with Contrastive Predictive Coding*](https://arxiv.org/abs/1807.03748), arXiv:1807.03748, Section 2.3. Introduces the InfoNCE loss.
+- Li, J., Li, D., Xiong, C., Hoi, S. (2022). [*BLIP: Bootstrapping Language-Image Pre-training for Unified Vision-Language Understanding and Generation*](https://arxiv.org/abs/2201.12086), ICML 2022, Section 3. Details the MED architecture (ITC, ITM, LM) and CapFilt bootstrapping; see also Li et al. (2023), [*BLIP-2*](https://arxiv.org/abs/2301.12597), Section 3 for the Q-Former.
+- Li, L. H., Zhang, P., Zhang, H. et al. (2022). [*Grounded Language-Image Pre-training*](https://arxiv.org/abs/2112.03857), CVPR 2022, Sections 3.1–3.3. Unifies object detection and phrase grounding with deep cross-modality fusion and pseudo-box self-training.
+- Yuksekgonul, M., Bianchi, F., Kalluri, P., Jurafsky, D., Zou, J. (2023). [*When and Why Vision-Language Models Behave like Bags-Of-Words, and What to Do About It?*](https://arxiv.org/abs/2210.01936), ICLR 2023, Section 2. Introduces the ARO benchmark for relational and order sensitivity; pair with Goh, G. et al. (2021), [*Multimodal Neurons in Artificial Neural Networks*](https://distill.pub/2021/multimodal-neurons/), Distill, on typographic attacks.
+
+<LessonProgress />

@@ -1,0 +1,382 @@
+---
+title: Recurrent Neural Networks (RNN)
+description: Reading a sentence word by word and remembering what came before. Hidden states, weight sharing, backpropagation through time, and why RNNs struggle with long-range memory.
+quiz:
+  - question: 'An RNN layer has $d_x = 10$ (input dimension) and $d_h = 20$ (hidden state dimension). How many parameters does this layer have when reading a sequence of length $L = 100$, and when reading a sequence of length $L = 1000$?'
+    options:
+      - '620 in both cases'
+      - '62,000 and 620,000'
+      - '620 and 6,200'
+      - '600 in both cases, because $\mathbf{b}_h$ is not counted'
+    answer: 0
+    explanation: '$\mathbf{W}_{hh}$ has $20 \times 20 = 400$ entries, $\mathbf{W}_{xh}$ has $20 \times 10 = 200$ entries, and $\mathbf{b}_h$ has 20 entries: 620 in total. Every time step reuses this exact set of parameters, so the parameter count does not depend on $L$. Multiplying by $L$ would be the mindset of an MLP with separate weights at each position. The bias vector is also a learnable parameter, so it must be counted.'
+  - question: 'Consider a 1D RNN $h_t = \tanh(w\,h_{t-1} + u\,x_t)$ with $w = 0.8$, and assume $h$ stays near 0 so the derivative of $\tanh$ is close to 1. Roughly how large is $\partial h_{60} / \partial h_{10}$?'
+    options:
+      - 'Around $0.8 \times 50 = 40$'
+      - 'Around $0.8$, because every step uses the same $w$'
+      - 'Around $0.8^{50} \approx 1.4 \times 10^{-5}$'
+      - 'Around $0.8^{60} \approx 1.5 \times 10^{-6}$'
+    answer: 2
+    explanation: 'The derivative across one step is $w \cdot \tanh''(\cdot) \approx 0.8$. Going from step 10 to step 60 crosses 50 steps, and the chain rule multiplies those 50 factors together: $0.8^{50} \approx 1.4 \times 10^{-5}$. Because this is multiplication rather than addition, the result shrinks exponentially. The exponent is the distance $60 - 10$, not 60.'
+  - question: 'You train an RNN on a very long sequence using truncated BPTT with chunk length $K = 50$, while still passing $\mathbf{h}$ (with gradients detached) from one chunk to the next. A label at some step depends on an input 200 steps earlier. Which statement is true?'
+    options:
+      - 'The model cannot use information from 200 steps earlier because $\mathbf{h}$ is reset to 0 at every chunk'
+      - '$\mathbf{h}$ still carries information across chunk boundaries, but gradients never travel farther than 50 steps, so the model is not directly trained to preserve that information'
+      - 'Truncated BPTT produces the exact same gradients as full BPTT while using less memory'
+      - 'The model learns this dependency more easily than with full BPTT because gradients do not vanish'
+    answer: 1
+    explanation: 'The forward pass is not cut: the final $\mathbf{h}$ of one chunk becomes the initial $\mathbf{h}$ of the next, so information can still flow across boundaries. Only the gradient path is detached at boundaries, so no gradient signal tells the weights "keep this input alive for 200 steps." For that reason, the gradient differs from full BPTT: it drops all terms beyond $K$ steps.'
+  - question: 'Your RNN reads ~300-word reviews and relies only on the last few dozen words to classify them. Training loss decreases smoothly, with no spikes or NaNs. You turn on gradient clipping with threshold 1. What will happen?'
+    options:
+      - 'The model starts using words from the beginning of the review because clipping keeps gradients stable'
+      - 'Almost nothing changes: clipping only shrinks gradients that are too large; it does not amplify gradients that have already vanished'
+      - 'The loss becomes NaN because clipping distorts the gradient'
+      - 'The model forgets the words at the end of the review as well'
+    answer: 1
+    explanation: 'The symptom here is a vanishing gradient: the signal from the beginning of the review to the loss is tiny. Clipping only acts when the gradient norm exceeds the threshold, in which case it scales the vector down. It never makes small numbers larger. Remembering farther back requires changing the architecture, such as using a gated GRU or LSTM.'
+  - question: 'Which task has a one-to-many structure?'
+    options:
+      - 'Reading a comment and predicting whether it is positive or negative'
+      - 'Assigning a part-of-speech tag to every word in a sentence'
+      - 'Translating an English sentence into Vietnamese'
+      - 'Looking at an image and generating a caption word by word'
+    answer: 3
+    explanation: 'A single image (one input) produces a sequence of words: that is one-to-many. Comment classification is many-to-one. Part-of-speech tagging is synced many-to-many, with one label per word. Machine translation is also many-to-many, but the two sequences have different lengths, which calls for an encoder–decoder setup.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import forwardCode from '@code/dl/rnn/forward.en.py?raw';
+import jacobianCode from '@code/dl/rnn/jacobian.en.py?raw';
+import sineRnnCode from '@code/dl/rnn/sine-rnn.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Explain why sequential data needs a dedicated architecture, and how a **recurrent neural network** (RNN) uses a **hidden state** to carry information across steps.
+- Unroll an RNN through time, see why every step shares a single set of weights, and recognize one-to-many, many-to-one, and many-to-many task patterns.
+- Derive **backpropagation through time** (BPTT) on your own, and explain why gradients vanish or explode exponentially with distance.
+- Implement the RNN forward pass in NumPy, and train an RNN in PyTorch using truncated BPTT and gradient clipping.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+## Intuition
+
+### Ordered data
+
+Read two short sentences: "dog bites man" and "man bites dog." The exact same three words, yet the meaning is reversed. Or look at hourly temperature readings: 24, 25, 27, 29... To predict the next hour, you need to know the order the numbers arrived in, not just which numbers appeared.
+
+Text, time series, audio, and DNA strands are all **sequential data**: a sequence $\mathbf{x}_1, \mathbf{x}_2, \dots, \mathbf{x}_L$ where order carries meaning and the length $L$ varies from sample to sample. A product review might be 5 words long or 500 words long.
+
+### Why an MLP does not fit
+
+The MLP from [Artificial Neural Networks](/en/dl/neural-networks/) takes a fixed-size vector. There are two ways to force a sequence into that mold, and both run into trouble:
+
+- **Concatenate all steps into one long vector.** You must pick a maximum length in advance, pad shorter sequences with zeros, and truncate longer ones. Worse, every position gets its own separate weights. Learning that the word *great* at position 2 is praise does nothing for the word *great* at position 7: the network has to relearn it from scratch at every position.
+- **Sum or average all steps.** Now the dimension is fixed, but order is completely lost. "Dog bites man" and "man bites dog" collapse into the exact same vector.
+
+### Reading word by word and keeping a note
+
+You do not read this sentence by taking in the whole line at once. You read word by word, keeping a running "summary" in your head of what you have read so far. Each time you meet a new word, you update that summary. And your updating skill is the same at every word: you do not use one reading skill for the 3rd word and a different skill for the 30th.
+
+An RNN works the exact same way. It maintains a vector called the hidden state. At each step, it takes the previous state and the new input, runs them through **the same formula with the same set of weights**, and produces the new state. Because of that, it can read sequences of any length, and whatever it learns at one position automatically applies at every other position.
+
+The problem for this lesson is: **build a network that reads a sequence of arbitrary length in order, remembers what it has read inside a state vector, and can be trained end to end; then understand why it still struggles to remember things from many steps ago.**
+
+## Theory
+
+### Hidden state and the one-step formula
+
+At step $t$ (from $1$ to $L$), an RNN receives the input $\mathbf{x}_t \in \mathbb{R}^{d_x}$ and the previous hidden state $\mathbf{h}_{t-1} \in \mathbb{R}^{d_h}$, then computes the new state:
+
+$$
+\mathbf{h}_t = \tanh\left(\mathbf{W}_{xh} \mathbf{x}_t + \mathbf{W}_{hh} \mathbf{h}_{t-1} + \mathbf{b}_h\right)
+$$
+
+- $d_x$ is the input dimension, and $d_h$ is the hidden state dimension (a hyperparameter, such as 32 or 256).
+- $\mathbf{W}_{xh} \in \mathbb{R}^{d_h \times d_x}$ maps the new input into the state space.
+- $\mathbf{W}_{hh} \in \mathbb{R}^{d_h \times d_h}$ is the **recurrent weight** matrix: it governs how the old state shapes the new state. This is the "recurrent" part of the name.
+- $\mathbf{b}_h \in \mathbb{R}^{d_h}$ is the bias vector.
+- $\tanh$ squashes each component into $(-1, 1)$, keeping the state from blowing up even across hundreds of steps.
+- The initial state $\mathbf{h}_0$ is usually set to the zero vector.
+
+The matrix subscript notation reads like an arrow: the first letter is what gets multiplied, and the second letter is what gets produced. $\mathbf{W}_{xh}$ goes from $\mathbf{x}$ to $\mathbf{h}$, while $\mathbf{W}_{hh}$ goes from the old $\mathbf{h}$ to the new $\mathbf{h}$. The [GRU](/en/dl/gru/) and [LSTM and BiLSTM](/en/dl/lstm-bilstm/) lessons keep this exact convention, replacing the second letter with the gate name (such as $\mathbf{W}_{xf}, \mathbf{W}_{hf}$ for the forget gate).
+
+Whenever we need a prediction at step $t$, we pass $\mathbf{h}_t$ through a linear output layer:
+
+$$
+\hat{\mathbf{y}}_t = \mathbf{W}_{hy} \mathbf{h}_t + \mathbf{b}_y
+$$
+
+For classification, $\hat{\mathbf{y}}_t$ holds the logits, and we apply softmax just like at the output of an MLP. For regression—such as predicting the next value of a numerical series—$\hat{\mathbf{y}}_t$ is the prediction directly.
+
+Notice the chain of dependencies: $\mathbf{h}_t$ depends on $\mathbf{h}_{t-1}$, which depends on $\mathbf{h}_{t-2}$, all the way back to $\mathbf{x}_1$. Thus $\mathbf{h}_t$ is a summary of **the entire prefix** $\mathbf{x}_1, \dots, \mathbf{x}_t$, compressed into $d_h$ numbers. It depends only on past and present steps, never seeing future steps.
+
+### Unrolling through time and weight sharing
+
+The recurrence above has a loop: the output $\mathbf{h}_t$ feeds back in as an input at the next step. To compute activations and take derivatives, we **unroll** the network through time: we draw one copy of the RNN cell for each step and connect $\mathbf{h}_1 \to \mathbf{h}_2 \to \dots \to \mathbf{h}_L$.
+
+$$
+\mathbf{h}_0 \xrightarrow{\ \mathbf{x}_1\ } \mathbf{h}_1 \xrightarrow{\ \mathbf{x}_2\ } \mathbf{h}_2 \to \cdots \xrightarrow{\ \mathbf{x}_L\ } \mathbf{h}_L
+$$
+
+Once unrolled, an RNN looks like a feedforward network of $L$ layers. The crucial difference is **weight sharing**: **every "layer" uses the exact same $\mathbf{W}_{hh}$, $\mathbf{W}_{xh}$, and $\mathbf{b}_h$**. This has three consequences:
+
+1. **The parameter count does not depend on $L$.** An RNN layer has $d_h^2 + d_h d_x + d_h$ parameters whether the sequence is 10 steps long or 10,000 steps long.
+2. **Learn once, use everywhere.** A rule like "seeing the word *great* nudges the state toward positive sentiment" lives inside $\mathbf{W}_{xh}$ and applies at any step.
+3. **Generalize to sequences longer than any seen during training.** You simply run the step formula for more steps.
+
+You will see the rolled RNN cell alongside its unrolled graph in the Illustration section.
+
+### Sequence task patterns
+
+Using the same RNN backbone, different choices of where we feed inputs and where we read outputs give four common patterns:
+
+| Pattern | Input | Output | Example |
+|---|---|---|---|
+| One-to-many | A single vector (often used as $\mathbf{h}_0$ or $\mathbf{x}_1$) | $\hat{\mathbf{y}}_1, \dots, \hat{\mathbf{y}}_L$ | Image captioning |
+| Many-to-one | $\mathbf{x}_1, \dots, \mathbf{x}_L$ | Only $\hat{\mathbf{y}}_L$, computed from $\mathbf{h}_L$ | Sentiment classification of a review |
+| Many-to-many (aligned) | $\mathbf{x}_1, \dots, \mathbf{x}_L$ | $\hat{\mathbf{y}}_t$ at every step | Part-of-speech tagging; next-step prediction |
+| Many-to-many (unaligned) | Source sequence | Target sequence of a different length | Machine translation |
+
+The last pattern requires two RNNs: an encoder that reads the source sentence and a decoder that generates the target sentence. That is the topic of [Sequence-to-Sequence Models (Seq2Seq)](/en/llm/seq2seq/).
+
+For aligned many-to-many tasks, the total loss is the sum of the per-step losses, $\mathcal{L} = \sum_{t=1}^{L} \mathcal{L}_t$, where $\mathcal{L}_t$ compares $\hat{\mathbf{y}}_t$ against the target at step $t$. For many-to-one tasks, there is only $\mathcal{L}_L$. In code, we usually average instead of summing; that simply scales the gradient by a constant.
+
+### Backpropagation through time (BPTT)
+
+To train the network, we need the gradients of $\mathcal{L}$ with respect to $\mathbf{W}_{hh}$, $\mathbf{W}_{xh}$, and $\mathbf{b}_h$. Once unrolled, the RNN is an $L$-layer feedforward network, so we apply standard backpropagation from [Training Neural Networks](/en/dl/training-neural-networks/), working backward from step $L$ down to step $1$. This procedure is called **backpropagation through time** (BPTT). Two things are new compared to a standard MLP: $\mathbf{h}_t$ affects the loss along two paths, and the weights are reused at every step.
+
+For brevity, write $\boldsymbol{\delta}_t = \partial \mathcal{L} / \partial \mathbf{h}_t$ for the gradient of the total loss with respect to the hidden state at step $t$, a vector of the same shape as $\mathbf{h}_t$.
+
+**Step 1: gradient with respect to hidden states.** $\mathbf{h}_t$ influences the total loss through two routes: directly through $\mathcal{L}_t$ (via $\hat{\mathbf{y}}_t$), and indirectly through $\mathbf{h}_{t+1}$ and all subsequent steps. The multivariable chain rule adds the two contributions:
+
+$$
+\boldsymbol{\delta}_t = \frac{\partial \mathcal{L}_t}{\partial \mathbf{h}_t} + \left(\frac{\partial \mathbf{h}_{t+1}}{\partial \mathbf{h}_t}\right)^{\!\top} \boldsymbol{\delta}_{t+1}
+$$
+
+At the final step there is no $\mathbf{h}_{L+1}$, so $\boldsymbol{\delta}_L = \partial \mathcal{L}_L / \partial \mathbf{h}_L$. From there we step backward to compute $\boldsymbol{\delta}_{L-1}, \boldsymbol{\delta}_{L-2}, \dots, \boldsymbol{\delta}_1$.
+
+**Step 2: the one-step Jacobian.** The factor $\partial \mathbf{h}_{t+1} / \partial \mathbf{h}_t$ is a $d_h \times d_h$ **Jacobian matrix**: its $(i, j)$ entry is the derivative of component $i$ of $\mathbf{h}_{t+1}$ with respect to component $j$ of $\mathbf{h}_t$. Since $\mathbf{h}_{t+1} = \tanh(\mathbf{W}_{hh} \mathbf{h}_t + \dots)$ and $\tanh'(u) = 1 - \tanh^2(u)$ acts elementwise, the chain rule gives:
+
+$$
+\frac{\partial \mathbf{h}_{t+1}}{\partial \mathbf{h}_t} = \mathbf{D}_{t+1} \mathbf{W}_{hh}, \qquad
+\mathbf{D}_{t+1} = \mathrm{diag}\left(\mathbf{1} - \mathbf{h}_{t+1} \odot \mathbf{h}_{t+1}\right)
+$$
+
+$\mathbf{D}_{t+1}$ is the diagonal matrix of elementwise $\tanh$ derivatives, computed directly from the $\mathbf{h}_{t+1}$ saved during the forward pass. Every diagonal entry lies in $(0, 1]$.
+
+**Step 3: gradients with respect to weights.** At step $t$, $\mathbf{W}_{hh}$ multiplies $\mathbf{h}_{t-1}$, just like a linear layer taking input $\mathbf{h}_{t-1}$. The gradient with respect to the pre-activation of $\tanh$ at step $t$ (multiplying $\boldsymbol{\delta}_t$ by the $\tanh$ derivative, as in Step 2) is $\mathbf{D}_t \boldsymbol{\delta}_t$, so step $t$ contributes the outer product $(\mathbf{D}_t \boldsymbol{\delta}_t)\, \mathbf{h}_{t-1}^\top$, just like a linear layer in an MLP. Because $\mathbf{W}_{hh}$ is shared across **all** steps, its total gradient is the sum of those per-step contributions:
+
+$$
+\begin{aligned}
+\frac{\partial \mathcal{L}}{\partial \mathbf{W}_{hh}} &= \sum_{t=1}^{L} (\mathbf{D}_t \boldsymbol{\delta}_t)\, \mathbf{h}_{t-1}^\top \\
+\frac{\partial \mathcal{L}}{\partial \mathbf{W}_{xh}} &= \sum_{t=1}^{L} (\mathbf{D}_t \boldsymbol{\delta}_t)\, \mathbf{x}_t^\top \\
+\frac{\partial \mathcal{L}}{\partial \mathbf{b}_h} &= \sum_{t=1}^{L} \mathbf{D}_t \boldsymbol{\delta}_t
+\end{aligned}
+$$
+
+Summing across time steps is the only extra rule introduced by weight sharing. The gradients for $\mathbf{W}_{hy}$ and $\mathbf{b}_y$ work just like an MLP output layer, also summed over steps that produce a loss.
+
+:::note[Key takeaway]
+BPTT is standard backpropagation on the unrolled network. Hidden-state gradients flow backward via $\boldsymbol{\delta}_t = \partial \mathcal{L}_t / \partial \mathbf{h}_t + (\mathbf{D}_{t+1} \mathbf{W}_{hh})^\top \boldsymbol{\delta}_{t+1}$. Weight gradients sum the contributions of every step because all steps share the same weights. Because BPTT must store every $\mathbf{h}_t$ from the forward pass, memory grows linearly with $L$.
+:::
+
+### Why RNNs struggle with long-range memory
+
+Suppose the label at step $L$ depends on an input at a much earlier step $t$. To learn that relationship, the gradient from $\mathcal{L}_L$ must travel all the way back to $\mathbf{h}_t$. Unrolling the recursion from Step 1, the contribution flowing from $\mathbf{h}_L$ back to $\mathbf{h}_t$ is:
+
+$$
+\frac{\partial \mathcal{L}_L}{\partial \mathbf{h}_t} = \left(\frac{\partial \mathbf{h}_L}{\partial \mathbf{h}_t}\right)^{\!\top} \frac{\partial \mathcal{L}_L}{\partial \mathbf{h}_L}, \qquad
+\frac{\partial \mathbf{h}_L}{\partial \mathbf{h}_t} = \mathbf{D}_L \mathbf{W}_{hh}\, \mathbf{D}_{L-1} \mathbf{W}_{hh} \cdots \mathbf{D}_{t+1} \mathbf{W}_{hh}
+$$
+
+The right-hand side is the product of $L - t$ one-step Jacobians, each equal to $\mathbf{D}_k \mathbf{W}_{hh}$. Unlike a deep MLP where each layer has its own weight matrix, here **the exact same matrix $\mathbf{W}_{hh}$ is multiplied repeatedly** $L - t$ times.
+
+**The 1D case.** Suppose $d_h = 1$ and the state stays near 0 so $\tanh' \approx 1$. Each Jacobian is just the scalar $w$, and $\partial h_L / \partial h_t \approx w^{L-t}$. Over a distance of $L - t = 50$: if $w = 0.9$, then $0.9^{50} \approx 0.005$; if $w = 1.1$, then $1.1^{50} \approx 117$. A $\pm 0.1$ nudge around $1$ changes the result by more than a factor of twenty thousand.
+
+**The general case.** Using submultiplicativity of the spectral norm $\lVert \mathbf{A}\mathbf{B} \rVert \le \lVert \mathbf{A} \rVert \lVert \mathbf{B} \rVert$, where $\lVert \cdot \rVert$ is the largest **singular value** $\sigma_{\max}$ (the maximum factor by which a matrix can stretch any vector), and noting that each diagonal matrix $\mathbf{D}_k$ has entries in $(0, 1]$ so $\lVert \mathbf{D}_k \rVert \le 1$, we obtain:
+
+$$
+\left\lVert \frac{\partial \mathbf{h}_L}{\partial \mathbf{h}_t} \right\rVert
+\le \prod_{k=t+1}^{L} \lVert \mathbf{D}_k \rVert \, \lVert \mathbf{W}_{hh} \rVert
+\le \sigma_{\max}(\mathbf{W}_{hh})^{\,L-t}
+$$
+
+- **Vanishing gradient.** If $\sigma_{\max}(\mathbf{W}_{hh}) < 1$, the upper bound shrinks to 0 exponentially in the distance $L - t$. This is a **sufficient** condition: gradients are guaranteed to vanish. Saturation of $\tanh$ (states near $\pm 1$, where the derivative is near 0) makes them shrink even faster.
+- **Exploding gradient.** For the product to grow with distance, $\sigma_{\max}(\mathbf{W}_{hh}) > 1$ is a **necessary** condition, though not sufficient because the $\mathbf{D}_k$ matrices can still pull the product down. When explosion happens, a few updates with huge gradients hurl the weights far away, causing the loss to spike or turn into NaN.
+
+Pascanu, Mikolov, and Bengio (2013) proved both conditions (for $\tanh$; with sigmoid activations, the threshold is 4 instead of 1 because the sigmoid derivative is at most $1/4$). Earlier, Bengio, Simard, and Frasconi (1994) showed that the longer a dependency spans, the harder it is for gradient descent to learn. The practical effect is clear from the BPTT sum: the gradient with respect to $\mathbf{W}_{hh}$ adds terms from all distances, and long-range terms are exponentially smaller than short-range terms. Short-range signals dominate the update, so the network mainly learns relationships between nearby steps.
+
+We already met vanishing gradients in deep MLPs in [Training Neural Networks](/en/dl/training-neural-networks/). In an RNN, "depth" is sequence length, and a sentence or sensor stream easily spans hundreds of steps.
+
+### Truncated BPTT
+
+Running full BPTT on a very long sequence (an entire book, or a year of hourly measurements) both consumes huge memory—since every $\mathbf{h}_t$ must be stored—and updates the weights only once at the very end. **Truncated BPTT** splits the sequence into consecutive chunks of length $K$:
+
+1. Run the forward pass on the first chunk starting from $\mathbf{h}_0$, compute the chunk loss, backpropagate **only within that chunk**, and update the weights.
+2. Carry the final hidden state of the chunk over as the initial state of the next chunk, but **detach its gradient history**—treating it as a constant vector.
+3. Repeat until the end of the sequence.
+
+The forward pass remains continuous, so $\mathbf{h}$ can still carry information from earlier chunks. In exchange, gradients never travel farther than $K$ steps, so the network is not directly trained to hold onto information across more than $K$ steps. Memory scales with $K$ rather than $L$. In PyTorch, step 2 is `h = h.detach()`, as shown in the third code cell.
+
+### Gradient clipping
+
+For exploding gradients, the simplest remedy is **gradient norm clipping**. Let $\mathbf{g}$ be the vector formed by concatenating all parameter gradients of the model, and let $\tau$ be a chosen threshold. Before each optimizer step:
+
+$$
+\text{if } \lVert \mathbf{g} \rVert > \tau \text{ then } \mathbf{g} \leftarrow \frac{\tau}{\lVert \mathbf{g} \rVert}\, \mathbf{g}
+$$
+
+The rescaled vector has norm exactly $\tau$ while keeping its original direction. The gradient still points downhill, only with a capped step size, so a single bad batch cannot fling the weights off course. Pascanu et al. suggest picking $\tau$ by observing the average gradient norm over many updates; in their experiments, thresholds between half and ten times that average worked well. In PyTorch, this is `torch.nn.utils.clip_grad_norm_`.
+
+Clipping only shrinks gradients that are too large. It **never** enlarges gradients that have vanished, so it does not help an RNN remember farther back.
+
+### Limitations
+
+- **Hard to remember far back.** Vanishing gradients restrict vanilla RNNs to mostly local context. Truncated BPTT and gradient clipping stabilize training, but they do not fix this fundamental decay. The second code cell lets you measure how fast the gradient shrinks.
+- **Inherently sequential.** Computing $\mathbf{h}_t$ requires $\mathbf{h}_{t-1}$, preventing parallelization across time steps. [Transformers](/en/dl/transformers/) remove this recurrence entirely.
+- **Everything is squeezed into one vector.** The entire history must pass through a $d_h$-dimensional vector $\mathbf{h}_t$. [Sequence-to-Sequence Models (Seq2Seq)](/en/llm/seq2seq/) shows why this becomes a bottleneck when translating long sentences.
+
+## Illustration
+
+The diagram below places a rolled RNN cell next to its unrolled view across time. Look at the weight labels on the unrolled side: steps $t-1$, $t$, and $t+1$ all use the exact same $\mathbf{W}_{xh}$ and $\mathbf{W}_{hh}$, not three separate sets. The horizontal arrows connecting $\mathbf{h}_{t-1} \to \mathbf{h}_t \to \mathbf{h}_{t+1}$ form the highway along which gradients must travel backward during BPTT.
+
+{/* FIG: RnnUnrolledFigure
+    Idea: a rolled RNN cell with a self-loop is equivalent to a chain of weight-sharing copies connected through the hidden state. */}
+
+The table below shows how rapidly the product of Jacobians shrinks or grows in the 1D case, $\partial h_L / \partial h_t \approx w^{L-t}$. Each column is a distance $L - t$.
+
+| $w$ | $L - t = 1$ | $L - t = 10$ | $L - t = 20$ | $L - t = 50$ |
+|---|---:|---:|---:|---:|
+| 0.5 | 0.5 | 0.00098 | 9.5e-07 | 8.9e-16 |
+| 0.9 | 0.9 | 0.35 | 0.12 | 0.0052 |
+| 1.0 | 1 | 1 | 1 | 1 |
+| 1.1 | 1.1 | 2.6 | 6.7 | 120 |
+
+Only the row $w = 1$ preserves the gradient across 50 steps, and that is a knife-edge balance: any slight deviation leads to vanishing or exploding gradients. The second code cell measures this exact quantity on a real multi-dimensional RNN with $\tanh$.
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the two NumPy cells with Python 3.14 and NumPy 2.4 (the versions bundled in Pyodide), and the PyTorch cell with Python 3.14 and PyTorch 2.15 on CPU. The two NumPy cells run directly in the page and are self-contained: each imports its own libraries and generates its own data. The PyTorch cell runs on your machine.
+
+### Forward pass in NumPy
+
+The cell below implements the one-step formula and runs it on a 4-step sequence with $d_x = 2$ and $d_h = 3$. The weights are randomly initialized and untrained: here we simply watch how the hidden state evolves across steps. At the end, the same parameters are run on two other sequences: the first 2 steps of the original sequence, and the original sequence in reverse order.
+
+<PythonRunner code={forwardCode} title="RNN forward pass on a short sequence" />
+
+Reading the output:
+
+- **All four states $\mathbf{h}_1, \dots, \mathbf{h}_4$** lie in $(-1, 1)$ thanks to $\tanh$. The final state $\mathbf{h}_4 = [0.365, 0.01, -0.084]$ summarizes the whole sequence. From it, the output layer produces a scalar prediction `y_hat = -0.123`, following the many-to-one pattern.
+- **The length-2 prefix** ends at state $[0.21, -0.089, 0.233]$, identical to $\mathbf{h}_2$ of the length-4 sequence. The same function handles any sequence length, and $\mathbf{h}_t$ depends only on steps up to $t$.
+- **The reversed sequence** ends at $[0.146, 0.236, -0.409]$, completely different from $\mathbf{h}_4$ even though it contains the exact same four input vectors. An RNN is sensitive to order, unlike the averaging baseline from the Intuition section.
+- **22 parameters**: 6 in $\mathbf{W}_{xh}$, 9 in $\mathbf{W}_{hh}$, 3 in $\mathbf{b}_h$, 3 in $\mathbf{W}_{hy}$, and 1 in $\mathbf{b}_y$. This count stays constant no matter how long the sequence gets.
+
+### Measuring gradients across many steps
+
+The cell below measures the exact quantity from "Why RNNs struggle with long-range memory": the spectral norm $\lVert \partial \mathbf{h}_L / \partial \mathbf{h}_t \rVert$ as a function of the distance $L - t$, with $d_h = 16$ and $L = 50$. To control the scale of $\mathbf{W}_{hh}$, we set $\mathbf{W}_{hh} = c\,\mathbf{Q}$, where $\mathbf{Q}$ is an **orthogonal matrix** (multiplying by $\mathbf{Q}$ rotates vectors without changing their length). That makes every singular value of $\mathbf{W}_{hh}$ equal to $c$. The input is a sequence of small scalars, and for simplicity we omit $\mathbf{b}_h$.
+
+The code walks backward from step $L$, multiplying one Jacobian $\mathbf{D}_k \mathbf{W}_{hh}$ at each step as in Step 2 of BPTT, and prints the spectral norm of the accumulated product at several distances.
+
+<PythonRunner code={jacobianCode} title="Spectral norm of the Jacobian product vs. distance" />
+
+Reading the output:
+
+- **$c = 0.5$: vanishing.** At distance 10 the norm is $9.5 \times 10^{-4}$, right below the upper bound $0.5^{10} \approx 9.8 \times 10^{-4}$ because the states are small and $\mathbf{D}_k$ is close to the identity matrix. By distance 40 it is down to $7.1 \times 10^{-13}$: an input 40 steps earlier sends virtually zero signal to the weights.
+- **$c = 1.0$: slow decay.** The upper bound is 1, yet $\tanh' < 1$ still whittles the norm down gradually: 0.73 at distance 10, and 0.14 at distance 40. This is the regime where a vanilla RNN learns best, and it is a very narrow ridge.
+- **$c = 2.0$: exploding.** The norm grows from 1.9 at distance 1 to $3.2 \times 10^{1}$ at distance 10 and $6.7 \times 10^{3}$ at distance 40. That is still far below the upper bound $2^{40} \approx 10^{12}$ because the states grow large and $\tanh$ saturation dampens the product. As noted in the Theory section, $\sigma_{\max} > 1$ is necessary for explosion, not sufficient.
+
+Try changing `c` to 0.9 or 1.1, or increasing the `0.1` multiplier on `xs` to 1.0, and re-run the cell to see how $\tanh$ saturation accelerates gradient decay.
+
+### PyTorch RNN predicting the next value of a sine wave
+
+The script below trains `nn.RNN` on an aligned many-to-many task: at every step, it reads the current value of a noisy sine wave and predicts the next value.
+
+- **Synthetic data:** $\sin(0.1\,t)$ plus Gaussian noise of standard deviation 0.05, over 2,000 steps. The input is $x_t$ and the target is $x_{t+1}$.
+- **Model:** `nn.RNN(1, 32)` ($d_x = 1$, $d_h = 32$, $\tanh$ activation) followed by `nn.Linear(32, 1)` for $\hat{y}_t = \mathbf{W}_{hy} \mathbf{h}_t + b_y$. PyTorch computes $\mathbf{h}_t$ with two bias vectors, `bias_ih` and `bias_hh`, whose sum plays the role of $\mathbf{b}_h$ in our formula.
+- **Truncated BPTT:** the 2,000-step series is split into 40 chunks of length $K = 50$. The final state of each chunk is passed to the next via `h.detach()`.
+- **Gradient clipping** with threshold $\tau = 1$. `clip_grad_norm_` returns the gradient norm **before** clipping; the script logs the maximum pre-clip norm seen in each epoch.
+- **Training:** 15 epochs with Adam (600 parameter updates in total). We then evaluate on a fresh 500-step segment and compare against the simplest baseline: predicting that the next value equals the current value.
+
+Instructions for installing CPU-only PyTorch are in [Build Your First LLM](/en/llm/build-first-llm/).
+
+<LocalCode
+  code={sineRnnCode}
+  title="nn.RNN predicting the next value of a sine wave"
+  packages={['torch']}
+  hardware="CPU is enough, no GPU required. Takes about 40 seconds to 1 minute on a dev laptop, faster when idle"
+  sampleVaries={false}
+>
+
+```text
+epoch  1  train MSE 0.0779  max grad norm 1.66
+epoch  5  train MSE 0.0045  max grad norm 0.15
+epoch 10  train MSE 0.0042  max grad norm 0.26
+epoch 15  train MSE 0.0042  max grad norm 0.16
+test MSE (RNN)          0.0038
+test MSE (copy x_t)     0.0091
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **Training MSE drops from 0.0779 in epoch 1 to 0.0042.** Because the target noise has variance $0.05^2 = 0.0025$ and is unpredictable, no model can push the MSE below roughly 0.0025.
+- **Clipping only triggers early on.** In epoch 1, the maximum gradient norm is 1.66, exceeding the threshold of 1, so it gets clipped. By epoch 5, the maximum norm stays between 0.15 and 0.26, and clipping is a no-op. That is how gradient clipping usually behaves in practice: a safety net for a few rough updates rather than an active constraint on every step.
+- **On the unseen test segment, the RNN achieves an MSE of 0.0038**, compared to 0.0091 for copying $x_t$—roughly 2.4 times lower. The hidden state has learned to track whether the wave is rising or falling from recent steps, which beats simply repeating the last noisy reading.
+
+Because the random seed is fixed, re-running on the same machine gives the same numbers; across different machines or PyTorch versions, the values may vary slightly.
+
+## Common pitfalls
+
+:::caution[Thinking each time step has its own weights]
+Because the unrolled diagram looks like $L$ layers, it is tempting to think an RNN has $L$ sets of weights and that its parameter count grows with sequence length. It does not: every step shares $\mathbf{W}_{hh}$, $\mathbf{W}_{xh}$, and $\mathbf{b}_h$, just as the first NumPy cell has 22 parameters whether it reads 2 steps or 4. The backpropagation corollary: per-step weight gradients are **summed** into the same matrix rather than updating separate matrices at each step.
+:::
+
+:::caution[Forgetting to detach the hidden state between truncated BPTT chunks]
+In truncated BPTT, if you remove `h = h.detach()` in the PyTorch script, `h` from the previous chunk stays connected to the old computation graph. The second call to `backward()` then tries to backpropagate into the previous chunk's graph—which PyTorch has already freed—raising a `RuntimeError` with "Trying to backward through the graph a second time." Passing `backward(retain_graph=True)` as suggested by the error message is the wrong fix: it forces gradients all the way back to the start of the sequence, defeating truncated BPTT, and in this loop it immediately triggers another error ("modified by an inplace operation") because the old graph depends on weights that `opt.step()` has already overwritten. Conversely, resetting `h = None` at each chunk avoids the error but wipes out the context from earlier chunks.
+:::
+
+:::caution[Believing gradient clipping fixes vanishing gradients]
+Clipping only scales down gradient vectors whose norm exceeds the threshold. When a gradient from 40 steps back has already shrunk to $10^{-13}$ (second code cell, $c = 0.5$), clipping leaves it untouched. Clipping prevents explosion; remembering over long distances requires gated architectures like GRUs and LSTMs.
+:::
+
+:::caution[Mixing up tensor axis order in PyTorch]
+By default, `nn.RNN` expects inputs shaped `(seq_len, batch_size, d_x)`, not `(batch_size, seq_len, d_x)`. If your data has the batch on the first axis and you forget `batch_first=True`, PyTorch will not raise a shape error because the last axis is still $d_x$: instead, it treats each sample in the batch as a time step and reads "across" different samples. The code runs and prints a decreasing loss, making the bug silent. Always check `x.shape` right before calling the model.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- An RNN reads a sequence step by step and updates a hidden state $\mathbf{h}_t = \tanh(\mathbf{W}_{xh} \mathbf{x}_t + \mathbf{W}_{hh} \mathbf{h}_{t-1} + \mathbf{b}_h)$ that summarizes all steps seen so far; the prediction at step $t$ is $\hat{\mathbf{y}}_t = \mathbf{W}_{hy} \mathbf{h}_t + \mathbf{b}_y$.
+- Unrolled through time, an RNN is an $L$-layer deep network with shared weights: its parameter count is independent of $L$, it handles variable-length sequences, and it is sensitive to order. Depending on where outputs are read, we get one-to-many, many-to-one, and many-to-many patterns.
+- BPTT is backpropagation on the unrolled graph; weight gradients sum the contributions of all steps. The gradient from step $L$ back to step $t$ multiplies $L - t$ Jacobians $\mathbf{D}_k \mathbf{W}_{hh}$, shrinking or growing exponentially with distance: $\sigma_{\max}(\mathbf{W}_{hh}) < 1$ guarantees vanishing gradients, while $\sigma_{\max}(\mathbf{W}_{hh}) > 1$ is necessary for exploding gradients.
+- Truncated BPTT restricts backpropagation to $K$-step chunks to save memory; gradient clipping rescales overly large gradients to norm $\tau$. Both stabilize training, but neither solves long-range memory.
+
+The natural next question is: how can we let gradients travel across hundreds of steps without vanishing? The [GRU](/en/dl/gru/) lesson answers this with **gates**: instead of overwriting the hidden state with $\tanh(\dots)$ at every step, the network learns how much of the old state to keep, creating a nearly direct highway for both information and gradients.
+
+**Further reading:**
+
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. (Vietnamese translation by the Dive into Deep Learning Vietnam team). [*Đắm mình vào Học Sâu*](https://d2l.aivivn.com/chapter_recurrent-neural-networks/index_vn.html), Chapter 8, Sections 8.4 to 8.7. Vietnamese edition of *Dive into Deep Learning*: RNNs from scratch in code, with detailed sections on gradient clipping and BPTT.
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. (2023). [*Dive into Deep Learning*, Section 9.7 Backpropagation Through Time](https://d2l.ai/chapter_recurrent-neural-networks/bptt.html). Newer English edition; Section 9.7 compares full BPTT, regular truncated BPTT, and randomized truncated BPTT.
+- Goodfellow, I., Bengio, Y., Courville, A. (2016). [*Deep Learning*, Chapter 10 Sequence Modeling: Recurrent and Recursive Nets](https://www.deeplearningbook.org/contents/rnn.html), Sections 10.1, 10.2, 10.7, and 10.11. Unfolding computational graphs, BPTT, the challenge of long-term dependencies, and gradient clipping. Note that the book writes $\tau$ for sequence length (where this lesson writes $L$), whereas here $\tau$ denotes the clipping threshold.
+- Pascanu, R., Mikolov, T., Bengio, Y. (2013). [*On the difficulty of training recurrent neural networks*](https://proceedings.mlr.press/v28/pascanu13.html), ICML 2013, Sections 2 and 3. Sufficient conditions for vanishing gradients, necessary conditions for exploding gradients, and the gradient norm clipping algorithm with threshold selection advice.
+- Bengio, Y., Simard, P., Frasconi, P. (1994). [*Learning long-term dependencies with gradient descent is difficult*](https://doi.org/10.1109/72.279181), *IEEE Transactions on Neural Networks* 5(2), 157–166. The classic paper analyzing why gradient descent struggles to learn long-range dependencies in recurrent networks.
+
+<LessonProgress />

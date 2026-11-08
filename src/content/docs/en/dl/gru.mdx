@@ -1,0 +1,309 @@
+---
+title: GRU
+description: 'Vanilla RNNs forget quickly because they overwrite their state at every step. A GRU adds reset and update gates to interpolate between the old and new states, letting gradients travel far.'
+quiz:
+  - question: 'A textbook writes the GRU update as $\mathbf{h}_t = (1 - \mathbf{z}_t) \odot \mathbf{h}_{t-1} + \mathbf{z}_t \odot \tilde{\mathbf{h}}_t$. Under this convention, what value must a unit''s update gate take to preserve its state across many steps?'
+    options:
+      - 'Close to 1'
+      - 'Close to 0'
+      - 'Close to 0.5, to balance old and new'
+      - 'It does not depend on $\mathbf{z}_t$, only the reset gate needs to be close to 0'
+    answer: 1
+    explanation: 'In this notation, $\mathbf{z}_t$ multiplies the new candidate state while $1 - \mathbf{z}_t$ multiplies the old state. Keeping the old state means $1 - \mathbf{z}_t \approx 1$, which requires $\mathbf{z}_t \approx 0$. "Close to 1" matches the PyTorch convention used in this lesson, making it an easy trap: always check which term $\mathbf{z}_t$ multiplies before reading further. A reset gate near 0 does the opposite—it makes the candidate ignore the old state.'
+  - question: 'A layer has $d_x = 10$, $d_h = 20$, and one bias vector per branch. A vanilla RNN of this size has 620 parameters. How many parameters does a GRU of the same size have?'
+    options: ['620', '1240', '1860', '2480']
+    answer: 2
+    explanation: 'A GRU has three branches with the same matrix shapes as a vanilla RNN: reset gate, update gate, and candidate state. Each branch has $d_h(d_x + d_h) + d_h = 20 \cdot 30 + 20 = 620$ parameters, giving $3 \cdot 620 = 1860$ in total. 2480 is for an LSTM, which has four branches. PyTorch''s `nn.GRU` reports 1920 because it uses two bias vectors per branch.'
+  - question: 'At some time step, both the reset gate and the update gate of every unit are close to 0. What is the new state $\mathbf{h}_t$ approximately equal to?'
+    options:
+      - '$\mathbf{h}_{t-1}$: nothing changes'
+      - 'The zero vector $\mathbf{0}$: the network wipes the state clean'
+      - '$\tanh(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{b}_h)$: it depends only on the current input'
+      - '$\tanh(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{W}_{hh}\mathbf{h}_{t-1} + \mathbf{b}_h)$: a standard vanilla RNN step'
+    answer: 2
+    explanation: 'Because $\mathbf{z}_t \approx \mathbf{0}$, we have $\mathbf{h}_t \approx \tilde{\mathbf{h}}_t$. And because $\mathbf{r}_t \approx \mathbf{0}$, inside the candidate we have $\mathbf{r}_t \odot \mathbf{h}_{t-1} \approx \mathbf{0}$, so the $\mathbf{W}_{hh}(\dots)$ term disappears. The network effectively restarts as if $\mathbf{x}_t$ were the very first element. A standard RNN step corresponds to $\mathbf{r}_t \approx \mathbf{1}$, not $\mathbf{0}$. "Wipes to $\mathbf{0}$" is wrong because the candidate still receives $\mathbf{x}_t$.'
+  - question: 'One unit of a GRU has update gate $z \approx 0.99$ for 50 consecutive steps. Along the direct path through the hidden states, by roughly what factor is the gradient from the final step back to the first step multiplied?'
+    options:
+      - 'Around $0.6$, because each step''s Jacobian is close to $z$ and bypasses $\mathbf{W}_{hh}$'
+      - 'Close to 0, because the sigmoid saturates at $z \approx 0.99$ so the gradient vanishes'
+      - 'Exactly 1, because a GRU completely eliminates vanishing gradients'
+      - 'Around $\sigma_{\max}(\mathbf{W}_{hh})^{50}$, just like a vanilla RNN'
+    answer: 0
+    explanation: 'When $z \approx 1$, the one-step Jacobian is approximately $\mathrm{diag}(\mathbf{z}_t)$, so across 50 steps the signal is multiplied by roughly $0.99^{50} \approx 0.6$. Sigmoid saturation shrinks the gradient flowing into the gate''s own weights, but it does not block the highway through $\mathbf{z}_t \odot \mathbf{h}_{t-1}$; in fact, saturation makes the two extra Jacobian terms vanish. Nor is the factor exactly 1—only an exact $z = 1$ gives 1. $\mathbf{W}_{hh}$ only appears in the candidate branch, which is scaled by $1 - z \approx 0.01$.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import gruStepCode from '@code/dl/gru/gru-step.en.py?raw';
+import rememberFirstCode from '@code/dl/gru/remember-first.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Explain why vanilla RNNs struggle to remember over long distances, and how a **gate** acts like a continuous valve for each memory slot.
+- Write down the equations of a **GRU** (gated recurrent unit): the **reset gate** $\mathbf{r}_t$, the **update gate** $\mathbf{z}_t$, the **candidate state** $\tilde{\mathbf{h}}_t$, and the linear interpolation that produces $\mathbf{h}_t$.
+- Explain why $\mathbf{z}_t \approx \mathbf{1}$ lets gradients travel across many steps with almost no decay.
+- Implement a GRU step in NumPy, count its parameters (3 times a vanilla RNN), and train PyTorch's `nn.GRU` on a long-range memory task.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+A vanilla RNN ([Recurrent Neural Networks](/en/dl/rnn/)) updates its **hidden state** via $\mathbf{h}_t = \tanh(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{W}_{hh}\mathbf{h}_{t-1} + \mathbf{b}_h)$, with $\mathbf{x}_t \in \mathbb{R}^{d_x}$ and $\mathbf{h}_t \in \mathbb{R}^{d_h}$. The **sigmoid** function $\sigma(a) = 1/(1 + e^{-a})$ maps any real number into $(0, 1)$. The symbol $\odot$ denotes elementwise (Hadamard) multiplication of two vectors of the same shape.
+:::
+
+## Intuition
+
+### A photocopy of a photocopy
+
+Imagine photocopying a page, then photocopying the copy, and repeating that 50 times. Each generation blurs the ink only slightly, yet by the 50th copy the original text is almost illegible.
+
+A vanilla RNN does the exact same thing to its memory. At **every** time step, it recomputes the entire hidden state from scratch: multiply the old state by $\mathbf{W}_{hh}$, add the new input, and pass the sum through $\tanh$. For information from step 1 to reach step 50, it must survive 49 such transformations. As [Recurrent Neural Networks](/en/dl/rnn/) showed in the backward direction, the gradient from the last step to the first is the product of 49 Jacobians $\mathbf{D}_k\mathbf{W}_{hh}$, which typically shrinks to 0 exponentially.
+
+Consider a concrete task: the network reads a sequence of 100 numbers, each $+1$ or $-1$, and at the end must report what the **very first** number was. The remaining 99 numbers are pure noise. For a human, this is trivial: write the first number on a slip of paper and never touch that slip again. A vanilla RNN has no way to "not touch" its memory: every step rewrites the entire state vector.
+
+### A valve for each memory slot
+
+The core idea of a GRU is to attach a **valve** to each component of the hidden state. When the valve is turned all the way toward "keep," that component is copied straight to the next step untouched. When it is turned toward "write," the component is replaced by a fresh value computed from the current input. And the valve is not a binary switch—it can be set to any blend in between.
+
+Crucially, the valve setting is **not fixed**. It is computed at every step from the current input and the previous state, using learnable weights. The network learns for itself when to hold on to a memory and when to overwrite it.
+
+The problem for this lesson is: **design a state update rule that can learn to copy parts of the old state across many steps unchanged, so that both forward information and backward gradients can travel far.**
+
+## Theory
+
+### What a gate is
+
+A **gate** is a vector of the same dimension as the hidden state, with every entry in $(0, 1)$, used to multiply another vector elementwise. Entries near 0 block the signal; entries near 1 let it pass through. To produce numbers in $(0, 1)$, we apply a sigmoid to a linear transformation of the input and previous state—just like a standard neural network layer:
+
+$$
+\mathbf{g}_t = \sigma\left(\mathbf{W}_{xg}\mathbf{x}_t + \mathbf{W}_{hg}\mathbf{h}_{t-1} + \mathbf{b}_g\right)
+$$
+
+The matrix subscripts follow the convention from [Recurrent Neural Networks](/en/dl/rnn/): the first letter indicates what gets multiplied ($\mathbf{x}$ or $\mathbf{h}$), and the second indicates what is being computed (here, gate $g$). A GRU uses two such gates.
+
+### The four GRU equations
+
+The GRU was proposed by Cho et al. in 2014, in the same paper that introduced the encoder–decoder framework covered in [Sequence-to-Sequence Models (Seq2Seq)](/en/llm/seq2seq/). At step $t$, a GRU takes $\mathbf{x}_t$ and $\mathbf{h}_{t-1}$ and computes four quantities in order.
+
+**Step 1: reset gate.** Decides how much of the old state to consult when forming the new candidate value:
+
+$$
+\mathbf{r}_t = \sigma\left(\mathbf{W}_{xr}\mathbf{x}_t + \mathbf{W}_{hr}\mathbf{h}_{t-1} + \mathbf{b}_r\right)
+$$
+
+**Step 2: update gate.** Decides what fraction of the old state to keep:
+
+$$
+\mathbf{z}_t = \sigma\left(\mathbf{W}_{xz}\mathbf{x}_t + \mathbf{W}_{hz}\mathbf{h}_{t-1} + \mathbf{b}_z\right)
+$$
+
+**Step 3: candidate state.** This is a standard vanilla RNN step, except that the old state passes through the reset gate before being multiplied by $\mathbf{W}_{hh}$:
+
+$$
+\tilde{\mathbf{h}}_t = \tanh\left(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{W}_{hh}(\mathbf{r}_t \odot \mathbf{h}_{t-1}) + \mathbf{b}_h\right)
+$$
+
+If $\mathbf{r}_t \approx \mathbf{1}$, then $\mathbf{r}_t \odot \mathbf{h}_{t-1} \approx \mathbf{h}_{t-1}$, and $\tilde{\mathbf{h}}_t$ is identical to a vanilla RNN update. If $\mathbf{r}_t \approx \mathbf{0}$, the $\mathbf{W}_{hh}(\dots)$ term vanishes, and the candidate is computed from $\mathbf{x}_t$ alone—as if the sequence had just started at step $t$.
+
+**Step 4: linear interpolation.** The new hidden state is an elementwise weighted average of the old state and the candidate:
+
+$$
+\mathbf{h}_t = \mathbf{z}_t \odot \mathbf{h}_{t-1} + (\mathbf{1} - \mathbf{z}_t) \odot \tilde{\mathbf{h}}_t
+$$
+
+For each component $j$, the two weights $z_{t,j}$ and $1 - z_{t,j}$ are non-negative and sum to 1, so $h_{t,j}$ always lies between $h_{t-1,j}$ and $\tilde{h}_{t,j}$. This is the valve from the Intuition section: $z_{t,j} \approx 1$ keeps the old value, while $z_{t,j} \approx 0$ replaces it with the candidate. Because each component has its own valve entry, some dimensions can hold long-term memories while others update rapidly at every step.
+
+:::caution[Two opposite conventions for the update gate]
+This lesson follows the convention of the original paper (Cho et al., 2014) and PyTorch: $\mathbf{z}_t$ multiplies the **old state**, so $\mathbf{z}_t \approx \mathbf{1}$ means "keep." *Dive into Deep Learning* uses this convention as well. Other sources—such as Chung et al. (2014) and the Wikipedia article on GRUs—write $\mathbf{h}_t = (\mathbf{1} - \mathbf{z}_t) \odot \mathbf{h}_{t-1} + \mathbf{z}_t \odot \tilde{\mathbf{h}}_t$, flipping the role of $\mathbf{z}_t$ so that $\mathbf{z}_t \approx \mathbf{1}$ means "write new." The two formulations are mathematically identical up to renaming $\mathbf{z}_t \leftrightarrow \mathbf{1} - \mathbf{z}_t$. Whenever you read another resource, check which term $\mathbf{z}_t$ multiplies first.
+:::
+
+### Extreme gate cases
+
+Setting the gates to their extreme values clarifies what a GRU can express:
+
+| Update gate $\mathbf{z}_t$ | Reset gate $\mathbf{r}_t$ | $\mathbf{h}_t$ is approximately | Meaning |
+|---|---|---|---|
+| $\approx \mathbf{1}$ | any | $\mathbf{h}_{t-1}$ | Copy the old state, ignore $\mathbf{x}_t$ |
+| $\approx \mathbf{0}$ | $\approx \mathbf{1}$ | $\tanh(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{W}_{hh}\mathbf{h}_{t-1} + \mathbf{b}_h)$ | Exact vanilla RNN step |
+| $\approx \mathbf{0}$ | $\approx \mathbf{0}$ | $\tanh(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{b}_h)$ | Forget the past, restart from $\mathbf{x}_t$ |
+
+A vanilla RNN is therefore a special case of a GRU. The gates add two behaviors a vanilla RNN cannot perform: **copying unchanged** and **resetting completely**. Cho et al. observed that units capturing short-term dependencies tend to have active reset gates, whereas units capturing long-term dependencies keep their update gates near the "keep" regime most of the time.
+
+### Why gates help gradients travel far
+
+In a vanilla RNN, the one-step Jacobian is $\mathbf{D}_t\mathbf{W}_{hh}$, and backpropagation from step $L$ to step $t$ multiplies $L - t$ such matrices. Let us now inspect the one-step Jacobian of a GRU, $\partial \mathbf{h}_t / \partial \mathbf{h}_{t-1}$.
+
+In $\mathbf{h}_t = \mathbf{z}_t \odot \mathbf{h}_{t-1} + (\mathbf{1} - \mathbf{z}_t) \odot \tilde{\mathbf{h}}_t$, the vector $\mathbf{h}_{t-1}$ appears in three places: directly in the first term, inside $\mathbf{z}_t$, and inside $\tilde{\mathbf{h}}_t$. Applying the product rule sums the three contributions:
+
+$$
+\frac{\partial \mathbf{h}_t}{\partial \mathbf{h}_{t-1}}
+= \underbrace{\mathrm{diag}(\mathbf{z}_t)}_{\text{direct path}}
++ \underbrace{\mathrm{diag}(\mathbf{h}_{t-1} - \tilde{\mathbf{h}}_t)\,\frac{\partial \mathbf{z}_t}{\partial \mathbf{h}_{t-1}}}_{\text{via update gate}}
++ \underbrace{\mathrm{diag}(\mathbf{1} - \mathbf{z}_t)\,\frac{\partial \tilde{\mathbf{h}}_t}{\partial \mathbf{h}_{t-1}}}_{\text{via candidate}}
+$$
+
+The middle term has coefficient $\mathbf{h}_{t-1} - \tilde{\mathbf{h}}_t$ because $\mathbf{z}_t$ multiplies $\mathbf{h}_{t-1}$ and $-\mathbf{z}_t$ multiplies $\tilde{\mathbf{h}}_t$. Since the derivative of the sigmoid is $\sigma'(a) = \sigma(a)(1 - \sigma(a))$, we have:
+
+$$
+\frac{\partial \mathbf{z}_t}{\partial \mathbf{h}_{t-1}} = \mathrm{diag}\big(\mathbf{z}_t \odot (\mathbf{1} - \mathbf{z}_t)\big)\,\mathbf{W}_{hz}
+$$
+
+Now consider a component where $z \approx 1$:
+
+- **The first term** puts $z \approx 1$ on the diagonal.
+- **The middle term** contains the factor $z(1 - z) \approx 0$, so it nearly vanishes.
+- **The last term** is multiplied by $1 - z \approx 0$, so it also nearly vanishes. Notice that this is the only branch that passes through $\mathbf{W}_{hh}$.
+
+When all components have $z \approx 1$, the one-step Jacobian is approximately $\mathrm{diag}(\mathbf{z}_t) \approx \mathbf{I}$, the identity matrix. Across many steps, the product of Jacobians is approximately the product of the diagonal matrices $\mathrm{diag}(\mathbf{z}_k)$: component $j$ is simply multiplied by $\prod_k z_{k,j}$. For example, $z = 0.99$ held over 50 steps gives $0.99^{50} \approx 0.6$. Compared to the vanilla RNN in the previous lesson—where even $\sigma_{\max}(\mathbf{W}_{hh}) = 0.9$ gave an upper bound of $0.9^{50} \approx 0.005$—this is an almost unimpeded highway.
+
+The key mechanism is **addition**: the 1 on the diagonal comes from adding $\mathbf{z}_t \odot \mathbf{h}_{t-1}$ directly to the new state rather than passing $\mathbf{h}_{t-1}$ through a weight matrix and a nonlinearity first. Chung et al. (2014) highlight this additive update as the core difference from a vanilla RNN: instead of replacing its activation at every step, a GRU keeps the existing content and adds new content on top.
+
+:::note[Key takeaway]
+A GRU computes two sigmoid gates $\mathbf{r}_t, \mathbf{z}_t \in (0, 1)^{d_h}$, a candidate state $\tilde{\mathbf{h}}_t$ via a reset-gated RNN step, and interpolates $\mathbf{h}_t = \mathbf{z}_t \odot \mathbf{h}_{t-1} + (\mathbf{1} - \mathbf{z}_t) \odot \tilde{\mathbf{h}}_t$. When $\mathbf{z}_t \approx \mathbf{1}$, the state is copied straight through and the one-step Jacobian is close to $\mathbf{I}$, allowing both information and gradients to travel over long distances.
+:::
+
+### Parameter count
+
+A vanilla RNN has a single branch—$\mathbf{W}_{xh} \in \mathbb{R}^{d_h \times d_x}$, $\mathbf{W}_{hh} \in \mathbb{R}^{d_h \times d_h}$, and $\mathbf{b}_h \in \mathbb{R}^{d_h}$—for a total of $d_h(d_x + d_h) + d_h$ parameters. A GRU has three branches of the exact same shape (reset gate, update gate, and candidate), so:
+
+$$
+\text{GRU parameters} = 3\left(d_h(d_x + d_h) + d_h\right)
+$$
+
+For $d_x = 3$ and $d_h = 4$ as in the NumPy cell below, a vanilla RNN has $4 \cdot 7 + 4 = 32$ parameters, while a GRU has 96. That is more than a vanilla RNN, but fewer than an LSTM (which has 4 branches; see [LSTM and BiLSTM](/en/dl/lstm-bilstm/)).
+
+PyTorch's `nn.GRU` uses **two** bias vectors per branch (`bias_ih` and `bias_hh`), so it reports $3\left(d_h(d_x + d_h) + 2d_h\right)$ parameters. The three branches are stacked into single matrices in the order reset, update, candidate: `weight_ih_l0` has shape $(3d_h, d_x)$ and `weight_hh_l0` has shape $(3d_h, d_h)$.
+
+### How PyTorch computes the candidate
+
+PyTorch applies the reset gate **after** the matrix multiplication $\mathbf{W}_{hh}\mathbf{h}_{t-1}$ rather than before:
+
+$$
+\tilde{\mathbf{h}}_t = \tanh\left(\mathbf{W}_{xh}\mathbf{x}_t + \mathbf{b}_{xh} + \mathbf{r}_t \odot (\mathbf{W}_{hh}\mathbf{h}_{t-1} + \mathbf{b}_{hh})\right)
+$$
+
+The PyTorch documentation calls this quantity $n_t$ (the "new" gate). Chung et al. (2014) tested both placements of the reset gate and found that they perform similarly. All other equations, including the interpolation step, are identical to the ones above. In the main text we write $\mathbf{W}_{hh}(\mathbf{r}_t \odot \mathbf{h}_{t-1})$ because it reads more naturally: the reset gate decides "how much of the old state to look at."
+
+### Limitations
+
+- **Gates do not automatically eliminate vanishing gradients.** The network has to *learn* $\mathbf{z}_t \approx \mathbf{1}$, whereas at random initialization $\mathbf{z}_t \approx 0.5$. The PyTorch cell and the first Common pitfalls box demonstrate this directly.
+- **Gradients can still explode** through the candidate branch, so training GRUs still commonly uses gradient clipping just as in [Recurrent Neural Networks](/en/dl/rnn/).
+- **Still sequential.** Step $t$ must wait for step $t - 1$, preventing parallel computation across time steps. That bottleneck motivates [Transformers](/en/dl/transformers/).
+- **One vector for both storage and output.** A GRU exposes its entire state at every step, and the keep/write weights must sum to 1. An LSTM separates internal memory from the exposed output using a cell state and three gates ([LSTM and BiLSTM](/en/dl/lstm-bilstm/)).
+
+## Illustration
+
+The diagram below traces a single GRU cell. Follow the top horizontal line, where $\mathbf{h}_{t-1}$ flows straight to $\mathbf{h}_t$ through a single elementwise multiplication by $\mathbf{z}_t$: that is the "direct path" from our Jacobian analysis. All matrix multiplications and the $\tanh$ nonlinearity sit on the lower branch that forms the candidate state.
+
+{/* FIG: GruCellFigure
+    Idea: the old state has a direct highway to the new state through an elementwise multiply with the update gate, while the candidate branch detours below. */}
+
+The table below takes numbers from the first NumPy cell: for the same input $\mathbf{x}_1$ and initial state $\mathbf{h}_0 = [0.9, -0.8, 0.5, -0.3]$, we add an offset to the update-gate bias to push $\mathbf{z}$ toward its extremes.
+
+| Offset added to update gate | Mean $\mathbf{z}$ | $\mathbf{h}_1$ | Close to |
+|---|---:|---|---|
+| $0$ | 0.510 | $[0.245, -0.375, -0.092, 0.244]$ | blend of old and new |
+| $+5$ | 0.992 | $[0.885, -0.796, 0.493, -0.293]$ | $\mathbf{h}_0$ |
+| $-5$ | 0.008 | $[-0.022, 0.353, -0.911, 0.847]$ | candidate $\tilde{\mathbf{h}}_1$ |
+
+## Code examples
+
+The cells below are self-contained. The first cell uses only NumPy and runs directly in the page. The second requires PyTorch and runs on your machine; it was last tested in November 2026 with Python 3.14 and PyTorch 2.15 on CPU.
+
+### A single GRU step in NumPy
+
+The cell below implements `gru_step` directly from the four equations in the Theory section, with $d_x = 3$, $d_h = 4$, and random weights. The `bias_z` argument adds a constant offset to the update gate pre-activation to push $\mathbf{z}$ near 0 or near 1. The first part runs a single step under three values of `bias_z`. The second part feeds the exact same 50-step input sequence starting from two opposite initial states, $\mathbf{h}_0$ and $-\mathbf{h}_0$. If the two final states still differ after 50 steps, the network still "remembers" where it started.
+
+<PythonRunner code={gruStepCode} title="One GRU step, and memory after 50 steps" />
+
+Reading the output:
+
+- **`bias_z=+0`:** the mean of $\mathbf{z}$ is 0.510, so $\mathbf{h}_1$ is a roughly 50/50 mix of old and new, quite different from $\mathbf{h}_0$.
+- **`bias_z=+5`:** the mean of $\mathbf{z}$ is 0.992, and $\mathbf{h}_1 = [0.885, -0.796, 0.493, -0.293]$ is nearly identical to $\mathbf{h}_0 = [0.9, -0.8, 0.5, -0.3]$. The input $\mathbf{x}_1$ is almost completely ignored.
+- **`bias_z=-5`:** the mean of $\mathbf{z}$ is 0.008, so $\mathbf{h}_1$ equals the candidate up to rounding, erasing all trace of $\mathbf{h}_0$.
+- **After 50 steps:** initially the two trajectories are separated by a maximum gap of 1.8 in their first component. With `bias_z=+0`, the gap shrinks to 0.0000: the two trajectories have merged and the network has completely forgotten its starting state. With `bias_z=+5`, the gap is still 1.3047—matching our back-of-the-envelope estimate from the Theory section: $0.992^{50} \approx 0.67$, and $1.8 \cdot 0.67 \approx 1.2$.
+
+What this forward experiment shows for state values holds equally for backward gradients: the separation between trajectories decays by the exact same product of $z$ values that governs the Jacobian.
+
+### Vanilla RNN vs. GRU on a long-memory task
+
+The script below implements the exact task from the Intuition section: a sequence of length $L$ whose entries are random $+1$ or $-1$ values, where the label is the **very first** element. The model must predict that label from the final state $\mathbf{h}_L$ alone.
+
+- **Model:** `nn.RNN` or `nn.GRU` with $d_x = 1$, $d_h = 16$, followed by a 2-class linear head. Random guessing gives 0.5 accuracy.
+- **Training:** 200 Adam steps, each on a fresh batch of 64 sequences, tested at $L = 10$ and $L = 100$. Evaluation uses 2,000 fresh sequences.
+- **Update-gate initialization:** setting `BIAS_Z = 3.0` initializes the update-gate slice of `bias_hh_l0` (the middle third of the stacked `[r, z, n]` bias vector) to 3, so at the start of training $\mathbf{z}_t \approx \sigma(3) \approx 0.95$: the network begins in a "mostly keep" mode. This is the exact analog of initializing the forget-gate bias to 1 in [LSTM and BiLSTM](/en/dl/lstm-bilstm/).
+
+Instructions for installing CPU-only PyTorch are in [Build Your First LLM](/en/llm/build-first-llm/).
+
+<LocalCode
+  code={rememberFirstCode}
+  title="Vanilla RNN and GRU remembering the first element"
+  packages={['torch']}
+  hardware="CPU is enough, no GPU required. Takes about 1 to 2 minutes on a busy dev laptop, faster when idle"
+  sampleVaries={false}
+>
+
+```text
+RNN: 304 recurrent parameters
+GRU: 912 recurrent parameters
+L= 10  RNN: loss 0.000  test accuracy 1.000
+L= 10  GRU: loss 0.000  test accuracy 1.000
+L=100  RNN: loss 0.691  test accuracy 0.496
+L=100  GRU: loss 0.001  test accuracy 1.000
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **Parameter count:** 304 vs. 912, exactly 3 times larger. Using PyTorch's two-bias formula: $16 \cdot 17 + 2 \cdot 16 = 304$ per branch.
+- **$L = 10$:** both models reach 100% accuracy. Over a short span, a vanilla RNN can still propagate signals back to step 1.
+- **$L = 100$:** the vanilla RNN gets stuck at loss 0.691—right around $\ln 2 \approx 0.693$, the cross-entropy of random guessing—with test accuracy 0.496. The gradient from step 100 back to step 1 is too tiny to teach it anything. The GRU reaches loss 0.001 and test accuracy 1.000: its update gates learn to latch onto the first element and carry it across 99 steps of noise.
+
+Because the seed is fixed, re-running on the same machine reproduces these numbers; different hardware or PyTorch versions may differ slightly.
+
+## Common pitfalls
+
+:::caution[Assuming gates automatically solve long-range memory]
+Change `BIAS_Z = 0.0` in the PyTorch script and run it again. In our test run, the GRU at $L = 100$ stayed at loss 0.690 and accuracy 0.491, no better than the vanilla RNN. At default initialization, $\mathbf{z}_t \approx \sigma(0) = 0.5$: every step halves the signal, and across 99 steps the gradient shrinks by roughly $0.5^{99}$. Gates only create the **capacity** to remember; gradient descent still has to discover that regime. On very long sequences, initialize the update gate toward keeping (under PyTorch's convention, a **positive** bias), or use curriculum learning by starting with shorter sequences and gradually lengthening them.
+:::
+
+:::caution[Mixing up the two update-gate conventions]
+This lesson, Cho et al. (2014), and PyTorch write $\mathbf{z}_t \odot \mathbf{h}_{t-1}$, where $\mathbf{z}_t \approx \mathbf{1}$ means keep. Other papers write $(\mathbf{1} - \mathbf{z}_t) \odot \mathbf{h}_{t-1}$, where $\mathbf{z}_t \approx \mathbf{1}$ means overwrite. Combining equations from two different sources—or initializing the update-gate bias according to one convention while running code written in the other—does the exact opposite of what you intend. Always verify which term $\mathbf{z}_t$ multiplies.
+:::
+
+:::caution[Forgetting `batch_first=True` with `nn.GRU`]
+By default, `nn.GRU` expects input tensors shaped `(seq_len, batch, d_x)`. If your tensor is `(batch, seq_len, d_x)` and you omit `batch_first=True`, PyTorch runs without complaint, silently treating each sample in the batch as a time step and each time step as a sample. Also note that `out, h_n = gru(x)` returns two tensors: `out` holds $\mathbf{h}_t$ at **every** step of the top layer, whereas `h_n` holds only the final step of every layer. A many-to-one classifier should read `out[:, -1]` (when `batch_first=True`) or `h_n[-1]`.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- A vanilla RNN overwrites its hidden state at every step, causing both forward information and backward gradients to be multiplied repeatedly by $\mathbf{D}_t\mathbf{W}_{hh}$ and decay exponentially.
+- A GRU adds a reset gate $\mathbf{r}_t$ (how much old state the candidate sees) and an update gate $\mathbf{z}_t$ (how much old state is retained), then interpolates $\mathbf{h}_t = \mathbf{z}_t \odot \mathbf{h}_{t-1} + (\mathbf{1} - \mathbf{z}_t) \odot \tilde{\mathbf{h}}_t$. Some references swap the roles of $\mathbf{z}_t$ and $\mathbf{1} - \mathbf{z}_t$.
+- When $\mathbf{z}_t \approx \mathbf{1}$, the one-step Jacobian is close to $\mathbf{I}$, letting gradients cross many steps with minimal decay. Still, the network must learn to open that path; biasing the update gate toward keeping helps on very long sequences.
+- A GRU has 3 times the parameters of a vanilla RNN of the same size—fewer than an LSTM (4 times)—while matching LSTM performance on many tasks.
+
+**Further reading:**
+
+- Aston Zhang, Zachary C. Lipton, Mu Li, Alexander J. Smola (2023). [*Dive into Deep Learning*](https://d2l.ai/chapter_recurrent-modern/gru.html), Section 10.2 "Gated Recurrent Units (GRU)". Walks through each gate with code; uses the same $\mathbf{z}_t$ convention as this lesson, written in row-vector form ($\mathbf{X}_t\mathbf{W}_{xr}$).
+- Kyunghyun Cho et al. (2014). [*Learning Phrase Representations using RNN Encoder–Decoder for Statistical Machine Translation*](https://arxiv.org/abs/1406.1078), EMNLP 2014, Section 2.3. The paper that introduced the GRU cell (before the name "GRU" was coined) and explained the motivation for each gate.
+- Junyoung Chung, Caglar Gulcehre, KyungHyun Cho, Yoshua Bengio (2014). [*Empirical Evaluation of Gated Recurrent Neural Networks on Sequence Modeling*](https://arxiv.org/abs/1412.3555), NIPS 2014 Deep Learning Workshop, Section 3. Compares GRU, LSTM, and tanh-RNN on music and speech data, emphasizing the additive update. Note that this paper uses the opposite $\mathbf{z}_t$ convention from ours.
+- PyTorch. [*torch.nn.GRU*](https://docs.pytorch.org/docs/stable/generated/torch.nn.GRU.html). Exact equations computed by PyTorch, how the three branches are packed into `weight_ih_l0` and `weight_hh_l0`, and the behavior of `batch_first`.
+
+<LessonProgress />

@@ -1,0 +1,434 @@
+---
+title: Transformers
+description: 'Reading a whole sentence at once instead of word by word. Scaled dot-product attention, multi-head attention, positional encoding, the Transformer block, causal masking, and the three model families.'
+quiz:
+  - question: 'You increase the key dimension from $d_k = 64$ to $d_k = 256$ but forget to divide the attention scores by $\sqrt{d_k}$. The entries of queries and keys still have mean 0 and variance 1. What is most likely to happen to the softmax output?'
+    options:
+      - 'Nothing changes, because softmax already normalizes each row to sum to 1'
+      - 'The attention weights become flatter, close to uniform across all positions'
+      - 'The score variance is 4 times larger, softmax concentrates almost all weight on a single position, and gradients nearly vanish'
+      - 'The score variance is 16 times larger, so the model learns faster'
+    answer: 2
+    explanation: 'The dot product is a sum of $d_k$ independent terms of variance 1, so its variance equals $d_k$: going from 64 to 256 multiplies the variance by 4 (not 16, since variance grows linearly with $d_k$). Wider scores push softmax into saturation where almost all mass lands on one entry and gradients are tiny. Summing to 1 does not stop softmax from collapsing onto a single column.'
+  - question: 'A Transformer encoder without positional encoding reads two 3-token sentences: "dog bites cat" and "cat bites dog." Compare the output vector at the middle token "bites" across the two sentences.'
+    options:
+      - 'They are identical'
+      - 'They differ because "dog" and "cat" swapped positions'
+      - 'They differ because multi-head attention learns word order automatically'
+      - 'They cannot be compared because the two sentences have different lengths'
+    answer: 0
+    explanation: 'Without positional information, self-attention treats the input as an unordered set of vectors: "bites" computes the exact same dot products with "dog" and "cat" regardless of where they sit, and takes the exact same weighted sum of their values. Adding more heads or layers does not change this because every operation is permutation-equivariant. Our third NumPy cell verifies this directly: without positional encoding, the output at "bites" changes by $0.000$.'
+  - question: 'A model doubles its context window from 4,096 to 8,192 tokens. For a single attention head in a single layer, how does the number of entries in the score matrix $\mathbf{Q}\mathbf{K}^\top$ change?'
+    options:
+      - 'It stays the same, because the model''s parameter count does not change'
+      - 'It doubles ($2\times$)'
+      - 'It grows by $\sqrt{2}$'
+      - 'It quadruples ($4\times$)'
+    answer: 3
+    explanation: 'The score matrix has $L \times L$ entries, so doubling $L$ multiplies the number of entries by 4 (from ~16.8 million to ~67.1 million). While the parameter count indeed stays fixed—$\mathbf{W}^Q$, $\mathbf{W}^K$, and $\mathbf{W}^V$ do not depend on $L$—the compute and memory of standard self-attention scale as $L^2$. Other layers such as the FFN scale linearly with $L$.'
+  - question: 'You compute self-attention on 6 tokens, once without a mask and once with a causal mask. Which row of the attention weight matrix is identical in both runs?'
+    options:
+      - 'The first row'
+      - 'The last row'
+      - 'No row, because the mask alters every row'
+      - 'Every row, because the mask only changes the output vectors, not the weights'
+    answer: 1
+    explanation: 'A causal mask only blocks future positions $j > i$. For the last row ($i = 6$), there are no positions with $j > 6$, so no entry is masked and softmax produces the exact same weights as in the unmasked run. The first row is the opposite extreme: only position 1 remains unmasked, so its weight vector is $[1, 0, \dots, 0]$, completely different from the unmasked first row.'
+  - question: 'You want to classify the sentiment of completed product reviews, where words near the end (like "...but not worth the price") can flip the meaning of words at the beginning. Which Transformer family is the most natural starting point?'
+    options:
+      - 'Decoder-only, because the causal mask makes training faster'
+      - 'Encoder–decoder, because classification requires cross-attention'
+      - 'Encoder-only, because every token can attend to the entire review in both directions'
+      - 'All three families behave identically because they are all Transformers'
+    answer: 2
+    explanation: 'Because the full review is already written, there is no future to hide: an encoder-only model (like BERT) lets every token attend bidirectionally across the whole review, which fits classification naturally. A causal mask is needed for autoregressive generation and prevents early tokens from seeing the ending. While a decoder-only model can still classify if you read from the final token, encoder-only is the natural design for understanding tasks, and encoder–decoder has an unnecessary decoder half when the output is a single label.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import attentionCode from '@code/dl/transformers/attention.en.py?raw';
+import scalingCode from '@code/dl/transformers/scaling.en.py?raw';
+import positionalCode from '@code/dl/transformers/positional.en.py?raw';
+import sortEncoderCode from '@code/dl/transformers/sort-encoder.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Explain the three bottlenecks of RNNs and LSTMs (sequential step-by-step computation, $O(L)$ path length between distant tokens, and compressing the entire past into a single state vector) and how attention removes all three.
+- Derive **scaled dot-product attention** $\mathrm{softmax}(\mathbf{Q}\mathbf{K}^\top/\sqrt{d_k})\mathbf{V}$, including why we divide by $\sqrt{d_k}$, and implement it in NumPy with and without a causal mask.
+- Understand **multi-head attention**, **positional encoding**, and the building blocks of a **Transformer block**: residual connections, layer normalization, and position-wise feed-forward networks.
+- Distinguish the three Transformer families (encoder-only, decoder-only, encoder–decoder) and explain the $O(L^2)$ cost of self-attention on long sequences.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+**Softmax** turns a vector of scores $\mathbf{z}$ into a probability distribution, $\mathrm{softmax}(\mathbf{z})_j = e^{z_j} / \sum_{k} e^{z_k}$: all entries are positive, sum to 1, and higher scores get larger shares ([Artificial Neural Networks](/en/dl/neural-networks/)). Each token is mapped to a learnable vector called an **embedding** by looking up its row in an embedding table. An **LSTM** reads a sequence one token at a time, updating a hidden state $\mathbf{h}_t$ and cell state $\mathbf{c}_t$ ([LSTM and BiLSTM](/en/dl/lstm-bilstm/)).
+:::
+
+## Intuition
+
+### Three bottlenecks of reading word by word
+
+Read the sentence below and answer: what does "it" refer to?
+
+> The cat that our neighbor adopted last winter climbed onto the roof because **it** was afraid of the dog.
+
+You know immediately that "it" is the cat, even though more than ten words sit between them. Your eyes jump straight from "it" back to "cat." An LSTM cannot jump. It has to march through every word in between, hitting three bottlenecks:
+
+1. **Sequential computation.** To compute $\mathbf{h}_{10}$, you must first finish $\mathbf{h}_9$. A 1,000-token passage requires 1,000 sequential steps, leaving thousands of GPU cores waiting idly.
+2. **Long path length.** Information about "cat" has to survive more than ten state updates to reach "it," and backward gradients must traverse the same chain in reverse. Between two tokens separated by $L$ steps, the path length is $O(L)$.
+3. **One fixed-size vector for the entire past.** Everything read so far must be squeezed into a single vector $\mathbf{h}_t$ of fixed dimension. The longer the sentence, the more crowded that vector becomes.
+
+The gates of GRUs and LSTMs ease the second bottleneck, but they cannot remove the first or the third.
+
+### Soft lookup
+
+Now try a radical alternative: let **every word look directly at every other word** in the sentence in a single step. The word "it" broadcasts a question: "who in this sentence is an animate subject that can feel afraid?" Every word holds up a tag describing itself: "cat: animate noun, subject," "roof: inanimate object, location." Whichever tag matches the question best gets the largest share of attention.
+
+Think of this as a **soft dictionary lookup**. A Python dictionary `d["cat"]` performs a hard lookup: the key must match exactly, and you retrieve a single value. A soft lookup computes a **compatibility score** between the query and every key, then returns a **weighted average** of all values—the better a key matches, the larger its weight. Because the entire operation is built out of matrix multiplications and softmax, it is fully differentiable and end-to-end trainable by backpropagation.
+
+In self-attention, every word plays all three roles at once: asking a question (query), holding up a descriptive tag (key), and offering content to be retrieved (value). Because all words ask their questions simultaneously, the entire sentence is processed **in parallel**. One catch remains: if we only compare tags, the network has no idea which word came first and which came last—"dog bites cat" and "cat bites dog" look identical. We will need to inject position information explicitly.
+
+The problem for this lesson is: **build a neural network layer where every token attends directly to every other token in one parallel step via learnable soft lookup, while still knowing token order and—when generating text—never peeking at future tokens.**
+
+## Theory
+
+### From RNNs to attention
+
+Bahdanau, Cho, and Bengio (2014) first introduced attention for machine translation: at each decoding step, an RNN decoder took a weighted average of all encoder hidden states instead of relying on a single final vector ([Sequence-to-Sequence Models (Seq2Seq)](/en/llm/seq2seq/)). At that point, attention was still an add-on to an RNN. Vaswani et al. (2017) took the next leap: drop the RNN completely and build the entire model out of attention. Their paper title said it plainly: *Attention Is All You Need*. That architecture is the **Transformer**.
+
+### Scaled dot-product attention
+
+Start with a **single** query. We have:
+
+- one **query** $\mathbf{q} \in \mathbb{R}^{d_k}$: what this position is looking for;
+- $L$ **keys** $\mathbf{k}_1, \dots, \mathbf{k}_L \in \mathbb{R}^{d_k}$: the descriptive label of each position;
+- $L$ **values** $\mathbf{v}_1, \dots, \mathbf{v}_L \in \mathbb{R}^{d_v}$: the content offered by each position.
+
+Here $L$ is the sequence length and $d_k$ is the **key dimension**. Queries and keys must share the same dimension $d_k$ because we compare them via a dot product. Attention proceeds in three steps.
+
+**Step 1: score compatibility.** The similarity between the query and key $j$ is their dot product divided by $\sqrt{d_k}$ (we derive the $\sqrt{d_k}$ factor in the next subsection):
+
+$$
+s_j = \frac{\mathbf{q}^\top \mathbf{k}_j}{\sqrt{d_k}}, \qquad j = 1, \dots, L
+$$
+
+The dot product is positive when two vectors point in similar directions and zero or negative when they point apart, making it the simplest measure of alignment.
+
+**Step 2: turn scores into weights.** Applying softmax across $j = 1, \dots, L$ produces non-negative weights that sum to 1:
+
+$$
+\alpha_j = \frac{\exp(s_j)}{\sum_{l=1}^{L} \exp(s_l)}
+$$
+
+**Step 3: mix the values.** The output vector is the weighted average of the value vectors:
+
+$$
+\mathbf{o} = \sum_{j=1}^{L} \alpha_j \mathbf{v}_j
+$$
+
+Now run this for all $L$ queries at once. Stack the $L$ queries as the rows of a matrix $\mathbf{Q} \in \mathbb{R}^{L \times d_k}$, the keys into $\mathbf{K} \in \mathbb{R}^{L \times d_k}$, and the values into $\mathbf{V} \in \mathbb{R}^{L \times d_v}$. Because entry $(i, j)$ of $\mathbf{Q}\mathbf{K}^\top$ is $\mathbf{q}_i^\top \mathbf{k}_j$, all three steps compact into a single matrix equation:
+
+$$
+\mathrm{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \mathrm{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d_k}}\right)\mathbf{V}
+$$
+
+- $\mathbf{Q}\mathbf{K}^\top$ is the $L \times L$ score matrix: row $i$ holds the compatibility scores of query $i$ against all $L$ keys.
+- Softmax is applied **row-wise**, so every row of the attention weight matrix $\mathbf{A}$ sums to 1.
+- $\mathbf{A}\mathbf{V}$ has shape $L \times d_v$: row $i$ is $\mathbf{o}_i$, the output for position $i$.
+
+The entire operation consists of two matrix multiplications and a row-wise softmax—no loop over time steps, so all $L$ positions run in parallel on a GPU.
+
+### Why divide by $\sqrt{d_k}$
+
+Suppose the components $q_r$ and $k_r$ of a query and key are independent random variables with mean 0 and variance 1 (the exact assumption analyzed in a footnote of Vaswani et al., 2017). Their dot product is a sum of $d_k$ terms:
+
+$$
+\mathbf{q}^\top \mathbf{k} = \sum_{r=1}^{d_k} q_r k_r
+$$
+
+Consider a single product term $q_r k_r$. By independence, its mean is $\mathbb{E}[q_r]\,\mathbb{E}[k_r] = 0$, and its variance is:
+
+$$
+\begin{aligned}
+\mathrm{Var}(q_r k_r) &= \mathbb{E}[q_r^2 k_r^2] - \left(\mathbb{E}[q_r k_r]\right)^2 \\
+&= \mathbb{E}[q_r^2]\,\mathbb{E}[k_r^2] - 0 \\
+&= 1 \cdot 1 = 1
+\end{aligned}
+$$
+
+The first line is the definition of variance; the second factors the expectation of the product using independence and zero mean; the third uses $\mathbb{E}[q_r^2] = \mathrm{Var}(q_r) + (\mathbb{E}[q_r])^2 = 1$.
+
+Because the $d_k$ terms are independent, the variance of their sum is the sum of their variances: $\mathrm{Var}(\mathbf{q}^\top\mathbf{k}) = d_k$, giving a standard deviation of $\sqrt{d_k}$. When $d_k = 64$, raw dot products routinely spread across $\pm 8$, where $e^{8}/e^{-8}$ is nearly nine million. Softmax then puts almost all weight on the single largest score and enters a flat saturation region where its gradients are tiny, slowing training to a crawl. Dividing by $\sqrt{d_k}$ rescales the variance back to 1 regardless of $d_k$:
+
+$$
+\mathrm{Var}\!\left(\frac{\mathbf{q}^\top \mathbf{k}}{\sqrt{d_k}}\right) = \frac{d_k}{d_k} = 1
+$$
+
+The second code cell verifies this variance law empirically.
+
+### Self-attention: Q, K, V from the same sequence
+
+In **self-attention**, the queries, keys, and values all come from the same input sequence $\mathbf{X} \in \mathbb{R}^{L \times d}$, where row $i$ is the representation of token $i$ and $d$ is the **model dimension**. Three learnable projection matrices $\mathbf{W}^Q, \mathbf{W}^K \in \mathbb{R}^{d \times d_k}$ and $\mathbf{W}^V \in \mathbb{R}^{d \times d_v}$ produce:
+
+$$
+\mathbf{Q} = \mathbf{X}\mathbf{W}^Q, \qquad \mathbf{K} = \mathbf{X}\mathbf{W}^K, \qquad \mathbf{V} = \mathbf{X}\mathbf{W}^V
+$$
+
+Why not set $\mathbf{Q} = \mathbf{K} = \mathbf{V} = \mathbf{X}$ directly? Because what a token searches for (its query) is different from how it advertises itself to others (its key) and what information it hands over when selected (its value). In our earlier sentence, "it" needs a query that asks "who is an animate subject?", whereas "cat" needs a key that says "I am an animate subject." Separate projection matrices let the model learn these three roles independently. And because every position shares the same $\mathbf{W}^Q$, $\mathbf{W}^K$, and $\mathbf{W}^V$, the parameter count does not depend on sequence length $L$.
+
+With self-attention, "it" reaches "cat" in **one** hop no matter how many words sit between them: the path length between any two positions is $O(1)$ instead of $O(L)$.
+
+### Multi-head attention
+
+A single attention computation gives each position **one** weighted average. Yet a word usually needs to track several relationships at once: "it" may need to find its noun antecedent, check the tense of the governing verb, and look at the immediately preceding word. Forcing all of those into a single attention distribution averages their signals together.
+
+**Multi-head attention** runs $h$ attention operations (**heads**) in parallel, each with its own projection matrices, and concatenates their outputs:
+
+$$
+\begin{aligned}
+\mathrm{head}_i &= \mathrm{Attention}(\mathbf{X}\mathbf{W}_i^Q, \mathbf{X}\mathbf{W}_i^K, \mathbf{X}\mathbf{W}_i^V), \quad i = 1, \dots, h \\
+\mathrm{MultiHead}(\mathbf{X}) &= \mathrm{Concat}(\mathrm{head}_1, \dots, \mathrm{head}_h)\,\mathbf{W}^O
+\end{aligned}
+$$
+
+- Each head projects down to $d_k = d_v = d/h$ dimensions. Concatenating all $h$ heads restores dimension $d$, and the output projection $\mathbf{W}^O \in \mathbb{R}^{d \times d}$ mixes information across heads.
+- Because each head operates in its own $d/h$-dimensional subspace, different heads can specialize in different linguistic patterns (coreference, local syntax, adjacent tokens) without interfering with one another.
+- Because each head is $h$ times narrower, the total compute across all $h$ heads is roughly the same as a single full-$d$ attention head.
+
+The base Transformer in Vaswani et al. (2017) uses $d = 512$ and $h = 8$, so $d_k = 64$. In code, we never loop over heads one by one: we multiply $\mathbf{X}$ by a single $(d, d)$ matrix and reshape the $(L, d)$ result into $(h, L, d_k)$ so all heads run in one batched matrix multiply.
+
+### Positional encoding
+
+Self-attention by itself is blind to word order. If you swap two rows of $\mathbf{X}$, the corresponding rows of $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ swap, the rows and columns of the score matrix swap, and the output rows swap in the exact same way—nothing else changes. Formally, self-attention is **permutation-equivariant**. For a token whose own position stays put—like "bites" in "dog bites cat" vs. "cat bites dog"—the output vector is completely unchanged. The third code cell tests this directly.
+
+To break this symmetry, we add to each token embedding a **positional encoding** vector $\mathbf{p}_{\text{pos}} \in \mathbb{R}^d$ that depends only on its position index $\text{pos} \in \{0, 1, \dots, L-1\}$. The original Transformer uses parameter-free **sinusoidal positional encoding**:
+
+$$
+p_{\text{pos},\,2i} = \sin\!\left(\frac{\text{pos}}{10000^{2i/d}}\right), \qquad
+p_{\text{pos},\,2i+1} = \cos\!\left(\frac{\text{pos}}{10000^{2i/d}}\right)
+$$
+
+where $i = 0, 1, \dots, d/2 - 1$ indexes pairs of dimensions. Reading the formula:
+
+- **Each dimension pair is a clock hand rotating at its own frequency.** Pair $i = 0$ rotates fastest (one radian per position); the last pair rotates slowest, with wavelengths growing geometrically from $2\pi$ to $10000 \cdot 2\pi$. Just as reading the second, minute, and hour hands together tells you the exact time, reading all $d/2$ pairs gives each position a unique signature.
+- **Every entry is bounded in $[-1, 1]$**, so long sequences never produce huge position numbers.
+- **A fixed offset is a linear rotation.** For any fixed offset $k$, the $2\times 2$ block $(\sin, \cos)$ at position $\text{pos} + k$ is a fixed rotation of the block at $\text{pos}$, making $\mathbf{p}_{\text{pos}+k}$ a linear function of $\mathbf{p}_{\text{pos}}$. Vaswani et al. chose sinusoids so the model could easily attend by relative offset.
+
+Two other position schemes are widely used in modern models:
+
+- **Learned positional embeddings**: a trainable lookup table of shape $L_{\max} \times d$, added to the token embeddings just like sinusoids. Vaswani et al. found learned and sinusoidal encodings performed almost identically; GPT models use learned positional embeddings.
+- **RoPE** (Rotary Position Embedding): instead of adding position vectors to the input embeddings, RoPE rotates the query and key vectors inside every attention layer so that each dot product $\mathbf{q}_i^\top \mathbf{k}_j$ depends only on the relative distance $i - j$. This is the standard in the Llama family; see [The LLaMA Family: RoPE and Parallel Training](/en/llm/llama-family/).
+
+### The Transformer block
+
+Attention mixes information **across** positions. A full network also needs to transform representations **within** each position and stack many layers deep. A **Transformer block** pairs multi-head attention with a position-wise feed-forward network, wrapping each sublayer in a residual connection and layer normalization. Writing $\mathbf{H} \in \mathbb{R}^{L \times d}$ for the block's input, the original paper computes:
+
+$$
+\begin{aligned}
+\mathbf{H}' &= \mathrm{LN}\big(\mathbf{H} + \mathrm{MultiHead}(\mathbf{H})\big) \\
+\mathbf{H}_{\text{out}} &= \mathrm{LN}\big(\mathbf{H}' + \mathrm{FFN}(\mathbf{H}')\big)
+\end{aligned}
+$$
+
+- **Position-wise feed-forward network** (FFN): a two-layer MLP applied **independently to each position** using the same weights across all positions: $\mathrm{FFN}(\mathbf{x}) = \max(0, \mathbf{x}\mathbf{W}_1 + \mathbf{b}_1)\mathbf{W}_2 + \mathbf{b}_2$. The hidden layer is wider than $d$ (the original paper uses $d_{\text{ff}} = 2048 = 4d$). Intuitively, attention is where tokens communicate with one another, and the FFN is where each token processes what it just gathered.
+- **Residual connection** ($\mathbf{H} + \dots$): each sublayer only has to learn a **residual adjustment** on top of its input, and gradients have an unimpeded additive highway through the entire stack—the exact same principle as ResNet in [Modern CNN Architectures](/en/dl/modern-cnn-architectures/).
+- **Layer normalization** ($\mathrm{LN}$): normalizes each token's $d$-dimensional vector to mean 0 and variance 1, then applies learnable per-dimension scale and shift parameters. Unlike BatchNorm, LayerNorm normalizes across the features of a **single** token, so it behaves identically at any batch size or sequence length.
+
+Placing $\mathrm{LN}$ **after** the residual addition as written above is called **Post-LN**. Most models from GPT-2 onward place $\mathrm{LN}$ **before** each sublayer—$\mathbf{H} + \mathrm{MultiHead}(\mathrm{LN}(\mathbf{H}))$—which is called **Pre-LN**: Xiong et al. (2020) showed that Pre-LN keeps gradient norms well-behaved at initialization without requiring a delicate learning-rate warmup. [Build Your First LLM](/en/llm/build-first-llm/) uses Pre-LN.
+
+A complete Transformer stacks $N$ such blocks ($N = 6$ in the base model of Vaswani et al.) on top of the sum of token embeddings and positional encodings, followed by a task-specific output head. Every block takes an $L \times d$ matrix and returns an $L \times d$ matrix.
+
+### Causal masking
+
+When generating text left to right, the model must predict token $i + 1$ using only tokens $1, \dots, i$. If position $i$ could attend to position $j > i$, it would peek directly at the target answer. A **causal mask** prevents this by adding $-\infty$ to all score entries with $j > i$ right before softmax:
+
+$$
+\mathrm{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d_k}} + \mathbf{M}\right)\mathbf{V},
+\qquad
+M_{ij} =
+\begin{cases}
+0, & j \le i \\
+-\infty, & j > i
+\end{cases}
+$$
+
+Because $e^{-\infty} = 0$, masked future positions receive weight 0, while the allowed positions $j \le i$ still sum to 1. The attention weight matrix $\mathbf{A}$ becomes lower triangular: row 1 can only look at position 1, whereas row $L$ sees the entire sequence and matches the unmasked row $L$ exactly. Thanks to causal masking, a single parallel forward pass computes all $L$ next-token predictions during training without any position seeing its future target; [Build Your First LLM](/en/llm/build-first-llm/) uses this exact mask to train a miniature GPT.
+
+### The three Transformer families
+
+From this single block design, three major model families are built:
+
+| Family | Stack | Attention pattern | Classic examples | Best suited for |
+|---|---|---|---|---|
+| Encoder-only | Stack of encoder blocks | Bidirectional self-attention (no causal mask) | BERT (Devlin et al., 2018) | Understanding a complete input: classification, token tagging, search embeddings |
+| Decoder-only | Stack of decoder blocks | Causally masked self-attention | GPT (Radford et al., 2018), Llama | Autoregressive text generation |
+| Encoder–decoder | Encoder stack + decoder stack | Bidirectional encoder; causally masked decoder + cross-attention to encoder | Original Transformer (2017), T5 | Transforming one sequence into another: translation, summarization |
+
+Here we only map out the three families at a high level. Cross-attention, teacher forcing, and beam search for encoder–decoder models are covered in [Sequence-to-Sequence Models (Seq2Seq)](/en/llm/seq2seq/), while BERT and GPT are explored in depth in the NLP and LLM parts.
+
+### The cost: $O(L^2)$
+
+Table 1 of Vaswani et al. (2017) compares a self-attention layer against a recurrent layer:
+
+| Criterion | Self-attention | Recurrent layer (RNN/LSTM) |
+|---|---|---|
+| Compute per layer | $O(L^2 d)$ | $O(L d^2)$ |
+| Sequential steps required | $O(1)$ | $O(L)$ |
+| Maximum path length between two positions | $O(1)$ | $O(L)$ |
+
+The bottom two rows explain why Transformers won: full parallelization across the sequence length, and a one-step path between any pair of tokens. The top row is the price tag. Every head in every layer materializes an $L \times L$ score matrix. At $L = 8192$, a single head's score matrix has $8192^2 \approx 67$ million entries, and doubling the sequence length quadruples both the compute and memory of standard attention. When $L < d$ (typical for single sentences), self-attention is actually cheaper than an RNN layer; when context windows stretch to tens or hundreds of thousands of tokens, the $O(L^2)$ term dominates.
+
+:::note[Key takeaway]
+Scaled dot-product attention is differentiable soft lookup: $\mathrm{softmax}(\mathbf{Q}\mathbf{K}^\top/\sqrt{d_k})\mathbf{V}$, where each row of the attention matrix sums to 1 and dividing by $\sqrt{d_k}$ keeps the score variance at 1. Self-attention projects $\mathbf{Q}, \mathbf{K}, \mathbf{V}$ from the same sequence; multi-head attention runs $h$ parallel heads of width $d/h$. Because self-attention is permutation-equivariant, positional information must be injected (via sinusoidal encodings, learned embeddings, or RoPE). A Transformer block combines multi-head attention and a position-wise FFN with residual connections and layer normalization. Causal masking blocks future tokens during generation, and the main cost of standard attention is $O(L^2)$ in sequence length.
+:::
+
+### Limitations
+
+- **Long sequences are expensive.** The $O(L^2)$ compute and memory scaling of full attention motivates memory-efficient attention kernels (such as FlashAttention) and sparse or linear approximations covered in Advanced Transformers.
+- **Weak built-in inductive bias.** Unlike CNNs (which bake in local translation invariance) or RNNs (which bake in sequential order), a Transformer starts with almost no structural assumptions about the input. That makes it remarkably general across text, images, and audio, but often more data-hungry on small datasets.
+- **Word order comes solely from positional encoding.** If you omit positional encodings, every matrix shape still matches and the code runs without error, yet the model treats its input as a bag of tokens—as the first Common pitfalls box demonstrates.
+
+## Illustration
+
+The diagram below shows a Transformer block in the style of the original paper. Read it from bottom to top, and trace the two residual skip connections that loop around each sublayer before joining at the addition and layer-normalization nodes.
+
+{/* FIG: TransformerBlockFigure
+    Idea: a Transformer block consists of multi-head attention followed by a position-wise FFN, each wrapped in a residual connection and layer normalization, stacked N times. */}
+
+Attention weight matrices can be inspected directly. The table below is taken from the first NumPy cell in the Code examples section: 5 tokens with random vectors (seed 0), $d = 8$, and $d_k = 4$. Row $i$ shows how position $i$ distributes its attention across the 5 positions—on the left without a mask, and on the right with a causal mask.
+
+| Position | Unmasked: attending to 1, 2, 3, 4, 5 | Causal mask: attending to 1, 2, 3, 4, 5 |
+|---|---|---|
+| 1 | 0.09, 0.29, 0.18, 0.37, 0.08 | 1.00, 0, 0, 0, 0 |
+| 2 | 0.38, 0.18, 0.11, 0.08, 0.25 | 0.67, 0.33, 0, 0, 0 |
+| 3 | 0.33, 0.27, 0.08, 0.14, 0.18 | 0.48, 0.40, 0.11, 0, 0 |
+| 4 | 0.13, 0.18, 0.33, 0.19, 0.16 | 0.16, 0.22, 0.40, 0.23, 0 |
+| 5 | 0.08, 0.31, 0.23, 0.32, 0.07 | 0.08, 0.31, 0.23, 0.32, 0.07 |
+
+Notice three things:
+
+- **Every row sums to 1** on both sides (up to $\pm 0.01$ from two-decimal rounding).
+- **The right-hand matrix is lower triangular.** Position 1 can only see itself, so its weight on position 1 is 1.00.
+- **Row 5 is identical on both sides**, because the final position has no future tokens to mask out. Row 2 on the right is simply row 2 on the left with the last three entries zeroed out and the remaining two renormalized: $0.38 : 0.18$ becomes $0.67 : 0.33$.
+
+Here the input vectors are random, so the weights carry no linguistic meaning. In a trained Transformer, each head produces a table like this, and many heads learn interpretable patterns such as attending to the previous token or linking pronouns to their antecedents.
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the three NumPy cells with Python 3.14 and NumPy 2.4 (bundled in Pyodide), and the final cell with Python 3.14 and PyTorch 2.15 on CPU. The first three cells run directly in the page and are independent of one another; the fourth requires PyTorch and runs on your machine.
+
+### Self-attention and causal masking in NumPy
+
+The cell below implements the exact equations from the Theory section. Five toy tokens have random $d = 8$-dimensional vectors, projected down to $d_k = 4$ by three projection matrices. The `attention` function accepts an optional boolean `mask` (`True` = allowed to attend) and fills masked score entries with `-np.inf` prior to softmax.
+
+<PythonRunner code={attentionCode} title="Self-attention with and without a causal mask" />
+
+Reading the output:
+
+- **The unmasked weight matrix** matches the left side of the table in the Illustration section. `row sums` prints five `1.`s, confirming that row-wise softmax gives each query a valid probability distribution.
+- **`output shape: (5, 4)`**: each token receives a new $d_v = 4$-dimensional vector formed by mixing the value vectors of all tokens.
+- **With the causal mask**, the weight matrix becomes lower triangular and the last row is unchanged. The final line prints `True`: the output vector at position 0 equals `V[0]` exactly, because position 0 can only attend to itself with weight 1.
+
+### Why divide by $\sqrt{d_k}$
+
+This cell checks the dot-product variance calculation empirically. For each $d_k \in \{4, 64, 512\}$, it draws 2,000 random queries and 10 random keys per query with standard normal entries $\mathcal{N}(0, 1)$. It prints the empirical variance of $\mathbf{q}^\top\mathbf{k}$ alongside the average maximum softmax weight without scaling (`raw`) and with $\sqrt{d_k}$ scaling (`scaled`).
+
+<PythonRunner code={scalingCode} title="Dot-product variance and softmax sharpness vs. key dimension" />
+
+Reading the output:
+
+- **The empirical variance tracks $d_k$ closely**: 4.0, 62.9, and 506.9 for $d_k = 4, 64, 512$, matching $\mathrm{Var}(\mathbf{q}^\top\mathbf{k}) = d_k$ up to sampling noise.
+- **Without scaling, softmax sharpens dramatically**: the mean maximum weight jumps from 0.50 to 0.87 and then 0.95. At $d_k = 512$, softmax puts 95% of its probability mass onto a single key even though all 10 keys are pure random noise with no true match.
+- **With $\sqrt{d_k}$ scaling, the mean maximum weight stays around 0.30–0.32** across all dimensions, keeping softmax in a well-conditioned regime where gradients can flow.
+
+### Sinusoidal positional encoding
+
+This cell builds the sinusoidal positional encoding matrix and runs the "dog bites cat" vs. "cat bites dog" experiment on 3 tokens. For brevity, we use projection-free self-attention ($\mathbf{Q} = \mathbf{K} = \mathbf{V}$ equal to the input); the conclusion is identical when projection matrices are included. We swap token 0 and token 2 and measure how much the output at the middle token (position 1, "bites") changes, with and without positional encoding.
+
+<PythonRunner code={positionalCode} title="Sinusoidal positional encoding and token order" />
+
+Reading the output:
+
+- **The PE table** prints the first 4 dimensions of positions 0, 1, and 2. Position 0 is $(0, 1, 0, 1)$ because $\sin 0 = 0$ and $\cos 0 = 1$. The first column ($i = 0$) oscillates rapidly ($\sin 1 \approx 0.84$, $\sin 2 \approx 0.91$), while the third column ($i = 1$) changes much more slowly ($0.10, 0.20$), giving each position a distinct multi-scale signature.
+- **Without PE, the output at position 1 changes by 0.000** when tokens 0 and 2 swap: self-attention cannot tell "dog bites cat" apart from "cat bites dog," confirming permutation equivariance.
+- **With PE, the output at position 1 changes by 0.146**: because "dog" at position 0 now carries a different position vector than "dog" at position 2, the two sentences produce distinct representations at "bites."
+
+### Encoder-only Transformer learning to sort
+
+The script below trains a small encoder-only Transformer to **sort sequences of 8 digits**: given `3 9 0 1 ...`, output the same 8 digits in non-decreasing order. Sorting is a clean testbed for two core ideas of this lesson: every output position must look at the **entire** input sequence (since the smallest digit could sit anywhere), and every output position must know **its own position index** (position 0 must emit the minimum, position 7 must emit the maximum).
+
+- **Model:** token embeddings scaled by $\sqrt{d}$ as in Vaswani et al. (2017), plus sinusoidal positional encoding (`sinusoidal`, identical to our NumPy formula), passed through a 2-layer `nn.TransformerEncoder` with $d = 64$, $h = 4$ heads, FFN width 128, and `norm_first=True` (Pre-LN), followed by a linear head producing 10 digit logits at **every** position.
+- **No causal mask:** the entire 8-digit sequence is given upfront, so every position attends bidirectionally across all 8 tokens.
+- **Training:** 1,001 steps of AdamW on freshly generated batches of 64 random sequences, minimizing cross-entropy across all 8 positions.
+- **Evaluation on 1,000 unseen sequences:** reports per-digit accuracy (`token acc`) and the fraction of sequences sorted with all 8 positions completely right (`sequence acc`).
+
+Instructions for installing CPU-only PyTorch are in [Build Your First LLM](/en/llm/build-first-llm/).
+
+<LocalCode
+  code={sortEncoderCode}
+  title="Transformer encoder sorting digit sequences"
+  packages={['torch']}
+  hardware="CPU is enough. Takes about 15 to 30 seconds depending on the machine"
+>
+
+```text
+step    0: loss = 8.8032
+step  500: loss = 0.4811
+step 1000: loss = 0.3019
+token acc = 0.976, sequence acc = 0.845
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **Fast convergence:** In 1,000 steps (around 15 seconds on CPU), the cross-entropy loss drops from 8.80 to 0.30. On 1,000 fresh test sequences, per-digit accuracy reaches **97.6%**, and **84.5%** of entire 8-digit sequences are sorted with zero mistakes.
+- **Why the Transformer solves it:** Even without any recurrent loop, 4-head self-attention lets every position gather information from all 8 input digits in parallel, while the positional encodings tell each output slot whether it is responsible for the 1st, 2nd, ..., or 8th smallest digit.
+
+## Common pitfalls
+
+:::caution[Forgetting positional encoding]
+If you leave out positional encodings, every tensor shape still matches and the model trains without raising an error—it simply has no notion of order. Set `USE_POS = False` in the PyTorch sorting script and run it again: the loss stalls at 1.71, per-digit accuracy drops to 30.0%, and **full-sequence accuracy collapses to 0.0%**. The reason is the exact same permutation equivariance we saw in the "dog bites cat" cell: without positions, identical input digits produce identical output vectors, so the network has no way to route the minimum to slot 0 and the maximum to slot 7. Whether your model uses sinusoidal or learned positional encodings, make sure they are **added to the embeddings** before block 1 (or applied inside each attention layer if using RoPE).
+:::
+
+:::caution[Dividing by $\sqrt{d}$ instead of $\sqrt{d_k}$, or forgetting to scale]
+In multi-head attention, each head has key dimension $d_k = d/h$, so its dot products must be divided by $\sqrt{d_k}$, not by the full model dimension $\sqrt{d}$. Dividing by $\sqrt{d}$ shrinks the scores by an extra factor of $\sqrt{h}$, making attention overly uniform early in training; forgetting to divide at all pushes softmax into saturation for wide heads (as shown in the second code cell). Neither bug raises an exception—the model just trains worse. PyTorch's `nn.MultiheadAttention` and `F.scaled_dot_product_attention` scale by $\sqrt{d_k}$ automatically; watch out for this when implementing attention from scratch.
+:::
+
+:::caution[Applying softmax along the wrong axis]
+In the score matrix $\mathbf{Q}\mathbf{K}^\top$, rows index queries and columns index keys. Softmax must be applied **across columns within each row** (`axis=-1` or `axis=1` in 2D NumPy) so that each query distributes 1 unit of attention across all keys. Using `axis=0` normalizes each **column** to sum to 1—making each key split itself across queries, which makes no sense (and in causal attention, leaks future information through the column sum). The output shape is unchanged, so always sanity-check `A.sum(axis=-1)` on a small batch to verify that every row sums to 1.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- RNNs and LSTMs process tokens sequentially, have an $O(L)$ path between distant tokens, and compress history into a single state vector. Self-attention lets every token attend directly to every other token in $O(1)$ hops and computes all positions in parallel.
+- Scaled dot-product attention $\mathrm{softmax}(\mathbf{Q}\mathbf{K}^\top/\sqrt{d_k})\mathbf{V}$ performs differentiable soft lookup: queries score keys to form row-wise probability weights that mix values. Dividing by $\sqrt{d_k}$ keeps dot-product variance at 1.
+- Self-attention projects $\mathbf{Q}, \mathbf{K}, \mathbf{V}$ from the same sequence; multi-head attention runs $h$ parallel heads of width $d/h$. Because self-attention is permutation-equivariant, token order must be injected via sinusoidal encodings, learned positional embeddings, or RoPE.
+- A Transformer block pairs multi-head attention with a position-wise FFN, wrapping each in a residual connection and layer normalization (Post-LN in the 2017 paper, Pre-LN in most modern models). Causal masking hides future positions. The three families are encoder-only (BERT), decoder-only (GPT, Llama), and encoder–decoder (original Transformer, T5), and standard self-attention costs $O(L^2)$ in sequence length.
+
+**Further reading:**
+
+- Vaswani, A. et al. (2017). [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762), NIPS 2017, Sections 3 and 4. The original Transformer paper: scaled dot-product attention (including the variance footnote), multi-head attention, sinusoidal positional encoding, and the complexity comparison table with RNNs. Note that the paper writes $d_{\text{model}}$ and $n$ where this lesson writes $d$ and $L$.
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. (2023). [*Dive into Deep Learning*](https://d2l.ai/chapter_attention-mechanisms-and-transformers/index.html), Chapter 11, Sections 11.1 to 11.7. Builds step by step from queries, keys, and values to a complete Transformer with runnable code.
+- Bahdanau, D., Cho, K., Bengio, Y. (2014). [*Neural Machine Translation by Jointly Learning to Align and Translate*](https://arxiv.org/abs/1409.0473), arXiv:1409.0473 (ICLR 2015), Section 3. The paper that introduced attention for neural machine translation on top of an RNN encoder–decoder, using a small MLP alignment score prior to dot-product attention.
+- Alammar, J. (2018). [*The Illustrated Transformer*](https://jalammar.github.io/illustrated-transformer/). Step-by-step visual diagrams of self-attention, multi-head attention, and tensor shapes.
+- Xiong, R. et al. (2020). [*On Layer Normalization in the Transformer Architecture*](https://arxiv.org/abs/2002.04745), ICML 2020. Analyzes why Pre-LN Transformers have well-behaved gradients at initialization and train stably without warmup.
+
+<LessonProgress />

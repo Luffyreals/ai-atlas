@@ -16,7 +16,7 @@ SOBEL_V = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
 
 
 def conv2d(x, kernel, stride=1):
-    """Tích chập 'valid', không lật kernel (cross-correlation)."""
+    # Tích chập 'valid', không lật kernel (cross-correlation).
     k = kernel.shape[0]
     n_out = (x.shape[0] - k) // stride + 1
     out = np.zeros((n_out, n_out))

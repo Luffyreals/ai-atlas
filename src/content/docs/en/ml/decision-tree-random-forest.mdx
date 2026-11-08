@@ -41,7 +41,7 @@ import giniSplitCode from '@code/ml/decision-tree-random-forest/gini-split.en.py
 import depthCode from '@code/ml/decision-tree-random-forest/depth.en.py?raw';
 import randomForestCode from '@code/ml/decision-tree-random-forest/random-forest.en.py?raw';
 
-## Objectives
+## Goals
 
 After this lesson, you will be able to:
 
@@ -311,7 +311,7 @@ Trees greedily select splits minimizing weighted impurity $\frac{m_L}{m}G_L + \f
 - **Axis-aligned boundaries.** Averaging softens staircase boundaries into fine steps, but regression forests still cannot extrapolate beyond observed feature domains.
 - **Gradient Boosting.** Alternative tree ensembles like **gradient boosting** (XGBoost, LightGBM) train trees sequentially to correct predecessor residuals, frequently outperforming random forests on tabular data.
 
-## Visualization
+## Illustration
 
 To see how bagging diversifies trees, consider training a mini-ensemble of 3 trees on the 12 afternoons using bootstrap sampling (`np.random.default_rng(0)`):
 
@@ -325,7 +325,7 @@ To see how bagging diversifies trees, consider training a mini-ensemble of 3 tre
 - **Each tree leaves out 4–5 days**, closely matching the theoretical 37% OOB fraction.
 - **Tree 2 misclassifies Day 6** (rain, 25°C, calm). In its bootstrap sample, all rainy days were windy, leading it to associate calm conditions with play. Individual trees make uncorrelated errors that balance out when aggregated over hundreds of trees.
 
-## Code Examples
+## Code examples
 
 The three cells below execute independently.
 
@@ -352,7 +352,7 @@ The third cell compares a single tree against a 200-tree random forest across fi
 - **F1 for the malignant class reaches 0.925**, prioritizing detection of severe cases where misses carry high clinical cost.
 - **Top features**: `worst perimeter` (0.144), `worst radius` (0.136), `worst concave points` (0.131), `worst area` (0.103). The forest distributes credit across correlated dimensions of tumor size.
 
-## Common Pitfalls
+## Common pitfalls
 
 :::caution[Taking MDI Feature Importance as Ground Truth]
 Mean Decrease in Impurity (MDI) is calculated on training data and inflates high-cardinality features. On correlated features, an unconstrained single tree places `worst perimeter` at the root with 0.725 importance, leaving `worst radius` with only 0.037 simply because perimeter was tested first. A random forest distributes importance more evenly (0.144 vs. 0.136). For unbiased importance, use `permutation_importance` on the test set.
@@ -366,13 +366,13 @@ Unconstrained decision trees and random forests both trivially reach 1.000 train
 Unlike polynomial degree or tree depth, ensemble size `n_estimators` does not control model capacity. Increasing tree count solely drives the Monte Carlo variance term $\frac{1-\rho}{B}\sigma^2$ toward zero, monotonically stabilizing predictions. If a forest overfits, regularize individual constituent trees (`max_depth`, `min_samples_leaf`) or reduce `max_features`—do not decrease tree count.
 :::
 
-## Quick Check
+## Quick check
 
 {/* Questions defined in the `quiz` frontmatter field. */}
 
 <Quiz />
 
-## Summary and Further Reading
+## Summary and further reading
 
 **Key Takeaways:**
 

@@ -231,35 +231,33 @@ ai-atlas/
 - [x] `RoadmapMap` cho trang chủ, đọc từ `roadmap.ts`, có dấu ✓ bài đã học và dòng "Đã học x/y"
 - [x] Tạo khung sidebar từ `roadmap.ts` cho toàn bộ 78 bài. Không tạo trang trống: bài chưa viết chỉ có nhãn "Sắp có" trên lộ trình.
 - [x] Trang demo `/vi/dev/components/` và `/en/dev/components/` dùng đủ các component (thiết kế: [docs/architecture/components.md](architecture/components.md))
-- [ ] Người dùng duyệt giao diện trên trang demo, cả máy tính lẫn điện thoại thật (M1-10)
+- [x] Người dùng duyệt giao diện trên trang demo, cả máy tính lẫn điện thoại thật (M1-10)
 
 **Kết quả:** website có đủ khung lộ trình và đủ công cụ trình bày.
 
-> **Trạng thái mốc M1 (23/10/2026):** xong phần kỹ thuật. `npm run check` 0 lỗi 0 cảnh báo, `npm test` 244/244, `npm run build` 0 `[WARN]`, `npm run test:e2e` 111 qua (3 bỏ qua có chủ ý), `npm run test:e2e:network` 11/11. Lighthouse mobile trang demo: Accessibility 100, Performance 87–90 (chấp nhận theo [quyết định 17](decisions.md), tối ưu ở M4). Còn chờ: người dùng duyệt (M1-10) và tiêu chí "mọi component chạy trên bản deploy" (cần kết nối Cloudflare Pages, Giai đoạn 0).
->
-> **Bước tiếp theo (M2, Giai đoạn 2):** bài mẫu Hồi quy tuyến tính, theo thứ tự ở [docs/mvp.md](mvp.md) mục 5: `summarizer` tóm tắt tài liệu vào `docs/research/` → `lesson-writer` (vi) → `content-reviewer` → sửa → `viz-builder` → `tester` → `analyst` → **người dùng duyệt bản vi và template** → chỉnh bài và `docs/lesson-template.mdx` → `lesson-translator` (en) → `content-reviewer` (khớp vi/en) → `tester` → `analyst` (Lighthouse trên bài thật). File bài và `status` của `ml/linear-regression` trong `roadmap.ts` phải đổi **trong cùng một lần**, vì test `roadmap-files` bắt buộc như vậy: `lesson-writer` đổi `status.vi`, `lesson-translator` đổi `status.en`.
+> **Trạng thái mốc M1 (23/10/2026):** hoàn thành. `npm run check` 0 lỗi 0 cảnh báo, `npm test` 244/244, `npm run build` 0 `[WARN]`, `npm run test:e2e` 111 qua (3 bỏ qua có chủ ý), `npm run test:e2e:network` 11/11. Lighthouse mobile trang demo: Accessibility 100, Performance 87–90 (tối ưu ở M4).
 
 ### Giai đoạn 2: Bài mẫu
 - [x] Viết hoàn chỉnh **1 bài mẫu: Hồi quy tuyến tính**. Bài có đủ trực giác, toán từng bước, minh họa tương tác, code ví dụ và quiz.
 - [x] Bạn duyệt, chỉnh template cho đến khi ưng ý
 
-> **Trạng thái mốc M2 (23/10/2026):** xong. Bài `ml/linear-regression` có bản vi (người dùng đã duyệt, [quyết định 32](decisions.md)) và bản en, VIZ `LinearFitViz`, bảng dữ liệu `DatasetTable`, SEO cho trang fallback (quyết định 30, 33, 34), nút "Bắt đầu học" ở trang chủ. Template đã chốt theo bài này. Báo cáo: [docs/progress/2026-10-23-m2.md](progress/2026-10-23-m2.md).
+> **Trạng thái mốc M2 (23/10/2026):** hoàn thành. Bài `ml/linear-regression` có bản vi (người dùng đã duyệt, [quyết định 32](decisions.md)) và bản en, VIZ `LinearFitViz`, bảng dữ liệu `DatasetTable`, SEO cho trang fallback (quyết định 30, 33, 34), nút "Bắt đầu học" ở trang chủ. Template đã chốt theo bài này. Báo cáo: [docs/progress/2026-10-23-m2.md](progress/2026-10-23-m2.md).
 >
-> **Bước tiếp theo (M3):** 4 bài ML còn lại của MVP, bản vi, theo template đã chốt. Bản en làm sau MVP ([quyết định 43](decisions.md)). Đã xong bản vi cả 4 bài: Tổng quan Học máy, Overfitting và Underfitting, Ridge/Lasso/Elastic Net, Gradient Descent (bài cuối chờ duyệt trên PR #1, quyết định 56). Vẫn còn tồn: deploy lên Cloudflare Pages (Giai đoạn 0) và người dùng duyệt giao diện component (M1-10).
+> **Trạng thái mốc M3:** hoàn thành cả 5 bài ML đầu tiên và mở rộng sang toàn bộ 14 bài ML (vi & en) cùng 64 bài còn lại trong Giai đoạn 3.
 
 **Kết quả:** bài chuẩn dùng làm mẫu cho mọi bài sau.
 
 ### Giai đoạn 3: Viết nội dung theo thứ tự lộ trình
-- [x] Python (7 bài vi)
-- [x] Toán (3 bài vi)
+- [x] Python (7 bài vi & 7 bài en)
+- [x] Toán (3 bài vi & 3 bài en)
 - [x] Machine Learning (14 bài vi & 14 bài en)
-- [x] Deep Learning (8 bài vi)
-- [x] NLP, CV, LLM (46 bài vi)
-  - [x] NLP (Phần 5a, 13 bài vi): hoàn thành và gộp vào nhánh chính
-  - [x] CV (Phần 5b, 10 bài vi): hoàn thành và gộp vào nhánh chính
-  - [x] LLM (Phần 5c, 23 bài vi): hoàn thành và gộp vào nhánh chính
+- [x] Deep Learning (8 bài vi & 8 bài en)
+- [x] NLP, CV, LLM (46 bài vi & 46 bài en)
+  - [x] NLP (Phần 5a, 13 bài vi & 13 bài en): hoàn thành và gộp vào nhánh chính
+  - [x] CV (Phần 5b, 10 bài vi & 10 bài en): hoàn thành và gộp vào nhánh chính
+  - [x] LLM (Phần 5c, 23 bài vi & 23 bài en): hoàn thành và gộp vào nhánh chính
 
-**Kết quả:** Đã hoàn thành 100% bản tiếng Việt (78/78 bài) và 100% bản tiếng Anh phần ML (14/14 bài). Toàn bộ 78 bài học đã được xuất bản và chạy trực tiếp trên website.
+**Kết quả:** Đã hoàn thành 100% bản tiếng Việt (78/78 bài) và 100% bản tiếng Anh (78/78 bài). Toàn bộ 78 bài học đã được xuất bản song ngữ hoàn chỉnh trên website.
 
 ### Giai đoạn 4: Hoàn thiện & Ra mắt (Mốc M4)
 - [x] Trang Giới thiệu song ngữ `/vi/about/` và `/en/about/`

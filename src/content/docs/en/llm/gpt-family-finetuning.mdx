@@ -1,0 +1,324 @@
+---
+title: The GPT Family and Multi-Task Fine-Tuning
+description: A base model only knows how to continue text—how do we get it to follow instructions? GPT-1, GPT-2, GPT-3, instruction tuning, dataset formatting, chat templates, and answer-only loss masking.
+quiz:
+  - question: 'Which of the following actually changes the parameters (weights) of a language model?'
+    options:
+      - 'Appending `TL;DR:` after a news article so GPT-2 writes a summary'
+      - 'Placing 32 translation example pairs into a GPT-3 prompt (few-shot)'
+      - 'Continued training on dozens of NLP datasets phrased as natural-language instructions, as in FLAN'
+      - 'Writing a longer, more detailed system prompt'
+    answer: 2
+    explanation: 'FLAN runs gradient descent on labeled instruction datasets, updating the model weights so the learned behavior persists across all future calls. The other three options only change the input text fed at inference time. Few-shot prompting is the easiest trap because it is called "in-context learning," but GPT-3 updates zero parameters: open a fresh prompt without the examples and the model is back where it started.'
+  - question: 'An SFT example has a 30-token prompt, a 9-token answer, and 1 EOS token, padded out to a total length of 50 tokens. The labels for the prompt and padding positions are set to $-100$. After shifting by one position for next-token prediction, how many positions contribute to the loss?'
+    options: ['9', '10', '40', '49']
+    answer: 1
+    explanation: 'Only the 9 answer tokens plus the 1 EOS token have labels other than $-100$, giving 10 scored positions. Shifting by one drops only the label of the very first token (which belonged to the prompt anyway), so none of the 10 scored targets are lost. Picking 9 forgets the EOS token—which must be scored so the model learns when to stop. 49 is the total number of shifted positions, including prompt and padding.'
+  - question: 'You reuse the EOS token as your padding token, and then build your label mask with `labels = ids.masked_fill(ids == eos_id, -100)`. After fine-tuning, what is most likely to happen at generation time?'
+    options:
+      - 'The training loss becomes `nan` on the very first step'
+      - 'The model memorizes the prompt verbatim'
+      - 'Nothing unusual happens, because the padding positions are properly masked out'
+      - 'The model answers accurately but never stops generating until it hits the maximum token limit'
+    answer: 3
+    explanation: 'Comparing `ids == eos_id` cannot tell padding tokens apart from the real EOS token at the end of the assistant''s answer, so the real EOS token gets masked to $-100$ as well. Because the model is never scored on predicting EOS, it never learns to stop. Loss only becomes `nan` when every single label in the entire batch is $-100$.'
+  - question: 'A summarization dataset has news articles averaging 950 tokens and summaries averaging 50 tokens. You train with cross-entropy over the entire sequence without masking the prompt. Which statement is true?'
+    options:
+      - 'The average loss mostly measures how well the model predicts the news article: the summary accounts for only about 5% of the scored positions'
+      - 'The model can no longer read the news article when generating the summary'
+      - 'The loss becomes `nan` because there are too many active labels'
+      - 'It makes no difference, because cross-entropy averages across positions so sequence length cancels out'
+    answer: 0
+    explanation: 'Because the loss averages across all unmasked positions, the 950 article tokens outweigh the 50 summary tokens by 19 to 1. Most of the gradient signal goes toward predicting the input article—which is already given at inference time. The second option is a common misconception: setting prompt labels to $-100$ only excludes those positions from the loss; the prompt tokens remain in the input and self-attention still reads them normally.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import labelMaskCode from '@code/llm/gpt-family-finetuning/label-mask.en.py?raw';
+import maskedLossCode from '@code/llm/gpt-family-finetuning/masked-loss.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Trace the evolution from GPT-1 to GPT-3: per-task fine-tuning, zero-shot task prompting, and in-context learning—and distinguish which methods update model weights and which do not.
+- Understand **instruction tuning**: supervised fine-tuning (**SFT**) across many tasks phrased as natural-language instructions, as in FLAN, T0, and the first stage of InstructGPT.
+- Format five diverse tasks (QA, code generation, summarization, retrieval judgment, translation) into a unified prompt–completion schema, and explain what a **chat template** does.
+- Derive the answer-only SFT loss and implement it in PyTorch using `-100` label masking and a one-position shift.
+
+## Prerequisites
+
+{/* List populated from roadmap.ts prerequisites. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In [Building Your First LLM](/en/llm/build-first-llm/), you saw that a causal language model predicts the next-token distribution $p(x_t \mid x_{<t})$ and trains by minimizing cross-entropy $\mathcal{L} = -\frac{1}{L}\sum_{t=1}^{L} \ln p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$. A GPT is a decoder-only Transformer with a causal mask, so a single forward pass produces a prediction at every position: the logit vector at position $t$ predicts token $t + 1$. And in [Using Text APIs](/en/llm/text-api/), you worked with `messages` lists built from `system`, `user`, and `assistant` turns.
+:::
+
+## Intuition
+
+### Good at continuing text, bad at following orders
+
+Suppose you have a GPT pre-trained on billions of web pages—just like the tiny GPT from the previous lesson, scaled up enormously. You type:
+
+> Translate to French: Good morning.
+
+A base language model knows only one job: continue the text so that it looks like documents from its training corpus. On the web, a line like `"Translate to French: Good morning."` often sits inside a worksheet or quiz listing ten translation exercises in a row. Continuing with `"Translate to French: See you tomorrow."` is therefore just as natural a continuation of web text as outputting `"Bonjour."`. The model is not broken—it is doing the exact job it was trained to do: continuing a document, not answering a user.
+
+Between 2018 and 2022, researchers explored three ways to get a pre-trained language model to perform the task you actually want. Picture an apprentice who has read an entire library of books:
+
+- **Train a separate specialist for each job** (GPT-1, 2018). For each task, coach the apprentice on thousands of labeled examples. You end up with a separate fine-tuned copy of the model for every task.
+- **Cue the task in the text, or show a few examples on the spot** (GPT-2, 2019 and GPT-3, 2020). Do not update the model at all. Phrase the input so the desired answer looks like the natural continuation, optionally including a few worked examples right in the prompt.
+- **Teach the habit of following instructions** (FLAN, T0, InstructGPT, 2021–2022). Fine-tune the model once across dozens of different tasks, each phrased in many natural ways. Next time the apprentice sees a brand-new instruction, they already know they are supposed to execute it rather than continue a list of questions.
+
+That third approach—instruction tuning / SFT—is the first post-training stage behind InstructGPT and virtually every modern chat model. Making it work requires two practical ingredients that we will build in this lesson: formatting diverse tasks into a single sequence structure, and masking the loss so we only grade the model on its answer.
+
+**The problem: starting from a base model that only knows how to continue text, how do we turn it into a model that follows natural-language instructions across many tasks—including tasks it never saw during fine-tuning—and which tokens in the sequence should actually be scored during training?**
+
+## Theory
+
+### GPT-1: pre-train once, fine-tune per task
+
+GPT-1 (Radford et al., 2018) established a two-stage recipe. Stage one pre-trains a 12-layer decoder-only Transformer ($D = 768$, context window $512$) on next-token prediction over BooksCorpus (over 7,000 unpublished books). Stage two performs **supervised fine-tuning** separately for each downstream task, such as sentiment classification or natural language inference (entailment). For each task, they attach a fresh linear layer and softmax on top of the final token's hidden state to predict the probability of the task label $y$.
+
+Given an input token sequence $\mathbf{x} = (x_1, \dots, x_L)$ and a class label $y$, the task classification loss is:
+
+$$
+\mathcal{L}_{\text{task}} = -\sum_{(\mathbf{x}, y)} \ln p(y \mid x_1, \dots, x_L)
+$$
+
+Notably, GPT-1 also includes an **auxiliary language modeling objective** during fine-tuning: the standard next-token prediction loss $\mathcal{L}_{\text{LM}}$ evaluated on the task's input text itself:
+
+$$
+\mathcal{L}_{\text{GPT-1}} = \mathcal{L}_{\text{task}} + \lambda\, \mathcal{L}_{\text{LM}}, \qquad \lambda = 0.5
+$$
+
+(The paper writes this as a log-likelihood $L_3 = L_2 + \lambda L_1$ to be maximized; we negate it here to match our loss-minimization convention.) The authors report that keeping the language modeling objective during fine-tuning improves generalization and speeds up convergence—with ablations showing that it helps on larger datasets while making little difference on small ones.
+
+A second lasting idea from GPT-1 is how it feeds structured multi-part inputs into a decoder-only model. Rather than designing task-specific architectures, they flatten every structured input into **a single contiguous token sequence** using start, delimiter, and extract tokens. For entailment, the sequence is `[start] premise [delim] hypothesis [extract]`. For multiple-choice QA, each candidate answer is concatenated with the context and question into its own sequence. This "everything is one flat sequence" principle returns directly in FLAN and modern chat templates.
+
+GPT-1 set new state-of-the-art results on 9 out of 12 benchmarks. Still, every new task required its own labeled dataset, its own classification head, and its own separate copy of the fine-tuned weights.
+
+### GPT-2: specifying the task inside the text
+
+GPT-2 (Radford et al., 2019) asked a bold question: can a single pre-trained language model perform multiple tasks without any task-specific fine-tuning at all? Single-task supervised learning estimates $p(\text{output} \mid \text{input})$. A single system capable of performing many tasks must condition on which task is being requested:
+
+$$
+p(\text{output} \mid \text{input}, \text{task})
+$$
+
+Crucially, conditioning on the task does not require a special task-ID input pin. Because the task description, the input, and the output can all be written in natural language, all three fit inside a single text sequence. As the paper notes, a translation training example can simply be written as the sequence `(translate to french, english text, french text)`. A sufficiently large language model trained on diverse web text may already have seen—and learned to continue—sequences of that exact shape.
+
+They trained models up to 1.5 billion parameters on WebText (~40 GB of text from outbound Reddit links) and evaluated them **zero-shot**—updating zero parameters and cueing each task purely through input text formatting:
+
+- **Summarization:** append `TL;DR:` right after an article and sample the continuation. Dropping the `TL;DR:` cue caused ROUGE scores to drop by 6.4 points, showing that a five-character string was enough to select a "summarize" behavior mode.
+- **Translation:** place several `"english sentence = french sentence"` pairs in the context followed by `"english sentence ="` and let the model complete the line.
+- **Reading comprehension (QA):** place a passage and several question–answer pairs in the context so the model picks up the short-answer pattern.
+
+(Note on terminology: the GPT-2 paper called all of these evaluations "zero-shot" because zero gradient updates were performed; GPT-3 later refined the terminology, reserving *zero-shot* for prompts with no examples and calling prompts with examples *one-shot* or *few-shot*.)
+
+As a pure language model, GPT-2 beat the state of the art on 7 out of 8 perplexity benchmarks. On downstream tasks, however, the authors were candid about its limits: its summaries barely beat selecting 3 random sentences from the article on ROUGE, English-to-French translation scored just 5 BLEU, and on Natural Questions it answered only 4.1% of questions correctly. As the paper concluded, GPT-2's zero-shot performance was "still far from use-able" in practice. Clever prompt cues on a base model were not enough on their own.
+
+### GPT-3: in-context learning
+
+GPT-3 (Brown et al., 2020) kept GPT-2's architecture and objective but scaled the model up to 175 billion parameters with a 2,048-token context window. The paper systematically compared three evaluation regimes—**none of which update model weights**:
+
+- **Zero-shot:** only a natural-language task instruction, such as `"Translate English to French:"` followed by `"cheese =>"`.
+- **One-shot:** the instruction plus a single worked example (`"sea otter => loutre de mer"`) before `"cheese =>"`.
+- **Few-shot:** the instruction plus $K$ worked examples (typically 10 to 100, as many as fit in the context window).
+
+The paper termed this ability to pick up a task from examples inside the prompt **in-context learning**, which you already used in [Prompt Engineering](/en/llm/prompt-engineering/). Here, focus on the contrast with fine-tuning: fine-tuning updates $\boldsymbol{\theta}$, so what the model learns is permanently baked into its weights for all future calls. In-context learning changes zero weights; start a new conversation without the examples and the model retains nothing. (The GPT-3 paper did not perform weight fine-tuning at all, leaving it as future work.)
+
+### Instruction tuning: multi-task SFT
+
+GPT-3 showed that a large base model contains a huge range of capabilities if you coax them out with carefully formatted few-shot prompts. The next wave of research flipped the problem around: instead of forcing humans to format prompts to look like web continuations, why not fine-tune the model to understand direct human instructions? The recipe is supervised fine-tuning—just like GPT-1—except performed **simultaneously across dozens of tasks phrased as natural-language instructions**. This is **instruction tuning**. Its goal is not to master one specific benchmark, but to generalize **zero-shot to brand-new task types** never seen during instruction tuning.
+
+**FLAN** (Wei et al., 2021) took a pre-trained 137B decoder-only language model and fine-tuned it on 62 NLP datasets grouped into 12 task clusters. For each dataset, the authors wrote 10 distinct natural-language instruction templates—plus up to 3 "turned-around" templates that inverted the input and output (for instance, asking the model to generate a movie review with a given sentiment rather than classify the sentiment). To test true generalization to unseen task types, when evaluating on a cluster such as natural language inference, they held out the **entire NLI cluster** (all datasets in that category) from instruction tuning. Result: zero-shot FLAN (137B) outperformed zero-shot GPT-3 (175B) on 20 of 25 datasets, and even beat few-shot GPT-3 on several benchmarks. The paper also documented two important limitations: instruction tuning helped very little on tasks already naturally framed as text continuation (such as commonsense completion), and at small model scales (**below ~8B parameters**), instruction tuning actually **hurt** performance on held-out tasks—likely because small models spent their entire capacity fitting the training tasks.
+
+**T0** (Sanh et al., 2021; ICLR 2022) arrived at the same conclusion using an 11B encoder-decoder T5 model trained on a large pool of supervised datasets converted into diverse natural prompts via the public PromptSource (P3) repository. T0 matched or outperformed models up to $16\times$ larger on held-out tasks. Because FLAN and T0 used different base architectures and evaluation splits, do not compare their raw numbers directly; the shared takeaway is the data recipe: **many tasks $\times$ multiple phrasings per task, all unified as text-in, text-out pairs**.
+
+**InstructGPT** (Ouyang et al., 2022) took instruction tuning into open-ended user requests. Its first stage is SFT: fine-tuning GPT-3 on ~13,000 human-written **demonstrations** collected from real API user prompts and labeler-written prompts. Unlike academic classification benchmarks, real user prompts were overwhelmingly open-ended: according to Table 1 of the paper, generation accounted for 45.6% of API prompts, open QA 12.4%, and brainstorming 11.2%, whereas classification was just 3.5% and closed QA 2.6%. One striking empirical detail: they trained SFT for 16 epochs, and even though validation loss started rising after epoch 1, training further continued to improve human preference ratings and reward model scores. While specific to their setup, this observation is a useful reminder that validation cross-entropy loss ([Overfitting and Underfitting](/en/ml/overfitting-underfitting/)) is only a proxy for downstream human judgment. The remaining two stages of InstructGPT—reward modeling and reinforcement learning—are the subject of [RLHF](/en/llm/rlhf/).
+
+Mathematically, FLAN, T0, and InstructGPT's SFT stage all optimize the same cross-entropy loss as single-task fine-tuning. The magic is in the **data mixture**: combining many tasks and many instruction phrasings into a single training run.
+
+### Dataset formatting: every task becomes a text pair
+
+To train on many tasks at once, every example must share a common schema: a **prompt** (the instruction and input) and a **completion** (the target answer). The table below formats five distinct tasks into that unified schema. (The retrieval row illustrates how even a binary relevance judgment can be cast as text generation; embedding-based retrieval itself is covered in [RAG and Modern Chatbots](/en/llm/rag-chatbot/).)
+
+| Task | Prompt | Completion |
+|---|---|---|
+| Question answering (QA) | Read the passage and answer the question. Passage: "Hanoi is the capital of Vietnam…" Question: What is the capital of Vietnam? | Hanoi. |
+| Code generation | Write a Python function that returns the square of x. | `def sq(x): return x * x` |
+| Summarization | Summarize in one sentence: "Heavy rain forced this afternoon's match to be delayed…" | The match was delayed by rain. |
+| Retrieval judgment | Does the following passage answer the question "When will the match take place?" Passage: "…" Answer yes or no. | no |
+| Translation | Translate to French: Good morning. | Bonjour. |
+
+When building a real SFT dataset, keep two practices in mind. First, vary the **instruction wording** across examples (just as FLAN used 10 templates per dataset) so the model learns to follow the meaning of an instruction rather than memorizing a single rigid header. Second, pick a standard storage format: Hugging Face's TRL library accepts either `{"prompt": ..., "completion": ...}` pairs or multi-turn `messages` lists matching the Chat Completions API:
+
+```json
+{
+  "messages": [
+    {"role": "system", "content": "Answer briefly."},
+    {"role": "user", "content": "Translate to French: Good morning."},
+    {"role": "assistant", "content": "Bonjour."}
+  ]
+}
+```
+
+### Chat templates: flattening a conversation into one token sequence
+
+A Transformer only reads **a single flat sequence of tokens**. A list of `messages` dicts must therefore be serialized into one string with **special control tokens** marking where each speaker's turn begins and ends. That serialization rule is called a **chat template**. Our toy template in the code cell formats each turn as `<|role|> content <|end|>`:
+
+```text
+<|system|> Answer briefly. <|end|> <|user|> What is the capital of France? <|end|> <|assistant|> It is Paris. <|end|>
+```
+
+Three practical rules govern chat templates:
+
+- **Every fine-tuned model expects its own exact template.** The Hugging Face `transformers` documentation notes that two models fine-tuned from the exact same base model may use `[INST] … [/INST]` in one case and `<|user|>` / `<|assistant|>` in the other; feeding the wrong delimiters noticeably degrades output quality. In practice, always call `tokenizer.apply_chat_template(...)` so the tokenizer applies the exact template stored with the model.
+- **At inference time, append the assistant header; at training time, do not.** When generating a reply, the input string must end with `<|assistant|>` so the model knows it is now the assistant's turn to speak (rather than continuing the user's question). In `apply_chat_template`, this is controlled by `add_generation_prompt=True`. During training, the full assistant reply is already present in the sequence, so `add_generation_prompt=False` is used.
+- **The end-of-turn token teaches the model when to stop.** If the model is never trained to emit `<|end|>` (or the **EOS** end-of-sequence token), it will keep rambling after answering your question.
+
+### Computing loss on the answer only
+
+An SFT example concatenates a prompt $\mathbf{x}$ and a target completion $\mathbf{y}$ into a single token sequence $\mathbf{s} = (s_1, \dots, s_L)$. What we want the model to learn is $p(\mathbf{y} \mid \mathbf{x})$: read the prompt, write the answer. At inference time, the prompt is always provided by the user.
+
+Should we compute cross-entropy loss on the positions inside the prompt? For prompt–completion datasets, Hugging Face's `SFTTrainer` defaults to **no** (computing loss on completion tokens only). Two intuitive reasons explain why: first, predicting the user's question is not the task we care about; second, prompts are often much longer than answers—if a 950-token article is paired with a 50-token summary, the summary makes up only ~5% of the sequence, so an unmasked average loss would spend 95% of its effort grading how well the model predicts the input article. (This is a design choice rather than an absolute law: recall that GPT-1 intentionally included $\mathcal{L}_{\text{LM}}$ on the input and found it helpful on large datasets, and TRL lets you toggle full-sequence loss if desired. Note also that for conversational `messages` datasets, TRL defaults to full-sequence loss unless you set `assistant_only_loss=True` with a chat template that wraps assistant turns in `{% generation %}` / `{% endgeneration %}` tags.)
+
+Let $\mathcal{A}$ be the set of sequence positions belonging to the assistant's answer, **including** its closing end-of-turn / EOS token. The answer-only SFT loss is:
+
+$$
+\mathcal{L}_{\text{SFT}}(\boldsymbol{\theta}) = -\frac{1}{|\mathcal{A}|} \sum_{t \in \mathcal{A}} \ln p_{\boldsymbol{\theta}}(s_t \mid s_{<t})
+$$
+
+Walking through each piece:
+
+- **$\ln p_{\boldsymbol{\theta}}(s_t \mid s_{<t})$** has the exact same form as the pre-training loss from the previous lesson. Because the full sequence $\mathbf{s}$ is fed into the Transformer, the prefix $s_{<t}$ still contains the entire prompt $\mathbf{x}$—self-attention reads the prompt normally.
+- **$\sum_{t \in \mathcal{A}}$** sums only over the answer positions $t \in \mathcal{A}$ rather than all positions $1, \dots, L$.
+- **Dividing by $|\mathcal{A}|$** (the number of scored answer tokens) averages the loss per answer token, regardless of how long the prompt was. Across a mini-batch, $\mathcal{A}$ pools all scored positions across all examples in the batch, so examples with longer answers contribute proportionally more terms.
+
+**Implementing answer-only loss with `-100` labels.** In PyTorch, we construct a `labels` tensor of the same shape as the input token IDs `ids`. At positions belonging to the answer (and its closing EOS), `labels` holds the true token ID. At positions belonging to the prompt—and at **padding** positions added to make all sequences in a batch the same length—`labels` is set to `-100`. PyTorch's `F.cross_entropy` has a built-in parameter `ignore_index=-100` by default: any position whose target label is `-100` is excluded from both the numerator sum and the denominator count (when `reduction='mean'`), computing $\mathcal{L}_{\text{SFT}}$ automatically. Finally, just as in pre-training, we **shift by one position** because the logit vector at index $t$ predicts the token at index $t + 1$:
+
+```python
+z = logits[:, :-1].reshape(-1, V)
+y = labels[:, 1:].reshape(-1)
+keep = y != -100
+```
+
+Here `logits[:, :-1]` drops the final logit (which has no following token to predict), and `labels[:, 1:]` drops the first label (which has no preceding logit to predict it). Calling `F.cross_entropy(z, y)` then returns the exact batch $\mathcal{L}_{\text{SFT}}$.
+
+Do not confuse `-100` label masking with the causal attention mask from the previous lesson. The causal mask blocks **attention inputs** so position $t$ cannot peek at future tokens. The `-100` label mask filters **loss outputs**: prompt positions are still read and attended to by every answer token; we simply do not grade the model on predicting the prompt itself—just like an exam where students read the printed question, but only their written answers are graded.
+
+:::note[Key takeaway]
+GPT-1 fine-tuned a separate model per task. GPT-2 and GPT-3 kept weights frozen and specified the task (and few-shot examples) inside the prompt. Instruction tuning (FLAN, T0, InstructGPT SFT) fine-tunes a single model across many tasks phrased as natural-language instructions so it generalizes to unseen instructions. Conversations are flattened into a single token sequence via a model-specific chat template. Answer-only SFT loss masks prompt and padding labels to `-100`, keeps the label on the closing EOS token, and shifts logits and labels by one position.
+:::
+
+### Limitations
+
+- **SFT only imitates demonstrations.** Cross-entropy pushes probability toward the single reference answer; it has no way of expressing that one plausible answer is subtly better or safer than another. Teaching comparative preferences is the role of [RLHF](/en/llm/rlhf/).
+- **Instruction tuning teaches format and intent, not new world knowledge.** As FLAN showed, it adds little on pure completion tasks and can even degrade small models below ~8B parameters. Do not expect SFT on a small dataset to turn a weak base model into an expert.
+- **Full-parameter fine-tuning requires substantial GPU memory.** Updating only a small set of adapter weights with methods like LoRA is covered in [Model Evaluation and PEFT](/en/llm/evaluation-peft/).
+
+## Illustration
+
+The table below compares the four paradigms from this lesson side by side. Look at the second column first: only the first and last rows update model parameters. The first row trains a separate copy per task, whereas the last row trains once across a diverse mixture of instruction tasks. The middle two rows leave the weights untouched and work entirely through the prompt.
+
+| Approach | Updates weights for the task? | Labeled data required | How the model knows which task to perform |
+|---|---|---|---|
+| GPT-1 (2018): per-task fine-tuning | Yes, a separate model copy per task | Thousands to hundreds of thousands of examples per task | Task-specific linear head + structured input with delimiter tokens |
+| GPT-2 (2019): zero-shot prompting | No | None | Natural-language cue inside the input text, e.g., `TL;DR:` |
+| GPT-3 (2020): one-shot / few-shot | No | A handful of examples placed inside the prompt | Task description + worked examples in the context window |
+| FLAN, T0, InstructGPT SFT (2021–2022) | Yes, once across many tasks | Dozens of datasets with diverse instruction templates, or human-written demonstrations | Natural-language instructions, generalizing even to unseen task types |
+
+## Code examples
+
+The code in this lesson was last tested in October 2026: the chat template cell with Python 3.14 and NumPy 2.4 (in Pyodide), and the masked-loss cell with Python 3.14 and PyTorch 2.14 on CPU. The first cell runs right in your browser; the second requires PyTorch and runs on your machine. The two cells are self-contained and run independently.
+
+### Toy chat template and `-100` labels
+
+This cell implements the toy chat template from the Theory section. The `render` function flattens a list of `messages` into whitespace-split tokens and records a boolean mask indicating which tokens belong to the assistant's reply. It prints the inference-time prompt string first, followed by the shifted training pairs `(input token -> target label)` at every position.
+
+<PythonRunner code={labelMaskCode} title="Toy chat template and -100 label masking" />
+
+Walking through the output:
+
+- **The first line** is the inference prompt: only the `system` and `user` turns, ending with `<|assistant|>` because `add_generation_prompt=True`. At generation time, the model continues directly from that token.
+- **The table** shows the training sequence after shifting by one position. Every position reading `system` or `user` tokens has target `-100`. The position reading `<|assistant|>` must predict `"It"`, followed by `"is"`, `"Paris."`, and finally `<|end|>`.
+- **`scored: 4 / 17`**: only 4 out of 17 shifted positions contribute to the loss. Crucially, the fourth scored position targets `<|end|>`, teaching the model to stop as soon as it finishes its sentence.
+
+### Answer-only masked loss on a three-task batch
+
+This PyTorch script runs one forward pass of SFT loss calculation on a mini-batch of three tasks modeled after our dataset formatting table: translation, summarization, and code generation. Each UTF-8 byte (`0`–`255`) is a token, plus a dedicated EOS token at ID `256`, giving $V = 257$. Each sequence consists of the prompt bytes, a newline, the answer bytes, and EOS. Shorter sequences are padded to the batch's maximum length using EOS as the pad token, while padding labels are set to `-100`. The model is a tiny **untrained** embedding + linear layer—this script verifies the exact loss masking math rather than training a model.
+
+<LocalCode
+  code={maskedLossCode}
+  title="Answer-only loss masking on a batch of three tasks"
+  packages={['torch']}
+  hardware="CPU is plenty—runs in a couple of seconds."
+  sampleVaries={false}
+>
+
+```text
+shape: (3, 98)
+counted per row: [9, 31, 28]
+counted: 68 / 291
+loss: 5.7924, by hand: 5.7924, ln V: 5.5491
+mask by pad id: 65 counted
+all -100: nan
+```
+
+</LocalCode>
+
+Walking through the output:
+
+- **`shape: (3, 98)`**: 3 examples, padded to match the longest sequence (98 tokens, the summarization example: 67 prompt bytes including the newline, plus 30 answer bytes and 1 EOS token).
+- **`counted per row: [9, 31, 28]`**: each row scores the exact byte length of its answer plus 1 for EOS: `"Bonjour."` is 8 bytes + 1 = 9; `"The match was delayed by rain."` is 30 bytes + 1 = 31; `"def sq(x):\n    return x * x"` is 27 bytes + 1 = 28.
+- **`counted: 68 / 291`**: after shifting by one position, the batch has $3 \times 97 = 291$ prediction positions, of which only 68 (~23%) are scored; the remaining 77% are prompt and padding positions.
+- **`loss` matches `by hand` to four decimal places**: `F.cross_entropy(z, y)` with `ignore_index=-100` produces the exact same result as manually filtering `z[keep]` and `y[keep]` and averaging across all 68 active positions (so the 31-token summary answer carries more weight in the batch average than the 9-token translation answer). The value sits near $\ln 257 = 5.5491$ because the random weights guess nearly uniformly.
+- **`mask by pad id: 65 counted`**: if you naively mask everywhere `ids == EOS` instead of masking by position, all 3 real EOS tokens at the ends of the answers get wiped out too, leaving 65 instead of 68 scored positions. See the second pitfall below for what happens next.
+- **`all -100: nan`**: when every label in a batch is `-100`, the denominator of the mean is zero and `F.cross_entropy` returns `nan`.
+
+## Common pitfalls
+
+:::caution[Forgetting to shift logits and labels by one position]
+If you align `logits` and `labels` at the same index $t$, position $t$ is asked to "predict" the exact token $t$ it is currently reading. The network learns an identity copy in a few steps, driving training loss near zero while producing gibberish at generation time—and because tensor shapes match, no runtime error is raised. Always pair `logits[:, :-1]` with `labels[:, 1:]`. Note that high-level libraries like Hugging Face `transformers` perform this shift *inside* the model's built-in `loss` computation when you pass `labels=...` to `model(input_ids, labels=labels)`—so check whether your framework shifts internally before shifting a second time!
+:::
+
+:::caution[Accidentally masking out the EOS token, or truncating away the answer]
+A model only learns when to stop if the position that predicts EOS (or `<|end|>`) is included in the loss. The most common way to break this is reusing `eos_token_id` as `pad_token_id` and then masking with `labels[ids == pad_token_id] = -100`—which masks the real EOS token at the end of every answer right alongside the padding, as shown by the `mask by pad id` line in our PyTorch script. The resulting model answers accurately and then rambles until it hits `max_tokens`. Always mask by **position** (prompt length and true sequence length), or use a dedicated pad token distinct from EOS. A closely related bug is right-truncating long examples at `max_length` (TRL defaults to `max_length=1024`): if a long prompt pushes the entire answer past `max_length`, every remaining token in the truncated sequence is prompt, every label is `-100`, and a batch of long prompts yields `nan` loss. Always check how many non-`-100` labels survive per example before training.
+:::
+
+:::caution[Mismatched chat templates or double BOS tokens]
+Every instruction-tuned model is trained with a specific chat template. Hand-concatenating strings with different delimiters, using another model's template, or forgetting `add_generation_prompt=True` at inference time silently degrades output quality without raising any error. A second subtle bug is adding special tokens twice: if `apply_chat_template(..., tokenize=False)` already prepends a beginning-of-sequence (`<bos>`) token and you then pass that string into `tokenizer(text)` with its default `add_special_tokens=True`, the tokenizer prepends a *second* `<bos>` token. Either let `apply_chat_template(..., tokenize=True)` tokenize directly, or pass `add_special_tokens=False` when tokenizing a pre-rendered template string—and print the decoded token list once to verify.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- GPT-1 (2018) pre-trained a decoder-only Transformer and fine-tuned a separate model per task with an auxiliary language modeling loss. GPT-2 (2019) framed multitask learning as $p(\text{output} \mid \text{input}, \text{task})$ using text cues alone, though zero-shot quality remained rough. GPT-3 (2020) scaled to 175B parameters and showed strong in-context learning from few-shot examples without updating weights.
+- Instruction tuning fine-tunes a model once across a wide variety of tasks phrased as natural-language instructions (FLAN, T0) or open-ended human demonstrations (InstructGPT SFT), enabling zero-shot generalization to unseen instructions. It teaches instruction-following behavior rather than new world knowledge, and can hurt models below ~8B parameters.
+- Diverse tasks can all be formatted as `(prompt, completion)` pairs or `messages` lists, which a model-specific chat template serializes into a single token stream with role and end-of-turn delimiters. At inference time, open the assistant turn with `add_generation_prompt=True`.
+- Answer-only SFT loss $\mathcal{L}_{\text{SFT}} = -\frac{1}{|\mathcal{A}|}\sum_{t \in \mathcal{A}} \ln p_{\boldsymbol{\theta}}(s_t \mid s_{<t})$ scores only the completion positions: set prompt and padding labels to `-100`, keep the label on the closing EOS token, and shift logits and labels by one position.
+
+**Further reading:**
+
+- Radford, A., Narasimhan, K., Salimans, T., Sutskever, I. (2018). [*Improving Language Understanding by Generative Pre-Training*](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf) (PDF), OpenAI technical report, Section 3. GPT-1: supervised fine-tuning with an auxiliary LM objective and task input transformations.
+- Radford, A., Wu, J., Child, R., Luan, D., Amodei, D., Sutskever, I. (2019). [*Language Models are Unsupervised Multitask Learners*](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) (PDF), OpenAI technical report, Sections 2 and 3.5–3.8. GPT-2: conditioning on task in text, `TL;DR:` summarization, translation, QA, and the authors' discussion of zero-shot limitations.
+- Brown, T. B., Mann, B., Ryder, N. et al. (2020). [*Language Models are Few-Shot Learners*](https://arxiv.org/abs/2005.14165), arXiv:2005.14165, Section 2. GPT-3: zero-shot, one-shot, and few-shot in-context learning vs. weight-updating fine-tuning.
+- Wei, J., Bosma, M., Zhao, V. Y. et al. (2021). [*Finetuned Language Models Are Zero-Shot Learners*](https://arxiv.org/abs/2109.01652), arXiv:2109.01652. FLAN: instruction tuning across 62 datasets, held-out task cluster evaluation, and scale ablations.
+- Sanh, V., Webson, A., Raffel, C., Bach, S. H. et al. (2021). [*Multitask Prompted Training Enables Zero-Shot Task Generalization*](https://arxiv.org/abs/2110.08207), arXiv:2110.08207, ICLR 2022. T0 and the PromptSource (P3) collection.
+- Ouyang, L., Wu, J., Jiang, X. et al. (2022). [*Training language models to follow instructions with human feedback*](https://arxiv.org/abs/2203.02155), arXiv:2203.02155, Section 3. InstructGPT: SFT demonstration collection, Table 1 task distribution, and validation loss vs. human preference behavior.
+- Hugging Face. [*Chat templates*](https://huggingface.co/docs/transformers/v5.20.2/en/chat_templating) (`transformers` 5.20.2) and [*SFT Trainer*](https://huggingface.co/docs/trl/v1.16.0/en/sft_trainer) (`trl` 1.16.0), official documentation (checked 10/2026). `apply_chat_template`, `add_generation_prompt`, dataset formats, and completion-only / assistant-only loss masking.
+
+<LessonProgress />

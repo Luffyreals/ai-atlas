@@ -1,0 +1,414 @@
+---
+title: 'Modern CNN Architectures: LeNet, AlexNet, VGG, GoogLeNet, ResNet, Xception, SENet, YOLO'
+description: 'From LeNet reading digits to 152-layer ResNet and YOLO: how each architecture added one key idea (stacked 3×3s, 1×1 convolutions, residual connections, depthwise separable convolutions, channel attention, single-pass detection).'
+quiz:
+  - question: 'You replace a single $7 \times 7$ convolutional layer with three stacked $3 \times 3$ layers (stride 1, same $C$ input and output channels, ignoring biases). How do the receptive field and parameter count change?'
+    options:
+      - 'The receptive field shrinks to $3 \times 3$, and parameters drop from $49C^2$ to $9C^2$'
+      - 'The receptive field grows to $9 \times 9$, and parameters increase from $49C^2$ to $81C^2$'
+      - 'The receptive field stays $7 \times 7$, and parameters drop from $49C^2$ to $27C^2$'
+      - 'The receptive field stays $7 \times 7$, and parameter count does not change'
+    answer: 2
+    explanation: 'Each stride-1 $3 \times 3$ layer widens the receptive field by 2 pixels along each dimension: $1 + 3 \cdot 2 = 7$. Each layer has $9C^2$ weights, so three layers cost $27C^2$ — far less than the $49C^2$ of a single $7 \times 7$ layer. The $3 \times 3$ option forgets that each layer looks at the previous layer''s outputs, each of which already summarizes a patch of the image. Three layers also insert three ReLU nonlinearities instead of one.'
+  - question: 'An input has 256 channels. You want a $5 \times 5$ layer outputting 64 channels, and you insert a $1 \times 1$ bottleneck layer before it that reduces the channels to 32. Ignoring biases, roughly how many parameters does this two-layer design use compared to the direct $5 \times 5$ layer?'
+    options:
+      - 'About 59 thousand, compared to about 410 thousand'
+      - 'About 410 thousand Either way, because a $1 \times 1$ layer has negligible weights'
+      - 'About 470 thousand, compared to about 410 thousand, because adding a layer adds parameters'
+      - 'About 8 thousand, compared to about 410 thousand'
+    answer: 0
+    explanation: 'Without the bottleneck: $25 \cdot 256 \cdot 64 = 409\,600$. With the bottleneck: the $1 \times 1$ layer costs $256 \cdot 32 = 8\,192$, and the $5 \times 5$ layer now takes only 32 input channels so it costs $25 \cdot 32 \cdot 64 = 51\,200$, totaling $59\,392$ — nearly 7 times fewer parameters. Adding a narrow bottleneck layer makes the expensive spatial layer dramatically cheaper. 8 thousand counts only the $1 \times 1$ layer.'
+  - question: 'A plain 56-layer network (without residual connections) has a higher training error than a 20-layer network of the same family. Which explanation matches this phenomenon?'
+    options:
+      - 'The 56-layer network is overfitting because it has more parameters'
+      - 'The 56-layer network needs more training data, so higher training error is normal'
+      - 'The 56-layer network cannot represent the functions that the 20-layer network represents'
+      - 'The optimizer struggles to find good parameters for the deeper plain network, even though a solution at least as good as the 20-layer network exists'
+    answer: 3
+    explanation: 'Overfitting causes low training error and high test error. Here the training error itself is higher, so the bottleneck is optimization. A 56-layer network can represent everything a 20-layer network can: copy the 20 layers and set the remaining 36 layers to the identity mapping. Residual connections make learning the identity mapping easy by simply driving the residual $F(\mathbf{x})$ toward 0.'
+  - question: 'A standard $3 \times 3$ convolutional layer has 128 input channels and 128 output channels (ignoring biases). If you replace it with a depthwise separable convolution ($3 \times 3$ depthwise followed by $1 \times 1$ pointwise), by roughly what factor does the parameter count decrease?'
+    options:
+      - 'About $128\times$, because each channel has only one filter'
+      - 'About $8.4\times$'
+      - 'Exactly $9\times$, because the kernel has 9 cells'
+      - 'No reduction, because both $3 \times 3$ and $1 \times 1$ are still present'
+    answer: 1
+    explanation: 'Standard convolution: $9 \cdot 128 \cdot 128 = 147\,456$. Depthwise: $9 \cdot 128 = 1\,152$. Pointwise: $128 \cdot 128 = 16\,384$. Total: $17\,536$, a reduction factor of about $8.4$. The general ratio is $1/(1/C_{\text{out}} + 1/k^2)$: the $1/k^2$ term dominates so the savings approach 9, but stay slightly below 9 because the pointwise step still costs $C_{\text{in}} C_{\text{out}}$. Only the depthwise step alone is $128\times$ cheaper.'
+  - question: 'Two pedestrians stand close together in an image. The detector outputs an accurate bounding box for each person, and the IoU between the two boxes is 0.4. You run NMS with an IoU threshold of 0.3. What happens?'
+    options:
+      - 'Both boxes are kept, because each box belongs to a different person'
+      - 'Both boxes are discarded, because they overlap'
+      - 'The higher-scoring box is kept and the other is suppressed, so one person is missed'
+      - 'The two boxes are merged into one large box covering both people'
+    answer: 2
+    explanation: 'NMS does not know which ground-truth object a box belongs to. It keeps the highest-scoring box and discards any remaining box of the same class whose IoU with it is at least the threshold; since $0.4 \ge 0.3$, the second pedestrian''s box is suppressed. With a threshold of 0.5, both boxes would be kept. Setting the NMS threshold too low suppresses nearby objects; setting it too high leaves duplicate boxes.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import paramCountCode from '@code/dl/modern-cnn-architectures/param-count.en.py?raw';
+import iouNmsCode from '@code/dl/modern-cnn-architectures/iou-nms.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Trace the timeline from LeNet-5 (1998) to SENet (2018), identifying the **single core idea** each architecture introduced and the bottleneck it solved.
+- Calculate why two stacked $3 \times 3$ layers cost fewer parameters than one $5 \times 5$ layer, and how **1×1 convolutions** and **depthwise separable convolutions** slash parameter counts.
+- Explain **residual connections** in ResNet and why they make training networks with over 100 layers possible.
+- Understand YOLO's single-pass object detection pipeline — grid cells, bounding boxes, confidence scores, **IoU**, and **NMS** — and implement IoU and NMS in NumPy.
+
+## Prerequisites
+
+{/* List taken from prerequisites in roadmap.ts. Do not write manual links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+From [Convolutional Neural Networks (CNN)](/en/dl/cnn/): a convolutional layer with $k \times k$ kernels, $C_{\text{in}}$ input channels, and $C_{\text{out}}$ output channels has $(k^2 C_{\text{in}} + 1)\,C_{\text{out}}$ parameters (each filter has $k^2 C_{\text{in}}$ weights plus one bias), independent of image resolution. The **receptive field** of an output cell is the patch of the input image it "sees". From [Training Neural Networks](/en/dl/training-neural-networks/): **BatchNorm** normalizes layer activations per mini-batch, **Dropout** randomly zeroes neurons during training, and gradients can **vanish** when multiplied across many layers.
+:::
+
+## Intuition
+
+### One competition, one new idea each year
+
+Starting in 2010, the ImageNet competition (ILSVRC) challenged teams with roughly 1.2 million training images across 1000 object categories, scored by **top-5 error** (the fraction of test images where the true label is absent from the model's top 5 predictions). Look at how the winning error rate fell over five years:
+
+| Year | Model | Top-5 error |
+|---|---|---:|
+| 2012 | AlexNet | 15.3% (runner-up: 26.2%) |
+| 2014 | VGG (runner-up) | 7.3% |
+| 2014 | GoogLeNet (winner) | 6.67% |
+| 2015 | ResNet | 3.57% |
+| 2017 | SENet | 2.251% |
+
+The error rate dropped nearly sevenfold in five years. Remarkably, the core 2D convolution operation did not change at all: every model in the table still slides filters across feature maps just like in [Convolutional Neural Networks (CNN)](/en/dl/cnn/). What changed was **how convolutional layers are arranged and wired**. Each architecture hit a concrete wall and invented one structural idea to break through it:
+
+- Large networks trained too slowly and memorized the data. (AlexNet)
+- Which filter size should we pick: $3 \times 3$, $5 \times 5$, or $11 \times 11$? (VGG)
+- How can we use multiple filter sizes in parallel without blowing up the parameter count? (GoogLeNet)
+- Why does adding more layers make **training** error go *up*? (ResNet)
+- Does a single filter really need to look across space and mix channels at the same time? (Xception)
+- Which channels matter most for *this specific* image? (SENet)
+
+### From "what is in this image" to "what is where"
+
+Image classification answers a single question: "there is a cat in this photo". A self-driving car needs much more: "there are three pedestrians and one motorbike, **at these exact bounding boxes**, within 20 milliseconds". That task is **object detection**. YOLO uses a single CNN forward pass to predict all bounding boxes and class labels simultaneously.
+
+The goal of this lesson is to understand **which structural idea each landmark architecture added to the basic "conv → pool → classifier" template, what problem that idea solved, and how many parameters it cost or saved.**
+
+## Theory
+
+### Shared blueprint of an image-classification CNN
+
+Every classification network in this lesson (and YOLO up to its detection head) shares a two-part anatomy:
+
+1. **Backbone (stem + body):** a stack of convolutional stages. As you go deeper, spatial resolution shrinks (via pooling or stride-2 convolutions) while the number of channels grows. Early layers detect edges; middle layers compose textures and parts; deep layers represent whole objects.
+2. **Head:** converts the final feature map into 1000 class logits, followed by softmax.
+
+The sections below walk through the timeline chronologically, stating the problem first and the architectural solution second.
+
+### LeNet-5 (1998): the first template
+
+LeCun et al. (1998) built LeNet-5 to read handwritten digits on bank checks. Taking a $32 \times 32$ input image, it passes through:
+
+- a $5 \times 5$ convolution outputting 6 channels, followed by $2 \times 2$ subsampling (average pooling);
+- a $5 \times 5$ convolution outputting 16 channels, followed by subsampling;
+- a $5 \times 5$ convolution outputting 120 channels (reducing the spatial grid to $1 \times 1$), an 84-unit fully connected layer, and 10 output units.
+
+Summing the trainable parameters across layers gives roughly **60,000 parameters**. LeNet's lasting contribution is the **conv → pool → conv → pool → fully connected** blueprint trained end-to-end by backpropagation — the foundation every subsequent CNN built upon.
+
+### AlexNet (2012): scaling up with big data and GPUs
+
+Nearly 15 years later, the blueprint remained the same, but three ingredients had arrived: ImageNet (1.2 million labeled photos), programmable GPUs, and better training recipes. Krizhevsky, Sutskever, and Hinton (2012) scaled the blueprint up to **5 convolutional layers and 3 fully connected layers** with roughly **60 million parameters** — 1000 times larger than LeNet. Four practical choices made it work:
+
+- **ReLU** instead of tanh. Because ReLU does not saturate for positive values, gradients stay strong across layers. In the paper, a 4-layer CNN with ReLU reached 25% training error on CIFAR-10 six times faster than an equivalent tanh network.
+- **Dropout** ($p = 0.5$) in the first two huge fully connected layers, where most of the parameters live and overfitting is most severe.
+- **Data augmentation**: random $224 \times 224$ crops, horizontal flips, and PCA color jittering to multiply the effective size of the training set.
+- **Two GPUs** (GTX 580, 3 GB each) training in parallel for 5 to 6 days.
+
+AlexNet cut the ImageNet top-5 error from 26.2% (the best traditional computer-vision pipeline) down to 15.3%, igniting the modern deep learning revolution in computer vision.
+
+### VGG (2014): stacked 3×3 filters only
+
+AlexNet mixed $11 \times 11$ filters in layer 1, $5 \times 5$ in layer 2, and $3 \times 3$ in layers 3–5. Simonyan and Zisserman (2014) asked: what if we use **only $3 \times 3$ filters** (stride 1, padding 1) stacked in depth?
+
+**Step 1: how wide do two $3 \times 3$ layers see?** One cell in layer 1 sees a $3 \times 3$ patch of the input. One cell in layer 2 sees a $3 \times 3$ neighborhood of layer-1 cells, whose centers span 2 pixels in every direction and each reach 1 pixel further out, covering a $5 \times 5$ input patch. In general, stacking $L$ stride-1 layers of size $k \times k$ gives a receptive field of side:
+
+$$
+r_L = 1 + L(k - 1)
+$$
+
+For $k = 3$: two layers give $r_2 = 5$, and three layers give $r_3 = 7$. Two $3 \times 3$ layers have the exact same spatial receptive field as one $5 \times 5$ layer, and three $3 \times 3$ layers match one $7 \times 7$ layer.
+
+**Step 2: compare parameter counts.** Assume all layers have $C$ input and output channels and ignore biases. A single $k \times k$ layer has $k^2 C^2$ weights. Therefore:
+
+$$
+\underbrace{2 \cdot 9C^2}_{\text{two } 3 \times 3 \text{ layers}} = 18C^2
+\;<\;
+\underbrace{25C^2}_{\text{one } 5 \times 5 \text{ layer}}
+$$
+
+Two $3 \times 3$ layers use 72% of the parameters of one $5 \times 5$ layer. Three $3 \times 3$ layers vs. one $7 \times 7$ layer save even more: $27C^2$ vs. $49C^2$ (45% fewer weights).
+
+**Step 3: more nonlinearity.** Two layers apply ReLU twice instead of once, making the decision function more expressive for the same receptive field.
+
+VGG-16 and VGG-19 (16 and 19 weight layers) simply repeat blocks of "a few $3 \times 3$ convolutions followed by $2 \times 2$ max-pooling", doubling the channels after each pool from 64 up to 512, and finish with three fully connected layers. Its uniform modularity made VGG a classic baseline, though it is memory-heavy: VGG-16 has **138 million** parameters, with ~124 million of them concentrated in the three fully connected layers at the end.
+
+### GoogLeNet and the Inception block (2014): parallel branches and 1×1 convolutions
+
+That same year, Szegedy et al. (2014) asked a different question: why choose a single filter size at each layer when a salient object might occupy a small patch in one image and a large region in another? An **Inception module** runs four branches **in parallel** on the same input tensor: a $1 \times 1$ conv, a $3 \times 3$ conv, a $5 \times 5$ conv, and a $3 \times 3$ max-pooling branch, then **concatenates** their outputs along the channel dimension.
+
+Naively, the $5 \times 5$ branch is prohibitively expensive: mapping 192 input channels to 32 output channels with a $5 \times 5$ filter costs $(25 \cdot 192 + 1) \cdot 32 = 153\,632$ parameters.
+
+**What a 1×1 convolution does.** A $1 \times 1$ kernel does not look at neighboring pixels at all. At each spatial pixel $(i, j)$, it takes the vector of $C_{\text{in}}$ channel values at that single pixel and multiplies it by a $C_{\text{out}} \times C_{\text{in}}$ weight matrix. In other words, a $1 \times 1$ convolution is **a fully connected layer applied independently to every pixel's channel vector**, sharing weights across all pixels. When $C_{\text{out}} < C_{\text{in}}$, it acts as a **bottleneck** that compresses channel dimensionality before an expensive spatial convolution.
+
+GoogLeNet inserts a $1 \times 1$ bottleneck before every $3 \times 3$ and $5 \times 5$ branch. In the $5 \times 5$ branch above, compressing 192 channels down to 16 with a $1 \times 1$ conv before running the $5 \times 5$ conv to 32 channels cuts the parameter count to:
+
+$$
+\underbrace{(192 + 1) \cdot 16}_{1 \times 1:\ 3\,088}
++
+\underbrace{(25 \cdot 16 + 1) \cdot 32}_{5 \times 5:\ 12\,832}
+= 15\,920
+$$
+
+— nearly a **10× reduction** (verified in the first code cell).
+
+GoogLeNet stacks 22 weight layers and replaces the massive fully connected layers at the end with **global average pooling** (averaging each $7 \times 7$ channel map down to a single number), followed by a single linear layer to 1000 classes. The result won ILSVRC 2014 with 6.67% top-5 error using roughly 6.6 million parameters — 9× fewer than AlexNet and 20× fewer than VGG-16.
+
+### ResNet (2015): residual connections
+
+VGG and GoogLeNet showed that depth improves accuracy. So what happens if you simply stack 50 or 100 plain layers? He et al. (2015) tried this and hit a striking wall.
+
+**The degradation problem: adding layers increases training error.** On CIFAR-10, a 56-layer plain network (with BatchNorm and He initialization, so gradients did not vanish at step 0) had **higher training error** than a 20-layer plain network. This is **not** overfitting — overfitting produces lower training error and higher test error. Here the deeper network could not even fit the training data as well as the shallower one.
+
+Why is that paradoxical? Because a trivial solution exists: copy the learned 20-layer network and make the remaining 36 layers compute the **identity mapping** $\mathbf{y} = \mathbf{x}$. The 56-layer network should therefore achieve *at most* the training error of the 20-layer network. The fact that it does worse means SGD struggles to drive a stack of nonlinear convolutional layers to mimic an identity mapping.
+
+**The idea: learn the residual.** Let $\mathbf{x}$ be the input to a small block of layers and $H(\mathbf{x})$ be the target mapping we want the block to learn. Instead of forcing the stacked layers to approximate $H(\mathbf{x})$ directly, ResNet has them learn the **residual** (the difference from the input):
+
+$$
+F(\mathbf{x}) = H(\mathbf{x}) - \mathbf{x}
+$$
+
+and adds $\mathbf{x}$ back via an identity **shortcut connection** (or **skip connection**). The block outputs:
+
+$$
+\mathbf{y} = g\big(F(\mathbf{x}) + \mathbf{x}\big)
+$$
+
+where $F$ is two $3 \times 3$ convolutional layers with BatchNorm and an intermediate ReLU, and $g$ is the final ReLU after the addition. If the identity mapping is optimal at a given depth, the optimizer simply pushes the weights of $F$ toward 0 — which is vastly easier than tuning a stack of nonlinear layers to reproduce $\mathbf{x}$.
+
+**Why gradients flow effortlessly.** In a simplified 1D block without the final ReLU, $y = x + f(x)$, so the derivative is:
+
+$$
+\frac{dy}{dx} = 1 + f'(x)
+$$
+
+The $+1$ comes directly from the identity shortcut. A plain block $y = f(x)$ has derivative $f'(x)$; multiplying 50 such factors around 0.5 shrinks the gradient to $0.5^{50} \approx 10^{-15}$. With the residual shortcut, each factor is $1 + f'(x)$, which stays near 1 when $f'$ is small, creating an unobstructed gradient highway all the way from the loss back to the earliest layers.
+
+**When dimensions change.** The elementwise sum $F(\mathbf{x}) + \mathbf{x}$ requires matching shapes. At stage boundaries where the main path halves spatial resolution (stride 2) and doubles the channel count, the shortcut uses a $1 \times 1$ convolution with stride 2 to project $\mathbf{x}$ to the new shape. Identity shortcuts add **zero parameters**.
+
+**Bottleneck blocks.** For ResNet-50, 101, and 152, each block uses a 3-layer $1 \times 1 \to 3 \times 3 \to 1 \times 1$ bottleneck: the first $1 \times 1$ reduces channels by $4\times$, the $3 \times 3$ operates on the narrow channel count, and the final $1 \times 1$ restores the full channel width.
+
+On ImageNet, a 34-layer plain network had higher error than an 18-layer plain network (28.54% vs. 27.94% top-1); adding residual connections reversed the degradation, dropping ResNet-34 error to 25.03%. ResNet-152 reached 152 layers while still using fewer FLOPs than VGG-16 (11.3B vs. 15.3B), winning ILSVRC 2015 at 3.57% top-5 error. Residual connections are now universal across deep learning, including every [Transformer](/en/dl/transformers/) block.
+
+### Xception (2017): depthwise separable convolutions
+
+A standard $3 \times 3$ convolutional layer performs **two jobs at once**: it aggregates spatial neighbors across a $3 \times 3$ window, and it mixes information across all $C_{\text{in}}$ channels. Chollet (2017) hypothesized that spatial correlations and cross-channel correlations can be **completely decoupled** into two separate steps.
+
+A **depthwise separable convolution** factors a convolution into:
+
+1. **Depthwise convolution:** apply **one** $k \times k$ spatial filter per input channel independently ($C_{\text{in}}$ filters of shape $k \times k \times 1$). No cross-channel mixing occurs.
+2. **Pointwise convolution:** apply a $1 \times 1$ convolution ($C_{\text{out}}$ filters of shape $1 \times 1 \times C_{\text{in}}$) to mix the channels at each pixel.
+
+Counting weights (ignoring biases): a standard convolution uses $k^2 C_{\text{in}} C_{\text{out}}$ weights, whereas the separable version uses $k^2 C_{\text{in}}$ (depthwise) plus $C_{\text{in}} C_{\text{out}}$ (pointwise). Their ratio is:
+
+$$
+\frac{k^2 C_{\text{in}} + C_{\text{in}} C_{\text{out}}}{k^2 C_{\text{in}} C_{\text{out}}}
+= \frac{1}{C_{\text{out}}} + \frac{1}{k^2}
+$$
+
+For a $3 \times 3$ kernel ($k = 3$) and $C_{\text{out}} = 256$, this ratio is $1/256 + 1/9 \approx 0.115$ — an **8.7× reduction** in parameters and multiply-adds! As $C_{\text{out}}$ grows large, $1/C_{\text{out}} \to 0$ and the savings approach $k^2 = 9\times$.
+
+Chollet viewed this as the extreme limit of an Inception module ("Extreme Inception" → **Xception**): 36 depthwise separable convolutional layers grouped into 14 residual modules. With roughly the same parameter count as Inception V3 (~22.9M vs. 23.6M), Xception achieved higher accuracy on ImageNet (79.0% vs. 78.2% top-1) because its parameters were spent more efficiently. Depthwise separable convolutions also form the backbone of **MobileNet** for mobile and edge devices.
+
+### SENet (2018): a weight for every channel
+
+In all the networks above, every output channel of a convolutional layer is treated with equal importance. Yet for an image of a cat, channels responding to fur texture are much more informative than channels responding to car wheels. Hu et al. (2018) introduced the **Squeeze-and-Excitation (SE)** block to dynamically re-weight channels conditioned on the current image. Let $\mathbf{U}$ be a feature map of $C$ channels, where each channel $\mathbf{U}_c$ has spatial size $H \times W$.
+
+**Step 1, Squeeze:** compress each channel's $H \times W$ spatial map into a single scalar descriptor via global average pooling:
+
+$$
+z_c = \frac{1}{HW}\sum_{i=1}^{H}\sum_{j=1}^{W} U_c(i, j)
+$$
+
+This produces a $C$-dimensional vector $\mathbf{z}$ summarizing the global activation of every channel on this image.
+
+**Step 2, Excitation:** pass $\mathbf{z}$ through a tiny two-layer bottleneck MLP with a sigmoid output:
+
+$$
+\mathbf{s} = \sigma\big(\mathbf{W}_2\, \mathrm{ReLU}(\mathbf{W}_1 \mathbf{z})\big)
+$$
+
+Here $\mathbf{W}_1$ has shape $\tfrac{C}{r} \times C$ (squeezing $C$ down by reduction ratio $r = 16$) and $\mathbf{W}_2$ has shape $C \times \tfrac{C}{r}$ (expanding back to $C$). The sigmoid bounds each gate $s_c \in (0, 1)$.
+
+**Step 3, Scale:** multiply each channel map $\mathbf{U}_c$ by its scalar gate: $\tilde{\mathbf{U}}_c = s_c \mathbf{U}_c$.
+
+Because $\mathbf{s}$ is computed from the input image itself, this is a lightweight form of **channel attention**. An SE block adds only $2C^2/r$ weights: inserting SE blocks into every residual block of ResNet-50 increases parameters by ~10% (25.6M → 28.1M) and FLOPs by less than 0.3% (3.86B → 3.87B), while dropping ImageNet top-1 error from 24.80% to 23.29%. SENet won ILSVRC 2017 with a 2.251% top-5 error.
+
+### YOLO (2016): single-pass object detection
+
+Classification networks output a single class label for the whole image. **Object detection** must output a list of **bounding boxes**, each with $(x, y, w, h)$ coordinates and a class label. Earlier two-stage detectors (the R-CNN family) first proposed ~2000 candidate regions and then ran a classifier on each region — accurate, but too slow for real-time video.
+
+Redmon et al. (2016) reframed object detection as a single regression problem — **You Only Look Once (YOLO)**:
+
+**Grid.** Divide the image into an $S \times S$ grid ($S = 7$ in the paper). Whichever grid cell contains the **center** of an object is responsible for detecting that object.
+
+**Per-cell predictions.** Each grid cell predicts $B$ bounding boxes ($B = 2$). Each box consists of 5 numbers: center $(x, y)$ relative to the cell, width and height $(w, h)$ relative to the full image, and a **confidence** score. Each cell also predicts $C$ conditional class probabilities ($C = 20$ on PASCAL VOC), shared across the cell's boxes. Thus a single forward pass outputs a tensor of shape:
+
+$$
+S \times S \times (5B + C) = 7 \times 7 \times (5 \cdot 2 + 20) = 7 \times 7 \times 30
+$$
+
+**IoU (Intersection over Union).** To measure how well a predicted box $A$ matches a ground-truth box $B$ (or how much two predicted boxes overlap), we compute the ratio of their intersection area to their union area:
+
+$$
+\mathrm{IoU}(A, B) = \frac{\text{area}(A \cap B)}{\text{area}(A \cup B)}
+$$
+
+IoU equals 1 when two boxes are identical and 0 when they are disjoint. For example, let box $A$ span $(10, 10)$ to $(50, 50)$ and box $B$ span $(12, 14)$ to $(52, 54)$; each box has area $40 \times 40 = 1600$. Their intersection spans $x \in [12, 50]$ (width 38) and $y \in [14, 50]$ (height 36), giving area $38 \times 36 = 1368$. Their union area is $1600 + 1600 - 1368 = 1832$ (subtracting the intersection once so it is not double-counted). Thus $\mathrm{IoU} = 1368 / 1832 \approx 0.75$.
+
+Each box's confidence is trained to predict $\Pr(\text{Object}) \times \mathrm{IoU}(\text{pred}, \text{truth})$. At inference time, multiplying the class probabilities by the box confidence gives class-specific confidence scores for all $7 \times 7 \times 2 = 98$ boxes.
+
+**NMS (Non-Maximum Suppression).** A large object spanning multiple cells often triggers several high-scoring boxes around the same object. **NMS** cleans up these duplicates, running independently for each class:
+
+1. Sort all predicted boxes for the class by confidence score in descending order.
+2. Pick the highest-scoring box and add it to the final keep list.
+3. Discard any remaining box whose IoU with the picked box is at least a threshold (typically 0.5).
+4. Repeat with the remaining boxes until none are left.
+
+YOLO ran at 45 frames per second with 63.4 mAP on PASCAL VOC 2007 — real-time detection. Its main limitation in v1 was that each grid cell could predict only one class and two boxes, struggling when multiple small objects clustered inside a single cell (such as a flock of birds); later versions (YOLOv2, YOLOv3, and beyond) introduced multi-scale feature pyramids and anchor boxes to address this.
+
+### Comparison table
+
+| Year | Architecture | Weight layers | Parameters (approx.) | Core idea |
+|---|---|---|---:|---|
+| 1998 | LeNet-5 | 7 (excluding input) | 60K ¹ | Conv → pool → fully connected template |
+| 2012 | AlexNet | 8 (5 conv + 3 FC) | 61M ² | ReLU, Dropout, data augmentation, GPUs |
+| 2014 | VGG-16 / VGG-19 | 16 / 19 | 138M / 144M ² | Stacked $3 \times 3$ filters only |
+| 2014 | GoogLeNet | 22 | 6.6M ² | Parallel multi-scale branches, $1 \times 1$ bottlenecks, global average pooling |
+| 2015 | ResNet-18 / 50 / 152 | 18 / 50 / 152 | 11.7M / 25.6M / 60.2M ² | Identity residual connections $\mathbf{y} = g(F(\mathbf{x}) + \mathbf{x})$ |
+| 2017 | Xception | 36 conv layers | 22.9M ³ | Depthwise separable convolutions |
+| 2018 | SE-ResNet-50 | 50 | 28.1M ³ | Squeeze-and-Excitation channel attention |
+| 2016 | YOLO (v1) | 24 conv + 2 FC | not stated ⁴ | Single-pass detection on an $S \times S$ grid with IoU & NMS |
+
+Sources for parameter counts: ¹ summed from the layer tables in the LeNet-5 paper; ² counted directly from `torchvision` 0.29 (`weights=None`, excluding GoogLeNet's training-only auxiliary classifiers), matching the AlexNet (60M) and VGG (138M, 144M) papers; ³ reported in the Xception and SENet papers; ⁴ the YOLOv1 paper does not report total parameter count.
+
+Two big lessons stand out from the table: **parameter count does not grow monotonically with depth** (152-layer ResNet uses less than half the parameters of 16-layer VGG), and almost every architectural innovation after VGG was about **spending parameters more wisely** rather than making models wider.
+
+### Limitations
+
+- **This lesson focuses on architectural ideas.** Practical transfer learning, fine-tuning pretrained backbones, and mobile-first families like MobileNet and EfficientNet are covered in the Computer Vision track.
+- **Parameter count does not equal wall-clock speed.** Actual latency depends on FLOPs, memory bandwidth (activation tensor sizes), and hardware kernel support. For instance, depthwise convolutions have very low arithmetic intensity and can be memory-bound on GPUs unless fused carefully.
+- **YOLOv1 is presented at the conceptual level.** Multi-part detection losses, anchor boxes, and mAP calculation details belong to dedicated object-detection lessons.
+
+## Illustration
+
+The diagram below traces a single `BasicBlock` of ResNet-18. Follow the two paths branching from $\mathbf{x}$: the main path passes through two $3 \times 3$ convolutional layers with BatchNorm, while the identity shortcut carries $\mathbf{x}$ straight around to the addition node $\oplus$ **before** the final ReLU. Because the identity shortcut contains no layers, it adds zero parameters.
+
+{/* FIG: ResidualBlockFigure
+    Idea: a residual block computes two 3x3 convolutions F(x) and adds the input x via a parameter-free identity shortcut before the final ReLU. */}
+
+The table below shows the first Inception module of GoogLeNet (module "3a" in the paper), taking a $28 \times 28 \times 192$ input. Notice the second column: every expensive spatial branch is preceded by a $1 \times 1$ channel-reduction bottleneck.
+
+| Branch | $1 \times 1$ bottleneck | Main operation | Output channels |
+|---|---:|---|---:|
+| $1 \times 1$ | none | $1 \times 1$ conv | 64 |
+| $3 \times 3$ | 192 → 96 | $3 \times 3$ conv | 128 |
+| $5 \times 5$ | 192 → 16 | $5 \times 5$ conv | 32 |
+| Pooling | none | $3 \times 3$ max-pool, then $1 \times 1$ conv | 32 |
+| **Channel concat** | | | **256** |
+
+All four branches preserve the $28 \times 28$ spatial grid, so concatenating them along the channel axis produces a $28 \times 28 \times 256$ output using roughly 159K parameters in total.
+
+## Code examples
+
+The cells below run independently in the browser using NumPy and SciPy (the first cell may take a few extra seconds on its first run while Pyodide loads SciPy).
+
+### Counting parameters across three ideas
+
+The cell below counts parameters (including biases) for four key comparisons from the Theory section: two $3 \times 3$ layers vs. one $5 \times 5$ layer (at 256 channels), an Inception $5 \times 5$ branch with and without a $1 \times 1$ bottleneck, a depthwise separable convolution vs. a standard $3 \times 3$ convolution, and the parameter overhead of an SE block. It also verifies the receptive field of two stacked $3 \times 3$ layers by lighting up a single center pixel in a $9 \times 9$ image, convolving twice with $3 \times 3$ ones, and measuring the nonzero footprint.
+
+<PythonRunner code={paramCountCode} title="Counting parameters: VGG, Inception, Xception, SENet" />
+
+Reading the output:
+
+- **Two 3×3 layers: 1,180,160 parameters vs. one 5×5 layer: 1,638,656.** The ratio is 0.72, matching $18/25$ (biases are negligible). The nonzero footprint after two $3 \times 3$ convolutions is **5×5**, confirming that two stacked $3 \times 3$ layers have a $5 \times 5$ receptive field.
+- **Inception 5×5 branch: 153,632 parameters directly vs. 15,920 with a 16-channel 1×1 bottleneck** — nearly a 10× reduction, matching our hand calculation.
+- **Standard 3×3 conv: 590,080 parameters vs. depthwise separable: 68,352** — an 8.6× reduction, right in line with $1/(1/256 + 1/9) \approx 8.7$.
+- **An SE block with $r = 16$ costs just 8,464 parameters**, only 1.4% of a single $3 \times 3$ conv layer at the same channel width. That is why SENet can attach an SE block to every residual block while adding only ~10% to the total model size.
+
+### IoU and NMS in NumPy
+
+The cell below implements `iou` and `nms` following the exact steps from the YOLO section on 5 example bounding boxes for a single class: three overlapping boxes around a cat (boxes 0–2) and two overlapping boxes around a dog (boxes 3–4). Each box is formatted as $(x_1, y_1, x_2, y_2)$ (top-left and bottom-right corners). `iou` computes the IoU of one box against an array of boxes simultaneously, and `nms` returns the indices of the kept boxes in order of selection.
+
+<PythonRunner code={iouNmsCode} title="IoU and Non-Maximum Suppression (NMS) on 5 boxes" />
+
+Reading the output:
+
+- **IoU of box 0 with boxes 1..4 is `[0.75, 0.59, 0.0, 0.0]`.** The value 0.75 matches our hand calculation in the Theory section. Box 2 is shifted further away so its IoU with box 0 is 0.59. The two dog boxes (3 and 4) do not overlap box 0 at all (IoU = 0), and have an IoU of 0.65 with each other.
+- **With threshold 0.5, NMS keeps `[0, 3]`**: the highest-scoring cat box (0.90) and the highest-scoring dog box (0.85). All three duplicate boxes have IoU $\ge 0.5$ with one of the kept boxes and are suppressed, leaving exactly one box per object.
+- **With threshold 0.7, NMS keeps `[0, 3, 4, 2]`**: only box 1 (IoU 0.75 with box 0) exceeds 0.7 and gets suppressed. Box 4 (IoU 0.65 with box 3) and box 2 (IoU 0.59 with box 0) survive, double-counting both animals. The NMS threshold is a hyperparameter: setting it too high leaves duplicate detections.
+
+### A residual block in PyTorch
+
+In PyTorch, a ResNet `BasicBlock` applies two $3 \times 3$ convolutions with BatchNorm and adds the shortcut tensor `x + out` before the final ReLU (using a $1 \times 1$ stride-2 projection shortcut whenever spatial dimensions or channel counts change).
+
+{/* LOCALCODE_PENDING */}
+
+## Common pitfalls
+
+:::caution[Confusing the degradation problem in deep plain networks with overfitting]
+Overfitting means low training error and high test error. The degradation problem that ResNet solved is that a 56-layer plain network has **higher training error** than a 20-layer plain network — an optimization failure, not a generalization failure. Adding Dropout or collecting more data will not fix it. Always inspect your training loss curve first: if a deeper network fits the training set worse than a shallower one, reach for residual connections, BatchNorm, and proper initialization before adding regularization.
+:::
+
+:::caution[Treating a 1×1 convolution as a no-op]
+While a $1 \times 1$ kernel does not aggregate neighboring pixels spatially, it **mixes information across all channels** at each pixel via a learned $C_{\text{out}} \times C_{\text{in}}$ matrix multiplication, followed by a nonlinear activation. That cross-channel projection is what powers Inception bottlenecks, ResNet bottleneck blocks, and the pointwise step of Xception. (Stacking two $1 \times 1$ layers with no activation in between, however, really would collapse into a single matrix.)
+:::
+
+:::caution[Adding a residual shortcut when tensor shapes do not match]
+The elementwise sum $F(\mathbf{x}) + \mathbf{x}$ requires identical batch size, channel count, height, and width. At the first block of a stage where the main branch uses `stride=2` and doubles the channels, the shortcut branch must project $\mathbf{x}$ with a $1 \times 1$ `stride=2` convolution (plus BatchNorm) to match shapes. Even worse than a shape error is accidental broadcasting (for example, if one tensor has 1 channel), which runs silently while corrupting the architecture.
+:::
+
+:::caution[Picking an NMS threshold without considering crowded scenes]
+NMS looks only at box overlap (IoU) and has no way of knowing whether two overlapping boxes enclose the same object or two objects standing side by side. A low threshold (e.g., 0.3) aggressively removes duplicates but suppresses true detections in crowds; a high threshold (e.g., 0.7) leaves duplicate boxes around single objects, as shown in the second code cell. Tune the NMS threshold on your validation set, and always run NMS **per class** so a "person" box never suppresses a "bicycle" box just because the person is riding the bicycle.
+:::
+
+## Quick check
+
+{/* Questions live in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Every landmark CNN builds on LeNet-5's conv → pool → classifier template by introducing a targeted architectural idea. AlexNet (2012) scaled it up with ReLU, Dropout, data augmentation, and GPUs. VGG (2014) standardized on stacked $3 \times 3$ filters: $L$ layers achieve a $(1 + 2L) \times (1 + 2L)$ receptive field with fewer parameters ($18C^2$ vs. $25C^2$ for $L = 2$) and more nonlinearity.
+- A $1 \times 1$ convolution acts as a per-pixel fully connected layer across channels, compressing channel depth before expensive $3 \times 3$ or $5 \times 5$ convolutions (GoogLeNet Inception, ResNet bottlenecks). Depthwise separable convolutions (Xception) factor spatial filtering and channel mixing into two steps, cutting parameters by nearly $k^2\times$.
+- ResNet learns a residual mapping $\mathbf{y} = g(F(\mathbf{x}) + \mathbf{x})$: identity shortcuts make the identity mapping trivial to learn and create an unimpeded gradient highway across 100+ layers. SENet adds a lightweight Squeeze-and-Excitation block that dynamically weights each channel $s_c \in (0, 1)$ per image.
+- YOLO frames object detection as a single regression pass over an $S \times S$ grid, predicting $B$ boxes with confidence scores and $C$ class probabilities per cell. IoU measures box overlap, and NMS suppresses duplicate boxes above an IoU threshold.
+
+**Further reading:**
+
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. (2023). [*Dive into Deep Learning*, Chapter 8: Modern Convolutional Neural Networks](https://www.d2l.ai/chapter_convolutional-modern/index.html) ([Vietnamese translation](https://d2l.aivivn.com/chapter_convolutional-modern/index_vn.html)). Full implementations of AlexNet, VGG, NiN, GoogLeNet, ResNet, and DenseNet.
+- He, K., Zhang, X., Ren, S., Sun, J. (2015). [*Deep Residual Learning for Image Recognition*](https://arxiv.org/abs/1512.03385), CVPR 2016. Sections 1 & 3 and Figure 1 introduce the degradation problem, residual learning, and bottleneck blocks.
+- Simonyan, K., Zisserman, A. (2014). [*Very Deep Convolutional Networks for Large-Scale Image Recognition*](https://arxiv.org/abs/1409.1556), ICLR 2015. Section 2.3 derives the receptive field and parameter savings of stacked $3 \times 3$ convolutions.
+- Szegedy, C. et al. (2014). [*Going Deeper with Convolutions*](https://arxiv.org/abs/1409.4842), CVPR 2015. Section 4 and Table 1 detail the Inception module and $1 \times 1$ channel reduction.
+- Redmon, J., Divvala, S., Girshick, R., Farhadi, A. (2016). [*You Only Look Once: Unified, Real-Time Object Detection*](https://www.cv-foundation.org/openaccess/content_cvpr_2016/html/Redmon_You_Only_Look_CVPR_2016_paper.html), CVPR 2016. Section 2 explains the $S \times S$ grid, bounding-box encoding, and limitations of YOLOv1.
+- Other original papers: LeCun, Y. et al. (1998), [*Gradient-Based Learning Applied to Document Recognition*](http://yann.lecun.com/exdb/publis/pdf/lecun-01a.pdf) (PDF); Krizhevsky, A., Sutskever, I., Hinton, G. E. (2012), [*ImageNet Classification with Deep Convolutional Neural Networks*](https://papers.nips.cc/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html), NeurIPS 2012; Chollet, F. (2017), [*Xception: Deep Learning with Depthwise Separable Convolutions*](https://arxiv.org/abs/1610.02357), CVPR 2017; Hu, J. et al. (2018), [*Squeeze-and-Excitation Networks*](https://arxiv.org/abs/1709.01507), CVPR 2018.
+
+<LessonProgress />

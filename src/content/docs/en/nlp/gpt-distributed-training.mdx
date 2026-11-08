@@ -1,0 +1,391 @@
+---
+title: GPT and Distributed Training
+description: GPT learns to predict the next token at every position simultaneously. When one GPU is not enough, use data parallelism, ring all-reduce, gradient accumulation, and mixed precision.
+quiz:
+  - question: 'You slice a 513-token passage into a 512-token input and a 512-token target (the input shifted by one position). How many loss terms does a single forward pass of GPT produce? And roughly how many for BERT masking 15% of a 512-token sequence?'
+    options:
+      - 'GPT 1, BERT 1'
+      - 'GPT 1, BERT about 77'
+      - 'GPT 512, BERT about 77'
+      - 'GPT 512, BERT 512'
+    answer: 2
+    explanation: 'Thanks to the causal mask, position $t$ only sees $x_1, \dots, x_t$, so predictions at all 512 positions are valid and contribute to the loss. BERT attends bidirectionally—each position can see its own token—so it only computes loss at masked positions: $0.15 \times 512 \approx 77$. Answering 1 for GPT confuses training with autoregressive generation, where only the final position''s logits are used at each step.'
+  - question: 'Two workers compute gradients for a batch of 40 samples. Worker 1 gets 30 samples, and the gradient of the mean loss on its shard is $\mathbf{g}_1$. Worker 2 gets 10 samples, with gradient $\mathbf{g}_2$. What is the gradient of the mean loss across all 40 samples?'
+    options:
+      - '$\frac{1}{2}(\mathbf{g}_1 + \mathbf{g}_2)$'
+      - '$0.75\,\mathbf{g}_1 + 0.25\,\mathbf{g}_2$'
+      - '$\mathbf{g}_1 + \mathbf{g}_2$'
+      - '$30\,\mathbf{g}_1 + 10\,\mathbf{g}_2$'
+    answer: 1
+    explanation: 'The sum of gradients over the first 30 samples is $30\,\mathbf{g}_1$, and over the remaining 10 samples is $10\,\mathbf{g}_2$. Dividing by 40 gives $0.75\,\mathbf{g}_1 + 0.25\,\mathbf{g}_2$. An unweighted average is only right when the shards have equal size; here it would give the 10-sample shard the same weight as the 30-sample shard. The last option is the unnormalized sum, missing the division by 40.'
+  - question: 'You train with DDP on 16 GPUs. Each GPU runs a micro-batch of 8 sequences and accumulates gradients across 4 micro-batches before stepping the optimizer. How many sequences contribute to a single optimizer update?'
+    options: ['8', '32', '128', '512']
+    answer: 3
+    explanation: 'Each GPU accumulates $8 \times 4 = 32$ sequences before updating, and all-reduce averages across all 16 GPUs, so the effective batch size is $32 \times 16 = 512$ sequences. Answering 128 forgets the 4 accumulation steps; answering 32 forgets the other GPUs. The effective batch size is the number that matters when tuning the learning rate.'
+  - question: 'A model''s gradients take 2 GB. With ring all-reduce across 8 GPUs, roughly how much data does each GPU send during one all-reduce? What if you scale up to 64 GPUs?'
+    options:
+      - 'About 3.5 GB; at 64 GPUs about 3.94 GB—nearly unchanged'
+      - 'About 14 GB; at 64 GPUs $8\times$ more'
+      - 'Exactly 2 GB regardless of the number of GPUs'
+      - 'About 0.25 GB; at 64 GPUs $8\times$ smaller'
+    answer: 0
+    explanation: 'Each GPU sends $\frac{2(N-1)}{N}$ times the gradient size: $\frac{2 \cdot 7}{8} \times 2 = 3.5$ GB for $N = 8$, and $\frac{2 \cdot 63}{64} \times 2 \approx 3.94$ GB for $N = 64$. Because that per-GPU volume barely changes as $N$ grows, the ring algorithm scales cleanly. 14 GB is the cost of sending the entire gradient to every other GPU directly, while 0.25 GB is just a single chunk before multiplying by $2(N-1)$ steps.'
+  - question: 'You want to train a 7B-parameter model with Adam and mixed precision (16 bytes per parameter, excluding activations) on 8 GPUs with 80 GB of memory each. Which statement is true?'
+    options:
+      - 'Standard data parallelism is enough: 112 GB split across 8 GPUs is 14 GB per GPU'
+      - 'Using gradient accumulation with a tiny micro-batch makes it fit on a single GPU'
+      - 'Standard data parallelism will not fit because every GPU holds a full 112 GB copy; ZeRO stage 3 or FSDP shards it down to about 14 GB per GPU'
+      - 'There is no way to train this model on these 8 GPUs'
+    answer: 2
+    explanation: 'Standard data parallelism replicates the full model parameters, gradients, and optimizer state on every GPU, requiring $16 \times 7 = 112$ GB per GPU—exceeding 80 GB. The first option is the most common misconception: data parallelism splits the batch, not the model. ZeRO stage 3 or FSDP shards all three across the 8 GPUs down to $112/8 = 14$ GB each. Gradient accumulation only shrinks activation memory; the 112 GB of model states does not depend on micro-batch size.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import ParallelismFigure from '@components/figures/ParallelismFigure.astro';
+import shardCode from '@code/nlp/gpt-distributed-training/shard-gradients.en.py?raw';
+import ringCode from '@code/nlp/gpt-distributed-training/ring-allreduce.en.py?raw';
+import ddpCode from '@code/nlp/gpt-distributed-training/ddp.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand GPT as a **causal language model**: a decoder-only Transformer trained to model $p(x_t \mid x_{<t})$ whose causal mask yields a valid loss at every position in a single forward pass. Explain how GPT-1, GPT-2, and GPT-3 differ, and what **scaling laws** say.
+- Estimate the memory footprint and training time of a large language model to see why **distributed training** is unavoidable.
+- Derive why, in **data parallelism**, the average of shard gradients equals the full-batch gradient—and when an unweighted average goes wrong. Understand **ring all-reduce** and its $\frac{2(N-1)}{N}$ communication cost.
+- Use **gradient accumulation**, **mixed precision**, and PyTorch's `DistributedDataParallel`, and recognize when you need tensor parallelism, pipeline parallelism, or ZeRO/FSDP.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+**Self-attention** lets each position gather information from other positions: it scores every pair of positions by the dot product between a **query** and a **key**, turns scores into weights via softmax, and takes a weighted average of the **values**. A **causal mask** adds $-\infty$ to every pair where the key position comes after the query position, so position $t$ only sees tokens $1$ through $t$. A GPT **decoder block** consists of causally masked self-attention followed by a feed-forward network (FFN), each with layer normalization and a residual connection. [Building Your First LLM](/en/llm/build-first-llm/) built all of these pieces in PyTorch, along with cross-entropy loss and a tiny character-level GPT trained on *The Tale of Kieu*.
+:::
+
+## Intuition
+
+### One model, one job: continue the text
+
+Cover the last word of the line "Trăm năm trong cõi người ..." ("A hundred years in this human ...") and guess what comes next. That is the entire pre-training task of GPT: given the preceding text, predict the next token. No human annotator labels the data. The text serves as its own label, so as much text as you can collect is as much training data as you have.
+
+The surprise of 2018–2020 was how far you could get simply by doing that **at a much larger scale**: more parameters, more text. GPT-2 had 1.5 billion parameters. GPT-3 had 175 billion, trained on 300 billion tokens.
+
+### A single GPU is not enough
+
+Let us do the arithmetic for the largest GPT-2 model, at 1.5 billion parameters. When training with Adam and mixed precision, each parameter takes 16 bytes (we will count this in the Theory section). Parameters, gradients, and optimizer states alone therefore require $16 \times 1.5 \times 10^9 = 24 \times 10^9$ bytes, or 24 GB. A 24 GB GPU is completely full before storing a single activation (the intermediate layer outputs kept around for the backward pass).
+
+For GPT-3, the paper reports a total training compute of roughly $3.14 \times 10^{23}$ floating-point operations. An NVIDIA A100 GPU peaks at $312 \times 10^{12}$ operations per second in 16-bit precision. Running non-stop at that theoretical peak, a single A100 would take about $10^9$ seconds—**nearly 32 years**. In practice it would take even longer, since no GPU sustains 100% peak utilization.
+
+### Splitting the work like splitting a customer survey
+
+Suppose you want the average satisfaction score of 100 customers. Having one person interview all 100 takes too long. Instead, four people each interview 25 customers, compute the average of their own 25, and then meet to average their four numbers. The result **is identical** to the average across all 100 customers—because everyone interviewed the exact same number of people. If one person interviewed 70 customers while the other three interviewed 10 each, a plain average of the four numbers would be skewed: a 10-customer group would carry the same weight as the 70-customer group.
+
+Data parallelism does the exact same thing with gradients. Every GPU holds a copy of the model, computes the gradient on its own slice of the batch, and then the GPUs "meet" to average their gradients. The engineering question is how to average those gradients quickly when each gradient vector weighs gigabytes.
+
+The problem of this lesson is: **what does GPT learn, and why does a single pass learn at every position at once? And when the model and data outgrow a single GPU, how do we split training across many GPUs while keeping the math identical to training on one machine?**
+
+## Theory
+
+### GPT: causal language modeling
+
+Let a text passage be a sequence of tokens $x_1, \dots, x_L$. By the chain rule of probability, $p(x_1, \dots, x_L) = \prod_{t=1}^{L} p(x_t \mid x_{<t})$. GPT models each factor $p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$ with a stack of Transformer decoder blocks. Because each prediction depends only on the past, this is called a **causal** language model.
+
+The training objective is the mean cross-entropy loss across all positions:
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = -\frac{1}{L} \sum_{t=1}^{L} \ln p_{\boldsymbol{\theta}}(x_{t+1} \mid x_1, \dots, x_t)
+$$
+
+Given a chunk of $L + 1$ tokens, the input is $x_1, \dots, x_L$ and the target is $x_2, \dots, x_{L+1}$—the input **shifted left by one position**. The output at position $t$ predicts token $t + 1$.
+
+Why does a single forward pass yield all $L$ loss terms at once? The causal mask guarantees that the hidden representation at position $t$ depends only on $x_1, \dots, x_t$. Position $t$ cannot peek at the answer $x_{t+1}$, so all $L$ predictions are valid training examples simultaneously. A 1,024-token passage provides 1,024 learning signals from one forward pass and one backward pass. (Generating text at inference time is different: only the logits at the final position are used to sample the next token, which is then appended for the next step. See [Building Your First LLM](/en/llm/build-first-llm/) for a line-by-line implementation.)
+
+### From GPT-1 to GPT-3
+
+| Model | Year | Size | Training data | Key shift |
+|---|---|---|---|---|
+| GPT-1 (Radford et al.) | 2018 | 12 blocks, $D = 768$, context 512 | BooksCorpus, >7,000 books | Pre-train, then fine-tune separately per task |
+| GPT-2 (Radford et al.) | 2019 | up to 1.5B params, context 1,024 | WebText, ~40 GB | Express tasks as text prompts; evaluate zero-shot (no examples) |
+| GPT-3 (Brown et al.) | 2020 | 175B params, context 2,048 | 300B tokens | In-context learning: zero-shot, one-shot, few-shot with no weight updates |
+
+The architecture barely changed across the three generations. What changed was scale—and how the model is used: from task-specific fine-tuning to specifying the task directly inside the prompt. [The GPT Family and Multi-Task Fine-Tuning](/en/llm/gpt-family-finetuning/) tells the full story of this progression and the instruction-tuning stage that followed. For GPT-3 specifically, the paper notes (Section 2.3) that to fit the model in memory, training combined model parallelism within each matrix multiply and model parallelism across the network's layers—the two model-parallel strategies we will meet at the end of this section.
+
+**Scaling laws.** Kaplan et al. (2020) trained models across many orders of magnitude and showed that cross-entropy loss decreases as a smooth **power law** with model size, dataset size, and compute budget. They also popularized the standard rule of thumb: training costs roughly $6\Psi$ FLOPs per token, where $\Psi$ is the number of parameters. Checking this on GPT-3 gives $6 \times 175 \times 10^9 \times 300 \times 10^9 \approx 3.15 \times 10^{23}$ FLOPs, matching the paper's $3.14 \times 10^{23}$.
+
+Hoffmann et al. (2022) asked the follow-up question: given a fixed compute budget, should you spend it on a larger model or on more training tokens? Their answer was to scale **both in equal proportion**. Their 70B-parameter Chinchilla model trained on 1.4 trillion tokens—roughly 20 tokens per parameter—and outperformed the 280B Gopher model trained with the same compute budget. By that yardstick, GPT-3 (at roughly 1.7 tokens per parameter) was heavily oversized for the amount of data it saw.
+
+**GPT vs. BERT.** BERT ([BERT](/en/nlp/bert/)) is an encoder-only Transformer with bidirectional attention trained to predict masked tokens. Because every position sees both sides, its representations are richer for understanding tasks like classification, sequence labeling, and extractive QA. In exchange, BERT only gets a loss signal from the ~15% of positions that are masked, and cannot naturally generate text from left to right. GPT gets a loss signal at 100% of positions, and left-to-right generation is the exact task it was trained on. A full comparison across all three Transformer families awaits in [Advanced Transformers](/en/nlp/advanced-transformers/).
+
+### Where the memory goes
+
+We counted this table in [The LLaMA Family](/en/llm/llama-family/) and recap it here. Following the accounting in the ZeRO paper (Rajbhandari et al., 2020), training with Adam and mixed precision requires per parameter:
+
+| Stored quantity | Bytes per parameter |
+|---|---:|
+| 16-bit parameter | 2 |
+| 16-bit gradient | 2 |
+| FP32 master copy of parameter | 4 |
+| Adam first moment / momentum (FP32) | 4 |
+| Adam second moment / variance (FP32) | 4 |
+| **Total** | **16** |
+
+The three FP32 entries make up the **optimizer state**. A model with $\Psi$ parameters therefore needs $16\Psi$ bytes just for model states, before any activations. For 1.5B GPT-2 that is 24 GB; for 175B GPT-3 it is roughly 2.8 TB—requiring at least thirty-five 80 GB GPUs just to hold the weights and optimizer.
+
+Notice there are two distinct bottlenecks: **training is too slow** (one GPU cannot crunch the tokens fast enough) and **the model does not fit** (one GPU cannot hold the bytes). Data parallelism solves the first problem. The second requires sharding the model itself, covered at the end of this section.
+
+### Data parallelism: the mean of shard gradients equals the full-batch gradient
+
+Suppose we have $N$ GPUs, which we call $N$ workers indexed by $k = 1, \dots, N$. Every worker holds **a complete, identical copy** of the parameters $\boldsymbol{\theta}$. A batch of $m$ samples is partitioned into $N$ equal **shards** $S_1, \dots, S_N$, each containing $B = m/N$ samples. (For GPT, one sample is one text chunk.)
+
+Let $\ell_i(\boldsymbol{\theta})$ be the loss on sample $i$. The full-batch loss is the average:
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = \frac{1}{m} \sum_{i=1}^{m} \ell_i(\boldsymbol{\theta})
+$$
+
+Worker $k$ only sees its own shard $S_k$. It computes the mean loss on that shard and the corresponding gradient:
+
+$$
+\mathcal{L}_k = \frac{1}{B} \sum_{i \in S_k} \ell_i, \qquad \mathbf{g}_k = \nabla \mathcal{L}_k = \frac{1}{B} \sum_{i \in S_k} \nabla \ell_i
+$$
+
+We want to show that the average of the worker gradients $\mathbf{g}_k$ equals the full-batch gradient $\nabla \mathcal{L}$.
+
+**Step 1: the gradient of a sum is the sum of the gradients.** By linearity of differentiation:
+
+$$
+\nabla \mathcal{L} = \frac{1}{m} \sum_{i=1}^{m} \nabla \ell_i
+$$
+
+**Step 2: group the sum by shard.** Because every sample belongs to exactly one shard, the sum over all $m$ samples splits into $N$ partial sums:
+
+$$
+\nabla \mathcal{L} = \frac{1}{m} \sum_{k=1}^{N} \sum_{i \in S_k} \nabla \ell_i
+$$
+
+**Step 3: substitute each worker's gradient.** From the definition of $\mathbf{g}_k$, the inner sum $\sum_{i \in S_k} \nabla \ell_i$ equals $B\,\mathbf{g}_k$. Substituting this in and using $B/m = 1/N$:
+
+$$
+\begin{aligned}
+\nabla \mathcal{L} &= \frac{1}{m} \sum_{k=1}^{N} B\,\mathbf{g}_k \\
+&= \frac{B}{m} \sum_{k=1}^{N} \mathbf{g}_k \\
+&= \frac{1}{N} \sum_{k=1}^{N} \mathbf{g}_k
+\end{aligned}
+$$
+
+So the workers only need to communicate so that every worker obtains the **average** of the $N$ gradients $\mathbf{g}_k$. Then every worker runs the exact same Adam step starting from the exact same parameters with the exact same gradient, keeping all $N$ copies in lockstep. Up to floating-point rounding, the update is identical to a single machine processing all $m$ samples at once.
+
+**When the shards are uneven**, let $B_k$ be the number of samples on worker $k$. Step 3 gives $\sum_{i \in S_k} \nabla \ell_i = B_k\,\mathbf{g}_k$, so:
+
+$$
+\nabla \mathcal{L} = \sum_{k=1}^{N} \frac{B_k}{m}\,\mathbf{g}_k
+$$
+
+This is a **weighted** average, weighted by each shard's share of the batch. The plain average $\frac{1}{N}\sum_k \mathbf{g}_k$ is only exact when all $B_k$ are equal, just like the customer survey in the Intuition section. PyTorch's `DistributedSampler` pads the dataset with a few repeated indices by default so every worker gets the exact same number of samples (and runs the exact same number of steps). With language models there is a further subtlety: if each sample's loss is averaged over its non-padding tokens, and different shards contain different numbers of real tokens, then "equal size" must be weighted by token count rather than sequence count.
+
+### All-reduce and the ring algorithm
+
+The collective operation where every worker ends up with the sum (or average) of all workers' vectors is called **all-reduce**. The naive approach sends every worker's gradient of size $G$ to a central parameter server, sums them there, and broadcasts the result back. The central server must receive $(N-1)G$ bytes and send back $(N-1)G$ bytes: the more workers you add, the worse that single node bottlenecks.
+
+**Ring all-reduce** arranges the $N$ workers in a logical ring where each worker only sends to its right neighbor. Each worker's gradient vector is sliced into $N$ equal chunks of size $G/N$.
+
+1. **Reduce-scatter**, $N - 1$ steps. In each step, every worker simultaneously sends one chunk to its right neighbor, and the receiver adds the incoming chunk into its own matching chunk. As chunks travel around the ring, partial sums accumulate. After $N - 1$ steps, each worker holds the **complete sum** of one distinct chunk.
+2. **All-gather**, another $N - 1$ steps. Each worker forwards its fully summed chunk around the ring, and receivers overwrite their local chunk with the incoming one. After $N - 1$ steps, every worker holds the complete sum for all $N$ chunks.
+
+With 3 GPUs and three chunks A, B, C—writing A0 for GPU 0's chunk A, A01 for A0 + A1, and A012 for the full sum:
+
+| Step | GPU 0 sends | GPU 1 sends | GPU 2 sends | State after this step |
+|---|---|---|---|---|
+| Reduce-scatter 1 | A0 | B1 | C2 | GPU 1 has A01, GPU 2 has B12, GPU 0 has C20 |
+| Reduce-scatter 2 | C20 | A01 | B12 | GPU 0 has B012, GPU 1 has C012, GPU 2 has A012 |
+| All-gather 1 | B012 | C012 | A012 | Every GPU has two fully summed chunks |
+| All-gather 2 | A012 | B012 | C012 | Every GPU has all three fully summed chunks |
+
+**Counting the bytes sent.** There are $2(N-1)$ steps in total, and in each step a worker sends one chunk of size $G/N$. The total data sent by each worker is:
+
+$$
+2(N-1) \cdot \frac{G}{N} = \frac{2(N-1)}{N}\,G
+$$
+
+This is always strictly less than $2G$ and **hardly grows at all** as you add more workers: $1.5\,G$ at $N = 4$, and $1.97\,G$ at $N = 64$. Every link in the ring carries traffic simultaneously at every step, with no central bottleneck. Patarasuk and Yuan (2009) proved that this volume is bandwidth-optimal for large buffers. Baidu (Gibiansky, 2017) brought ring all-reduce to deep learning, and Horovod (Sergeev and Del Balso, 2018) popularized it across TensorFlow and PyTorch.
+
+Try the numbers on 1.5B GPT-2, where 16-bit gradients weigh 3 GB. Across 64 GPUs connected by 100 Gb/s links (12.5 GB/s), each GPU sends about $1.97 \times 3 \approx 5.9$ GB, taking roughly 0.47 seconds per step. A central server would have to receive $63 \times 3 = 189$ GB over its link—about 15 seconds (ignoring latency). Because the number of steps $2(N-1)$ does grow linearly with $N$, per-step network latency eventually matters at very large GPU counts; libraries like NCCL switch to hybrid ring/tree algorithms in that regime.
+
+PyTorch's `DistributedDataParallel` (DDP) goes one step further and **hides** communication behind computation: it groups parameters into buckets and launches a bucket's all-reduce as soon as the backward pass finishes computing that bucket's gradients, while earlier layers are still backpropagating (Li et al., 2020).
+
+### Gradient accumulation
+
+A large batch may not fit in a single GPU's memory because activation memory scales linearly with batch size. Our shard derivation above gives an immediate escape hatch without buying more GPUs: split the batch into $A$ **micro-batches** run **sequentially** on the same GPU, accumulate $\frac{1}{A}\mathbf{g}_a$ from each micro-batch, and only step the optimizer once at the end. Mathematically, it is the exact same average as data parallelism, replacing "$N$ workers in parallel" with "$A$ micro-batches in series." The trade-off is wall-clock time: $A$ sequential passes instead of one.
+
+Combining both techniques, the **effective batch size** of a single optimizer step is:
+
+$$
+\text{effective batch size} = (\text{micro-batch per GPU}) \times A \times N
+$$
+
+In PyTorch, `loss.backward()` **adds** into `.grad` rather than overwriting it, so gradient accumulation is simply calling `backward()` $A$ times (with each micro-batch loss divided by $A$) before calling `optimizer.step()` and `zero_grad()`. When combined with DDP, wrap the first $A - 1$ micro-batches in `with model.no_sync():` so DDP only runs all-reduce on the final micro-batch.
+
+### Mixed precision
+
+Computing in 16-bit floating point runs much faster and halves activation memory on GPUs with Tensor Cores. However, 16-bit numbers have two pitfalls:
+
+- **FP16** (5 exponent bits, 10 mantissa bits) can only represent positive numbers between roughly $6 \times 10^{-8}$ and $65\,504$. A gradient of $10^{-8}$ underflows to 0.
+- The gap between 1 and the next representable FP16 number is about $0.001$. Adding a weight update of $10^{-4}$ to a weight of 1.0 rounds right back to 1.0: the update vanishes completely.
+
+Micikevicius et al. (2017; ICLR 2018) showed how to run the forward and backward passes in 16-bit while preserving full-precision accuracy using three techniques that are now standard:
+
+1. **FP32 master weights:** optimizer updates are applied to a 32-bit master copy of the weights so tiny updates are never lost. The 16-bit weights used in the forward and backward passes are cast from the master copy after each step.
+2. **Loss scaling:** multiply the loss by a scale factor $s$ (say $s = 1024$) before calling `backward()`. By the chain rule, every gradient is multiplied by $s$ as well, shifting values like $10^{-8}$ up to $\sim 10^{-5}$ where FP16 can represent them cleanly. Before stepping the optimizer, divide the gradients back by $s$ in FP32.
+3. **FP32 accumulation:** products of FP16 numbers inside matrix multiplications and dot products are accumulated into an FP32 register before rounding the result back to 16-bit.
+
+While the original paper tested a fixed scale $s$ (noting in its conclusion that $s$ could be adjusted automatically), modern frameworks use dynamic loss scaling: if any gradient overflows (`inf` or `nan`), skip the optimizer step and halve $s$; if many steps pass without overflow, double $s$.
+
+**BF16** (8 exponent bits, 7 mantissa bits) has the exact same exponent range as FP32, so it rarely underflows or overflows and generally needs no loss scaling. In exchange, it has only 2–3 decimal digits of precision, so FP32 master weights are still essential. In PyTorch, 16-bit forward computation is enabled with `torch.autocast`, and dynamic loss scaling for FP16 is handled by `torch.amp.GradScaler`.
+
+### When the model does not fit on a single GPU
+
+Data parallelism copies the **entire** model onto every GPU, so it cannot help when $16\Psi$ bytes exceeds a single GPU's memory. At that point you must partition the model itself or its training states. The three strategies below are covered with full equations and worked examples in [The LLaMA Family](/en/llm/llama-family/); here we summarize the core idea of each:
+
+- **Tensor parallelism** (Megatron-LM; Shoeybi et al., 2019): split **individual weight matrices inside each layer** across GPUs—for instance, each GPU holds half the columns of the first FFN matrix. Because GPUs must synchronize activations inside every single layer, tensor parallelism requires ultra-fast interconnects (typically NVLink within a single node).
+- **Pipeline parallelism** (GPipe; Huang et al., 2019): slice the model **by depth**, assigning each GPU a contiguous stage of layers. A batch is split into micro-batches that stream through the stages assembly-line style, leaving a small idle fraction called the **pipeline bubble** while later stages wait at the start and earlier stages wait at the end.
+- **ZeRO** (Rajbhandari et al., 2020) and **FSDP** (Fully Sharded Data Parallel in PyTorch): keep the data-parallel execution model, but instead of storing $N$ redundant copies, shard the optimizer states (Stage 1), gradients (Stage 2), and parameters themselves (Stage 3) across the $N$ GPUs. At Stage 3, each GPU holds only $16\Psi/N$ bytes; before a layer runs, GPUs all-gather that layer's parameter shards on the fly and free them right after.
+
+Large training runs combine all three ("3D parallelism"): tensor parallelism within a node, pipeline parallelism across nodes, and data parallelism / FSDP on the outside.
+
+:::note[Key takeaway]
+GPT learns $p(x_t \mid x_{<t})$; its causal mask yields a valid loss at all $L$ positions in a single pass, with targets equal to the input shifted by one position. In data parallelism, $\nabla\mathcal{L} = \sum_k \frac{B_k}{m}\mathbf{g}_k$, which simplifies to $\frac{1}{N}\sum_k \mathbf{g}_k$ when shards are equal. Ring all-reduce sends $\frac{2(N-1)}{N}G$ per worker—nearly independent of $N$. Gradient accumulation computes the same average sequentially. Mixed precision computes in 16-bit, keeps FP32 master weights, and scales the loss by $s$ for FP16. When a model outgrows one GPU, shard matrices (tensor), layers (pipeline), or states (ZeRO/FSDP).
+:::
+
+### Limitations
+
+- **Bigger batches are not automatically better.** Data parallelism preserves the exact gradient of the combined batch, but adding GPUs increases the effective batch size. Very large batches typically require retuning the learning rate and using **learning-rate warmup**—gradually ramping $\eta$ up over initial steps (see the first box under Common pitfalls).
+- **The code example runs 2 processes on CPU.** It demonstrates the exact mechanics of DDP, not multi-GPU throughput. Serving large models across multiple GPUs at inference time is covered in [Deploying LLMs: Multi-GPU and Distributed Serving](/en/llm/llm-deployment/).
+- **Architectural improvements after GPT-3** (RoPE, efficient attention, KV caching) are covered in [Advanced Transformers](/en/nlp/advanced-transformers/) and [The LLaMA Family](/en/llm/llama-family/).
+
+## Illustration
+
+The figure below places the three parallelism axes side by side on a 4-layer model across 2 GPUs. This lesson focuses on the top row, data parallelism: notice how each GPU holds **all 4 layers** and only exchanges gradients, whereas the bottom two rows slice the model itself.
+
+{/* FIG: data, tensor, and pipeline parallelism split three different things: the data batch, the matrices inside a layer, and the layers themselves. */}
+<ParallelismFigure />
+
+The table below summarizes what each strategy holds per GPU and what it communicates:
+
+| Strategy | What each GPU holds | What is communicated, and when | Bottleneck solved |
+|---|---|---|---|
+| Data parallelism (DDP) | Full model, $1/N$ of the batch | All-reduce gradients, once per optimizer step | Training speed |
+| Gradient accumulation | Full model, one micro-batch at a time | Nothing (runs on 1 GPU) | Batch activations exceed memory |
+| ZeRO / FSDP | $1/N$ of parameters, gradients, optimizer state | All-gather parameters per layer, reduce-scatter gradients | Model states exceed 1 GPU, while still splitting the batch |
+| Tensor parallelism | A slice of every layer's weight matrices | Layer activations, inside every layer | Individual layers too wide |
+| Pipeline parallelism | A contiguous group of layers | Boundary activations and gradients between stages | Model too deep for 1 GPU |
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the two NumPy cells with Python 3.14 and NumPy 2.4 (bundled in Pyodide), and the DDP script with Python 3.14 and PyTorch 2.14 on CPU (Windows 11). The two NumPy cells run independently right on this page. The DDP script spawns multiple OS processes and requires PyTorch, so run it on your machine.
+
+### Averaging shard gradients
+
+The cell below sets up a small linear regression problem: a batch of 32 samples, 3 features, and mean squared error loss as in [Linear Regression](/en/ml/linear-regression/). It compares the full-batch gradient against three ways of splitting the batch: 4 workers with 8 samples each (plain average); 1 machine running 4 sequential micro-batches and accumulating $\mathbf{g}/4$; and 4 uneven shards of 20, 4, 4, and 4 samples.
+
+<PythonRunner code={shardCode} title="Shard gradients vs. full-batch gradient" />
+
+Reading the output:
+
+- **Data parallel** and **gradient accumulation** both match the full-batch gradient to within $4.4 \times 10^{-16}$—pure `float64` rounding error, confirming our three-step derivation in the Theory section.
+- **Uneven shards, plain mean:** off by 0.629, when the largest component of the true gradient (last line) is only 4.940. A ~13% error is not rounding noise—gradient descent will step in the wrong direction.
+- **Uneven shards, weighted mean** $\frac{B_k}{m}$: right back to machine precision, $8.9 \times 10^{-16}$.
+
+### Ring all-reduce
+
+This cell simulates 4 workers, each holding a 12-integer gradient vector split into 4 chunks of 3 numbers. The helper `ring_step` has every worker send one chunk to its right neighbor simultaneously; phase 1 adds incoming chunks, while phase 2 overwrites. The script tracks how many numbers worker 0 sends in total.
+
+<PythonRunner code={ringCode} title="Ring all-reduce across 4 workers" />
+
+After the reduce-scatter phase, worker 0's chunk 1 (0-indexed) is `[13 20 12]`, matching the corresponding slice of the true sum. After the all-gather phase, all 4 workers hold the exact full sum. Worker 0 sent 18 numbers in total—$1.50\times$ the gradient length, matching $\frac{2(N-1)}{N} = \frac{2 \cdot 3}{4}$. The final four lines show that this multiplier creeps up only from 1.00 to 1.97 as the worker count grows from 2 to 64.
+
+### DDP with two processes
+
+The script below runs **real distributed data parallelism** using `torch.distributed` on CPU, with no GPU required:
+
+- `mp.spawn` launches 2 processes, each acting as a worker running `worker(rank)` with `rank` 0 or 1. The `mp.spawn` call must sit inside `if __name__ == "__main__":` because each child process re-imports the script from scratch; without that guard, child processes would recursively spawn more processes and raise a `RuntimeError`.
+- `init_process_group("gloo", init_method="tcp://127.0.0.1:29500", ...)` connects the two processes over localhost port 29500. The `gloo` backend runs on CPU across Linux, macOS, and Windows; on NVIDIA GPUs you would use `nccl`.
+- The dataset is the opening 4 lines of *The Tale of Kieu* (130 characters), sliced into 114 overlapping windows of 17 characters. The model is a tiny character-level GPT: token + position embeddings, one causally masked Transformer block, and a linear output head. `forward` takes a 17-character window, uses the first 16 characters as input and the last 16 characters as shifted targets, and returns the cross-entropy loss.
+- `DistributedSampler` splits the 114 windows into two halves of 57 windows per process, reshuffling differently each epoch via `set_epoch`.
+- Each process **deliberately** initializes with a different random seed (`torch.manual_seed(rank)`). When `DDP(...)` wraps the model, it broadcasts rank 0's initial parameters to all other ranks so both start identically. During `loss.backward()`, DDP all-reduces and averages the gradients.
+- After 30 epochs, `all_gather` collects both processes' flattened parameter vectors to verify they stayed identical.
+
+<LocalCode
+  code={ddpCode}
+  title="DDP: 2 CPU processes training a tiny GPT together"
+  packages={['torch']}
+  hardware="CPU is sufficient, no GPU needed. Takes ~1 minute on a dev laptop, mostly spent importing PyTorch in each spawned process"
+  sampleVaries={false}
+>
+
+```text
+rank 1 epoch 10 loss 1.615
+rank 1 epoch 20 loss 0.649
+rank 1 epoch 30 loss 0.261
+rank 0 epoch 10 loss 1.692
+rank 0 epoch 20 loss 0.611
+rank 0 epoch 30 loss 0.276
+57 windows/rank, 15751 params
+max |rank0 - rank1| = 0.0e+00
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **The two ranks print different losses** (1.692 and 1.615 at epoch 10) because each rank prints the loss on the last mini-batch of **its own data shard**. At initialization, expected loss is roughly $\ln 39 \approx 3.66$ (uniform guessing over 39 characters); by epoch 30 both drop below 0.3 as the tiny model memorizes the 130-character poem.
+- **Both ranks end up with bit-for-bit identical parameters**—maximum difference `0.0e+00`—after 30 epochs and 120 optimizer steps, even though they initialized with different seeds and never saw the same data batch. That is DDP's contract: broadcast rank 0's parameters at construction time, and all-reduce gradients on every backward pass.
+- Output line order may vary between runs because the two processes print concurrently. On Windows, you may see two harmless `[c10d] The client socket has failed to connect to [hostname]:29500` warnings while rank 1 waits briefly for rank 0 to open the port. If port 29500 is already in use, change the port number in `ADDR`.
+
+Try replacing `model = DDP(TinyGPT(len(chars)))` with `model = TinyGPT(len(chars))`—dropping DDP while keeping everything else unchanged. The two processes then train independently on their own halves of the data. In our test run, epoch-30 losses were 0.466 and 0.509, and the maximum parameter difference reached 5.3: you end up with two completely different models instead of one.
+
+## Common pitfalls
+
+:::caution[Adding GPUs without adjusting the learning rate]
+With DDP, adding GPUs multiplies the effective batch size: 8 GPUs with 32 samples each process 256 samples per step, not 32. Each epoch therefore runs only $1/N$ as many optimizer steps as on a single GPU, so keeping the learning rate $\eta$ unchanged slows down progress per sample seen. Because a larger batch has lower gradient variance, you can take larger steps—i.e., increase $\eta$. Goyal et al. (2017) popularized the linear scaling rule (scaling $\eta$ proportionally to effective batch size, paired with several epochs of warmup) to train ResNet-50 with a batch size of 8,192 images, though linear scaling eventually breaks down at extreme batch sizes. Always log your effective batch size ($\text{micro-batch} \times A \times N$) alongside $\eta$ when comparing runs.
+:::
+
+:::caution[Accumulating gradients without dividing the loss]
+`loss.backward()` adds into `.grad`. If you accumulate across 4 micro-batches without dividing each micro-batch loss by 4, the accumulated gradient is $4\times$ too large—silently multiplying your learning rate by 4 (or worse, scaling the gradient norm before clipping). Likewise, when micro-batches contain different numbers of non-padding tokens, averaging the per-micro-batch mean losses falls into the "uneven shards" trap shown in the first NumPy cell. The exact fix is to sum the token losses across all micro-batches and divide by the total number of non-padding tokens in the effective batch.
+:::
+
+:::caution[Expecting standard data parallelism to make a large model fit in memory]
+Standard data parallelism replicates the full model parameters, gradients, and optimizer state on **every** GPU. A model that needs 112 GB of state on 1 GPU still needs 112 GB on each of 8 GPUs. To reduce per-GPU state memory, use ZeRO/FSDP, tensor parallelism, or pipeline parallelism. Also remember to call `sampler.set_epoch(epoch)` at the start of every epoch: without it, `DistributedSampler` uses the exact same shuffle order on every epoch.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` field of the frontmatter. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- GPT is a decoder-only Transformer trained to model $p(x_t \mid x_{<t})$. Targets are the input shifted by one position, and the causal mask yields a valid loss at every position in a single pass. GPT-1, GPT-2, and GPT-3 kept the same architecture while scaling up; scaling laws show loss follows a smooth power law, with Chinchilla recommending roughly 20 training tokens per parameter.
+- Training with Adam and mixed precision requires $16\Psi$ bytes of model state before activations, creating two distinct challenges: training speed and memory capacity.
+- In data parallelism, every GPU holds a copy of the model and processes one shard of the batch; $\nabla\mathcal{L} = \sum_k \frac{B_k}{m}\mathbf{g}_k$, which equals the plain average when shards are equal. Ring all-reduce sends $\frac{2(N-1)}{N}G$ bytes per GPU for gradient size $G$. Gradient accumulation computes the same average sequentially on one GPU.
+- Mixed precision runs forward/backward passes in 16-bit, updates FP32 master weights, and scales the loss by $s$ for FP16. When the model itself exceeds single-GPU memory, shard weight matrices (tensor parallelism), layer stages (pipeline parallelism), or model states (ZeRO/FSDP).
+
+**Further reading:**
+
+- Brown, T. B., Mann, B., Ryder, N., et al. (2020). [*Language Models are Few-Shot Learners*](https://arxiv.org/abs/2005.14165), arXiv:2005.14165, Sections 2.1–2.3 and Appendix D. Covers GPT-3 model sizes, dataset mixture, distributed training setup, and total compute.
+- Kaplan, J., McCandlish, S., Henighan, T., et al. (2020). [*Scaling Laws for Neural Language Models*](https://arxiv.org/abs/2001.08361), arXiv:2001.08361; and Hoffmann, J., Borgeaud, S., Mensch, A., et al. (2022). [*Training Compute-Optimal Large Language Models*](https://arxiv.org/abs/2203.15556), arXiv:2203.15556. The two foundational scaling-law papers; the second is the Chinchilla paper. (Kaplan et al. write $N$ for parameter count where this lesson writes $\Psi$.)
+- Sergeev, A., Del Balso, M. (2018). [*Horovod: fast and easy distributed deep learning in TensorFlow*](https://arxiv.org/abs/1802.05799), arXiv:1802.05799, Section 3. Concise illustrated walkthrough of ring all-reduce.
+- Li, S., Zhao, Y., Varma, R., et al. (2020). [*PyTorch Distributed: Experiences on Accelerating Data Parallel Training*](https://arxiv.org/abs/2006.15704), arXiv:2006.15704, VLDB 2020. Design of PyTorch DDP: initial parameter broadcast, gradient bucketing, overlapping communication with backpropagation, and `no_sync`.
+- Micikevicius, P., Narang, S., Alben, J., et al. (2017). [*Mixed Precision Training*](https://arxiv.org/abs/1710.03740), arXiv:1710.03740, ICLR 2018, Section 3. FP32 master weights, loss scaling, and FP32 accumulation.
+- PyTorch. [*Distributed Data Parallel*](https://docs.pytorch.org/docs/2.14/notes/ddp.html) and [*torch.utils.data*](https://docs.pytorch.org/docs/2.14/data.html), `DistributedSampler` section (PyTorch 2.14 official docs, accessed Nov 2026). How DDP works under the hood and how `DistributedSampler` partitions datasets.
+
+<LessonProgress />

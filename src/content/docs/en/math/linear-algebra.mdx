@@ -1,0 +1,294 @@
+---
+title: 'Linear Algebra'
+description: 'Master linear algebra for AI: vectors, matrices as spatial transformations, dot product, L1/L2 norms, cosine similarity, eigenvalues, and eigenvectors.'
+quiz:
+  - question: 'Given two embedding vectors $\mathbf{u}$ and $\mathbf{v}$ pointing in the exact same direction with $\|\mathbf{v}\|_2 = 3 \|\mathbf{u}\|_2$, what is the cosine similarity between them?'
+    options:
+      - '$1.0$'
+      - '$3.0$'
+      - '$0.333$'
+      - '$0.0$'
+    answer: 0
+    explanation: 'Cosine similarity measures the angle between two vectors via $\cos(\theta) = \frac{\mathbf{u} \cdot \mathbf{v}}{\|\mathbf{u}\|_2 \|\mathbf{v}\|_2}$. Because the two vectors point in the same direction, the angle between them is $\theta = 0^\circ$, so $\cos(0^\circ) = 1.0$. The vector magnitudes cancel out completely in the denominator, making cosine similarity invariant to document length.'
+  - question: 'Given two square matrices $\mathbf{A}$ and $\mathbf{B}$ of size $n \times n$, which of the following statements about matrix multiplication is TRUE?'
+    options:
+      - 'Matrix multiplication is always commutative: $\mathbf{A}\mathbf{B} = \mathbf{B}\mathbf{A}$'
+      - 'Matrix multiplication is associative: $(\mathbf{A}\mathbf{B})\mathbf{C} = \mathbf{A}(\mathbf{B}\mathbf{C})$, but generally not commutative: $\mathbf{A}\mathbf{B} \neq \mathbf{B}\mathbf{A}$'
+      - 'If $\mathbf{A}\mathbf{B} = \mathbf{0}$, then necessarily $\mathbf{A} = \mathbf{0}$ or $\mathbf{B} = \mathbf{0}$'
+      - 'The inverse $(\mathbf{A}\mathbf{B})^{-1}$ always equals $\mathbf{A}^{-1}\mathbf{B}^{-1}$'
+    answer: 1
+    explanation: 'Matrix multiplication represents the composition of spatial transformations. The order of transformations matters (for instance, rotating then shearing differs from shearing then rotating), so in general $\mathbf{A}\mathbf{B} \neq \mathbf{B}\mathbf{A}$. However, matrix multiplication is always associative. Moreover, $(\mathbf{A}\mathbf{B})^{-1} = \mathbf{B}^{-1}\mathbf{A}^{-1}$.'
+  - question: 'If the determinant of a square matrix is $0$ ($\det(\mathbf{A}) = 0$), what does that mean geometrically for the space?'
+    options:
+      - 'The matrix preserves spatial volume completely'
+      - 'The matrix rotates the space by $90^\circ$'
+      - 'The space is squashed into a lower dimension (transformed volume equals $0$) and the matrix is not invertible'
+      - 'Every vector in the space flips its sign'
+    answer: 2
+    explanation: 'The determinant $\det(\mathbf{A})$ gives the area scaling factor (in 2D) or volume scaling factor (in 3D). When $\det(\mathbf{A}) = 0$, the entire space is squashed onto a line or a point (zero area/volume). Because information is irreversibly lost during this collapse, you cannot invert the transformation, meaning the matrix is singular ($\mathbf{A}^{-1}$ does not exist).'
+  - question: 'In the eigenvalue-eigenvector equation $\mathbf{A}\mathbf{v} = \lambda \mathbf{v}$, how does the vector $\mathbf{v}$ transform under the action of matrix $\mathbf{A}$?'
+    options:
+      - 'The vector $\mathbf{v}$ is rotated to a perpendicular direction'
+      - 'The vector $\mathbf{v}$ stays on its original line and only scales in length by the factor $\lambda$'
+      - 'The vector $\mathbf{v}$ is always mapped to the zero vector'
+      - 'The vector $\mathbf{v}$ has its coordinate entries permuted'
+    answer: 1
+    explanation: 'An eigenvector $\mathbf{v}$ (nonzero) represents a special axis of the transformation: when matrix $\mathbf{A}$ acts on $\mathbf{v}$, the output stays collinear with $\mathbf{v}$, merely stretched (if $|\lambda| > 1$), shrunk (if $|\lambda| < 1$), or flipped in direction (if $\lambda < 0$) by the exact factor of the eigenvalue $\lambda$.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import vectorCode from '@code/math/linear-algebra/vector-operations.en.py?raw';
+import matrixCode from '@code/math/linear-algebra/matrix-transformation.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Understand the geometric nature of **vectors** as points or directions in space and **matrices** as spatial transformation engines.
+- Master core operations: the **dot product**, vector norms (**L1, L2 norms**), and **Cosine Similarity** used in semantic search and RAG.
+- Grasp the properties of matrix multiplication, the geometric meaning of the **determinant**, and matrix invertibility conditions.
+- Build solid intuition for **eigenvalues** and **eigenvectors** — the mathematical foundation of Principal Component Analysis (PCA) and AI model compression.
+
+## Prerequisites
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In [NumPy and Pandas](/en/python/numpy-pandas/), you worked with multidimensional `ndarray` arrays and vectorized operations. This lesson builds the mathematical foundation explaining why those arrays of numbers can recognize images, translate text, and steer AI models.
+:::
+
+## Intuition
+
+How can a computer understand the meaning of a cat photo or the semantics of a scientific article?
+
+Computers cannot directly perceive colors or read human words. All multimodal data in AI is converted into arrays of real numbers:
+- A $28 \times 28$ grayscale image is represented as a $28 \times 28$ matrix of numbers, or flattened into a 784-dimensional **vector**.
+- A passage of text is encoded by a language model into a 1536-dimensional **embedding vector** in semantic space.
+- A fully connected neural network layer (Dense layer) takes a feature vector, multiplies it by a **weight matrix**, and adds a bias vector to transform the representation space.
+
+While introductory school algebra often treats a matrix as just a "rectangular grid of numbers", in Artificial Intelligence you should view a matrix as a **spatial transformation**: it can stretch, compress, rotate, or warp data space to expose underlying patterns.
+
+## Theory
+
+### 1. Vectors: Points and Directions in Space
+
+An $n$-dimensional **vector** is an ordered tuple of $n$ real numbers, denoted $\mathbf{x} \in \mathbb{R}^n$:
+
+$$
+\mathbf{x} = \begin{bmatrix} x_1 \\ x_2 \\ \vdots \\ x_n \end{bmatrix} = [x_1, x_2, \dots, x_n]^\top
+$$
+
+Geometrically:
+- A vector can be viewed as an arrow starting at the origin $(0, 0, \dots, 0)$ and pointing to the coordinate $(x_1, x_2, \dots, x_n)$.
+- The arrow's orientation represents **direction**, and its length represents **magnitude**.
+
+#### Dot Product
+
+The dot product between two vectors $\mathbf{u}, \mathbf{v} \in \mathbb{R}^n$ is the sum of the products of their corresponding entries:
+
+$$
+\mathbf{u} \cdot \mathbf{v} = \mathbf{u}^\top \mathbf{v} = \sum_{i=1}^n u_i v_i
+$$
+
+Geometrically, the dot product is closely tied to the angle $\theta$ between the two vectors:
+
+$$
+\mathbf{u} \cdot \mathbf{v} = \|\mathbf{u}\|_2 \|\mathbf{v}\|_2 \cos(\theta)
+$$
+
+- If $\mathbf{u} \cdot \mathbf{v} > 0$: acute angle ($\theta < 90^\circ$), the two vectors point in roughly the same direction.
+- If $\mathbf{u} \cdot \mathbf{v} = 0$: the two vectors are perpendicular (**orthogonal**).
+- If $\mathbf{u} \cdot \mathbf{v} < 0$: obtuse angle ($\theta > 90^\circ$), the two vectors point in opposing directions.
+
+In the Attention mechanism of Transformer models, the correlation score $\mathbf{q} \cdot \mathbf{k}$ between a Query vector and a Key vector is literally a dot product!
+
+#### Vector Norms
+
+A **norm** measures the magnitude or length of a vector:
+
+1. **$L_1$ norm (Manhattan norm):** The sum of absolute values of the elements:
+   $$
+   \|\mathbf{x}\|_1 = \sum_{i=1}^n |x_i|
+   $$
+   The $L_1$ norm underpins Lasso Regularization, which drives unimportant weights to exact $0$ and produces sparse models.
+
+2. **$L_2$ norm (Euclidean norm):** The straight-line geometric distance from the origin to the vector tip:
+   $$
+   \|\mathbf{x}\|_2 = \sqrt{\sum_{i=1}^n x_i^2} = \sqrt{\mathbf{x}^\top \mathbf{x}}
+   $$
+   The $L_2$ norm underpins Ridge Regularization (Weight Decay), which constrains neural network weight magnitudes to prevent overfitting.
+
+#### Cosine Similarity
+
+When comparing two text passages via embedding vectors, a 5000-word article and a 500-word summary on the same topic will have very different $L_2$ lengths. To measure semantic similarity without being distorted by length, we use **Cosine Similarity**:
+
+$$
+\text{CosineSimilarity}(\mathbf{u}, \mathbf{v}) = \frac{\mathbf{u} \cdot \mathbf{v}}{\|\mathbf{u}\|_2 \|\mathbf{v}\|_2} = \cos(\theta)
+$$
+
+This value always lies in $[-1, 1]$:
+- $1.0$: identical semantic direction.
+- $0.0$: completely orthogonal and unrelated.
+- $-1.0$: diametrically opposed in meaning.
+
+:::note[Key takeaway]
+Euclidean distance is heavily influenced by vector magnitude, whereas Cosine Similarity cares only about the **angle** between two vectors in feature space.
+:::
+
+---
+
+### 2. Matrices: Linear Transformation Machines
+
+A matrix $\mathbf{A} \in \mathbb{R}^{m \times n}$ consists of $m$ rows and $n$ columns:
+
+$$
+\mathbf{A} = \begin{bmatrix} a_{11} & a_{12} & \dots & a_{1n} \\ a_{21} & a_{22} & \dots & a_{2n} \\ \vdots & \vdots & \ddots & \vdots \\ a_{m1} & a_{m2} & \dots & a_{mn} \end{bmatrix}
+$$
+
+When we multiply matrix $\mathbf{A}$ by a vector $\mathbf{x} \in \mathbb{R}^n$, we obtain a new vector $\mathbf{y} \in \mathbb{R}^m$:
+
+$$
+\mathbf{y} = \mathbf{A}\mathbf{x}
+$$
+
+Each $j$-th column of matrix $\mathbf{A}$ is the new landing spot of the $j$-th basis vector after the space is transformed. A matrix is a complete "relocation map" for the coordinate space.
+
+#### Matrix Multiplication
+
+Multiplying two matrices $\mathbf{A} \in \mathbb{R}^{m \times k}$ and $\mathbf{B} \in \mathbb{R}^{k \times p}$ yields a matrix $\mathbf{C} \in \mathbb{R}^{m \times p}$ where:
+
+$$
+C_{ij} = \sum_{r=1}^k A_{ir} B_{rj}
+$$
+
+**Essential properties to remember:**
+- **Associativity:** $(\mathbf{A}\mathbf{B})\mathbf{C} = \mathbf{A}(\mathbf{B}\mathbf{C})$.
+- **Generally NOT commutative:** $\mathbf{A}\mathbf{B} \neq \mathbf{B}\mathbf{A}$. Swapping the multiplication order changes the spatial transformation result or causes a shape mismatch!
+- **Transpose of a product:** $(\mathbf{A}\mathbf{B})^\top = \mathbf{B}^\top \mathbf{A}^\top$ (reverses the order of the factors).
+
+#### Determinant and Inverse Matrix
+
+- **Determinant ($\det(\mathbf{A})$ or $|\mathbf{A}|$):** Measures the area or volume scaling factor when space is transformed by a square matrix $\mathbf{A}$.
+  - If $\det(\mathbf{A}) = 2$: the area of every geometric shape in space doubles.
+  - If $\det(\mathbf{A}) < 0$: space flips its orientation (reflection).
+  - If $\det(\mathbf{A}) = 0$: space collapses into a lower dimension (e.g., a 2D plane squashed onto a 1D line segment).
+- **Inverse matrix ($\mathbf{A}^{-1}$):** The transformation that restores space back to its original state:
+  $$
+  \mathbf{A}^{-1} \mathbf{A} = \mathbf{A} \mathbf{A}^{-1} = \mathbf{I}
+  $$
+  A square matrix is invertible if and only if $\det(\mathbf{A}) \neq 0$ (a **non-singular** matrix).
+
+---
+
+### 3. Eigenvalues and Eigenvectors
+
+When matrix $\mathbf{A}$ transforms space, most vectors get knocked off their original line into a new direction. However, there are special directions where vectors **do not rotate at all**, but are merely stretched or shrunk!
+
+Those special vectors are called **eigenvectors** ($\mathbf{v}$), and their corresponding scaling factors are called **eigenvalues** ($\lambda$):
+
+$$
+\mathbf{A}\mathbf{v} = \lambda \mathbf{v} \quad (\mathbf{v} \neq \mathbf{0})
+$$
+
+To find the eigenvalues $\lambda$, we solve the characteristic equation:
+
+$$
+\det(\mathbf{A} - \lambda \mathbf{I}) = 0
+$$
+
+**Core applications in AI:**
+- **PCA (Principal Component Analysis):** The eigenvector corresponding to the largest eigenvalue of the covariance matrix points in the direction of greatest data variance — the direction carrying the most information. By projecting data onto the top eigenvectors, we reduce dimensionality from thousands of features down to a few while preserving key structure.
+- **Singular Value Decomposition (SVD):** The mathematical backbone of LoRA (Low-Rank Adaptation) weight compression in large language models (LLMs).
+
+### Limitations
+
+- **Computational complexity:** Standard matrix multiplication takes $\mathcal{O}(n^3)$ operations, and matrix inversion also costs $\mathcal{O}(n^3)$. For AI models with billions of parameters, we never invert matrices directly; instead, we use iterative optimization algorithms like Gradient Descent.
+- **Numerical instability:** When a matrix has a determinant very close to $0$ (a huge condition number $\kappa$), matrix operations on computers suffer from severe floating-point rounding errors.
+
+## Illustration
+
+Below is a visual diagram illustrating the geometric essence of the three core concepts:
+
+```text
+1. DOT PRODUCT AND COSINE SIMILARITY:
+        v
+       ↗
+      /  \  Small angle θ --> cos(θ) near 1.0 (Highly similar)
+     / θ  \ Angle θ = 90° --> cos(θ) = 0.0    (Orthogonal, unrelated)
+    +------> u
+
+2. MATRIX AS A 2D SPATIAL TRANSFORMATION:
+    Original space [i, j]                After multiplying by matrix A:
+          y                                    y
+          |                                    |    A @ [1, 2] = [5, 4]
+          |  [1, 2]                            |     ↗
+          +------> x                           +------> x
+    (Orthogonal grid)                    (Space is sheared and stretched)
+
+3. EIGENVALUES AND EIGENVECTORS (A @ v = λ * v):
+    Regular vector u:  u ──► A @ u  (Rotated off its original line!)
+    Eigenvector v:     v ──► A @ v = λ * v  (Same line, only scaled by λ!)
+```
+
+## Code examples
+
+The cells below run independently. Both use NumPy to perform C-optimized linear algebra computations.
+
+The first cell performs vector operations: computing the dot product, $L_1$ norm, $L_2$ norm, and Cosine Similarity between two text-embedding vectors.
+
+<PythonRunner code={vectorCode} title="Vector operations, L1/L2 norms, and Cosine Similarity" />
+
+The printed output shows:
+- Dot product $\mathbf{u} \cdot \mathbf{v} = 25.0000$.
+- The $L_1$ norm of $\mathbf{u}$ is $6.0000$ (sum of absolute values $|1| + |2| + |3| = 6$).
+- The $L_2$ norm (Euclidean length) of $\mathbf{u}$ is $3.7417$ and of $\mathbf{v}$ is $6.7082$.
+- Cosine similarity reaches approximately $0.9960$ (very close to $1.0$), proving that even though vector $\mathbf{v}$ is nearly twice as long as $\mathbf{u}$, both vectors point in almost the exact same direction in semantic space.
+
+The second cell transforms a coordinate vector with a $2 \times 2$ square matrix, computes the determinant $\det(\mathbf{A})$, and finds the eigenvalue-eigenvector pairs using `np.linalg.eig`.
+
+<PythonRunner code={matrixCode} title="Spatial transformation, determinant, and eigenvalues with NumPy" />
+
+Verification results:
+- Matrix multiplication maps the point $(1, 2)$ to the new coordinates $(5, 4)$.
+- The determinant $\det(\mathbf{A}) = 6.0000 > 0$, confirming that the matrix is invertible and scales 2D area by a factor of 6.
+- `np.linalg.eig` finds two eigenvalues $\lambda_1 = 3.0$ and $\lambda_2 = 2.0$.
+- Checking `A @ v0` yields the exact same vector as `lambda0 * v0` (`[3., 0.]`), and `np.allclose` returns `True`, verifying the mathematical definition of an eigenvector.
+
+## Common pitfalls
+
+:::caution[Confusing elementwise multiplication (`*`) with matrix multiplication (`@`)]
+In NumPy, the `*` operator performs the Hadamard product (elementwise multiplication between two arrays of matching shape). To perform linear algebra matrix multiplication $(\mathbf{A}\mathbf{B})$, you must use the `@` operator or `np.dot(A, B)`. Writing `A * B` by mistake will either raise a shape error or produce a matrix with completely wrong spatial transformation semantics.
+:::
+
+:::caution[Using Euclidean distance instead of Cosine Similarity for texts of different lengths]
+When matching two documents in a retrieval system (RAG), if you use Euclidean distance $\|\mathbf{u} - \mathbf{v}\|_2$, a 3-sentence summary and a 30-page in-depth report on the exact same AI topic will still have a large distance (due to word count and vector magnitude differences). Normalizing for angle via Cosine Similarity is the standard choice to eliminate document length bias.
+:::
+
+:::caution[Assuming every square matrix has an inverse]
+A square matrix is invertible only when its determinant is nonzero ($\det(\mathbf{A}) \neq 0$). If your dataset contains linearly dependent features (for example, one column measuring area in $\text{m}^2$ and another in $\text{ft}^2$), the matrix $\mathbf{X}^\top \mathbf{X}$ becomes singular with determinant $0$, causing the closed-form Normal Equation of linear regression to fail.
+:::
+
+## Quick check
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Vectors represent data samples or directions in space; the dot product measures directional alignment between two vectors.
+- The $L_1$ and $L_2$ norms measure vector length and form the basis of Lasso and Ridge weight penalties in machine learning.
+- Matrices are spatial transformations; the determinant measures area/volume scaling and determines whether a matrix is invertible.
+- Eigenvalues and eigenvectors reveal the invariant axes of a spatial transformation, underpinning PCA dimensionality reduction and SVD/LoRA model compression.
+
+**Further reading:**
+
+- Grant Sanderson (3Blue1Brown) (2016). [*Essence of Linear Algebra*](https://www.3blue1brown.com/topics/linear-algebra), the most visual geometric lecture series on linear algebra.
+- Gilbert Strang (2016). [*Introduction to Linear Algebra*](https://math.mit.edu/~gs/linearalgebra/), the classic MIT textbook on applied linear algebra.
+- Marc Peter Deisenroth, A. Aldo Faisal, Cheng Soon Ong (2020). [*Mathematics for Machine Learning*](https://mml-book.github.io/) (PDF), Chapter 2 (Linear Algebra) and Chapter 3 (Analytic Geometry).
+- Scipy Lecture Notes (2023). [*Operations on arrays and linear algebra with NumPy*](https://numpy.org/doc/stable/reference/routines.linalg.html), official reference documentation for `numpy.linalg`.
+
+<LessonProgress />

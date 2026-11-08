@@ -1,6 +1,6 @@
 import numpy as np
 
-# Bốn đầu vào của một cổng logic hai đầu vào: mỗi hàng là một mẫu.
+# Four inputs of a two-input logic gate: each row is one sample.
 X = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
 gates = {
     "AND": np.array([0, 0, 0, 1]),
@@ -10,22 +10,22 @@ gates = {
 
 
 def step(z):
-    return (z >= 0).astype(int)  # hàm bậc thang: 1 nếu z >= 0
+    return (z >= 0).astype(int)  # step function: 1 if z >= 0
 
 
 def train_perceptron(X, y, eta=1.0, max_epochs=20):
-    w, b = np.zeros(X.shape[1]), 0.0  # xuất phát từ 0
-    history = []  # số mẫu đoán sai trong mỗi epoch
+    w, b = np.zeros(X.shape[1]), 0.0  # start from 0
+    history = []  # misclassified samples per epoch
     for epoch in range(max_epochs):
         errors = 0
         for x_i, y_i in zip(X, y):
             y_hat = step(w @ x_i + b)
-            # Luật học perceptron: chỉ sửa khi đoán sai.
+            # Perceptron learning rule: update only on errors.
             w = w + eta * (y_i - y_hat) * x_i
             b = b + eta * (y_i - y_hat)
             errors += int(y_hat != y_i)
         history.append(errors)
-        if errors == 0:  # một lượt không sai mẫu nào: đã hội tụ
+        if errors == 0:  # zero errors in one pass: converged
             break
     return w, b, history
 

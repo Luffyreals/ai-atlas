@@ -1,0 +1,378 @@
+---
+title: Question Answering
+description: 'Finding the answer to "in which year?" right inside a passage. SQuAD-style extractive QA, start/end logits, unanswerable questions, EM and F1, retriever–reader pipelines, and RAG.'
+quiz:
+  - question: 'A passage has 5 tokens (positions 1 to 5). The start logits are $s = (0.5, 3.0, 1.0, 0.2, 3.5)$, the end logits are $e = (0.1, 2.0, 4.0, 0.5, 0.3)$, and the maximum span length is $K = 3$ tokens. Which span should the model output?'
+    options:
+      - 'From position 5 to position 3, because those are the individual argmax positions'
+      - 'Only position 5, because the start logit is largest there'
+      - 'From position 2 to position 3, with score $3.0 + 4.0 = 7.0$'
+      - 'Only position 3, because the end logit is largest there'
+    answer: 2
+    explanation: 'Taking argmax independently picks start at 5 and end at 3—a backward, invalid span. Instead, we must evaluate valid pairs $i \le j < i + K$ and pick the maximum sum $s_i + e_j$. Pair $(2, 3)$ scores $7.0$, beating $(3, 3)$ at $5.0$ and $(5, 5)$ at $3.8$. Even though position 5 has the highest start logit, no large end logit exists at or after position 5.'
+  - question: 'You have a model fine-tuned only on SQuAD 1.1 (where every question has an answer) and want it to abstain when the passage does not contain the answer. Which approach makes the most sense?'
+    options:
+      - 'Compare the best span score against the `[CLS]` score as in SQuAD 2.0, with $\tau = 0$'
+      - 'Increase the maximum span length so the model has more options'
+      - 'Take argmax independently for start and end, and treat any backward span as "no answer"'
+      - 'Further fine-tune on data that includes unanswerable questions (whose gold label points to `[CLS]`), then tune the threshold $\tau$ on a dev set'
+    answer: 3
+    explanation: 'The `[CLS]` score only carries meaning when the model has been trained to point to `[CLS]` on unanswerable questions. A SQuAD 1.1 model was never taught that convention: in our DistilBERT code cell, the `[CLS]` score on an unanswerable question is $-14.37$, far below its spurious span score ($1.38$). A backward span is simply a decoding bug, not a calibrated abstention signal.'
+  - question: 'The gold answer is "Quảng Ninh" and the model predicts "tỉnh Quảng Ninh" ("Quảng Ninh province"). Using the Vietnamese adaptation of SQuAD normalization (lowercase, strip punctuation, collapse whitespace, without English article removal), what are EM and F1?'
+    options:
+      - 'EM = 0, F1 = 0.8'
+      - 'EM = 1, F1 = 1, because normalization drops extra words'
+      - 'EM = 0, F1 = 0.667'
+      - 'EM = 0, F1 = 0'
+    answer: 0
+    explanation: 'Normalization only lowercases and strips punctuation; it does not drop the noun "tỉnh" (nor would English article removal touch it), so the two strings differ and EM = 0. The prediction has 3 syllable-tokens, the gold answer has 2, and they share 2: precision is $2/3$, recall is $1$, and F1 $= 2 \cdot \frac{2}{3} \cdot 1 / (\frac{2}{3} + 1) = 0.8$. The value $0.667$ corresponds to the 2-token prediction "năm 1994" vs. "1994" later in the lesson.'
+  - question: 'In your open-domain QA pipeline, the retriever fetches the top 5 passages, and only 60% of questions have an answer-bearing passage in the top 5. When given the right passage, the reader answers correctly 85% of the time. Which component should you improve first?'
+    options:
+      - 'The reader, because 85% is still well below 100%'
+      - 'The retriever: even with a perfect reader, the end-to-end system cannot exceed 60%'
+      - 'Neither, because $0.6 \times 0.85 = 0.51$ is the theoretical limit of any QA system'
+    answer: 1
+    explanation: 'The reader only sees what the retriever hands it. On the 40% of questions where no retrieved passage contains the answer, even a 100%-accurate extractive reader must fail. Retriever recall@5 (60%) is a hard ceiling on the entire pipeline: pushing the reader from 85% to 100% would move end-to-end accuracy only from roughly 51% to 60%, whereas improving retrieval lifts the ceiling itself.'
+  - question: 'A passage is 1,000 tokens long, while the model accepts at most 384 tokens. Why should the sliding windows overlap (using a stride) instead of being cut end-to-end without overlap?'
+    options:
+      - 'So that an answer sitting across a boundary still appears intact inside at least one window'
+      - 'So that the model runs faster because each window is shorter'
+      - 'So that every window has exactly 384 tokens, since the model rejects shorter sequences'
+    answer: 0
+    explanation: 'If windows are cut end-to-end without overlap, an answer span that straddles a cut boundary gets split in half, leaving no window with the complete answer. Overlapping windows increase the number of windows and therefore slow inference down slightly rather than speeding it up, and Transformer models readily accept padded sequences shorter than the maximum length.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import spanCode from '@code/nlp/question-answering/span.en.py?raw';
+import emF1Code from '@code/nlp/question-answering/em-f1.en.py?raw';
+import readerCode from '@code/nlp/question-answering/reader.en.py?raw';
+import RetrieverReaderFigure from '@components/figures/RetrieverReaderFigure.astro';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Distinguish the main flavors of **question answering** (QA): extractive QA over a passage, open-domain QA, generative QA, and knowledge-base QA.
+- Explain how a BERT-style model performs **extractive QA**: scoring start and end logits for every token and selecting the highest-scoring constrained span, including when a question has no answer in the passage.
+- Implement constrained span selection and SQuAD's two standard evaluation metrics: **exact match** (EM) and token-level F1.
+- Explain why, in a retriever–reader pipeline, retriever recall sets a hard ceiling on end-to-end accuracy.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+## Intuition
+
+Suppose someone asks: *"In what year was Ha Long Bay first inscribed by UNESCO as a World Natural Heritage Site?"* In front of you is a short passage:
+
+> Vịnh Hạ Long được UNESCO công nhận là di sản thiên nhiên thế giới lần đầu năm 1994 và lần thứ hai năm 2000.
+> *(Ha Long Bay was recognized by UNESCO as a World Natural Heritage Site for the first time in 1994 and for the second time in 2000.)*
+
+(In 2023, the heritage site was extended to become "Ha Long Bay – Cat Ba Archipelago"; the sentence above mentions only the first two inscriptions, which is all we need here.)
+
+You do not need to invent an answer from memory. It is sitting right there in the sentence. Your job is simply to **point to the exact span**: from which word to which word. Here it is a single token: `"1994"`.
+
+That sounds easy, but there are three traps. First, the passage contains **two** years (`"1994"` and `"2000"`). Because the question asks *"for the first time"*, `"2000"` is wrong even though it looks just like a valid year. A reader has to connect `"lần đầu"` ("first time") to `"1994"`, not merely grab any four-digit number.
+
+Second trap: what if someone asks *"How many square kilometers does Ha Long Bay cover?"* The passage does not say. A careful reader replies *"this passage does not say"*, instead of pointing blindly at `"1994"` just because it happens to be a number.
+
+Third trap: in real applications, nobody hands you the exact paragraph ahead of time. You are given a massive corpus—such as all of Wikipedia—and must **retrieve candidate passages** before **extracting the answer span**.
+
+The problem of this lesson is: **given a question and a passage, point to the exact contiguous span (start token to end token) that answers the question—or abstain when no answer is present—and then scale that up when the passage itself must be retrieved from a large corpus.**
+
+## Theory
+
+### Flavors of question answering
+
+"Question answering" is an umbrella term for several distinct setups that differ in where the answer comes from:
+
+| Flavor | Input | Answer format | Examples |
+|---|---|---|---|
+| **Extractive QA** (machine reading comprehension) | A question and **one** passage | A verbatim contiguous **span** from the passage | SQuAD, UIT-ViQuAD |
+| **Open-domain QA** | A question and a **document corpus** | Retrieve relevant passages, then extract or generate an answer | DrQA, DPR |
+| **Generative / abstractive QA** | A question, optionally with retrieved passages | Free-form text generated token by token | T5, RAG, modern chatbots |
+| **Knowledge-base QA** | A question and a structured knowledge graph/database | Translate the question into a formal query and execute it | `"Capital of Vietnam?"` $\to$ `(Vietnam, capital, ?)` |
+
+This lesson focuses deeply on extractive QA because it is the core building block of open-domain pipelines. We then connect it to open-domain retriever–reader systems and generative RAG. Structured knowledge-base QA is closely related to [Graph RAG](/en/llm/graph-rag/), where facts are stored as a graph.
+
+### SQuAD: extractive QA as a benchmark
+
+[Rajpurkar et al. (2016)](https://arxiv.org/abs/1606.05250) created **SQuAD** (Stanford Question Answering Dataset): over 100,000 crowd-written questions on English Wikipedia paragraphs. Its defining rule is simple: **every answer is a contiguous span of tokens inside the given passage**. Consequently, the ground-truth label for any question is just two integers: the start token index $i^\star$ and the end token index $j^\star$.
+
+That formulation is a major simplification. Instead of asking a model to generate an open-ended sequence over a 30,000-word vocabulary at every step, we only ask it to **point** to two positions in the passage. Generation turns into two classification problems over passage positions: *"which token starts the answer?"* and *"which token ends the answer?"*
+
+For Vietnamese, **UIT-ViQuAD** ([Nguyen et al., 2020](https://aclanthology.org/2020.coling-main.233/)) follows the exact same SQuAD 1.1 design: roughly 23,000 question–answer pairs across 5,109 paragraphs from 174 Vietnamese Wikipedia articles.
+
+### The model: two vectors for start and end positions
+
+The architecture below follows the BERT paper ([Devlin et al., 2019](https://arxiv.org/abs/1810.04805), Section 4.2). You already met BERT, `[CLS]`, `[SEP]`, and fine-tuning in [BERT](/en/nlp/bert/).
+
+**Step 1: pack the question and passage into one sequence.**
+
+```text
+[CLS] question [SEP] passage [SEP]
+```
+
+BERT processes the combined sequence with bidirectional self-attention, so every passage token attends to the question tokens and vice versa. At the output of the final layer, each token position $i$ has a contextual vector $\mathbf{h}_i \in \mathbb{R}^D$ ($D = 768$ for BERT-Base).
+
+**Step 2: add two learned parameter vectors.** Call them $\mathbf{w}_{\text{start}} \in \mathbb{R}^D$ and $\mathbf{w}_{\text{end}} \in \mathbb{R}^D$. Aside from an optional 2-scalar bias, these two vectors are the **only** new parameters introduced during QA fine-tuning; everything else comes from pretrained BERT. Taking their dot product with $\mathbf{h}_i$ gives two scalar logits for every token $i$:
+
+$$
+s_i = \mathbf{w}_{\text{start}}^\top \mathbf{h}_i, \qquad e_i = \mathbf{w}_{\text{end}}^\top \mathbf{h}_i
+$$
+
+A large $s_i$ means *"token $i$ looks like the start of the answer"*; a large $e_i$ means *"token $i$ looks like the end of the answer"*. In code, $\mathbf{w}_{\text{start}}$ and $\mathbf{w}_{\text{end}}$ are simply the two rows of a `nn.Linear(D, 2)` layer applied to every token.
+
+**Step 3: softmax across token positions.** Convert the start and end logits into probability distributions—where the softmax runs **across token positions in the sequence**, not across the vocabulary:
+
+$$
+p_{\text{start}}(i) = \frac{\exp(s_i)}{\sum_{k} \exp(s_k)}, \qquad p_{\text{end}}(j) = \frac{\exp(e_j)}{\sum_{k} \exp(e_k)}
+$$
+
+(We write $\exp(\cdot)$ rather than $e^{(\cdot)}$ to avoid confusion with the end logit $e_j$.) On SQuAD 1.1, the BERT paper sums over the passage tokens; Hugging Face's implementation applies softmax across the **entire sequence**, including `[CLS]` at index 0, so that the exact same head can represent "no answer" by pointing to `[CLS]` (see the SQuAD 2.0 section below). Thus the model acts as two position classifiers whose "classes" are the token indices.
+
+**Step 4: training loss.** Let $i^\star$ and $j^\star$ be the gold start and end token positions. We compute the cross-entropy loss for the start position and the end position and sum them:
+
+$$
+\mathcal{L} = -\ln p_{\text{start}}(i^\star) - \ln p_{\text{end}}(j^\star)
+$$
+
+The BERT paper states this as maximizing the sum of the log-likelihoods of the correct start and end positions, which is $-\mathcal{L}$. Hugging Face averages the two terms (dividing by 2), which differs only by a constant factor.
+
+### Selecting a span: why not take argmax independently?
+
+At inference time, the most tempting shortcut is to pick $i = \arg\max_i s_i$ and $j = \arg\max_j e_j$ independently. That breaks down immediately because **the two choices are uncoordinated**: nothing guarantees $i \le j$, and nothing prevents a span from stretching across 200 tokens.
+
+The table below shows synthetic logits (chosen by hand to illustrate the mechanism, matching our first code cell) for the question *"first recognized in which year?"*. Every unlisted position has logit $-2.0$. Tokens are 0-indexed with `[CLS]` at index 0, and for brevity the passage starts right at index 1:
+
+| Position | 17 | 18 | 24 |
+|---|---:|---:|---:|
+| Token | `năm` | `1994` | `2000` |
+| $s_i$ (start logit) | 2.0 | 3.9 | **4.2** |
+| $e_i$ (end logit) | $-2.0$ | **4.5** | 3.0 |
+
+Taking argmax independently picks start at 24 (`"2000"`) and end at 18 (`"1994"`)—a **backward**, empty span! Because the model is slightly split on the start position between the two years, independent argmax turns a mild ambiguity into a nonsensical prediction.
+
+**The right way: score valid `(start, end)` pairs jointly.** The score of a candidate span $(i, j)$ is $s_i + e_j$. Why the sum of the logits? Under the model's conditional independence assumption between start and end, the log-probability of pair $(i, j)$ is:
+
+$$
+\begin{aligned}
+\ln\big(p_{\text{start}}(i) \, p_{\text{end}}(j)\big)
+&= \ln p_{\text{start}}(i) + \ln p_{\text{end}}(j) \\
+&= \Big(s_i - \ln \textstyle\sum_k \exp(s_k)\Big) + \Big(e_j - \ln \textstyle\sum_k \exp(e_k)\Big)
+\end{aligned}
+$$
+
+Line 1 uses $\ln(ab) = \ln a + \ln b$. Line 2 substitutes the softmax definition and uses $\ln \exp(s_i) = s_i$. Because the two log-partition terms $\ln \sum_k$ do not depend on $i$ or $j$, maximizing $p_{\text{start}}(i)\,p_{\text{end}}(j)$ is equivalent to maximizing $s_i + e_j$—without even needing to compute the exponentials.
+
+We restrict the search to valid passage pairs whose length does not exceed a maximum of $K$ tokens:
+
+$$
+(\hat{i}, \hat{j}) = \arg\max_{i \le j < i + K} \; (s_i + e_j)
+$$
+
+The constraint $i \le j$ rules out backward spans, and $j < i + K$ rules out implausibly long spans (SQuAD answers are typically a few words long). In addition, $i$ and $j$ are restricted to **passage** tokens, excluding question tokens and special tokens. For a passage of length $L$ and cap $K$, there are at most $L \cdot K$ pairs to check, which takes microseconds.
+
+In our table with $K = 5$: the single-token span $(18, 18)$ (`"1994"`) scores $3.9 + 4.5 = 8.4$, beating $(24, 24)$ (`"2000"`) at $4.2 + 3.0 = 7.2$ and $(17, 18)$ (`"năm 1994"`) at $2.0 + 4.5 = 6.5$. The predicted answer is `"1994"`.
+
+:::note[Key takeaway]
+Extractive QA assigns each token a start logit $s_i$ and an end logit $e_i$, trained by summing the start and end cross-entropy losses. At inference time, pick the valid pair $i \le j < i + K$ inside the passage that maximizes $s_i + e_j$; never take argmax of $s$ and $e$ independently.
+:::
+
+### Unanswerable questions: SQuAD 2.0
+
+A model trained only on SQuAD 1.1 **always** outputs a span, even when the passage does not answer the question. [Rajpurkar, Jia, and Liang (2018)](https://arxiv.org/abs/1806.03822) introduced **SQuAD 2.0**, adding over 50,000 crowd-written unanswerable questions crafted to share keywords and plausible distractors with the passage. A strong neural architecture that scored 86% F1 on SQuAD 1.1 dropped to 66% F1 on SQuAD 2.0 in the original 2018 benchmark.
+
+BERT handles unanswerable questions (Section 4.3 of Devlin et al., 2019) by repurposing the `[CLS]` token at index 0:
+
+- **During training**, an unanswerable question is given the gold label $i^\star = j^\star = 0$: its "answer span" starts and ends on `[CLS]`.
+- **At inference time**, compute the no-answer score $s_{\text{null}} = s_0 + e_0$ and compare it against the best non-empty passage span score $\hat{s} = s_{\hat{i}} + e_{\hat{j}}$. Predict the span if and only if
+
+$$
+\hat{s} > s_{\text{null}} + \tau
+$$
+
+where the threshold $\tau$ is tuned on the development set to maximize F1. A large positive $\tau$ makes the model conservative (abstaining more often); a negative $\tau$ makes it aggressive (answering more often). In our first code cell, for the unanswerable area question, the best passage span scores $5.0$ while $s_{\text{null}} = 6.2$: with $\tau = 0$ the model abstains (`(no answer)`), whereas lowering the threshold to $\tau = -1.5$ makes it output `"1994"`—a false positive.
+
+### Passages longer than the model's context window
+
+BERT accepts at most 512 tokens, whereas a full Wikipedia article can be thousands of tokens long. The standard solution is a **sliding window**: slice the passage into overlapping windows, pair each window with the question as `[CLS] question [SEP] window [SEP]`, and run the model on each window. Adjacent windows **must overlap** by a stride; otherwise an answer span that straddles a cut boundary gets split in two, leaving no window with the full answer.
+
+For example, the standard Hugging Face QA recipe caps each input at 384 tokens and overlaps adjacent passage windows by 128 tokens (`stride=128` with `truncation="only_second"` so only the passage is truncated, never the question). Watch out for a naming subtlety when reading older code: original BERT's `run_squad.py` uses `doc_stride=128` to mean the **step size** between window starts, whereas Hugging Face's tokenizer `stride` specifies the **overlap** in tokens. After scoring every window, pick the candidate span with the highest score across all windows.
+
+### Evaluation: EM and token-level F1
+
+Suppose the model predicts `"năm 1994"` ("the year 1994") while the gold reference is `"1994"`. Is that right or wrong? SQuAD reports two metrics after passing both strings through a text **normalization** function.
+
+**Normalization** in the official SQuAD evaluation script performs four steps: lowercase, strip punctuation, remove the English articles `"a"`, `"an"`, and `"the"`, and collapse whitespace. Dropping English articles ensures that `"the Eiffel Tower"` and `"Eiffel Tower"` count as an exact match.
+
+**Never run English article removal on Vietnamese text.** Vietnamese has no articles `"a"`, `"an"`, or `"the"`, but the regex `\b(a|an|the)\b` blindly deletes the Vietnamese words `"a"` and `"an"` wherever they appear as standalone syllables! As a result, `"Long An"` turns into `"long"`, `"An Giang"` turns into `"giang"`, `"an toàn giao thông"` ("traffic safety") turns into `"toàn giao thông"`, and `"A Lưới"` turns into `"lưới"`. A model that predicts the incomplete name `"Long"` for `"Long An"` gets rewarded with `EM = 1`! When evaluating Vietnamese QA, keep lowercasing, punctuation removal, and whitespace normalization, and turn off English article removal. Under that Vietnamese normalization, `"năm 1994"` and `"1994"` remain distinct.
+
+**Exact Match (EM):** equals 1 if the normalized prediction and normalized gold answer are character-for-character identical, and 0 otherwise.
+
+**Token-level F1:** split both normalized strings on whitespace into bags of tokens, count the number of shared tokens (respecting multiplicity), and compute precision, recall, and F1:
+
+$$
+P = \frac{\text{shared tokens}}{\text{predicted tokens}}, \quad R = \frac{\text{shared tokens}}{\text{gold tokens}}, \quad F_1 = \frac{2PR}{P + R}
+$$
+
+Precision $P$ asks *"what fraction of the predicted words are in the gold answer?"*, while recall $R$ asks *"what fraction of the gold answer's words were predicted?"*. Comparing `"năm 1994"` (2 tokens) against `"1994"` (1 token): they share 1 token, so $P = 1/2$, $R = 1$, and $F_1 = 2 \cdot \frac{1}{2} \cdot 1 / (\frac{1}{2} + 1) = 0.667$. F1 awards partial credit where EM gives 0.
+
+Two additional conventions from the official evaluation script:
+
+- A question often has **multiple gold reference answers** collected from different human annotators. The script takes the **maximum** EM and the **maximum** F1 across the gold references for that question, then averages across all questions.
+- In SQuAD 2.0, unanswerable questions have the empty string `""` as their gold answer. If either the prediction or the gold answer is empty, both EM and F1 are 1 when both are empty, and 0 when only one is empty.
+
+### Open-domain QA: retriever and reader
+
+When no passage is given up front, [Chen et al. (2017)](https://arxiv.org/abs/1704.00051) proposed **DrQA**, splitting open-domain QA into a two-stage pipeline:
+
+1. **Retriever:** given the question, search all of Wikipedia to fetch the top $k$ relevant articles or passages. DrQA used unigram-plus-bigram TF-IDF hashes without neural training.
+2. **Reader:** run an extractive QA model over the retrieved passages and output the highest-scoring span. DrQA used a multi-layer bidirectional RNN; modern pipelines use a BERT-style reader or a generative model.
+
+We covered sparse and dense retrievers (TF-IDF, BM25, DPR) in [Information Retrieval](/en/nlp/information-retrieval/). Here, focus on one crucial system property: **the reader only sees what the retriever fetches**. If none of the top-$k$ retrieved passages contains the answer, even a flawless reader cannot extract it. The fraction of questions for which at least one top-$k$ passage contains the answer (retrieval recall@$k$) acts as a **hard ceiling** on end-to-end extractive QA accuracy.
+
+DrQA's own numbers illustrate this bottleneck vividly. Its retriever found an answer-containing article in the top 5 for 77.8% of SQuAD questions. Its reader, when handed the exact gold paragraph on the SQuAD dev set, achieved 69.5 EM. Yet when the two were combined into an end-to-end system over full Wikipedia, overall EM dropped to **27.1** (for the SQuAD-trained reader). Errors from the two stages compound, and real retrieval pulls in several noisy distractor paragraphs alongside the right one.
+
+[Karpukhin et al. (2020)](https://arxiv.org/abs/2004.04906) replaced TF-IDF/BM25 retrieval with **DPR** (Dense Passage Retrieval), using dual BERT encoders to raise top-$k$ retrieval recall and lift end-to-end QA accuracy accordingly.
+
+### Retrieval-augmented generative QA
+
+An extractive reader has two inherent limitations: the answer must appear verbatim inside **a single** retrieved passage, and the model cannot synthesize facts scattered across multiple passages or phrase the answer in a full sentence. [Lewis et al. (2020)](https://arxiv.org/abs/2005.11401) replaced the extractive reader with a **generative** encoder–decoder model (BART, covered in [Sequence-to-Sequence Models](/en/llm/seq2seq/)): the model reads the question together with the retrieved passages and generates the answer token by token. They named this architecture **RAG** (Retrieval-Augmented Generation). Modern document-grounded chatbots follow this exact pattern with an LLM decoder, as covered in [RAG and Modern Chatbots](/en/llm/rag-chatbot/).
+
+The trade-off is faithfulness: a generative reader is no longer restricted to pointing at an existing substring, so it can hallucinate details absent from the passages. Extractive QA remains attractive whenever you need **exact character offsets** to highlight the answer in the source document, fast CPU inference, and zero risk of newly fabricated phrasing.
+
+### Limitations
+
+- **Answers must be a single contiguous span.** Yes/no questions, counting or arithmetic questions (*"how many years apart were the two inscriptions?"*), and multi-hop syntheses have no single span to point to; they require a generative reader or specialized heads.
+- **Dataset shortcuts.** A model trained on SQuAD 1.1 assumes every question is answerable and learns strong entity-type heuristics (if the question asks *"when"* or *"how deep"*, grab a nearby number). Our DistilBERT code cell shows this failure mode on an unanswerable question.
+- **Span probabilities are not calibrated confidence scores.** See the second caution box under Common pitfalls.
+
+## Illustration
+
+The diagram below traces an open-domain retriever–reader pipeline. Notice the bottleneck where an entire corpus narrows down to just $k$ retrieved passages: everything the reader ever sees must pass through that narrow funnel.
+
+{/* FIG: the retriever narrows the entire corpus down to a few passages, and the reader only scores spans inside those passages—so if the right passage is missed at retrieval time, the reader cannot recover. */}
+<RetrieverReaderFigure />
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the first two cells on Python 3.14 and NumPy 2.4 in Pyodide, and the DistilBERT cell on Python 3.14, `transformers` 5.22, and PyTorch 2.14 on CPU. The first two cells run directly in your browser and are independent of each other; the third cell requires PyTorch and runs on your machine.
+
+### Span selection and the no-answer decision
+
+This cell reproduces our hand calculation from the Theory section on synthetic logits over the Ha Long Bay sentence (tokenized by syllable, with `[CLS]` at position 0; for brevity the question tokens are omitted so the passage starts at index 1). The function `best_span` searches all valid pairs $i \le j < i + K$ with $K = 5$.
+
+<PythonRunner code={spanCode} title="Selecting the best span from start/end logits" />
+
+- **Independent argmax** prints `start=24 2000, end=18 1994`: the start index sits after the end index, reproducing the backward-span trap from the Theory section.
+- **Joint constrained search** (`best_span`) selects `(18, 18) '1994'` with score `8.4` ($3.9 + 4.5$).
+- **Unanswerable area question:** the best passage span is still `'1994'` with score `5.0`, but the `[CLS]` null span scores `6.2`. With `tau=0.0`, $5.0 < 6.2$, so the model abstains (`(no answer)`). Lowering the threshold to `tau=-1.5` makes $5.0 > 6.2 - 1.5 = 4.7$, causing the model to output `'1994'`—a false positive. Tuning $\tau$ trades off false abstentions against false answers.
+
+### EM and token-level F1
+
+This cell implements SQuAD's `normalize`, `em`, and `f1` functions. The boolean parameter `en` toggles English article removal (`\b(a|an|the)\b`): `en=True` matches the original English SQuAD script, while `en=False` is the safe adaptation for Vietnamese. The script evaluates nine `(prediction, gold_list, en)` cases.
+
+<PythonRunner code={emF1Code} title="Exact Match (EM) and token-level F1" />
+
+- `'1994.'` gets `EM=1` because punctuation is stripped during normalization.
+- `'năm 1994'` against `["1994"]` gets `EM=0, F1=0.667`, matching our hand calculation. When `"năm 1994"` is included as a second acceptable reference in `["1994", "năm 1994"]` (row 3), taking the max across references gives `EM=1, F1=1.000`.
+- `'2000'` vs. `["1994"]` scores 0 on both metrics.
+- `'The Eiffel Tower'` vs. `["Eiffel Tower"]` scores `EM=1` with `en=True` thanks to English article removal.
+- `'vịnh Hạ Long ở Quảng Ninh'` vs. `["Quảng Ninh"]` has 6 tokens sharing 2 with the gold answer, giving $P = 1/3$, $R = 1$, and `F1=0.500`: overly verbose spans get penalized through precision.
+- The empty pair `("", [""])` scores 1 on both metrics: correctly abstaining on an unanswerable question.
+- **The last two rows** evaluate the exact same pair—predicting `'Long'` when the gold answer is `"Long An"`. With `en=True`, the syllable `"an"` is stripped as if it were the English article *an*, rewarding a half-missing province name with `EM=1, F1=1.000`! Setting `en=False` fixes the bug and gives `EM=0, F1=0.667`.
+
+### DistilBERT fine-tuned on SQuAD
+
+This cell runs `distilbert/distilbert-base-cased-distilled-squad`: a DistilBERT model ([Sanh et al., 2019](https://arxiv.org/abs/1910.01108)) distilled and fine-tuned on SQuAD 1.1 (reaching 79.6 EM and 87.0 F1 on the SQuAD 1.1 dev set per its model card). Because the checkpoint is English-only, we pass a short English passage about Ha Long Bay and ask three questions: two answerable and one unanswerable (the passage never mentions water depth).
+
+Because the high-level `question-answering` pipeline was removed in `transformers` v5, this script calls `AutoModelForQuestionAnswering` directly and implements span selection in four lines of PyTorch—letting you see every step of the Theory section in action:
+
+```python
+score = s[:, None] + e[None, :]  # score[i, j] = s_i + e_j
+n = len(s)
+ok = torch.ones(n, n).triu().tril(max_len - 1).bool()
+score = score.masked_fill(~ok, -1e4)  # drop j < i and long spans
+```
+
+Here `triu()` keeps pairs with $j \ge i$, and `tril(max_len - 1)` keeps pairs with $j - i \le K - 1$ (`max_len = 15`). Right before that, `sequence_ids(0)` masks out all tokens that do not belong to the passage (question tokens have ID `0`, passage tokens have ID `1`, and special tokens have `None`) by setting their logits to $-10^4$.
+
+<LocalCode
+  code={readerCode}
+  title="Extractive QA with DistilBERT: start/end logits and span selection"
+  packages={['transformers', 'torch']}
+  hardware="CPU is sufficient. The first run downloads about 261 MB (model weights and tokenizer). Subsequent runs take roughly one to two minutes on a development machine, mostly spent importing PyTorch and transformers"
+  sampleVaries={false}
+>
+
+```text
+When was Ha Long Bay first inscribed as a World Heritage Site?
+  answer='1994' p=0.992 start=170 end=174
+  best span score=19.55  [CLS] score=-4.73
+Which province is Ha Long Bay in?
+  answer='Quang Ninh' p=0.812 start=18 end=28
+  best span score=25.48  [CLS] score=-1.71
+How deep is the water in Ha Long Bay?
+  answer='2,000 limestone islands and islets' p=0.228 start=75 end=109
+  best span score=1.38  [CLS] score=-14.37
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **Question 1** extracts `'1994'` (ignoring the distractor `"2000"`) with `p=0.992`, where `p` is $p_{\text{start}}(\hat{i}) \cdot p_{\text{end}}(\hat{j})$ with softmax computed over passage positions. The character offsets `start=170 end=174` come from `return_offsets_mapping=True`: slicing `context[170:174]` yields `'1994'`. Extractive QA always gives you exact character coordinates in the source text.
+- **Question 2** extracts `'Quang Ninh'` with `p=0.812`. Notice that its raw logit sum (`25.48`) is higher than Question 1's (`19.55`), even though its normalized probability `p` is lower: `p` only compares candidate spans **within the same forward pass**, whereas raw logits are uncalibrated across different questions.
+- **Question 3** has no answer in the passage, yet the model still extracts `'2,000 limestone islands and islets'`. Because a SQuAD 1.1 checkpoint was trained to always pick a span, it grabs a phrase containing a number. The only hint of trouble is the low span score (`1.38`) and low probability (`p=0.228`).
+- **The `[CLS]` score cannot save a SQuAD 1.1 model.** On Question 3, `[CLS] score=-14.37` is far *below* the spurious span score `1.38`, so applying the SQuAD 2.0 rule $\hat{s} > s_{\text{null}} + \tau$ with $\tau = 0$ would still output the wrong answer. Because this checkpoint was never trained with `[CLS]` as an unanswerable target, its `[CLS]` logits are meaningless. To abstain reliably, use a checkpoint fine-tuned on SQuAD 2.0 (or UIT-ViQuAD 2.0 for Vietnamese).
+
+## Common pitfalls
+
+:::caution[Taking argmax of start and end logits independently]
+Independent argmax can pick a start position after the end position—as in our first code cell (`start=24, end=18`)—or span nearly the entire passage. Several minimal code snippets online use independent argmax for brevity, and because it happens to work on easy, unambiguous examples, the bug often goes unnoticed until production. Always maximize $s_i + e_j$ over valid passage pairs $i \le j < i + K$, as shown in our `answer` function.
+:::
+
+:::caution[Treating the span probability `p` as a calibrated confidence score]
+A value of `p=0.812` does not mean "this answer has an 81.2% chance of being right". The softmax probability `p` only measures how sharply one span beat other spans *inside the same passage*: if a passage mentions two equally valid phrasings of the answer, both split the probability mass and `p` drops even when the model is right. Conversely, to abstain on unanswerable questions, use a model trained with unanswerable examples and tune the threshold $\tau$ on $\hat{s} - s_{\text{null}}$ using a development set rather than guessing a raw probability cutoff.
+:::
+
+:::caution[Splitting long documents into non-overlapping chunks]
+If you slice a long document into contiguous, non-overlapping windows, any answer span that crosses a chunk boundary gets cut in two and cannot be extracted intact from either window. Always use overlapping sliding windows (`stride` in Hugging Face's tokenizer, alongside `truncation="only_second"` so the question is never truncated), and take the highest-scoring span across all windows. During training, any window that does not fully contain the gold answer span should have its target set to `[CLS]`.
+:::
+
+:::caution[Comparing EM and F1 across papers without checking normalization]
+EM and F1 depend heavily on text normalization and tokenization. Running the English SQuAD script's article filter `\b(a|an|the)\b` on Vietnamese erases the syllable `"an"`, turning `"Long An"` into `"long"` and giving the incomplete prediction `"Long"` a perfect `EM = 1` (the last two rows of our second code cell). Furthermore, syllable-level vs. word-segmented tokenization changes token counts and F1 on Vietnamese. Only compare EM and F1 numbers produced by the exact same evaluation script.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Extractive QA answers a question by pointing to a contiguous span inside a passage. A BERT-style reader encodes `[CLS] question [SEP] passage [SEP]`, computes start and end logits $s_i = \mathbf{w}_{\text{start}}^\top \mathbf{h}_i$ and $e_i = \mathbf{w}_{\text{end}}^\top \mathbf{h}_i$ for each token, and trains with the sum of start and end cross-entropy losses.
+- Select the answer span via $\arg\max_{i \le j < i + K} (s_i + e_j)$ restricted to passage tokens, never by independent argmax. For unanswerable questions (SQuAD 2.0), point gold labels to `[CLS]` during training and predict a span only when $\hat{s} > s_{\text{null}} + \tau$. For long passages, use overlapping sliding windows.
+- Evaluate with Exact Match (EM) and token-level F1 after normalization (lowercasing, stripping punctuation, collapsing whitespace—and omitting English article removal when scoring Vietnamese), taking the maximum score across gold references.
+- Open-domain QA pairs a retriever with a reader, where retriever recall@$k$ sets a hard ceiling on end-to-end accuracy. Replacing the extractive reader with a generative model yields RAG: more flexible, at the cost of losing verbatim span guarantees.
+
+**Further reading:**
+
+- Nguyen, K. V., Nguyen, D.-V., Nguyen, A. G.-T., Nguyen, N. L.-T. (2020). [*A Vietnamese Dataset for Evaluating Machine Reading Comprehension*](https://aclanthology.org/2020.coling-main.233/). COLING 2020. Introduces UIT-ViQuAD, a SQuAD-style Vietnamese Wikipedia reading comprehension benchmark, with an analysis of question types and reasoning challenges.
+- Rajpurkar, P., Zhang, J., Lopyrev, K., Liang, P. (2016). [*SQuAD: 100,000+ Questions for Machine Comprehension of Text*](https://arxiv.org/abs/1606.05250). EMNLP 2016. Introduces SQuAD 1.1 and its span-based evaluation. For unanswerable questions, see Rajpurkar, P., Jia, R., Liang, P. (2018), [*Know What You Don't Know: Unanswerable Questions for SQuAD*](https://arxiv.org/abs/1806.03822), ACL 2018.
+- Devlin, J., Chang, M.-W., Lee, K., Toutanova, K. (2019). [*BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding*](https://arxiv.org/abs/1810.04805). NAACL 2019, Sections 4.2 and 4.3. Defines the start/end vector head, constrained span decoding, and the `[CLS]` threshold rule for SQuAD 2.0.
+- Chen, D., Fisch, A., Weston, J., Bordes, A. (2017). [*Reading Wikipedia to Answer Open-Domain Questions*](https://arxiv.org/abs/1704.00051). ACL 2017. Introduces the DrQA retriever–reader pipeline; Tables 3 and 6 illustrate how retrieval recall bounds end-to-end QA performance.
+- Jurafsky, D., Martin, J. H. [*Speech and Language Processing*](https://web.stanford.edu/~jurafsky/slp3/), 3rd edition draft (August 2026), Chapter 11 "Information Retrieval and RAG", Sections 11.5 and 11.6. Places QA datasets and evaluation alongside dense retrieval and RAG.
+- Hugging Face. [*Question answering*](https://huggingface.co/learn/llm-course/chapter7/7), LLM Course Chapter 7. Complete implementation guide covering sliding windows with `stride`, labeling windows without answers, and aggregating span logits across windows.
+
+<LessonProgress />

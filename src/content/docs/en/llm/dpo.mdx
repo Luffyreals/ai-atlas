@@ -1,0 +1,367 @@
+---
+title: DPO
+description: 'RLHF requires a separate reward model and an RL loop. DPO optimizes the same objective with a classification loss on preference pairs: derived from the KL penalty, implicit reward, and the role of β.'
+quiz:
+  - question: 'A pair has $\ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_w) = -30$, $\ln\pi_{\text{ref}}(\mathbf{y}_w) = -31$, $\ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_l) = -42$, $\ln\pi_{\text{ref}}(\mathbf{y}_l) = -39$, and $\beta = 0.5$. What are the margin and DPO loss of this pair?'
+    options:
+      - 'Margin $6$, loss $\approx 0.0025$'
+      - 'Margin $2$, loss $\approx 0.127$'
+      - 'Margin $4$, loss $\approx 0.018$'
+      - 'Cannot be computed yet, because $Z(\mathbf{x})$ is missing'
+    answer: 1
+    explanation: 'The chosen response increased by 1 relative to the reference, while the rejected response decreased by 3, so $d = 1 - (-3) = 4$ and the margin is $\beta d = 2$. The loss is $-\ln\sigma(2) \approx 0.127$. The first option compares the two policy log-probs while forgetting the reference model: DPO only cares how much each response shifted relative to $\pi_{\text{ref}}$. The third option forgets to multiply by $\beta$. And $Z(\mathbf{x})$ already canceled out because both responses share the same prompt.'
+  - question: 'You run DPO with $\beta = 0.1$. The generated text starts drifting far from the SFT model: strange tone, frequent repetition. To keep the policy closer to the SFT model, what should you change first?'
+    options:
+      - 'Decrease $\beta$ to $0.01$, because $\beta$ acts as the learning rate'
+      - 'Keep $\beta$ unchanged and continue training until the loss is lower'
+      - 'Drop $\pi_{\text{ref}}$ from the loss to save memory'
+      - 'Increase $\beta$, because $\beta$ is the KL penalty coefficient'
+    answer: 3
+    explanation: '$\beta$ is the KL leash, not the learning rate $\eta$. In the solution $\pi^* \propto \pi_{\text{ref}}\, e^{r/\beta}$, a larger $\beta$ pulls the factor closer to 1. In the loss, a larger $\beta$ means even a small shift $d$ achieves a large margin. Thus increasing $\beta$ keeps the policy closer to $\pi_{\text{ref}}$. Decreasing $\beta$ does the opposite: a looser leash. Even so, $\beta$ cannot prevent everything: Azar et al. (2023) showed that when one answer always wins, DPO still pushes the losing response''s probability to 0 regardless of $\beta$.'
+  - question: 'Why doesn''t DPO need to compute the partition function $Z(\mathbf{x})$, a sum over all possible responses?'
+    options:
+      - 'Because the two responses share the same prompt and thus share $\beta\ln Z(\mathbf{x})$, which cancels out when taking the difference'
+      - 'Because after SFT, $Z(\mathbf{x})$ always equals 1 for every prompt'
+      - 'Because DPO estimates $Z(\mathbf{x})$ by sampling from $\pi_{\text{ref}}$ during training'
+      - 'Because when $\beta$ is small enough, $Z(\mathbf{x}) \approx 1$ and can be ignored'
+    answer: 0
+    explanation: 'The reward written in terms of the policy is $r = \beta\ln(\pi^*/\pi_{\text{ref}}) + \beta\ln Z(\mathbf{x})$. The second term depends only on the prompt, so it disappears when subtracting the scores of two responses to the same prompt. That is why DPO data must consist of response pairs for the same $\mathbf{x}$. DPO does not sample anything during training. And $Z$ is not 1: in the three-answer example with $\beta = 1$, $Z \approx 3.42$.'
+  - question: 'In a DPO training log, the loss decreases and `rewards/margins` steadily increases, but `logps/chosen` (the log-prob of the chosen response) also gradually decreases. Which statement is true?'
+    options:
+      - 'There is definitely a bug in the code, because if loss decreases, the probability of the chosen response must increase'
+      - 'The model has definitely improved, because the margin increases steadily at every step'
+      - 'This can happen: if the rejected response drops faster, the margin still increases'
+      - 'You should set $\beta = 0$ so the probability of the chosen response increases again'
+    answer: 2
+    explanation: 'The loss of a pair is $-\ln\sigma(\beta d)$, where $d$ is the difference of the two shifts. If both responses drop in probability but the rejected one drops faster, $d$ still increases, just like pair 3 in the code cell. The TRL documentation notes that in practice DPO often increases the margin by pushing down the rejected response rather than pulling up the chosen one. There is no bug here, though an increasing margin alone does not guarantee real quality. Setting $\beta = 0$ makes the margin always 0 and freezes the loss at $\ln 2$.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import RlhfStagesFigure from '@components/figures/RlhfStagesFigure.astro';
+import dpoLossCode from '@code/llm/dpo/dpo-loss.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Understand why **Direct Preference Optimization** (DPO) optimizes the exact same objective as the RL step in RLHF without a separate reward model (RM) and without a reinforcement learning loop.
+- Derive the DPO loss yourself in four steps: the solution to the KL-penalized objective, solving for the reward, substituting into Bradley–Terry so the partition function cancels out, and maximizing likelihood.
+- Read the DPO gradient: why currently misranked pairs are pushed the hardest, and what $\beta$ does.
+- Spot common misconceptions: DPO still has a (implicit) reward, still needs a reference model, and a low loss does not necessarily mean a good model.
+
+## Prerequisites
+
+{/* List taken from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+The [RLHF](/en/llm/rlhf/) lesson gave us three pieces we reuse here: the **Bradley–Terry model** $P(\mathbf{y}_w \succ \mathbf{y}_l \mid \mathbf{x}) = \sigma(r_w - r_l)$, which depends only on the score difference; the **RL step objective** $\mathbb{E}[r] - \beta\, D_{\mathrm{KL}}(\pi_{\boldsymbol{\phi}} \,\|\, \pi_{\text{ref}})$, where $\pi_{\boldsymbol{\phi}}$ is the policy being trained and $\pi_{\text{ref}}$ is the frozen SFT model; and the **solution** $\pi^* \propto \pi_{\text{ref}}\, e^{r/\beta}$ to that objective. The previous lesson promised to derive that solution here.
+:::
+
+## Intuition
+
+### A rather long detour
+
+Suppose you have a preference dataset: tens of thousands of triples consisting of a prompt, a chosen response, and a rejected response. In RLHF, you use it in two stages. Stage one: train an RM to imitate human choices. Stage two: run PPO, where the policy generates responses, the RM scores them, the policy updates, and then generates again. During training, four models sit in memory at once: the policy, the reference model, the RM, and the value function—along with many sensitive hyperparameters.
+
+Notice that the RM is just a relay station. The real information lives in the pairwise comparisons. The RM compresses it into a scoring function, and then PPO unpacks that scoring function into a policy. Each stage adds another place where things can go wrong: the RM scores inaccurately in regions it has not seen, and PPO finds those exact flaws, as we saw with reward hacking in the previous lesson.
+
+### The answer is already in one formula
+
+The previous lesson had a remarkable formula: if you know the scoring function $r$, the optimal policy is $\pi^* \propto \pi_{\text{ref}}\, e^{r/\beta}$. That formula goes from reward to policy. Rafailov et al. (2023) asked: what if we go backward? If every policy corresponds to a scoring function, then instead of learning a score and searching for a policy, we can learn the policy directly and read the score right out of it.
+
+Return to the cooking analogy from the previous lesson. RLHF hires a virtual judge, then cooks dish after dish for the virtual judge to score. DPO skips the judge. You take each pair "dish A tastes better than dish B" and edit the recipe directly: relative to the old recipe, lean more toward A and away from B. The "score" of a dish is simply how much you changed your way of cooking it compared to the old way.
+
+**The problem of this lesson: starting from the objective "achieve high reward without drifting far from the SFT model", how do we apply a change of variables to train the policy directly on preference pairs using a simple classification-like loss, without a separate RM and without an RL loop?**
+
+## Theory
+
+### Notation
+
+We keep the notation from the RLHF lesson: prompt $\mathbf{x}$, response $\mathbf{y}$, chosen response $\mathbf{y}_w$, rejected response $\mathbf{y}_l$, policy $\pi_{\boldsymbol{\phi}}$, reference model $\pi_{\text{ref}}$, and KL penalty coefficient $\beta > 0$. The DPO paper writes the policy as $\pi_\theta$. We keep $\boldsymbol{\phi}$ to match the previous lesson, where $\boldsymbol{\theta}$ was the RM parameters. The paper writes $\log$, while we write $\ln$ with the same meaning.
+
+$\pi(\mathbf{y} \mid \mathbf{x})$ is the probability of the **entire** response. As in the previous lesson, $\ln\pi(\mathbf{y} \mid \mathbf{x})$ is the sum of token log-probs, so for a response of a few dozen tokens, it is a negative number around a few dozen.
+
+The four steps below follow Section 4 and Appendix A of the paper.
+
+### Step 1: solution to the KL-penalized objective
+
+Fix a prompt and an arbitrary reward function $r$. For brevity, temporarily drop $\mathbf{x}$ from the notation. Assume $\pi$ can be chosen freely among all distributions over the set of responses, unconstrained by network architecture. Writing the expectation as a sum, the objective $\mathbb{E}_{\mathbf{y} \sim \pi}[r] - \beta\, D_{\mathrm{KL}}(\pi \,\|\, \pi_{\text{ref}})$ is
+
+$$
+J(\pi) = \sum_{\mathbf{y}} \pi(\mathbf{y}) \Big[ r(\mathbf{y}) - \beta \ln\frac{\pi(\mathbf{y})}{\pi_{\text{ref}}(\mathbf{y})} \Big]
+$$
+
+Finding $\pi$ that maximizes $J$ is equivalent to finding $\pi$ that minimizes $-J/\beta$: dividing by a positive number $\beta$ does not change the optimum, and flipping the sign turns a maximum into a minimum.
+
+$$
+-\frac{J(\pi)}{\beta} = \sum_{\mathbf{y}} \pi(\mathbf{y}) \Big[ \ln\frac{\pi(\mathbf{y})}{\pi_{\text{ref}}(\mathbf{y})} - \frac{r(\mathbf{y})}{\beta} \Big]
+$$
+
+Fold $r/\beta$ into the log. Since $r/\beta = \ln e^{r/\beta}$ and the difference of two logs is the log of their ratio:
+
+$$
+\ln\frac{\pi(\mathbf{y})}{\pi_{\text{ref}}(\mathbf{y})} - \frac{r(\mathbf{y})}{\beta} = \ln\frac{\pi(\mathbf{y})}{\pi_{\text{ref}}(\mathbf{y})\, e^{r(\mathbf{y})/\beta}}
+$$
+
+The denominator looks like a distribution, but its sum over all $\mathbf{y}$ does not equal 1 in general. We normalize it by setting
+
+$$
+\begin{aligned}
+Z &= \sum_{\mathbf{y}} \pi_{\text{ref}}(\mathbf{y})\, e^{r(\mathbf{y})/\beta} \\
+\pi^*(\mathbf{y}) &= \frac{1}{Z}\, \pi_{\text{ref}}(\mathbf{y})\, e^{r(\mathbf{y})/\beta}
+\end{aligned}
+$$
+
+$Z$ is the **partition function** (normalization constant). Since $\pi^*$ is positive and sums to 1, it is a valid probability distribution. The denominator above equals $Z\, \pi^*(\mathbf{y})$, and the log of a product in the denominator splits into a difference:
+
+$$
+\ln\frac{\pi(\mathbf{y})}{Z\, \pi^*(\mathbf{y})} = \ln\frac{\pi(\mathbf{y})}{\pi^*(\mathbf{y})} - \ln Z
+$$
+
+Substitute this back into the sum. Since $\ln Z$ does not depend on $\mathbf{y}$ and $\sum_{\mathbf{y}} \pi(\mathbf{y}) = 1$, the $-\ln Z$ term factors out intact. The remaining part is the exact definition of KL divergence:
+
+$$
+\begin{aligned}
+-\frac{J(\pi)}{\beta} &= \sum_{\mathbf{y}} \pi(\mathbf{y}) \ln\frac{\pi(\mathbf{y})}{\pi^*(\mathbf{y})} - \ln Z \\
+&= D_{\mathrm{KL}}(\pi \,\|\, \pi^*) - \ln Z
+\end{aligned}
+$$
+
+$Z$ does not depend on $\pi$. The KL divergence is always $\ge 0$, and equals 0 if and only if the two distributions are identical (Gibbs' inequality). Therefore $-J/\beta$ is minimized—meaning $J$ is maximized—precisely when $\pi = \pi^*$. Restoring $\mathbf{x}$:
+
+$$
+\pi^*(\mathbf{y} \mid \mathbf{x}) = \frac{1}{Z(\mathbf{x})}\, \pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})\, e^{r(\mathbf{x}, \mathbf{y})/\beta}
+$$
+
+This is the formula used in the previous lesson. Incidentally, at $\pi^*$ the KL divergence is 0, so the maximum value of the objective is $J(\pi^*) = \beta \ln Z(\mathbf{x})$.
+
+Why not use this formula directly for an LLM? Because $Z$ is a sum over **every** possible response. With a vocabulary of $V$ tokens and responses of length $L$, there are $V^L$ responses—impossible to compute.
+
+### Step 2: solving for the reward
+
+Take the natural log of both sides of the $\pi^*$ formula. The log of a product is the sum of the logs:
+
+$$
+\begin{aligned}
+\ln\pi^*(\mathbf{y} \mid \mathbf{x}) &= \ln\pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x}) \\
+&\quad + \frac{r(\mathbf{x}, \mathbf{y})}{\beta} - \ln Z(\mathbf{x})
+\end{aligned}
+$$
+
+Rearrange to isolate $r/\beta$, combine the two logs into the log of a ratio, and multiply both sides by $\beta$:
+
+$$
+r(\mathbf{x}, \mathbf{y}) = \beta \ln\frac{\pi^*(\mathbf{y} \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})} + \beta \ln Z(\mathbf{x})
+$$
+
+Read this as: the score of a response equals $\beta$ times "how much the optimal policy prefers this response over the reference model", plus a term that depends only on the prompt. Knowing the policy means knowing the reward, up to an $\mathbf{x}$-dependent constant. That constant, however, still contains $Z$.
+
+### Step 3: substituting into Bradley–Terry, Z cancels out
+
+Bradley–Terry only uses the **difference** in scores between two responses to the **same** prompt. Substitute the expression from Step 2 into $r(\mathbf{x}, \mathbf{y}_w) - r(\mathbf{x}, \mathbf{y}_l)$. Because both responses share $\mathbf{x}$, they share the term $\beta\ln Z(\mathbf{x})$, and the two terms subtract to 0:
+
+$$
+\begin{aligned}
+P(\mathbf{y}_w \succ \mathbf{y}_l \mid \mathbf{x}) = \sigma\Big( &\beta \ln\frac{\pi^*(\mathbf{y}_w \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y}_w \mid \mathbf{x})} \\
+&- \beta \ln\frac{\pi^*(\mathbf{y}_l \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y}_l \mid \mathbf{x})} \Big)
+\end{aligned}
+$$
+
+No more $r$, no more $Z$. The probability that a human chooses $\mathbf{y}_w$ now depends only on $\pi^*$ and $\pi_{\text{ref}}$. That is also why DPO data must consist of response pairs for the **same** prompt: if you paired responses from two different prompts, $Z$ would not cancel out.
+
+Let's verify numerically on the three-answer example from the previous lesson: the SFT model writes A, B, C with probabilities $\pi_{\text{ref}} = (0.6, 0.3, 0.1)$, the RM scores $r = (0, 1, 3)$, and $\beta = 1$. Compute $\pi^*$ using Step 1 and compare:
+
+| Quantity | A | B | C |
+|---|---:|---:|---:|
+| $\pi^*$ | 0.175 | 0.238 | 0.587 |
+| $\beta\ln(\pi^* / \pi_{\text{ref}})$ | $-1.2308$ | $-0.2308$ | $1.7692$ |
+| $r - \beta\ln(\pi^* / \pi_{\text{ref}})$ | 1.2308 | 1.2308 | 1.2308 |
+
+The last row is identical across all three answers. That value is $\beta\ln Z$, with $Z \approx 3.424$. Thus the difference in the second row between any two answers equals the exact RM score difference: B minus A is $-0.2308 - (-1.2308) = 1 = r_B - r_A$.
+
+### Step 4: the DPO loss
+
+We do not know $\pi^*$. But we have a policy $\pi_{\boldsymbol{\phi}}$ with learnable parameters. DPO's idea: **treat $\pi_{\boldsymbol{\phi}}$ as our candidate for $\pi^*$**, plug it into the probability formula in Step 3, and tune $\boldsymbol{\phi}$ so that the formula best explains the actual human choices. Just like training the RM in the previous lesson, we maximize likelihood by taking $-\ln$ and averaging over pairs:
+
+$$
+\begin{aligned}
+\mathcal{L}_{\text{DPO}}(\boldsymbol{\phi}) &= -\,\mathbb{E}_{(\mathbf{x}, \mathbf{y}_w, \mathbf{y}_l) \sim \mathcal{D}}\big[ \ln\sigma(\Delta) \big] \\
+\Delta &= \beta \ln\frac{\pi_{\boldsymbol{\phi}}(\mathbf{y}_w \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y}_w \mid \mathbf{x})} \\
+&\quad - \beta \ln\frac{\pi_{\boldsymbol{\phi}}(\mathbf{y}_l \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y}_l \mid \mathbf{x})}
+\end{aligned}
+$$
+
+Compare this to the RM loss, $-\ln\sigma\big(r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y}_w) - r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y}_l)\big)$: it has the exact same form. The only difference is that the score $r_{\boldsymbol{\theta}}$, previously produced by a separate network, is replaced by
+
+$$
+\hat{r}_{\boldsymbol{\phi}}(\mathbf{x}, \mathbf{y}) = \beta \ln\frac{\pi_{\boldsymbol{\phi}}(\mathbf{y} \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})}
+$$
+
+The paper calls this the **implicit reward**. The language model is simultaneously the policy and the RM. That is the meaning of the paper's subtitle: "Your Language Model is Secretly a Reward Model".
+
+**Compact form for a single pair.** Since $\ln(a/b) = \ln a - \ln b$, each log ratio is the difference of two log-probs. Dropping $\mathbf{x}$ for brevity, define
+
+$$
+\begin{aligned}
+d &= \big[ \ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_w) - \ln\pi_{\text{ref}}(\mathbf{y}_w) \big] \\
+&\quad - \big[ \ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_l) - \ln\pi_{\text{ref}}(\mathbf{y}_l) \big]
+\end{aligned}
+$$
+
+$d$ measures how much more the winning response has been boosted relative to the reference than the losing response. The quantity $\Delta$ in the loss is the **margin**, as in the previous lesson: the difference between the two implicit rewards, $\Delta = \hat{r}_{\boldsymbol{\phi}}(\mathbf{y}_w) - \hat{r}_{\boldsymbol{\phi}}(\mathbf{y}_l) = \beta d$. The loss for a single pair is $-\ln\sigma(\beta d)$. When the policy still matches the reference, $d = 0$ and the loss is $\ln 2 \approx 0.6931$, just like an untrained RM.
+
+Everything in the loss is a log-prob: run $\pi_{\boldsymbol{\phi}}$ and $\pi_{\text{ref}}$ on $\mathbf{y}_w$ and $\mathbf{y}_l$, and sum the log-probs of the response tokens. No new sequences need to be generated. Since $\pi_{\text{ref}}$ never changes during training, its log-probs only need to be precomputed once.
+
+**Change of variables, no extra approximation.** Steps 1 through 3 are exact equalities, so the DPO loss is a change of variables: searching directly for the policy instead of searching for a reward function first and a policy second. Under mild assumptions, the paper proves (Section 5.1, Theorem 1) that every equivalence class of reward functions consistent with Bradley–Terry (grouping reward functions that differ only by a function of $\mathbf{x}$) has a representative of the form $\beta\ln(\pi / \pi_{\text{ref}})$, so this parameterization loses no generality.
+
+:::note[Key takeaway]
+Four steps: (1) the KL-penalized objective has the closed-form solution $\pi^* = \pi_{\text{ref}}\, e^{r/\beta} / Z$. (2) Inverting gives $r = \beta\ln(\pi^* / \pi_{\text{ref}}) + \beta\ln Z$. (3) Bradley–Terry only uses the score difference of two responses to the same prompt, so $\beta\ln Z$ cancels out. (4) Replacing $\pi^*$ with $\pi_{\boldsymbol{\phi}}$ and maximizing likelihood yields the loss $-\ln\sigma(\beta d)$. DPO is logistic regression on the margin of implicit rewards.
+:::
+
+### Gradient: how DPO learns
+
+As derived in the previous lesson, the derivative of $-\ln\sigma(\Delta)$ with respect to the margin is $-(1 - \sigma(\Delta))$, and $1 - \sigma(\Delta) = \sigma(-\Delta)$. Here $\Delta = \beta d$. Inside $d$, the two $\pi_{\text{ref}}$ terms are constants, so by the chain rule, the gradient of $\Delta$ with respect to $\boldsymbol{\phi}$ is $\beta\big(\nabla_{\boldsymbol{\phi}}\ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_w) - \nabla_{\boldsymbol{\phi}}\ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_l)\big)$. Putting it together:
+
+$$
+\begin{aligned}
+&\nabla_{\boldsymbol{\phi}}\big[ -\ln\sigma(\beta d) \big] \\
+&= -\beta\, \sigma(-\beta d) \big( \nabla_{\boldsymbol{\phi}}\ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_w \mid \mathbf{x}) \\
+&\qquad - \nabla_{\boldsymbol{\phi}}\ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_l \mid \mathbf{x}) \big)
+\end{aligned}
+$$
+
+Read each piece, remembering that we step in the **negative** gradient direction:
+
+- **Last parenthesis:** increases the log-prob of the winning response and decreases the log-prob of the losing response.
+- **Weight $\sigma(-\beta d)$**, which equals $\sigma\big(\hat{r}_{\boldsymbol{\phi}}(\mathbf{y}_l) - \hat{r}_{\boldsymbol{\phi}}(\mathbf{y}_w)\big)$: the probability that the implicit reward assigns to the human choosing the other response. A currently misranked pair ($d < 0$) gets a weight above 0.5 and is pushed hard. A pair already ranked correctly with a large margin receives almost no further push.
+- **Leading $\beta$:** an overall scaling factor that makes the update step larger or smaller.
+
+This weighting is crucial. The paper compares against an unweighted baseline called unlikelihood, which simply increases the chosen log-prob and decreases the rejected log-prob with equal force on every pair. On TL;DR summarization, that baseline degenerates into meaningless repetition like "when when when when…" (Table 3 in the paper's appendix).
+
+### The role of β
+
+$\beta$ appears in two places, and both tell the same story.
+
+- **In the objective**, $\beta$ is the KL penalty coefficient. Looking at the solution $\pi^* \propto \pi_{\text{ref}}\, e^{r/\beta}$: a large $\beta$ keeps the exponential factor close to 1, so the policy barely moves. A small $\beta$ lets the policy move far.
+- **In the loss**, $\beta$ multiplies $d$ to form the margin. For a pair to reach $P = \sigma(2) \approx 0.88$, $\beta = 0.5$ requires $d = 4$, whereas $\beta = 0.1$ requires $d = 20$. A small $\beta$ forces the policy to shift its log-probs much farther from the reference. That is another way of saying "a looser leash".
+
+$\beta$ amplifies both directions: a correctly ranked pair ($d > 0$) has lower loss when $\beta$ increases, while a misranked pair ($d < 0$) has higher loss. Consequently, the average loss is not necessarily monotonic in $\beta$, as the code cell will show. Do not compare loss values across runs with different $\beta$.
+
+The paper uses $\beta = 0.1$ by default, except for TL;DR summarization where it uses $0.5$ (Appendix B). Do not confuse $\beta$ with the learning rate $\eta$: the paper uses $\eta = 10^{-6}$ with the RMSprop optimizer, a completely different hyperparameter.
+
+Even the $\beta$ leash cannot prevent everything. Azar et al. (2023) pointed out that if the data shows one response **always** winning, the loss only approaches 0 as $d \to \infty$, so DPO pushes the losing response's probability to 0 **regardless of $\beta$**. This mirrors the separable-data case for the RM in the previous lesson.
+
+### DPO vs. RLHF
+
+The DPO pipeline in the paper has two steps. First: for each prompt, sample two responses from $\pi_{\text{ref}}$ and have humans label the winner, or reuse an existing public preference dataset. Second: optimize $\mathcal{L}_{\text{DPO}}$ on that fixed dataset. Because no new responses are generated during training, this is **offline** learning. $\pi_{\text{ref}}$ is the SFT model. When no SFT model is available, the authors first fine-tune on the chosen responses so that $\pi_{\text{ref}}$ stays close to the distribution that generated the data.
+
+Their experimental results should be read in context: models up to 6 billion parameters, in 2023. On IMDb sentiment control, DPO achieved a better reward–KL frontier than PPO, even when PPO was given the ground-truth reward. On TL;DR summarization, judged by GPT-4 against reference summaries in the test set, DPO achieved a win rate of about 61% versus about 57% for PPO at its best sampling temperature. The authors themselves note that GPT-4 win rates are sensitive to the judge prompt, and scaling to much larger models was left as future work. The claim that "DPO is more stable than PPO" is their theoretical argument (Section 5.2, on the sources of instability in actor-critic algorithms like PPO), not a single direct metric.
+
+### Relatives of DPO
+
+Brief summaries so you recognize the names when you encounter them:
+
+- **IPO** (Identity Preference Optimization, Azar et al., 2023). Targets the overfitting issue just discussed. In their theoretical framework, DPO corresponds to using the logit function as the preference transformation. IPO replaces it with the identity function, turning the loss into a squared error that pulls $d$ toward a finite target instead of infinity. In TRL this is `loss_type="ipo"`, where the `beta` parameter plays the role of the regularization coefficient $\tau$ from the IPO paper.
+- **KTO** (Kahneman–Tversky Optimization, Ethayarajh et al., 2024). Does not require pairs: each response only needs a binary "good" or "bad" label, inspired by Kahneman and Tversky's prospect theory.
+- **ORPO** (Odds Ratio Preference Optimization, Hong et al., 2024). Eliminates the reference model and merges SFT and preference optimization into a single stage: the SFT loss plus a term based on the **odds ratio** between the winning and losing responses.
+
+### Limitations
+
+- **Fixed offline data.** If the responses in the dataset were not generated by $\pi_{\text{ref}}$, there is a distribution mismatch. The model also never explores new responses on its own as in PPO.
+- **Overfitting when preferences are nearly deterministic**, as shown by Azar et al. above.
+- **Over-optimization has not disappeared.** The DPO authors leave open how reward over-optimization manifests in DPO (Section 7). Not having a separate RM does not mean the problem is gone.
+- **Length bias.** Since the log-prob of a whole response is a sum over tokens, it scales with response length. TRL includes a variant `loss_type="sigmoid_norm"` (following SimPO by Meng et al., 2024) that normalizes by token count.
+
+## Illustration
+
+RLHF has three stages: SFT, RM training, and policy optimization via RL. Put DPO next to it: DPO keeps Stage 1 (the SFT model serves as $\pi_{\text{ref}}$) and keeps the preference dataset, collapsing Stages 2 and 3 into a single supervised-style loss optimization step.
+
+{/* FIG: reuse the figure from rlhf; the comparison with DPO is in the table below. */}
+<RlhfStagesFigure />
+
+| Criterion | RLHF with PPO | DPO |
+|---|---|---|
+| SFT stage | Yes, serves as $\pi_{\text{ref}}$ and initialization | Yes, serves as $\pi_{\text{ref}}$ and initialization |
+| Preference data used to | Train the RM | Compute the loss directly |
+| Scoring function | Separate network $r_{\boldsymbol{\theta}}$, frozen during RL | Implicit reward $\beta\ln(\pi_{\boldsymbol{\phi}} / \pi_{\text{ref}})$ |
+| Generates responses during training | Yes, every iteration | No (offline) |
+| Models needed in memory | Policy, reference, RM, value function | Policy, reference (can be precomputed) |
+| Objective | $\mathbb{E}[r] - \beta\, D_{\mathrm{KL}}$ | Same objective, via closed-form solution |
+| Optimization method | Clipped PPO | $-\ln\sigma(\beta d)$, like binary classification |
+
+## Code examples
+
+The code in this lesson was last tested in October 2026 with Python 3.14 and NumPy 2.4 (the versions bundled in Pyodide). There is one code cell, which runs directly in your browser. No local setup is required.
+
+### DPO loss on four pairs
+
+The cell uses whole-sequence log-probs simulated for four pairs. Instead of looking at the raw negative numbers, look at how much each response shifted relative to the reference:
+
+| Pair | Chosen response | Rejected response | $d$ |
+|---:|---:|---:|---:|
+| 1 | $+2$ | $-3$ | 5 |
+| 2 | $-3$ | $-1$ | $-2$ |
+| 3 | $-1$ | $-4$ | 3 |
+| 4 | $+1$ | $-1$ | 2 |
+
+Pair 1 shifted clearly in the right direction. Pair 2 shifted in the wrong direction. Pair 3 pushed both responses down, but pushed the rejected response down more. The cell prints the implicit rewards, losses, and gradient weights at $\beta = 0.1$, then the average loss across four $\beta$ values, and finally the case where the policy equals the reference.
+
+<PythonRunner code={dpoLossCode} title="DPO loss across β" />
+
+Reading the output:
+
+- **`d = [ 5. -2.  3.  2.]`**: matches the table above.
+- **`reward chosen` and `reward rejected`**: the implicit rewards at $\beta = 0.1$, equal to $0.1$ times the shift. `accuracy 0.75`: 3 out of 4 pairs have a positive margin. TRL logs this exact metric under the name `rewards/accuracies`. Notice Pair 3: the implicit reward of the chosen response is $-0.1$, meaning the policy **decreased** the probability of that response, yet the pair is still counted as accurate.
+- **`loss`**: $(0.4741, 0.7981, 0.5544, 0.5981)$. Pair 2 is misranked so its loss is highest, above $\ln 2$.
+- **`weight`**, i.e., $\sigma(-\beta d)$: $(0.3775, 0.5498, 0.4256, 0.4502)$. Pair 2 gets the largest weight and Pair 1 the smallest, matching the Gradient section. The full derivative of the loss with respect to $\ln\pi_{\boldsymbol{\phi}}(\mathbf{y}_w)$ also multiplies by $-\beta$: for Pair 2, that is $-0.1 \cdot 0.5498 \approx -0.055$.
+- **Table across $\beta$**: the mean loss goes $0.6833$, $0.6062$, $0.4767$, and then rises back to $0.5773$. Look at the individual columns: as $\beta$ goes from $0.01$ to $1$, Pair 1's loss drops from $0.668$ to $0.007$, while Pair 2's loss climbs from $0.703$ to $2.127$. At $\beta = 1$, Pair 2 alone accounts for about 92% of the total loss. $\beta$ amplifies both correct and incorrect pairs.
+- **`policy = ref`**: all four pairs have loss $0.6931 = \ln 2$, because $d = 0$.
+
+Try editing `logp_w` of Pair 2 so that $d > 0$ and re-running the cell. When every pair has $d > 0$, the mean loss decreases monotonically as $\beta$ increases.
+
+On a real model, you do not write this loop by hand. Hugging Face's TRL library provides `DPOTrainer` (version 1.16.0). The dataset takes three columns: `prompt`, `chosen`, and `rejected`. The default `loss_type` is `"sigmoid"`, which is the exact loss derived above, and the default `beta` is 0.1. If you leave `ref_model` empty, TRL uses a frozen copy of the initial model as the reference. We omit a runnable cell for TRL because it requires a full language model and a GPU.
+
+## Common pitfalls
+
+:::caution[Thinking DPO has no reward and needs no reference model]
+DPO does have a reward—it is just implicit: $\beta\ln(\pi_{\boldsymbol{\phi}} / \pi_{\text{ref}})$. It simply avoids training a separate RM network. And because that implicit reward is a log ratio against $\pi_{\text{ref}}$, the loss requires the reference model's log-probs on every pair, so you must either keep a frozen copy in memory or precompute its log-probs. Initialize $\pi_{\text{ref}}$ from the SFT model, as the paper recommends. If you want to drop the reference model entirely, you need a different algorithm such as ORPO.
+:::
+
+:::caution[Assuming a decreasing loss means a better model]
+The loss depends only on the difference between the two shifts. If both responses drop in probability while the rejected one drops faster, the loss still goes down, as in Pair 3 of the code cell. The TRL documentation notes that in practice DPO often increases the margin by pushing down the rejected response rather than pulling up the chosen one. Monitor `logps/chosen` and `rewards/chosen` as well, sample actual generations, and evaluate with humans or a judge model (see [Model Evaluation and PEFT](/en/llm/evaluation-peft/)). Like RLHF, DPO shapes behavior rather than adding new factual knowledge.
+:::
+
+:::caution[Confusing β with the learning rate]
+A larger $\beta$ means a **tighter** leash: the policy stays closer to $\pi_{\text{ref}}$, not "learns faster". The learning rate is $\eta$, a separate hyperparameter. Losses computed at different values of $\beta$ cannot be compared directly either, because $\beta$ sits inside the sigmoid argument. One more trap: in TRL, when you set `loss_type="ipo"`, the same `beta` argument represents the $\tau$ coefficient of IPO.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- RLHF's KL-penalized objective has the closed-form solution $\pi^* = \pi_{\text{ref}}\, e^{r/\beta} / Z$. Inverting it shows that every policy defines a reward function $r = \beta\ln(\pi^* / \pi_{\text{ref}}) + \beta\ln Z$.
+- Bradley–Terry only uses the score difference between two responses to the same prompt, so $Z$ cancels out. Replacing $\pi^*$ with $\pi_{\boldsymbol{\phi}}$ yields the DPO loss $-\ln\sigma(\beta d)$: logistic regression on the margin of the implicit reward $\beta\ln(\pi_{\boldsymbol{\phi}} / \pi_{\text{ref}})$.
+- The gradient boosts the winning response and suppresses the losing response, weighted by $\sigma(-\beta d)$, which is largest on currently misranked pairs. A larger $\beta$ keeps the policy closer to $\pi_{\text{ref}}$ and amplifies both well-ranked and misranked pairs in the loss.
+- Compared to RLHF: no separate RM, no RL loop, and no response generation during training. It still requires a reference model, can still overfit, and a low loss does not guarantee true generation quality.
+
+**Further reading:**
+
+- Rafailov, R., Sharma, A., Mitchell, E., Ermon, S., Manning, C. D., Finn, C. (2023). [*Direct Preference Optimization: Your Language Model is Secretly a Reward Model*](https://arxiv.org/abs/2305.18290), arXiv:2305.18290, Section 4 and Appendices A.1, A.2. The original paper whose derivation this lesson follows. The paper writes $\pi_\theta$ for the policy and $\log$ for the natural logarithm.
+- Azar, M. G., Rowland, M., Piot, B., Guo, D., Calandriello, D., Valko, M., Munos, R. (2023). [*A General Theoretical Paradigm to Understand Learning from Human Preferences*](https://arxiv.org/abs/2310.12036), arXiv:2310.12036, Sections 4 and 5. Why DPO can overfit, and the IPO objective.
+- Ethayarajh, K., Xu, W., Muennighoff, N., Jurafsky, D., Kiela, D. (2024). [*KTO: Model Alignment as Prospect Theoretic Optimization*](https://arxiv.org/abs/2402.01306), arXiv:2402.01306, ICML 2024. Learning from binary good/bad labels without paired responses.
+- Hong, J., Lee, N., Thorne, J. (2024). [*ORPO: Monolithic Preference Optimization without Reference Model*](https://arxiv.org/abs/2403.07691), arXiv:2403.07691. Combines SFT and preference alignment without a reference model.
+- Meng, Y., Xia, M., Chen, D. (2024). [*SimPO: Simple Preference Optimization with a Reference-Free Reward*](https://arxiv.org/abs/2405.14734), arXiv:2405.14734. Length-normalized log-prob rewards without a reference model.
+- Hugging Face. [*DPO Trainer*](https://huggingface.co/docs/trl/v1.16.0/en/dpo_trainer) (TRL 1.16.0), official documentation, accessed October 2026. Covers `DPOTrainer`, available `loss_type` options, and `rewards/*` metrics to monitor during training.
+
+<LessonProgress />

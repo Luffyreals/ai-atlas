@@ -1,0 +1,407 @@
+---
+title: Deploying Your Own Model
+description: Put your own model behind an HTTP address on a single machine. Build an API with FastAPI, run open LLMs with an OpenAI-compatible server, measure p50 and p95, and package with Docker.
+quiz:
+  - question: 'You measure 40 requests. 38 requests take 20 ms, and 2 requests take 900 ms. Using the rank formula from this lesson ($k = \lceil q \cdot m \rceil$), which statement is true?'
+    options:
+      - 'p95 = 900 ms, because there are slow requests'
+      - 'p95 = 20 ms, while the mean is 64 ms'
+      - 'p95 = 64 ms, equal to the mean'
+      - 'p50 = 460 ms, halfway between the two values'
+    answer: 1
+    explanation: 'The rank for p95 is $\lceil 0.95 \cdot 40 \rceil = 38$, and the 38th sorted request is still 20 ms. The two slow requests make up exactly 5% of all requests, so they sit above p95. The mean is $(38 \cdot 20 + 2 \cdot 900)/40 = 64$ ms: the mean gets pulled upward, whereas p95 misses this tail entirely. To catch those two outliers you need p99 or the maximum, along with a larger sample size.'
+  - question: 'In a test file, you write `client = TestClient(app)` (without a `with` block) and call `client.get("/health")` on the `app` from this lesson. What is the result?'
+    options:
+      - '200 `{"status": "ok"}`, because `TestClient` automatically loads the model'
+      - 'A connection error, because `uvicorn` is not running'
+      - '503, because `lifespan` did not run so `state` is still empty'
+      - '422, because the request has no body'
+    answer: 2
+    explanation: '`TestClient` only runs the `lifespan` context manager when used inside a `with` statement. Without `with`, `joblib.load` never executes, `"model" not in state` is true, and `/health` returns 503. `TestClient` calls the ASGI app directly in-process without needing `uvicorn` or a network socket, so there is no connection error. Calling `/predict` in this state would raise a `KeyError`.'
+  - question: 'You change the last line of the Dockerfile to the shell form: `CMD uvicorn app:app --host 0.0.0.0 --port 8000` (no square brackets). The container starts and `bench.py` works fine. Then you run `docker stop` on the container. Does the uvicorn log contain `Application shutdown complete.`?'
+    options:
+      - 'Yes, because `docker stop` always shuts down every container cleanly'
+      - 'No, because uvicorn runs as a child of a shell and never receives the stop signal'
+      - 'Yes, because `lifespan` always runs the code after `yield` no matter how the process stops'
+      - 'No, because with the shell form the container fails to start in the first place'
+    answer: 1
+    explanation: 'With the string (shell) form, Docker runs `/bin/sh -c "uvicorn ..."`: process 1 (PID 1) inside the container is the shell, and uvicorn is merely a child process. `docker stop` sends `SIGTERM` to PID 1, the shell does not forward it to uvicorn, and after the grace period expires Docker forcefully kills the container. Uvicorn never gets a chance to print `Shutting down` or `Application shutdown complete.`, and the cleanup code after `yield` never runs. With the JSON array (exec) form, uvicorn itself is PID 1, receives `SIGTERM`, and prints both lines. Because the shell-form container starts and serves requests normally, this bug only surfaces at shutdown.'
+  - question: 'You just launched `llama-server -m <model-file>.gguf --port 8080` with an 8 GB model file. A few seconds later, `curl http://localhost:8080/health` returns HTTP 503. You want to run the scripts from Using Text Generation APIs against this server. What should you do?'
+    options:
+      - 'Change `OPENAI_API_KEY`, because 503 means the API key is invalid'
+      - 'Rewrite your client code using a dedicated llama.cpp Python library'
+      - 'Increase `--n-gpu-layers`, because 503 means you ran out of GPU memory'
+      - 'Wait until `/health` returns 200 before running your script, because the server is still loading the model'
+    answer: 3
+    explanation: '`llama-server` opens its listening port first and then loads the model weights; while loading, `/health` returns 503 with a "Loading model" message. That indicates "not ready yet", not a configuration error. `/health` requires no key, and an invalid key returns 401 rather than 503. Your `openai` SDK code needs no rewrite: wait until `/health` returns 200, point `OPENAI_BASE_URL` at the local server, and run your script.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import LocalCode from '@components/LocalCode.astro';
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import ContainerImageFigure from '@components/figures/ContainerImageFigure.astro';
+import trainCode from '@code/llm/deploy-custom-model/train.en.py?raw';
+import appCode from '@code/llm/deploy-custom-model/app.en.py?raw';
+import benchCode from '@code/llm/deploy-custom-model/bench.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand what **model serving** is: a long-running process that loads a model once at startup and answers incoming HTTP requests.
+- Build an HTTP API around a scikit-learn model using FastAPI, complete with `/predict`, `/health`, Pydantic input validation, and one-time model loading via `lifespan`.
+- Serve an open-weights LLM using a ready-made **OpenAI-compatible** server, and reuse your existing client code simply by changing environment variables.
+- Measure p50 and p95 **latency** and **throughput**, and package the model server into a Docker image.
+
+## Prerequisites
+
+{/* List populated from prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+An **image** is a frozen package containing your application code, libraries, and a minimal OS userland, built from a **Dockerfile** with `docker build`. A **container** is a running instance of that image isolated from your host system. Running `docker run -p 8000:8000 <image>` forwards port 8000 on your host machine to port 8000 inside the container.
+:::
+
+## Intuition
+
+Suppose you just finished training a flower classifier in a Jupyter notebook. It works great. Then a colleague building a mobile app asks: "How do I call your model?" Their mobile app is written in Kotlin—it has no Python runtime, no scikit-learn, and certainly cannot open your notebook.
+
+The standard web solution is to put the model **behind an HTTP address**, because every programming language knows how to send a JSON request and read a JSON response. A small server process on your machine loads the trained model into memory once and waits. Whenever a request arrives at `http://<your-host>:8000/predict` carrying the four measurements of a flower, the server replies with the predicted species.
+
+With LLMs, the same pattern works in reverse. In [Using Text Generation APIs](/en/llm/text-api/), your Python client called a cloud provider's server. Now suppose you want to run an open-weights LLM right on your own machine so private data never leaves your network and you pay nothing per token. The good news is that ready-made LLM servers already speak the exact same OpenAI API protocol, so you do not have to rewrite a single line of client code. Your client code is the plug, and `OPENAI_BASE_URL` is the wall socket—you just plug it into a local socket instead.
+
+Whichever path you take, a model server has to answer three operational questions: When is the model loaded—on every request or once at startup? Who validates the incoming data before it hits the model? And how does an external caller know whether the server is ready? Think of a noodle shop: the kitchen has to finish simmering the broth (loading the model) before hanging the "Open" sign on the door. If a customer walks in too early, the staff says "not ready yet" rather than serving a bowl of cold tap water.
+
+**The problem: expose a model behind an HTTP endpoint on a single machine so that the model loads once, invalid inputs are rejected cleanly, callers can check whether the server is ready, and you can measure how fast the server responds.**
+
+## Theory
+
+### What is model serving?
+
+Model serving means running a trained model as a **service**: a long-lived process that listens on a network **port**, accepts requests, and returns predictions. Each URL path that handles a specific job is an **endpoint**. The server we build in this lesson exposes two endpoints:
+
+- `POST /predict`: accepts four flower measurements as JSON and returns the predicted species along with class probabilities.
+- `GET /health`: takes no input and simply reports whether the server is ready (HTTP 200) or not ready yet (HTTP 503).
+
+This lesson covers two practical paths. A custom model you trained yourself (a scikit-learn estimator or a small PyTorch network) has no off-the-shelf server, so you **write a thin API wrapper** around it. Open-weights LLMs, by contrast, already have **purpose-built inference servers**: you launch the server binary and point your existing OpenAI client at it.
+
+### Writing your own API with FastAPI
+
+**FastAPI** is a Python library for building web APIs. You write a normal Python function, decorate it with `@app.post("/predict")`, and FastAPI handles the HTTP plumbing: parsing the JSON body, calling your function, and serializing the return value back into JSON. FastAPI does not listen on a network socket by itself; that job belongs to **uvicorn**, an ASGI web server that runs FastAPI applications (`uvicorn app:app` means "import the `app` object from `app.py`").
+
+**Input validation with Pydantic.** You declare the expected request shape as a subclass of `BaseModel`, specifying field names, types, and constraints such as `Field(gt=0)` (strictly greater than zero). FastAPI uses this model to perform **input validation** *before* your endpoint function is ever called. Invalid payloads are rejected automatically with HTTP **422** and a structured error report, without running `predict`. For instance, if a client sends a negative petal width of `-1`:
+
+```json
+{"sepal_length": 5.9, "sepal_width": 3.0, "petal_length": 5.1, "petal_width": -1}
+```
+
+The server responds with status 422 and the following body (captured from an actual run of our server):
+
+```json
+{"detail": [{"type": "greater_than", "loc": ["body", "petal_width"],
+  "msg": "Input should be greater than 0", "input": -1, "ctx": {"gt": 0.0}}]}
+```
+
+Here `loc` pinpoints the offending field and `msg` explains what rule was violated; omitting a required field produces a `missing` error instead. From that same `BaseModel` definition, FastAPI also generates an interactive documentation page at `/docs` where you can test every endpoint in your browser.
+
+**Loading the model once with `lifespan`.** Loading model weights from disk takes time and memory—a few milliseconds for our iris classifier, or several minutes for a multi-gigabyte LLM. If you called `joblib.load` inside `predict`, every single request would pay that loading cost over and over. FastAPI lets you define a `lifespan` context manager that wraps the entire server lifecycle once:
+
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Runs once when the server starts: load the model into memory.
+    state["model"] = joblib.load("model.joblib")
+    yield  # the server handles requests while paused here
+    state.clear()  # runs when the server shuts down
+```
+
+Everything before `yield` runs once at startup before the server accepts requests; everything after `yield` runs when the server shuts down. The loaded model is stored in the module-level `state` dictionary, where every request can read it. (Loading the model at the top level of the `.py` file would also run once, but then any script or test that merely runs `import app` would be forced to load the model immediately.)
+
+Notice that both endpoint functions in our code are defined with plain `def` rather than `async def`. In FastAPI, plain `def` endpoints are executed in a worker threadpool so a CPU-bound `predict_proba` call does not block the main event loop from handling other concurrent requests.
+
+### Health checks: liveness and readiness
+
+A **health check** is a lightweight request sent periodically by an external supervisor—an operator, Docker, or a **load balancer** (a reverse proxy that distributes traffic across multiple server instances)—to check the server's status. There are two distinct questions a health check can answer:
+
+- **Is it alive (liveness)?** Is the process still running and responding to HTTP?
+- **Is it ready (readiness)?** Has the model finished loading so real prediction requests will succeed?
+
+Our `/health` endpoint answers the readiness question: if `"model"` is not yet in `state`, it returns HTTP **503** (`Service Unavailable`); once the model is loaded, it returns HTTP 200.
+
+Different servers order port binding and model loading differently. With uvicorn and FastAPI's `lifespan`, the code before `yield` finishes *before* uvicorn opens the listening socket: when we tested a simulated 4-second model load, clients connecting during those 4 seconds got a connection refused error rather than a 503. By contrast, `llama-server` from llama.cpp opens its port immediately and returns HTTP 503 with `"Loading model"` from `/health` until the weights finish loading. A robust client handles both behaviors: retry on connection refused, and wait when `/health` returns 503.
+
+### Ready-made servers for open LLMs
+
+While you could wrap an open-weights LLM inside your own FastAPI script, serving an LLM efficiently requires much more machinery: streaming tokens as they are generated, batching concurrent requests together on the GPU, and managing KV-cache memory across long contexts. Dedicated inference servers solve these engineering problems out of the box and expose an OpenAI-compatible Chat Completions endpoint:
+
+- **Ollama.** The easiest option on a personal machine. Pull a model with `ollama pull`, and the background server listens at `http://localhost:11434` with OpenAI compatibility under `/v1/`. Runs on CPU or GPU (NVIDIA, AMD, Apple Silicon).
+- **llama.cpp (`llama-server`).** Serves models in the **GGUF** file format, which are typically **quantized** (weights stored using fewer bits per parameter) so they fit comfortably in standard system RAM. Runs well on CPU, and `--n-gpu-layers` offloads some or all transformer layers to a GPU. Includes the `/health` endpoint described above and an `--api-key` flag for authentication.
+- **vLLM (`vllm serve <model-name>`).** Designed for GPU serving with high concurrency. We mention it here for completeness; multi-GPU and distributed serving with vLLM is covered in [LLM Deployment: Multi-GPU and Distributed](/en/llm/llm-deployment/).
+
+The most important takeaway is that **your client code stays unchanged**. The scripts in [Using Text Generation APIs](/en/llm/text-api/) read `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and `LLM_MODEL`. Pointing `OPENAI_BASE_URL` at your local server is all it takes (see exact commands in Code examples).
+
+Keep in mind that "OpenAI-compatible" does not mean every provider-specific extension is implemented: for example, Ollama does not support every variant of `tool_choice`. Code that sticks to core parameters (`model`, `messages`, `temperature`, `stream`) works across all of them; check each server's documentation before relying on specialized fields.
+
+### CPU or GPU?
+
+The first question to ask when deploying a model is not "how fast will it run?" but **"will it fit in memory?"** The model weights must fit in system RAM (for CPU inference) or GPU VRAM (for GPU inference). A quick back-of-the-envelope estimate is: number of parameters multiplied by bytes per parameter. A 7-billion-parameter model stored in 16-bit floating point (2 bytes per parameter) needs roughly 14 GB just for its weights; quantizing it to 4-bit (0.5 bytes per parameter) shrinks the weights to roughly 3.5 GB. You also need extra headroom at run time for activations and the KV cache, so never budget down to the last megabyte. Once the model fits in memory, you can consider speed: a CPU is plenty for small classical ML models like our iris classifier and for small quantized LLMs serving one user at a time, whereas a GPU is essential for larger models or concurrent users. Ollama and llama.cpp automatically use a supported GPU when available; vLLM is built specifically around GPUs.
+
+### Measuring latency and throughput
+
+**Latency** is the elapsed time from sending a single request to receiving the complete response. If you send $m$ requests, you get $m$ latency measurements. Sort them in ascending order:
+
+$$
+t_{(1)} \le t_{(2)} \le \dots \le t_{(m)}
+$$
+
+Here the parenthesized subscript $(k)$ denotes the **order statistic** (rank) after sorting: $t_{(1)}$ is the fastest request and $t_{(m)}$ is the slowest. The **percentile** at level $q$ is the value at rank $k$, where $k$ is the smallest integer greater than or equal to $q \cdot m$ (where $\lceil \cdot \rceil$ is the ceiling function):
+
+$$
+\text{p}(q) = t_{(k)}, \qquad k = \lceil q \cdot m \rceil
+$$
+
+In plain English: at least a fraction $q$ of all requests finished in $\text{p}(q)$ or less. With $m = 200$ as in our benchmark script, **p50** (the median) is $t_{(100)}$ since $\lceil 0.5 \cdot 200 \rceil = 100$, and **p95** is $t_{(190)}$ since $\lceil 0.95 \cdot 200 \rceil = 190$. (Other percentile definitions, such as linear interpolation in `np.percentile`, give nearly identical numbers once you have a few hundred samples.)
+
+Why not just report the **mean** $\bar{t}$? Because the mean hides tail latency. Picture 100 customers at a noodle shop: the 50th fastest customer waits 3 minutes (p50), while the 95th customer waits 6 minutes (p95). A mean wait time of 3.5 minutes sounds fine on paper, yet the slowest 5% of customers waited twice that long—and they are the ones who walk out frustrated. Production service-level objectives (SLOs) are therefore specified using p95 or p99, never the mean alone.
+
+**Throughput** $R$ is the number of requests completed per second. If a batch of $m$ requests finishes in a total wall-clock time of $\Delta t$ seconds:
+
+$$
+R = \frac{m}{\Delta t}
+$$
+
+When a single client sends requests **sequentially** one after another, total elapsed time is roughly the sum of the individual latencies, $\Delta t \approx m \cdot \bar{t}$. Substituting that into the formula cancels $m$ from numerator and denominator, leaving $R \approx 1 / \bar{t}$. That number only measures how fast a single sequential client can ping-pong with the server; to find the server's true capacity ceiling, you must send requests from multiple concurrent clients in parallel and watch how p95 latency climbs under load.
+
+When benchmarking, always discard a few initial warm-up requests (to get past **cold start** effects such as empty caches and initial socket setup) and measure over an actual HTTP connection just like a real client. For streaming LLMs, two additional metrics matter: time to first token (TTFT—how long the user stares at a blank bubble before the first word appears) and tokens per second (TPOT/decoding speed) thereafter.
+
+:::note[Key takeaway]
+Load the model once (`lifespan`), validate inputs before running the model (Pydantic, HTTP 422), and expose `/health` returning 503 when not ready. For open LLMs, use a ready-made OpenAI-compatible server and simply point `OPENAI_BASE_URL` at it. Measure latency with p50 and p95 via $\text{p}(q) = t_{(\lceil q \cdot m \rceil)}$, not just the mean.
+:::
+
+### Limitations
+
+- **Single machine, single model replica.** Splitting a large model across multiple GPUs or running multiple replicas behind a load balancer is covered in [LLM Deployment: Multi-GPU and Distributed](/en/llm/llm-deployment/).
+- **No authentication or HTTPS.** The server in this lesson is meant for `localhost` or a trusted private network (see the second warning in Common pitfalls).
+- **Cloud deployment** (pushing the image to a managed container platform and attaching a domain) is covered in [Docker and the Cloud](/en/llm/docker-cloud/). Here we stop at running the container locally with `docker run`.
+
+## Illustration
+
+The table below summarizes the request–response pairs you will encounter. Pay attention to the status code column: each code tells the client to take a different action. The first five rows come from our FastAPI server; the final row follows the llama.cpp server documentation.
+
+| Request | Status | Response | Meaning |
+|---|---:|---|---|
+| `GET /health` (after model is loaded) | 200 | `{"status": "ok"}` | Ready to serve |
+| `POST /predict` with four valid measurements | 200 | `{"label": "virginica", "proba": {...}}` | Prediction succeeded |
+| `POST /predict` with `petal_width: -1` | 422 | `"msg": "Input should be greater than 0"` | Client error; fix payload and resend |
+| `POST /predict` with only `sepal_length` | 422 | Three `missing` errors, one per omitted field | Client error |
+| `GET /predict` (wrong HTTP method) | 405 | `{"detail": "Method Not Allowed"}` | Endpoint only accepts `POST` |
+| `GET /health` on `llama-server` while loading | 503 | `"Loading model"` | Not ready yet; wait and retry |
+
+The second table compares the four serving options side by side so you can pick the right tool for your model.
+
+| Aspect | Custom FastAPI | Ollama | llama.cpp (`llama-server`) | vLLM |
+|---|---|---|---|---|
+| What it serves | Any custom Python model | Open LLMs from the Ollama library | LLMs in GGUF format | Open LLMs (Hugging Face weights) |
+| API format | Defined by you | OpenAI-compatible at `/v1/` | OpenAI-compatible | OpenAI-compatible |
+| Hardware | Depends on model | CPU or GPU | Strong CPU support; GPU layer offload | Built for GPUs |
+| Health check | Written by you | Send a small test request | `GET /health` (503 while loading) | `GET /health` |
+| Best suited for | Small ML models, custom business logic | Trying local LLMs on a laptop | Machines without a large GPU | High concurrency on GPU servers |
+
+When we package our FastAPI server with Docker in the Code examples section, `app.py` and `model.joblib` become a read-only layer at the top of the image.
+
+{/* FIG: reuses the container image figure from docker-cloud, showing the layers of this lesson's Dockerfile. */}
+<ContainerImageFigure stack="api" />
+
+## Code examples
+
+The code in this lesson was last tested in October 2026 with Python 3.14, `scikit-learn` 1.9.1, `fastapi` 0.162, `uvicorn` 0.54, and `httpx` 0.28. All three scripts run on your machine (they open a local server port and make network calls) and require no API key. Place all three files in the same folder and run them in order.
+
+### Step 1: train and save the model
+
+This script trains a **logistic regression** classifier on the classic iris dataset bundled with scikit-learn and saves the fitted estimator to `model.joblib`. The focus here is the serving workflow rather than model tuning.
+
+<LocalCode
+  code={trainCode}
+  title="Train and save the model"
+  file="train.py"
+  packages={['scikit-learn']}
+  sampleVaries={false}
+>
+
+```text
+Test accuracy: 0.978
+Saved model.joblib (scikit-learn 1.9.1)
+Classes: setosa, versicolor, virginica
+```
+
+</LocalCode>
+
+The classifier predicts 44 out of 45 test flowers correctly (0.978). Because we trained it on string species names directly, the server can return the predicted name without a separate lookup table. Take note of the scikit-learn version printed on the second line: the server must load `model.joblib` using that exact same version (see the third box in Common pitfalls).
+
+### Step 2: the FastAPI server
+
+Save the code below as `app.py` and start it with uvicorn. Passing `--host 127.0.0.1` ensures that only programs on your own machine can reach the server.
+
+<LocalCode
+  code={appCode}
+  title="Model API: /health and /predict"
+  file="app.py"
+  command="uvicorn app:app --host 127.0.0.1 --port 8000"
+  packages={['fastapi', 'uvicorn', 'scikit-learn']}
+/>
+
+At startup, uvicorn prints `Waiting for application startup.` (while the code before `yield` runs), then `Application startup complete.`, and only then `Uvicorn running on http://127.0.0.1:8000`—the listening socket opens only after the model is in memory. Open `http://127.0.0.1:8000/docs` in your browser to try out each endpoint interactively. Press Ctrl+C when you want to stop the server.
+
+Notice that `predict` returns the probability of every class so a downstream caller can tell when the model is uncertain. Values are explicitly cast to Python `float` and `str` because NumPy scalar types are not directly JSON-serializable.
+
+### Step 3: test calls and latency benchmark
+
+Leave the server running in your first terminal, open a second terminal window, and run the benchmark script below. It calls `/health`, sends one valid flower, sends one invalid flower, and then times 200 sequential `/predict` requests over a persistent HTTP connection (`httpx.Client`). If your server is running at a different address, pass it on the command line: `python bench.py http://<host>:<port>`.
+
+<LocalCode
+  code={benchCode}
+  title="Call the server and measure p50, p95, and throughput"
+  file="bench.py"
+  packages={['httpx']}
+  sampleVaries={false}
+>
+
+```text
+health: {'status': 'ok'}
+predict: {'label': 'virginica', 'proba': {'setosa': 0.001, 'versicolor': 0.345, 'virginica': 0.653}}
+bad input: 422 Input should be greater than 0
+p50 = 4.96 ms
+p95 = 5.90 ms
+mean = 4.95 ms
+throughput = 202 requests/s
+```
+
+</LocalCode>
+
+The first three output lines are deterministic on every run. The model favors `virginica` (0.653) while giving `versicolor` a 0.345 probability because those two species overlap in size. The invalid payload is stopped at status 422 before ever reaching the model.
+
+The four timing lines were recorded on our development machine (Windows, client and server on the same host), so your exact numbers will differ; look at the relationship between them. Here p95 is less than 1 ms above p50, showing a tight latency distribution with minimal tail spikes. The throughput of 202 requests/s is right around $1/\bar{t} = 1/0.00495\text{ s}$, matching our Theory derivation for a single sequential client.
+
+### Step 4: package with Docker
+
+Add two more files to the same folder. First, `requirements.txt` pins the **exact** package versions—especially `scikit-learn`, which must match the version printed in Step 1 (for strict production pinning, also pin `numpy`, `scipy`, and `joblib` from `pip freeze`, since they participate in unpickling):
+
+```text
+fastapi==0.162.0
+uvicorn==0.54.0
+scikit-learn==1.9.1
+```
+
+Second, create the `Dockerfile`:
+
+```dockerfile
+FROM python:3.14-slim
+WORKDIR /code
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py model.joblib ./
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+Dependencies are installed before copying `app.py` and `model.joblib` so that editing `app.py` later reuses the cached `pip install` layer. Two details on the `CMD` line are crucial:
+
+- **`--host 0.0.0.0`**: binds uvicorn to all network interfaces inside the container; as explained in [Docker and the Cloud](/en/llm/docker-cloud/), binding to `127.0.0.1` inside a container makes it unreachable from the host.
+- **JSON array syntax (exec form).** With exec form, uvicorn runs as PID 1 inside the container and receives the `SIGTERM` signal from `docker stop`, allowing the cleanup code after `yield` in `lifespan` to execute. When we tested the shell string form instead, uvicorn ran underneath `/bin/sh`, never received `SIGTERM`, and never printed `Application shutdown complete.` (see the third question in Quick check).
+
+Build the image and run the container:
+
+```sh
+docker build -t iris-api .
+docker run --rm -p 8000:8000 iris-api
+```
+
+Once the container is running, `python bench.py` from Step 3 works without changes because port 8000 on your host is forwarded to port 8000 of the container. Note that each container runs a single uvicorn worker process. While uvicorn supports `--workers` to spawn multiple worker processes, each worker loads its own separate copy of the model into memory: a 2 GB model across 4 workers consumes 8 GB of RAM.
+
+### Run an open LLM and reuse code from earlier lessons
+
+This section requires no new Python files: you launch an open-LLM server and rerun the "Two-turn conversation" script from [Using Text Generation APIs](/en/llm/text-api/). (The commands below were cross-checked against official documentation in October 2026 rather than executed on our test runner, which has no local GPU.) Pick **one** server:
+
+```sh
+# Ollama: server runs in the background after install (or run `ollama serve`), listening on port 11434
+ollama pull <model-name>
+
+# llama.cpp: serve a GGUF file; add --n-gpu-layers all to offload all layers to GPU
+llama-server -m <model-file>.gguf --port 8080
+
+# vLLM: requires a GPU; specify the port explicitly
+vllm serve <model-name> --port 8001
+```
+
+If you use `llama-server`, wait until `curl http://localhost:8080/health` returns `{"status":"ok"}` before sending chat requests. Next, set the three environment variables (shown below for Ollama):
+
+<Tabs syncKey="os">
+<TabItem label="macOS, Linux (bash)">
+
+```sh
+export OPENAI_BASE_URL="http://localhost:11434/v1/"
+export OPENAI_API_KEY="ollama"
+export LLM_MODEL="<pulled-model-name>"
+```
+
+</TabItem>
+<TabItem label="Windows (PowerShell)">
+
+```powershell
+$env:OPENAI_BASE_URL = "http://localhost:11434/v1/"
+$env:OPENAI_API_KEY = "ollama"
+$env:LLM_MODEL = "<pulled-model-name>"
+```
+
+</TabItem>
+</Tabs>
+
+For `llama-server`, set `OPENAI_BASE_URL` to `http://localhost:8080/v1`; for vLLM, use `http://localhost:8001/v1` and set `LLM_MODEL` to the exact model name passed to `vllm serve`. When the local server does not enforce authentication, `OPENAI_API_KEY` can be any non-empty string (the `openai` SDK still requires the variable to be set). Unsure of the exact model identifier? All three servers list their available models at `<base_url>/models`, e.g., `curl http://localhost:11434/v1/models`.
+
+Now run the "Two-turn conversation" script from [Using Text Generation APIs](/en/llm/text-api/) without modifying a single line of Python. The very first call may take a few extra seconds if the server loads the model on demand.
+
+## Common pitfalls
+
+:::caution[Model not loaded properly: loading on every request, or omitting `with` in tests]
+Calling `joblib.load` inside `predict` re-reads the model file from disk on every request—slowing down latency and duplicating model weights in RAM under concurrent traffic. Always load once inside `lifespan`. Conversely, when writing unit tests with FastAPI's `TestClient` (which requires `httpx`), always use `with TestClient(app) as client:`; without the `with` block, `lifespan` never runs, `/health` returns 503, and `/predict` raises `KeyError: 'model'`. Also keep in mind that timings measured through `TestClient` do not reflect real HTTP network latency.
+:::
+
+:::caution[Wrong bind address: `127.0.0.1` inside a container, or `0.0.0.0` on an untrusted network]
+Inside a container, your server must bind to `0.0.0.0`. Directly on your laptop, however, binding to `0.0.0.0` exposes your model server to **every device on the same Wi-Fi or LAN** (a coffee shop or office network) without a password, unless blocked by your firewall. When testing locally on your host, stick to `--host 127.0.0.1`, or bind the container port only to localhost: `docker run -p 127.0.0.1:8000:8000 iris-api`. With `llama-server`, pass `--api-key`. Exposing a server to the public Internet requires authentication and HTTPS, typically handled by placing a **reverse proxy** (such as Nginx or Caddy) in front of your application server.
+:::
+
+:::caution[Loading a `.joblib` file with a mismatched scikit-learn version, or from an untrusted source]
+Both `.joblib` and `.pkl` files serialize Python objects using `pickle`. scikit-learn does not support loading a model file across different scikit-learn versions: doing so can raise an `InconsistentVersionWarning`, silently alter predictions, or crash outright. Always pin the exact `scikit-learn` version from Step 1 in `requirements.txt`. Even more importantly, unpickling a `.joblib` or `.pkl` file can **execute arbitrary code** embedded in the file. Only load model files that you created yourself or obtained from a source you completely trust.
+:::
+
+:::caution[Benchmarking with a single request, or looking only at the mean]
+Timing a single request conflates cold-start overhead with steady-state latency and random noise. Send a representative batch of requests (a few hundred for a small model), discard several warm-up requests first, and report both p50 and p95 alongside throughput.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Model serving runs your model as an HTTP service: load the model **once** at startup (`lifespan`), validate incoming payloads with Pydantic (returning 422 on invalid input), and expose `/health` returning 503 until the model is ready.
+- Open-weights LLMs have ready-made OpenAI-compatible servers (Ollama, `llama-server`, vLLM). Keep your client code unchanged and update the three environment variables. Check whether the model fits in RAM/VRAM before choosing between CPU and GPU.
+- Measure latency using percentiles: $\text{p}(q) = t_{(\lceil q \cdot m \rceil)}$, tracking both p50 and p95 rather than just the mean. Throughput is $R = m / \Delta t$; a single sequential client only measures $R \approx 1/\bar{t}$.
+- For Docker packaging, pin exact library versions in `requirements.txt`, use the JSON array `CMD` form with `--host 0.0.0.0`, and publish the port via `docker run -p`. Multi-GPU and distributed serving are covered in a later lesson.
+
+**Further reading:**
+
+- FastAPI. [*Lifespan Events*](https://fastapi.tiangolo.com/advanced/events/). Official guide to `lifespan`, built around the exact use case of loading an ML model once at startup.
+- FastAPI. [*FastAPI in Containers - Docker*](https://fastapi.tiangolo.com/deployment/docker/). Official Dockerfile guide covering exec-form `CMD`, layer caching order, and when to use multiple workers.
+- FastAPI. [*Testing Events: lifespan*](https://fastapi.tiangolo.com/advanced/testing-events/). How to trigger `lifespan` startup and shutdown in tests using `with TestClient(app) as client:`.
+- scikit-learn. [*Model persistence*](https://scikit-learn.org/1.9/model_persistence.html) (v1.9). Covers saving models with `joblib`, pickle security risks, and version compatibility requirements.
+- ggml-org. [*llama.cpp server README*](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md). Reference for `llama-server` flags (`-m`, `--port`, `--host`, `--n-gpu-layers`, `--api-key`) and the `/health` endpoint.
+- Ollama. [*OpenAI compatibility*](https://docs.ollama.com/api/openai-compatibility) and [*Hardware support*](https://docs.ollama.com/gpu); vLLM. [*Online serving*](https://docs.vllm.ai/en/stable/serving/online_serving/). Details on supported OpenAI API fields, GPU compatibility, and vLLM's `/health` endpoint.
+
+<LessonProgress />

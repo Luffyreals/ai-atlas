@@ -1,0 +1,309 @@
+---
+title: 'Deploying LLMs: Multi-GPU and Distributed Serving'
+description: A 70B model does not fit on one GPU, and concurrent chats quickly exhaust memory. KV cache sizing, prefill vs. decode, multi-GPU model sharding, continuous batching, and PagedAttention.
+quiz:
+  - question: 'A server runs Llama 3 8B in BF16: model weights take about 15 GiB, and the KV cache takes about 16 GiB when serving 16 sequences of length $8\,192$. You quantize the weights to int4 while keeping the KV cache in BF16. Serving the exact same 16 sequences, which statement is true?'
+    options:
+      - 'Total memory drops by roughly $4\times$, because everything shrinks by $4\times$'
+      - 'The KV cache also shrinks by $4\times$, because K and V are computed from the quantized weights'
+      - 'Weights drop to about 3.7 GiB while the KV cache stays at 16 GiB, so total memory only drops from about 31 GiB to about 20 GiB'
+      - 'Nothing changes, because weights are dequantized back to 16-bit before each matrix multiplication'
+    answer: 2
+    explanation: 'The KV cache footprint is $2 \cdot N_{\text{layer}} \cdot H_{\text{kv}} \cdot d \cdot s \cdot L \cdot B$, where $s$ is the bytes per element of the cache itself. Weight quantization does not change any factor in this formula. While K and V are indeed computed using the weights, what gets cached is the resulting activation vectors in the cache''s own dtype (BF16). Dequantizing weights on the fly during matmuls does not inflate their resting storage size: weights remain stored in 4-bit. With long contexts and many concurrent users, the KV cache dominates total memory.'
+  - question: 'A RAG chatbot stuffs roughly $20\,000$ tokens of retrieved documents into every prompt. Users complain that after hitting Enter they wait a long time before the first word appears, but once generation starts, words stream out smoothly and quickly. Which latency metric is high, and why?'
+    options:
+      - 'TTFT is high: prefill must process all $20\,000$ prompt tokens (plus any queue wait time) before emitting the first output token'
+      - 'TPOT is high: decode is slow because each new token must re-read all model weights'
+      - 'Both are low, so the bottleneck must be the user''s network connection'
+      - 'TPOT is high, because a $20\,000$-token KV cache slows down every decode step equally'
+    answer: 0
+    explanation: 'Waiting a long time before the first word appears is Time To First Token (TTFT), which consists of queueing delay plus the prefill pass. Prefill must process all $20\,000$ prompt tokens to populate the KV cache, so long prompts directly inflate TTFT. Once streaming begins, words appear quickly and steadily, meaning Time Per Output Token (TPOT) is healthy. Although a long context does make each decode attention step read more cached K/V entries, the symptom described here is an upfront pause rather than slow streaming.'
+  - question: 'You need to serve a 70B model in BF16 (about 131 GiB of weights). You have 2 servers (nodes), each equipped with 4 80 GB GPUs connected via fast intra-node NVLink, while the network link between the two servers is much slower. Following the lesson''s guidelines, which setup makes the most sense?'
+    options:
+      - 'Tensor parallel size 8 spanning both servers, so each GPU holds the smallest possible weight shard'
+      - 'Pipeline parallel size 8 spanning both servers, assigning a slice of layers to each GPU'
+      - 'Load a full copy of the model onto each of the 8 GPUs and load-balance requests across all 8 replicas'
+      - 'Tensor parallel size 4 inside each server (one full model replica per server), with a load balancer routing requests across the two replicas'
+    answer: 3
+    explanation: 'Four 80 GB GPUs inside a single server provide 320 GB of combined memory—plenty for 131 GiB (~141 GB) of weights with ample headroom for the KV cache—so there is no need to split a single model instance across the slow inter-server network. Inside each server, tensor parallelism over NVLink is fast. Running a second independent replica on the second server doubles request throughput. Tensor parallelism across slow inter-node links would stall on all-reduce communication at every layer of every token step. Pipeline parallel 8 would work, but adds unnecessary cross-node hops. And a single 80 GB GPU cannot hold 141 GB of weights on its own.'
+  - question: 'A batch contains 4 requests: three requests only need 20 output tokens each, while the fourth needs 500 output tokens. Comparing static batching with continuous batching, which statement is true?'
+    options:
+      - 'Continuous batching finishes the 500-token request much earlier because it prioritizes long requests'
+      - 'With continuous batching, the three short requests return to their users as soon as they finish at step 20, and waiting requests immediately take their slots on the next step instead of leaving three slots idle until step 500'
+      - 'Both behave identically as long as the GPU has enough memory for all 4 requests'
+      - 'Continuous batching concatenates all 4 requests into a single 560-token sequence and decodes them in one pass'
+    answer: 1
+    explanation: 'Static batching locks the entire batch until the longest sequence finishes: from step 21 through step 500, three of the four batch slots sit idle (generating useless pad tokens) while newly arrived requests wait in the queue. Continuous batching schedules at the granularity of a single token step, releasing finished sequences immediately and slotting in new requests so the batch stays full. The 500-token request still requires 500 sequential decode steps. And requests remain independent sequences with separate KV caches—they are not concatenated into a single prompt.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import ParallelismFigure from '@components/figures/ParallelismFigure.astro';
+import memoryCode from '@code/llm/llm-deployment/memory.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Estimate GPU memory during **inference**: the fixed **model weights** footprint plus the dynamic **KV cache** footprint that grows with sequence length and concurrent users.
+- Distinguish the **prefill** phase from the **decode** phase, along with the two core **latency** metrics **TTFT** and **TPOT**.
+- Choose how to partition a large model across multiple GPUs for serving: **tensor parallelism** within a single node, and **pipeline parallelism** across nodes.
+- Understand how **continuous batching** and **PagedAttention** let a serving engine handle far more concurrent users on the same hardware.
+
+## Prerequisites
+
+{/* List taken from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In [The LLaMA Family](/en/llm/llama-family/), the **KV cache** stores the keys and values of all previously processed tokens so each generation step avoids recomputing them, and GQA shrinks that cache by letting multiple query heads share a single K, V head. That lesson also introduced multi-GPU parallelism for training: **tensor parallelism** splits weight matrices inside each layer, whereas **pipeline parallelism** splits layers depth-wise across devices.
+:::
+
+## Intuition
+
+### From one user to an entire company
+
+In [Deploying a Custom Model](/en/llm/deploy-custom-model/), you ran an open-weight LLM on a single machine. For one person testing it out, everything felt snappy. Now suppose your company wants to open that service to 200 employees simultaneously, backed by a 70-billion-parameter model. You immediately hit two walls.
+
+**Wall 1: the model does not fit on one GPU.** Storing 70 billion parameters at 2 bytes each takes roughly 140 GB. Even high-end data-center GPUs typically have 80 GB of HBM memory. A single model instance must be split across multiple GPUs.
+
+**Wall 2: even after the weights fit, memory still runs out.** Even if you pick a smaller model whose weights fit comfortably on one GPU, as soon as a few dozen users engage in long multi-turn chats at the same time, GPU memory fills up completely. The culprit is the KV cache.
+
+Picture a restaurant. **The model weights are the kitchen:** fixed in size whether one diner or a hundred diners show up. **The KV cache is the dining tables:** each active customer conversation occupies a table, and that table grows longer with every new sentence (token) in the conversation. First the kitchen must fit inside the building; then the remaining floor space determines how many tables you can seat at once.
+
+### Reading the prompt vs. writing the answer
+
+Generating a response happens in two distinct phases. First, the model **reads the entire user prompt**: because all prompt tokens are already known upfront, the GPU processes them in parallel in one big matrix–matrix pass, like skimming a whole page at a glance. Next, the model **writes the answer one token at a time**, like writing by hand: it cannot pick word $t+1$ until word $t$ has been emitted and fed back in.
+
+Each step of the writing phase produces only a single new token per sequence, yet it must read **all** the model's weight matrices from GPU memory. As the PagedAttention paper (Section 2.2) notes, this makes autoregressive decoding heavily memory-bandwidth-bound: the GPU spends far more time hauling weights out of memory than doing arithmetic. That is why batching many user requests together into a single step is a huge win: the GPU reads the weights once from memory and advances dozens of users' answers simultaneously. Consequently, an LLM server tries to pack as many concurrent requests into a **batch** as possible—which makes KV cache capacity the central bottleneck of LLM serving.
+
+**The problem of this lesson: how much memory does an LLM need when serving many concurrent users, how should we split the model across multiple GPUs when it does not fit on one, and how do modern serving engines schedule requests and manage KV cache memory so GPUs stay busy while users get fast responses?**
+
+## Theory
+
+### Memory component 1: model weights
+
+Suppose a model has $\Psi$ parameters (keeping the notation from the LLaMA lesson), stored using $s$ bytes per parameter. The model weights occupy:
+
+$$
+M_{\text{w}} \approx \Psi \cdot s
+$$
+
+For BF16/FP16, $s = 2$; for int8/FP8, $s = 1$; for int4, $s = 0.5$. The "$\approx$" accounts for small quantization scale metadata, as covered in [Model Evaluation and PEFT](/en/llm/evaluation-peft/). Crucially, this footprint is **static**: whether the server is handling 1 user or 60 concurrent users, $M_{\text{w}}$ stays the same.
+
+Counting directly from the architectural dimensions in the Llama 3 paper (Grattafiori et al., 2024), the 8B model has 8.03 billion parameters and the 70B model has 70.55 billion parameters (verified in our Python cell below). In BF16 ($s = 2$), that comes to 15.0 GiB and 131.4 GiB, respectively. Recall that $1\text{ GiB} = 2^{30}\text{ bytes} \approx 1.074\text{ GB}$, so 131.4 GiB is about 141 GB: the 70B model cannot fit on a single 80 GB GPU even with zero active users.
+
+Quantization shrinks $M_{\text{w}}$ directly (dropping 70B in int4 down to 32.9 GiB), at the cost of potential rounding degradation. When serving Llama 3 405B in FP8 (Section 6.2 of the Llama 3 paper), the authors quantized most weights and activations inside the FFN layers (which account for roughly 50% of inference FLOPs) while leaving attention weights unquantized and keeping the first and last Transformer layers in full precision to preserve quality.
+
+### Memory component 2: the KV cache
+
+Using the same notation as the LLaMA lesson: $N_{\text{layer}}$ layers, $H_{\text{kv}}$ key/value heads, $d$ dimensions per head, and $s$ bytes per cached number—now multiplied by the sequence length $L$ and the number of concurrent sequences in the batch $B$.
+
+**Step 1: one token at one layer.** Caching the key vector for a single token stores $H_{\text{kv}} \cdot d$ numbers ($d$ numbers for each of the $H_{\text{kv}}$ K/V heads), and caching the value vector stores another $H_{\text{kv}} \cdot d$ numbers. Together, that is $2 \cdot H_{\text{kv}} \cdot d$ numbers.
+
+**Step 2: across all layers.** Every Transformer layer maintains its own keys and values, so multiply by $N_{\text{layer}}$. Multiplying by $s$ bytes per number gives the per-token KV cache footprint:
+
+$$
+2 \cdot N_{\text{layer}} \cdot H_{\text{kv}} \cdot d \cdot s \ \text{bytes}
+$$
+
+**Step 3: across the sequence and the batch.** Every processed token (prompt plus generated tokens so far) occupies one slot in the cache, multiplying by $L$. Because each user request has its own conversation history, $B$ concurrent sequences multiply the footprint by $B$:
+
+$$
+M_{\text{KV}} = 2 \cdot N_{\text{layer}} \cdot H_{\text{kv}} \cdot d \cdot s \cdot L \cdot B
+$$
+
+Because this formula is a product of factors, $M_{\text{KV}}$ **scales linearly** with each factor: quadrupling the sequence length $L$ quadruples the cache; multiplying the batch size $B$ by 16 multiplies the cache by 16.
+
+**Plugging in real numbers.** Llama 3 8B has $N_{\text{layer}} = 32$, $H_{\text{kv}} = 8$, and $d = 4\,096/32 = 128$. In BF16 ($s = 2$), each token takes $2 \cdot 32 \cdot 8 \cdot 128 \cdot 2 = 131\,072$ bytes (128 KiB), as we computed in the LLaMA lesson. Scaling across $L$ and $B$:
+
+| Llama 3 8B, BF16 KV cache | Sequence length $L$ | Batch size $B$ | KV cache size | Compared to weights (15.0 GiB) |
+|---|---:|---:|---:|---|
+| 1 long chat | $8\,192$ | 1 | 1.0 GiB | Much smaller |
+| 16 long chats | $8\,192$ | 16 | 16.0 GiB | Already exceeds weights |
+| 16 long-document sessions | $32\,768$ | 16 | 64.0 GiB | Over $4\times$ larger than weights |
+
+Notice that the number of query heads $H$ does not appear in $M_{\text{KV}}$, which is why GQA is such a boon for deployment: if Llama 3 8B used 32 K/V heads (standard MHA) instead of 8, a single $8\,192$-token sequence would require 4.0 GiB instead of 1.0 GiB, cutting the maximum number of concurrent users on the same GPU by $4\times$.
+
+### How many concurrent users can fit?
+
+Suppose your GPU (or multi-GPU group) has $M_{\text{GPU}}$ bytes of memory. Subtract the static weight footprint $M_{\text{w}}$, and divide the remaining memory by the KV cache required for a single sequence of length $L$:
+
+$$
+B_{\max} \approx \left\lfloor \frac{M_{\text{GPU}} - M_{\text{w}}}{M_{\text{KV}}(L, B = 1)} \right\rfloor
+$$
+
+The floor brackets $\lfloor \cdot \rfloor$ round down to the nearest whole sequence. For Llama 3 8B in BF16 on an 80 GB GPU ($80 \cdot 10^9$ bytes) serving $8\,192$-token sequences: the weights take $8.03 \cdot 10^9 \cdot 2 \approx 16.06 \cdot 10^9$ bytes (15.0 GiB), leaving $80 - 16.06 \approx 63.9$ GB of free space; dividing by 1 GiB ($\approx 1.074$ GB) per sequence gives $\lfloor 59.5 \rfloor = \mathbf{59}$ **concurrent sequences**.
+
+Keep in mind that this is an **upper-bound estimate**: in practice, transient activation buffers, CUDA context overhead, and the serving engine's reserved memory margin reduce the usable space (for example, vLLM reserves a configurable `gpu_memory_utilization`, defaulting to 90%). Even so, the formula captures the fundamental rule of LLM capacity planning: **model weights determine whether the model fits at all; the KV cache determines how many concurrent users you can serve**. When vLLM starts up, it logs this exact calculation as `"GPU KV cache size"` (total token slots available) and `"Maximum concurrency"` for your configured maximum sequence length.
+
+:::note[Key takeaway]
+Inference memory consists of static model weights $M_{\text{w}} \approx \Psi \cdot s$ plus the dynamic KV cache $M_{\text{KV}} = 2 \cdot N_{\text{layer}} \cdot H_{\text{kv}} \cdot d \cdot s \cdot L \cdot B$, which grows linearly with sequence length $L$ and concurrency $B$. Under long contexts and high traffic, the KV cache easily exceeds the size of the weights themselves.
+:::
+
+### Prefill, decode, and the two latency metrics
+
+**Prefill** (the prompt processing phase) runs all tokens of the user's prompt in parallel, populates their K and V vectors across every layer in the KV cache, and emits the very first output token. **Decode** (the autoregressive generation phase) then loops step by step: feed the just-generated token back in, compute its K and V, append one new slot to the KV cache at every layer, and sample the next token. This is the exact generation loop from [Build Your First LLM](/en/llm/build-first-llm/), accelerated by the KV cache.
+
+Because the two phases have completely different compute profiles, serving benchmarks measure them separately. Following vLLM 0.32's benchmark definitions:
+
+- **TTFT (Time To First Token):** elapsed time from when the request arrives to when the first output token is emitted—which includes both queue wait time and the prefill pass. Long prompts (such as multi-document RAG contexts) directly increase TTFT.
+- **TPOT (Time Per Output Token):** average time between consecutive output tokens after the first token, measuring the pace of the decode loop. If a response of $N$ output tokens takes $t_{\text{total}}$ seconds end-to-end, then:
+
+$$
+\text{TPOT} = \frac{t_{\text{total}} - \text{TTFT}}{N - 1}
+$$
+
+The denominator is $N - 1$ because the first token is already accounted for in TTFT. Rearranging gives total request latency: $t_{\text{total}} = \text{TTFT} + (N - 1) \cdot \text{TPOT}$. For example, if TTFT is 0.5 s and TPOT is 40 ms ($0.04$ s), a 201-token answer takes $0.5 + 200 \cdot 0.04 = 8.5$ seconds in total.
+
+Note that terminology varies slightly across tools: the Llama 3 paper calls decode step latency "time-to-incremental-token", while other benchmarks call it ITL (inter-token latency). Always check whether queue wait time is included when comparing numbers across reports.
+
+**The throughput–latency trade-off.** Server **throughput** is the total number of tokens generated per second across all users combined. Increasing the batch size $B$ raises total throughput (better amortizing weight reads), but each step now does more work so individual users see slightly higher TPOT. Figure 24 of the Llama 3 paper plots this exact throughput-vs-latency frontier across batch sizes. Where you operate on that curve depends on your application's SLA—and as emphasized in [Deploying a Custom Model](/en/llm/deploy-custom-model/), always track p50 and p95 latencies rather than averages alone.
+
+### Splitting a model across GPUs for inference
+
+At inference time there are no gradients and no optimizer states—only weights and the KV cache need to be partitioned.
+
+**Tensor parallelism: within a single node.** Every GPU holds a slice of the weight matrices in **every** layer; in attention, each GPU handles a subset of heads (following Megatron-LM's head-wise split, so each GPU also holds the KV cache for its assigned K/V heads—note that if tensor-parallel degree exceeds $H_{\text{kv}}$, such as splitting 8 K/V heads across 16 GPUs, the K/V heads must be replicated across GPU pairs, as noted in the Llama 2 paper). The catch: after every single attention and FFN sub-layer, all GPUs in the tensor-parallel group must synchronize via an all-reduce at every token step. That chatty communication requires high-bandwidth intra-node links like NVLink.
+
+**Pipeline parallelism: across nodes.** Each GPU (or each multi-GPU node) holds a contiguous stage of layers along with the KV cache for those layers. Adjacent stages only pass intermediate hidden states at stage boundaries, which tolerates much slower inter-node networking (such as standard Ethernet or InfiniBand between servers). What about the **pipeline bubble** that plagued training in the LLaMA lesson? As Section 6.1 of the Llama 3 paper points out, during inference there is no backward pass requiring a synchronous pipeline flush! By splitting incoming requests into micro-batches, all pipeline stages stay concurrently busy—boosting throughput at the cost of a small latency increase from stage handoffs.
+
+**Real-world example: Llama 3 405B.** As documented in Section 6.1 of the Llama 3 paper, the 405B model in BF16 requires $405 \cdot 10^9 \cdot 2 = 810$ GB just for weights, exceeding the 640 GB capacity of a single 8-GPU H100 node. The authors serve it across 16 GPUs spanning two nodes: tensor parallelism of 8 within each node over NVLink, combined with pipeline parallelism of 2 between the two nodes.
+
+**What about data parallelism?** Data parallelism does not help a single giant model fit into memory, because each replica holds a full copy of the model. At the service level, however, data parallelism is simply **model replication**: running multiple independent model instances (each potentially using tensor/pipeline parallelism internally) behind a standard **load balancer** to scale request throughput linearly.
+
+vLLM's *Parallelism and Scaling* guide summarizes the decision tree for a single model instance:
+
+| Hardware situation (per model replica) | Recommended sharding strategy |
+|---|---|
+| Fits on a single GPU | No sharding needed (`TP = 1, PP = 1`) |
+| Exceeds one GPU, but fits within a single multi-GPU node | Tensor parallelism (`TP` = number of GPUs needed in the node) |
+| Exceeds a single node's total GPU memory | Tensor parallelism within each node (`TP` = GPUs per node) + Pipeline parallelism across nodes (`PP` = number of nodes) |
+| Multi-GPU node without fast NVLink interconnects | Prefer pipeline parallelism over tensor parallelism |
+| GPU count does not evenly divide attention heads | Use pipeline parallelism (layers can be split unevenly across stages) |
+
+Once the model fits, inspect the server startup log to see how many concurrent sequences the remaining KV cache memory supports; if you need higher concurrency, add GPUs to expand the KV cache or spin up additional replicas behind a load balancer.
+
+### Continuous batching: iteration-level scheduling
+
+**Static batching** works like a shuttle bus that only boards passengers at the first stop and keeps the doors locked until the very last passenger reaches the end of the line: the entire batch runs until the longest sequence emits `<EOS>`. Shorter sequences that finished dozens of steps ago stay trapped in the batch (wasting GPU slots on padding), while newly arrived users wait outside in the queue.
+
+Orca (Yu et al., OSDI 2022) introduced **iteration-level scheduling**, now universally known as **continuous batching**. Instead of locking a batch for an entire generation call, the scheduler runs the model for **a single token iteration** and re-evaluates the batch after every step. As soon as any sequence emits `<EOS>`, it is returned to the user immediately, and a waiting request from the queue is slotted into the batch on the very next step. The bus now opens its doors at every single token stop. (Because sequences in the batch have different lengths, Orca also introduced *selective batching*, batching matrix multiplications across all tokens while running attention per sequence.) On GPT-3 175B, the Orca paper reported up to $36.9\times$ higher throughput than NVIDIA FasterTransformer at the same latency target under their benchmark workload.
+
+### PagedAttention: paging the KV cache
+
+To keep a large continuous batch running, you need room for every active request's KV cache. Kwon et al. (2023) measured where KV cache memory was actually going in existing serving systems and found a massive waste: because a request's output length is unknown in advance, prior systems pre-allocated a **contiguous** chunk of GPU memory sized for the maximum possible sequence length (e.g., $2\,048$ or $8\,192$ tokens). Most responses finish much earlier, leaving the reserved tail unused (internal fragmentation), while variable-sized contiguous allocations leave unassignable gaps between chunks (external fragmentation). In the authors' profiling, existing systems utilized only **20.4% to 38.2%** of their KV cache memory for actual token states—wasting 60% to 80% of reserved memory!
+
+**PagedAttention** solves this by borrowing virtual memory **paging** directly from operating systems:
+
+- Each sequence's KV cache is partitioned into fixed-size **KV blocks** (pages), where each block holds the keys and values for a fixed number of tokens (e.g., 16 tokens).
+- Blocks do not need to sit contiguously in physical GPU memory. A lightweight **block table** maps each sequence's logical blocks to physical memory blocks on the fly.
+- New physical blocks are allocated on demand only as the sequence actually generates new tokens—zero upfront over-reservation for maximum length.
+
+Returning to our restaurant analogy: instead of roping off a contiguous 16-seat banquet table for every party of 2 just in case more friends show up, the host seats them at a small 2-top and pulls up another small table only when extra guests actually arrive. Better yet, because logical blocks map to physical blocks via pointers, multiple sequences that share the same prompt prefix (such as parallel sampling or shared system prompts) can **share physical KV blocks** with copy-on-write. The PagedAttention paper reports near-zero KV cache waste (under 4%) and $2\times$ to $4\times$ higher throughput than FasterTransformer and Orca at the same latency. This algorithm powers **vLLM**.
+
+### Speculative decoding (brief overview)
+
+**Speculative decoding** (Leviathan et al., 2022) attacks decode latency from another angle: a fast, small draft model quickly guesses $K$ future tokens autoregressively, and the large target model verifies all $K$ draft tokens **in parallel in a single forward pass** (just like prefill). Using a modified rejection-sampling rule, speculative decoding is mathematically guaranteed to produce the **exact same output distribution** as sampling from the large model alone, achieving $2\times$ to $3\times$ speedups on T5-XXL in the authors' experiments.
+
+### Limitations
+
+- **Back-of-the-envelope memory formulas are estimates** assuming uncompressed BF16 KV caches. Always read the actual available KV cache capacity from your serving engine's startup logs.
+- **Non-standard architectures require recounting.** Mixture-of-Experts (MoE) models and compressed attention mechanisms like MLA change both the weight and KV cache formulas—see [The DeepSeek Family](/en/llm/deepseek-family/) for both.
+- **Advanced serving optimizations**—such as automatic prefix caching, chunked prefill, and disaggregated prefill/decode clusters—are beyond this introductory lesson; see the vLLM and SGLang documentation in Further reading.
+
+## Illustration
+
+Below is the three-way parallelism diagram from the LLaMA lesson. Read it through an inference lens this time: ignore the backward "gradients" and "sum gradients" arrows, and compare the middle row (**tensor parallelism**, slicing every layer across GPUs with an all-reduce at every layer) against the bottom row (**pipeline parallelism**, assigning contiguous layer stages to each GPU and passing only boundary activations).
+
+{/* FIG: reuse the figure from llama-family; read it for inference by ignoring the gradient arrows. */}
+<ParallelismFigure />
+
+The table below summarizes how all three parallelism dimensions apply at inference time. Look at the "Communication" column: it dictates which interconnect each strategy requires.
+
+| Parallelism type | What gets split | Communication | Role in inference serving |
+|---|---|---|---|
+| Data parallelism (replication) | Incoming requests (each replica holds the full model) | None between replicas (routed via load balancer) | Scale out request throughput linearly |
+| Tensor parallelism | Weight matrices and attention heads inside every layer | All-reduce after every layer at every token step | Fit a large model across GPUs **within one NVLink node** |
+| Pipeline parallelism | Contiguous stages of Transformer layers | Pass boundary activations between adjacent stages | Span a huge model **across multiple nodes**, or across GPUs without NVLink |
+
+## Code examples
+
+The code in this lesson was last tested in October 2026 with Python 3.14 (in Pyodide). The memory calculator cell runs directly in your browser. The `vllm serve` shell commands at the end require a multi-GPU Linux server and are shown for reference following vLLM's official documentation.
+
+### Calculating weight and KV cache memory
+
+The cell below translates both memory formulas from the Theory section into pure Python functions. `n_params` counts exact parameters from architectural hyperparameters (where `dim` is the model hidden dimension $D$): the four attention projections ($\mathbf{W}_Q, \mathbf{W}_O$ of shape $D \times D$ and $\mathbf{W}_K, \mathbf{W}_V$ of shape $D \times H_{\text{kv}} d$), the three SwiGLU FFN matrices, and the input/output token embedding tables ($\text{vocab} \times D$), omitting only the tiny 1D RMSNorm gain vectors. `kv_bytes` implements the exact $M_{\text{KV}}$ formula. The script prints weight sizes, KV cache footprints across three $(L, B)$ workloads for Llama 3 8B and 70B, and two "what-if" comparisons.
+
+<PythonRunner code={memoryCode} title="Weight and KV cache memory calculator for Llama 3" />
+
+Reading the output:
+
+- **Parameter counts:** 8.03B and 70.55B, matching the official model sizes. Weight memory in BF16 / int8 / int4 is 15.0 / 7.5 / 3.7 GiB for 8B, and 131.4 / 65.7 / 32.9 GiB for 70B.
+- **8B KV cache:** 1.0, 16.0, and 64.0 GiB across the three workloads—multiplying $B$ by 16 multiplies the cache by 16, and quadrupling $L$ quadruples the cache again.
+- **70B KV cache:** 2.5, 40.0, and 160.0 GiB. Because 70B has 80 layers instead of 32 ($2.5\times$ as many layers), each token takes 320 KiB instead of 128 KiB. At the third workload ($L = 32\,768, B = 16$), the KV cache alone takes 160 GiB—more than two 80 GB GPUs—so even if you quantize the 70B weights to int4 (32.9 GiB), serving that workload still requires sharding across multiple GPUs.
+- **`32 K/V heads` line:** 4.0 GiB instead of 1.0 GiB for a single $8\,192$-token sequence on 8B. GQA shrinks the KV cache by the exact ratio $32 / 8 = 4\times$.
+- **Final line:** 59 concurrent sequences, matching our manual calculation in the Theory section.
+
+Try experimenting in the cell: change `s=2` to `s=1` inside `kv_bytes` to see the effect of an FP8/int8 KV cache, or change `80e9` to match your own GPU's VRAM.
+
+### Serving with vLLM across multiple GPUs
+
+Once you know your tensor-parallel and pipeline-parallel degrees, passing them to a production serving engine takes just two CLI flags. The two commands below follow vLLM's *Parallelism and Scaling* documentation (`<model_name>` and `<model_path>` are placeholders):
+
+```sh
+# Single node with 4 GPUs: 4-way tensor parallelism
+vllm serve <model_name> --tensor-parallel-size 4 --port 8001
+
+# Two nodes with 8 GPUs each (16 GPUs total): TP=8 within each node, PP=2 across the two nodes.
+# Requires starting a multi-node Ray cluster first, per vLLM's documentation.
+vllm serve <model_path> \
+    --tensor-parallel-size 8 \
+    --pipeline-parallel-size 2 \
+    --distributed-executor-backend ray
+```
+
+Model sharding, continuous batching, and PagedAttention KV block management are all handled transparently inside the server. **Your client code does not change at all**: you use the exact same OpenAI-compatible client from [Using Text Generation APIs](/en/llm/text-api/), pointing `OPENAI_BASE_URL` at `http://<server-host>:<port>/v1` and setting `LLM_MODEL` to the served model name. At the time of writing (October 2026), vLLM (v0.32.0) and SGLang (v0.5.22) are two widely used open-source engines implementing these techniques.
+
+## Common pitfalls
+
+:::caution[Sizing GPUs for model weights while forgetting the KV cache]
+Saying "the model weights are 15 GiB and my GPU has 80 GB, so we have tons of room" is a calculation for **one user**. Because $M_{\text{KV}}$ scales linearly with both sequence length $L$ and concurrency $B$, 16 concurrent $32\,768$-token sessions on Llama 3 8B require 64 GiB of KV cache alone—more than $4\times$ the weight footprint. Always size hardware for both $M_{\text{w}}$ and $M_{\text{KV}}$ at your target $(L, B)$, leave headroom for activations, and verify the actual token capacity in the server startup logs.
+:::
+
+:::caution[Running tensor parallelism across slow inter-node networks, or confusing sharding with replication]
+Tensor parallelism performs an all-reduce after every layer on every generated token; running it across slow inter-server Ethernet will leave your GPUs stalled waiting on the network. Use tensor parallelism within a node (over NVLink) and pipeline parallelism across nodes. Conversely, if a model already fits comfortably inside a single 4-GPU node with enough KV cache headroom, do not shard it across two 4-GPU nodes just to "use all 8 GPUs"—run **two independent 4-GPU replicas** behind a load balancer instead. Sharding **one** instance across GPUs makes a large model fit; spinning up **multiple** instances scales user throughput.
+:::
+
+:::caution[Taking headline "$N\times$ speedup" claims out of context, or mixing latency definitions]
+Orca's $36.9\times$, PagedAttention's $2\text{–}4\times$, and speculative decoding's $2\text{–}3\times$ speedups were each measured by their respective authors on specific models, hardware, prompt-length distributions, and baselines. Always benchmark TTFT, TPOT (at p50 and p95), and throughput on your own workload distribution. And when comparing two benchmark reports, verify whether TTFT includes queueing time and how TPOT/ITL is defined.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Inference memory has two main components: static model weights $M_{\text{w}} \approx \Psi \cdot s$ (which determine whether the model fits at all) and the dynamic KV cache $M_{\text{KV}} = 2 \cdot N_{\text{layer}} \cdot H_{\text{kv}} \cdot d \cdot s \cdot L \cdot B$ (which scales with sequence length and concurrency, determining how many users can be served simultaneously).
+- Prefill processes all prompt tokens in parallel and governs TTFT; decode generates one token at a time and governs TPOT, with total latency $t_{\text{total}} = \text{TTFT} + (N - 1) \cdot \text{TPOT}$. Larger batches increase server throughput at the expense of per-user latency.
+- When a model exceeds one GPU: use tensor parallelism within a single node (over NVLink), and add pipeline parallelism across nodes. To serve more traffic once the model fits: replicate the model behind a load balancer.
+- Continuous batching schedules requests at single-token iteration granularity so finished requests exit immediately and new requests fill their slots. PagedAttention splits the KV cache into on-demand non-contiguous blocks via a block table, eliminating pre-allocation waste and enabling much larger batch sizes.
+
+**Further reading:**
+
+- vLLM. [*Parallelism and Scaling*](https://docs.vllm.ai/en/v0.32.0/serving/parallelism_scaling/). Practical guide to choosing tensor and pipeline parallelism degrees across GPUs and nodes, `vllm serve` commands, and interpreting KV cache concurrency logs. See also [*Benchmark CLI*](https://docs.vllm.ai/en/v0.32.0/benchmarking/cli/) (v0.32.0) for standard TTFT and TPOT definitions.
+- Kwon, W. et al. (2023). [*Efficient Memory Management for Large Language Model Serving with PagedAttention*](https://arxiv.org/abs/2309.06180), arXiv:2309.06180, SOSP 2023, Sections 1–4. Quantifies KV cache fragmentation in prior systems and introduces block tables and PagedAttention.
+- Yu, G.-I., Jeong, J. S., Kim, G.-W., Kim, S., Chun, B.-G. (2022). [*Orca: A Distributed Serving System for Transformer-Based Generative Models*](https://www.usenix.org/conference/osdi22/presentation/yu), OSDI 2022. Introduces iteration-level scheduling (continuous batching) and selective batching.
+- Grattafiori, A., Dubey, A., Jauhri, A. et al. (2024). [*The Llama 3 Herd of Models*](https://arxiv.org/abs/2407.21783), arXiv:2407.21783, Section 6. Details two-node pipeline + micro-batch inference for Llama 3 405B, FP8 FFN quantization, and the throughput–latency trade-off curve in Figure 24.
+- Leviathan, Y., Kalman, M., Matias, Y. (2022). [*Fast Inference from Transformers via Speculative Decoding*](https://arxiv.org/abs/2211.17192), arXiv:2211.17192, ICML 2023. The foundational speculative decoding paper.
+- Zheng, L. et al. (2023). [*SGLang: Efficient Execution of Structured Language Model Programs*](https://arxiv.org/abs/2312.07104), arXiv:2312.07104. Introduces SGLang and RadixAttention for prefix caching. Package releases: [vLLM on PyPI](https://pypi.org/project/vllm/) (0.32.0) and [SGLang on PyPI](https://pypi.org/project/sglang/) (0.5.22).
+
+<LessonProgress />

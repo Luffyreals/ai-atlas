@@ -1,0 +1,346 @@
+---
+title: Data Augmentation in Computer Vision
+description: A model recognizes a centered digit with ease, yet fails when the digit shifts by 1 pixel. Learn data augmentation via flips, crops, rotations, color jitter, cutout, mixup, CutMix, and RandAugment.
+quiz:
+  - question: 'You are training a traffic-sign classifier that includes the classes "no left turn" and "no right turn". How should you handle horizontal flipping?'
+    options:
+      - 'Flip horizontally with probability 0.5 and keep the label unchanged, because horizontal flips are almost always safe'
+      - 'Flip images only in the test set to check whether the model is robust'
+      - 'Do not horizontally flip those two classes, or flip them while swapping the left/right labels'
+      - 'Use vertical flips instead, because vertical flips do not swap left and right'
+    answer: 2
+    explanation: 'A horizontal flip turns a "no left turn" sign into the exact visual appearance of a "no right turn" sign. Keeping the old label teaches the model the wrong answer. A transform is safe with an unchanged label only when the label is invariant to it; here the label changes predictably, so you can either skip the flip or swap the two labels. A vertical flip turns signs upside down—something never seen on real roads—so it is not a good choice either.'
+  - question: 'A mixup sample blends a cat image and a dog image with weight $\lambda = 0.25$ for the cat, giving soft label $[0.25, 0.75]$ (cat, dog). The model predicts probability $0.8$ for cat and $0.2$ for dog. What is the approximate cross-entropy loss on this sample?'
+    options: ['$0.22$', '$1.26$', '$1.05$', '$1.61$']
+    answer: 1
+    explanation: 'With soft labels, cross-entropy is $-\sum_k \tilde{y}_k \ln p_k = -(0.25 \ln 0.8 + 0.75 \ln 0.2) \approx 0.056 + 1.207 = 1.26$, which equals $\lambda$ times the cat loss plus $1 - \lambda$ times the dog loss. The value $0.22$ is the loss if the label were pure cat. The value $1.05$ is $-\ln(0.25 \cdot 0.8 + 0.75 \cdot 0.2)$, which blends probabilities before taking the log—not the mixup formula.'
+  - question: 'You write a custom rotation function for semantic segmentation and rotate the segmentation mask (values 0, 1, 2 for background, road, car) using bilinear interpolation, just like the image. Along the boundary between road and car, values like $1.5$ appear. What is wrong?'
+    options:
+      - 'Class IDs are categorical names without numerical order, so averaging class 1 and class 2 is meaningless; masks must use nearest-neighbor interpolation'
+      - 'Nothing is wrong; just round $1.5$ up to 2'
+      - 'It is only a data-type issue; casting the mask to float makes it valid'
+      - 'The image must also use nearest-neighbor interpolation to match the mask'
+    answer: 0
+    explanation: 'Bilinear interpolation averages neighboring pixel values. For an image, the average of two brightnesses is a valid brightness. For a mask, "the average of road and car" is not a class; worse, averaging background (0) and car (2) yields 1 ("road"), silently fabricating a wrong class along the border. Segmentation masks must therefore always use nearest-neighbor interpolation, as `tv_tensors.Mask` in torchvision does automatically. The image itself should still use bilinear interpolation for smoothness.'
+  - question: 'You have 500 images. You generate 10 randomly shifted and rotated copies of each image to get 5,500 images, and only then randomly split 80% train and 20% test. Your test accuracy is sky-high. Which statement is true?'
+    options:
+      - 'The result is reliable because the test set is much larger than before'
+      - 'The result is reliable because the test images are transformed and therefore harder'
+      - 'Augmentation is useless here because transformed images are just duplicates'
+      - 'The result is overly optimistic because transformed versions of the same original image end up in both train and test'
+    answer: 3
+    explanation: 'A 1-pixel shifted copy is nearly identical to the original image. Splitting after augmenting means almost every test image has near-twin siblings in the training set, so a model that simply memorizes training images scores high on test: this is classic data leakage. The right workflow: split train, validation, and test on the original images first, and augment only the training set, sampling fresh random transforms each epoch.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import galleryCode from '@code/cv/image-augmentation/gallery.en.py?raw';
+import shiftExperimentCode from '@code/cv/image-augmentation/shift-experiment.en.py?raw';
+import pipelineCode from '@code/cv/image-augmentation/torchvision-pipeline.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand **data augmentation** as a way of teaching a model what *must not* change the label, and why it acts as a form of regularization.
+- Choose geometric transforms (flips, random crops, rotations, scaling) and photometric transforms (brightness, contrast, color jitter, noise, blur) that fit your task, and spot when a transform corrupts the label.
+- Implement cutout, mixup, and CutMix—including the label-blending formula of mixup—and understand how RandAugment reduces policy search to two numbers $N$ and $M$.
+- Build a `torchvision.transforms.v2` pipeline that transforms an image, segmentation mask, and bounding boxes in lockstep, while augmenting only the training set.
+
+## Prerequisites
+
+{/* List populated from prerequisites in roadmap.ts. Do not write manual links here. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+**Data preprocessing** prepares raw inputs so a model can learn from them—for example, scaling pixel values from 0–255 down to 0–1. A dataset is split into a **training set**, a **validation set** for tuning hyperparameters, and a **test set** evaluated once at the end. Every step that "learns" from data or expands it must touch only the training set; letting test information leak into training is **data leakage**, which produces artificially inflated test scores.
+:::
+
+## Intuition
+
+### A digit shifted by 1 pixel
+
+Suppose you train a small neural network to classify handwritten digits on 300 $8 \times 8$ images from `load_digits`. On the test set, it reaches about 94% accuracy. Then you shift each test image by at most 1 pixel horizontally or vertically. To a human eye, nothing meaningful changed. To the model, accuracy plunges to around 40% (the scikit-learn cell in the Code examples section reproduces these exact numbers).
+
+What went wrong? The model had never seen a digit 6 sitting one pixel to the right. Instead of learning "a loop at the bottom means 6," it learned a brittle shortcut like "a dark pixel in column 3 means 6." On 300 centered training images, both rules fit the training data equally well, and the network latched onto the simpler pixel-coordinate rule.
+
+### Teaching what should not change the label
+
+The simplest fix: show the model digits at slightly different positions during training. You do not need to collect new photographs. You simply shift the existing training images yourself, keep their original labels, and feed them into training. Every shifted copy tells the model: "shifting by 1 pixel does not change which digit this is."
+
+That is the entire idea behind data augmentation. You know ahead of time that certain transformations **preserve the ground-truth answer**: a horizontally flipped dog is still a dog; a slightly darker photo is still the same scene. Because a neural network only learns from data, you turn that domain knowledge into data.
+
+Not every transformation is safe, however. Rotating a 6 by 180 degrees turns it into a 9. Flipping the letter "b" horizontally turns it into a "d". Horizontally flipping a chest X-ray moves the heart to the right side of the chest—a rare congenital condition called situs inversus. Whether a transform is valid depends on the **task**, not just the image.
+
+**The core question of this lesson:** which transforms should you pick, what targets must transform along with the image (labels, masks, bounding boxes), and why does "making up extra data" help a model generalize rather than just memorize more?
+
+## Theory
+
+### Notation
+
+Let $\mathbf{X} \in \mathbb{R}^{H \times W \times C}$ be an image (height $H$, width $W$, $C$ color channels), $y$ be its label, and $f$ be the model. The $i$-th training example is $(\mathbf{X}^{(i)}, y^{(i)})$, for $i = 1, \dots, m$. A **transformation** $T$ takes an image and returns an image of the same or different size, such as "flip horizontally" or "shift right by 1 pixel." In semantic segmentation, each image also comes with a mask $\mathbf{M}$ assigning a class ID to every pixel.
+
+### Invariance and equivariance
+
+In image classification, we want the model to be **invariant** to $T$: transforming the input image should leave the predicted class unchanged.
+
+$$
+f(T(\mathbf{X})) = f(\mathbf{X})
+$$
+
+Semantic segmentation is different. If you flip the input image horizontally, the ground-truth segmentation map must flip horizontally too: when the cat moves to the left half of the image, the "cat" region in the mask must move to the left half as well. Here we want the model to be **equivariant** to $T$: transforming the input transforms the output in the exact same way.
+
+$$
+f(T(\mathbf{X})) = T(f(\mathbf{X}))
+$$
+
+Object detection works the same way: bounding boxes must move, scale, and rotate along with the objects they enclose. That is why the Code examples section passes the image, segmentation mask, and bounding boxes through **the exact same** random transform call.
+
+CNNs have a piece of this built into their architecture: sliding the same convolutional kernel across the image makes feature maps translation-equivariant (see [Image Classification with CNNs](/en/cv/cnn-image-classification/)). Even so, a CNN is not automatically invariant to rotation, scale, or brightness shifts. And a fully connected MLP has no spatial inductive bias at all—to an MLP, a pixel in column 3 and a pixel in column 4 are two unrelated features. Data augmentation supplies the missing invariances through training examples.
+
+### Augmentation in the loss function
+
+Standard training minimizes the average loss $\ell$ over the $m$ original training examples:
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = \frac{1}{m}\sum_{i=1}^{m} \ell\big(f(\mathbf{X}^{(i)}), y^{(i)}\big)
+$$
+
+With data augmentation, each time the model visits image $i$, we draw a random transform $T$ from a distribution of allowed transforms (for instance, "shift randomly by $-1$, $0$, or $+1$ pixel along each axis"). Across many epochs, with a fresh draw every epoch, training minimizes the **expected loss over all random transforms $T$**:
+
+$$
+\mathcal{L}_{\text{aug}}(\boldsymbol{\theta}) = \frac{1}{m}\sum_{i=1}^{m} \mathbb{E}_{T}\Big[\ell\big(f(T(\mathbf{X}^{(i)})), y^{(i)}\big)\Big]
+$$
+
+Here $\mathbb{E}_T$ averages over the random choice of $T$. You can read this objective in two complementary ways:
+
+- **An expanded dataset.** Each original image becomes a whole cloud of transformed variants sharing the same label, multiplying the effective size of the training set.
+- **A regularization penalty.** Any model that outputs different predictions on $\mathbf{X}$ and $T(\mathbf{X})$ must be wrong on at least one of them, incurring higher loss. The augmented objective rules out functions that memorize exact pixel coordinates, much like [Ridge, Lasso, and Elastic Net](/en/ml/regularization/) rule out models with huge weights.
+
+Data augmentation is therefore a direct weapon against [overfitting](/en/ml/overfitting-underfitting/): it stops the model from clinging to accidental quirks of a few hundred training images. And just like a regularization strength $\lambda$, you can overdo it: if transforms distort images beyond recognition, the model underfits.
+
+:::note[Key takeaway]
+Data augmentation tells the model "these transformations do not change the answer" (for classification) or "the answer transforms in the exact same way" (for segmentation and detection) by feeding transformed examples into the training loop. It helps whenever that assumption holds for your task.
+:::
+
+### Geometric and photometric transforms
+
+**Geometric transforms** move pixels to new spatial positions without changing their color values:
+
+- **Horizontal flip**: almost always safe for natural photos. **Vertical flip** only makes sense for top-down imagery with no "up" direction, such as satellite imagery or microscope slides.
+- **Random crop** and **random resized crop**: crop a random sub-rectangle and resize it back to a fixed resolution. This forces the model to recognize objects at different locations and scales. AlexNet (Krizhevsky et al., 2012) extracted random $224 \times 224$ crops from $256 \times 256$ images along with horizontal flips—one of the paper's two main defenses against overfitting, alongside dropout.
+- **Rotation** by a few degrees, **scaling**, and **shear**. Rotating an image exposes empty triangles at the corners that must be filled (typically with 0), and requires interpolating pixel values onto the rotated grid.
+
+**Photometric transforms** change pixel intensities or colors while leaving every pixel in its original location:
+
+- **Brightness and contrast**: simulate photos taken in sunny or dim lighting, or with different camera exposures.
+- **Color jitter** (saturation, hue): simulates warm indoor lighting versus cool daylight.
+- **Gaussian noise** and **blur**: simulate noisy camera sensors or motion blur.
+
+Because photometric transforms never move a pixel, segmentation masks and bounding boxes **stay untouched**. Only geometric transforms need to be applied to masks and boxes.
+
+### When a transform corrupts the label
+
+A transform $T$ is safe only if the ground-truth label is genuinely invariant to $T$. Common cases where the label is **not** invariant include:
+
+- **Digits and text (OCR):** rotating a 6 by 180 degrees turns it into a 9; horizontally flipping letters produces mirror writing that never appears at test time.
+- **Directional semantics:** a "turn left" sign flipped horizontally becomes "turn right." Medical scans have anatomical left and right: flipping a chest X-ray moves the heart to the opposite side of the body.
+- **Color-defining classes:** classifying ripe vs. unripe fruit, or red vs. green traffic lights—strong hue jitter changes the true class.
+- **Aggressive cropping:** cropping a tiny patch in the corner can miss the target object entirely, leaving only background with an object label.
+
+The simplest sanity check in practice: plot a few dozen augmented training images with their labels and ask yourself, "Would a human still assign this label to this image?"
+
+### Cutout, mixup, and CutMix
+
+The next three techniques do not try to mimic natural camera variations at all. Instead, they deliberately synthesize "unnatural" images so the model cannot rely on a single narrow cue.
+
+**Cutout** (DeVries & Taylor, 2017): zero out a fixed-size square patch at a random location. Because the dog's head might be masked out in one epoch and its legs in the next, the network must learn to recognize the dog from multiple parts rather than fixating on a single feature.
+
+**Mixup** (Zhang et al., 2018): linearly blend two images **and** their one-hot label vectors $\mathbf{y}$ using the same weight $\lambda$:
+
+$$
+\begin{aligned}
+\tilde{\mathbf{X}} &= \lambda\,\mathbf{X}^{(i)} + (1 - \lambda)\,\mathbf{X}^{(j)} \\
+\tilde{\mathbf{y}} &= \lambda\,\mathbf{y}^{(i)} + (1 - \lambda)\,\mathbf{y}^{(j)}
+\end{aligned}
+$$
+
+The mixing weight $\lambda \in [0, 1]$ is drawn from a symmetric $\text{Beta}(\alpha, \alpha)$ distribution; for small $\alpha$, $\lambda$ usually lands near 0 or near 1, so one of the two images dominates. The paper found $\alpha \in [0.1, 0.4]$ improved ImageNet accuracy, whereas large $\alpha$ caused underfitting. In practice, you blend a mini-batch with a randomly shuffled copy of itself.
+
+The blended target $\tilde{\mathbf{y}}$ is a **soft label**—say, $0.7$ for class 6 and $0.3$ for class 1. Cross-entropy with a soft label is still $-\sum_k \tilde{y}_k \ln p_k$, where $p_k$ is the model's predicted probability for class $k$. Substituting $\tilde{y}_k$ in gives:
+
+$$
+\begin{aligned}
+-\sum_k \tilde{y}_k \ln p_k &= -\sum_k \big(\lambda y^{(i)}_k + (1-\lambda) y^{(j)}_k\big) \ln p_k \\
+&= \lambda\Big(-\sum_k y^{(i)}_k \ln p_k\Big) + (1-\lambda)\Big(-\sum_k y^{(j)}_k \ln p_k\Big)
+\end{aligned}
+$$
+
+The second line simply splits the sum in two. Each parenthesized term is ordinary cross-entropy against a single hard label. Thus, the mixup loss is simply the **weighted average of the two standard cross-entropy losses**: weight $\lambda$ on label $i$ and weight $1 - \lambda$ on label $j$. Many implementations compute mixup directly from this second line without ever constructing a one-hot soft label vector.
+
+Why does blending two unrelated images into a ghostly double exposure help? Because mixup forces the model's predictions to transition **linearly** between training examples: halfway between a 6 and a 1, the predicted probabilities must also sit halfway in between, rather than snapping abruptly from 100% confident in one class to 100% confident in the other. That smoothness acts as a strong regularizer and improves calibration.
+
+**CutMix** (Yun et al., 2019) combines the best of cutout and mixup: instead of zeroing out a rectangle (cutout) or ghosting two whole images together (mixup), it **cuts a rectangular patch from image $j$ and pastes it onto image $i$**. Let $\mathbf{B}$ be a binary mask of the same spatial size as the image, equal to 1 where image $i$ is kept and 0 inside the pasted rectangle, and let $\odot$ denote elementwise multiplication:
+
+$$
+\tilde{\mathbf{X}} = \mathbf{B} \odot \mathbf{X}^{(i)} + (\mathbf{1} - \mathbf{B}) \odot \mathbf{X}^{(j)}
+$$
+
+The labels are blended just like in mixup, with $\lambda$ equal to the **area fraction** of image $i$ that remains visible. To make the rectangle cover fraction $1 - \lambda$ of an $H \times W$ image, its width and height are set to $W\sqrt{1-\lambda}$ and $H\sqrt{1-\lambda}$, whose product is $(1 - \lambda)WH$. Because the box is clipped at the image borders, code recomputes the exact $\lambda$ from the remaining pixel count. Compared with cutout, no pixels are wasted on blank zeros; compared with mixup, every local patch looks like a real natural image, helping the model localize objects.
+
+### From AutoAugment to RandAugment
+
+Which transforms should you combine, at what magnitudes, and with what probabilities? With dozens of candidate operations and continuous magnitudes, the space of possible pipelines is enormous.
+
+**AutoAugment** (Cubuk et al., 2019) framed policy design as a search problem. A **policy** consists of several sub-policies; each sub-policy chains two operations, each with its own application probability and magnitude. Every image in a mini-batch is transformed by one randomly chosen sub-policy. The authors used reinforcement learning to search over policies by training small proxy models on a subset of the data and scoring them on a validation set. The discovered policies worked well, but the search itself was extraordinarily expensive—as the RandAugment paper notes, finding the AutoAugment policy for object detection took 15,000 GPU hours.
+
+**RandAugment** (Cubuk et al., 2020) eliminated the separate search phase altogether. It starts with a fixed list of $K = 14$ standard transforms (rotate, shear, translate, auto-contrast, brightness, sharpness, and so on). For each image:
+
+1. Pick $N$ transforms uniformly at random from the list.
+2. Apply them one after another using **the same shared magnitude** $M$, on an integer scale from 0 to 10 (where 10 is the strongest setting of each operation).
+
+The entire augmentation policy is now controlled by just two interpretable integers: larger $N$ and $M$ mean stronger regularization. The paper estimates this shrinks the search space from roughly $10^{32}$ (in AutoAugment) down to $10^2$—small enough to tune with a quick grid search directly on your target task. Crucially, the paper also shows that the optimal magnitude $M$ **grows** with both model size and dataset size, which means a policy tuned on a small proxy model is often suboptimal for a large model anyway.
+
+### Augmenting only the training set, and test-time augmentation
+
+Random data augmentation belongs strictly to **training**. Validation and test images should pass only through deterministic preprocessing: resize to a standard resolution, center crop, and normalize pixel values. If you apply random transforms to the test set, your test score changes from run to run and cannot be fairly compared against other models.
+
+The one deliberate exception is **test-time augmentation** (TTA): at inference time, create a fixed set of deterministic views of each test image (for example, the original image plus its horizontal flip, or crops from the four corners and center), run the model on all of them, and average the predicted probability vectors. AlexNet used 10-crop TTA (four corners and center, plus their horizontal flips). TTA often nudges accuracy up slightly, at the cost of multiplying inference time by the number of views.
+
+### Limitations
+
+- **Augmentation does not create genuinely new domain knowledge.** It only multiplies variations you already know how to write down mathematically. Dimming daytime street photos will not teach a model what glowing headlights and wet asphalt reflections look like at night.
+- **Too much augmentation causes underfitting.** If transforms are too strong for the model's capacity, even clean-image accuracy can drop—as you can verify by swapping the MLP for logistic regression in the first code example below.
+- **Self-supervised learning turns augmentation into the primary learning signal:** two augmented views of the same image are forced to produce similar representations. [Self-Supervised Learning for Images](/en/cv/self-supervised-learning/) builds directly on this idea.
+
+## Illustration
+
+The code cell below serves as our visual gallery: it takes the first digit 6 from `load_digits` (pixel values divided by 16 into $[0, 1]$) and applies nine transforms using NumPy and `scipy.ndimage`. Mixup uses a fixed $\lambda = 0.7$ for readability instead of sampling from $\text{Beta}(\alpha, \alpha)$. To see which digit each transformed image "resembles" under a naive template matcher, the script averages all 1,797 images per digit class and picks the class whose mean template is closest in squared Euclidean distance. Click Run and check the predicted digit in parentheses above each panel. The first run takes a few extra seconds while Pyodide loads SciPy, scikit-learn, and matplotlib.
+
+<PythonRunner
+  code={galleryCode}
+  title="Flip, shift, rotate, noise, cutout, and mixup"
+  figureAlt={['A 3 x 3 grid of 8 x 8 grayscale images of the same digit 6, each titled with the transform name and the nearest-template digit in parentheses: original (6), flip (1), shift 1px (1), rotate 15 (6), rotate 180 (9), contrast (6), noise (6), cutout (6), mixup (1). The 180-degree rotated image looks like a 9; the mixup image is a blend between a 6 and a 1.']}
+/>
+
+The printed `mixup label` line shows a 10-element vector with $0.3$ at index 1 and $0.7$ at index 6, matching $\tilde{\mathbf{y}} = \lambda\mathbf{y}^{(i)} + (1-\lambda)\mathbf{y}^{(j)}$. Shifting uses `order=0` (nearest-neighbor interpolation) and `cval=0` (filling exposed border pixels with white background, value 0); 15-degree rotation uses `order=1` (bilinear interpolation), which slightly softens the stroke.
+
+Three details worth noting:
+
+- **Rotate 180** produces an image that you yourself would read as a 9: this transform changes the true class and must not be used on digits.
+- **Shift 1px** fools the naive template matcher into predicting 1, even though to your eye the 6 barely moved. That is the exact brittleness that shift augmentation fixes.
+- **Mixup** produces a ghostly superposition that does not look like a real digit—and it does not need to, because its target label is $0.7$ for 6 and $0.3$ for 1.
+
+The table below summarizes when each transform helps and when to avoid it.
+
+| Transform | Good for | Avoid when | Mask & bounding boxes |
+|---|---|---|---|
+| Horizontal flip | Natural photos: animals, objects, street scenes | Text/OCR, directional signs, left/right-sensitive medical scans | Flip along with the image |
+| Vertical flip, 90° rotation | Satellite imagery, microscopy (no natural "up") | Gravity-oriented scenes: people, street scenes | Flip/rotate along with the image |
+| Random resized crop | General image classification | Tiny objects easily cropped out; object counting | Crop both; drop boxes that fall outside |
+| Small rotation, shear | Handwritten digits, handheld photos | Angle carries meaning (clocks, compasses, gauges) | Rotate both; use nearest-neighbor on masks |
+| Brightness, contrast | Outdoor photos, multi-camera datasets | Intensity carries calibrated physical meaning (e.g., CT Hounsfield units) | Leave unchanged |
+| Color jitter, hue shift | Tasks where object identity is color-independent | Color defines the class: fruit ripeness, traffic lights | Leave unchanged |
+| Noise, blur | Low-cost camera sensors, motion blur | Fine texture or tiny cracks are the target signal | Leave unchanged |
+| Cutout | Preventing reliance on a single discriminative part | Small objects that could be completely occluded | Needs care if an object is fully erased |
+| Mixup, CutMix | Classification, especially on small datasets or many classes | Tasks requiring crisp single-class outputs; segmentation needs custom mask mixing | Weight labels by visible area (CutMix) |
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the browser cells with Python 3.14, NumPy 2.4, SciPy 1.18, and scikit-learn 1.8 (in Pyodide), and the local PyTorch cell with Python 3.14, PyTorch 2.15, and torchvision 0.29 on CPU. The scikit-learn cell below (and the gallery cell above) runs right on the page; the PyTorch cell runs on your machine. All cells are independent and share no variables.
+
+### With and without shift augmentation
+
+This cell reproduces the experiment from the Intuition section. It splits `load_digits` into 300 training images (stratified across all 10 digits) and 1,497 test images. The test set is evaluated in two forms: the original centered test images, and those same test images randomly shifted by up to 1 pixel along each axis. An `MLPClassifier` with one hidden layer of 64 neurons is trained twice with the same random seed: once on the 300 original training images, and once on the 300 original images plus 4 randomly shifted copies per image (1,500 training images total). Augmentation touches only the training set. Running the cell takes around ten seconds because it trains the MLP twice.
+
+<PythonRunner code={shiftExperimentCode} title="Training with and without random shift augmentation" />
+
+Reading the output:
+
+- **Without augmentation:** accuracy is $0.938$ on the original test set, but drops to $0.401$ on the 1-pixel shifted test set. The MLP memorized exact pixel coordinates, just as described in the Intuition section.
+- **With shift augmentation:** accuracy stays at $0.937$ on the original test set and jumps to $0.882$ on the shifted test set. Without seeing a single additional real handwriting sample, the network learned that shifting by 1 pixel does not change a digit's identity.
+- Because a plain MLP has no built-in translation equivariance like a CNN, every bit of shift invariance it acquires comes directly from the augmented training data.
+
+Try replacing `MLPClassifier((64,), ...)` with `LogisticRegression(max_iter=2000)` (remember to update the import). You will get $0.935$ and $0.372$ without augmentation, versus $0.883$ and $0.595$ with augmentation. A linear classifier is too simple to fit both centered and shifted digits at once, so shift augmentation pulls down its accuracy on clean centered images—a concrete example of over-regularizing a low-capacity model.
+
+### A torchvision v2 pipeline: image, mask, and bounding box together
+
+In real projects, you rarely write geometric transforms from scratch; instead, you use `torchvision.transforms.v2`. Starting in torchvision 0.15 (March 2023), v2 transforms accept images, segmentation masks, and bounding boxes in a single call when wrapped in `tv_tensors`. The script below draws a synthetic $128 \times 128$ image with PIL (a red square as class 1 and a blue circle as class 2 on a gray background), constructs the corresponding segmentation mask and the red square's bounding box, and passes all three through a training pipeline: random resized crop to $96 \times 96$, horizontal flip, random rotation up to 15 degrees, color jitter, and conversion to `[0, 1]` float. To verify that the transformed image and mask still line up, it infers each pixel's class from its RGB color (dominant red = 1, dominant blue = 2) and measures pixel agreement against the transformed mask.
+
+<LocalCode
+  code={pipelineCode}
+  title="Jointly transforming an image, segmentation mask, and bounding box"
+  packages={['torch', 'torchvision', 'pillow']}
+  hardware="CPU is enough. Computation takes under a second; most of the runtime is importing PyTorch"
+  sampleVaries={false}
+>
+
+```text
+image: (3, 96, 96) torch.float32
+mask: (96, 96) torch.uint8 values [0, 1, 2]
+box before: [[16, 20, 61, 65]] after: [[48, 0, 87, 41]]
+agreement, one call: 0.993
+agreement, two calls: 0.400
+eval image: (3, 96, 96)
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **`image`:** random resized crop outputs a $96 \times 96$ tensor, and `ToDtype(..., scale=True)` scales `uint8` values from `0..255` to `0..1` float.
+- **`mask ... values [0, 1, 2]`:** the rotated and resized mask still contains only the three integer class IDs, with no fractional values like `1.5`. Because `mask` is wrapped in `tv_tensors.Mask`, torchvision automatically uses nearest-neighbor interpolation on it and skips `ColorJitter`.
+- **`box`:** the red square's bounding box shifts, scales, and rotates along with the image. After rotation, the new axis-aligned box is the tightest rectangle enclosing the rotated square, so it is slightly wider than before.
+- **`agreement, one call: 0.993`:** the image colors and the segmentation mask agree on 99.3% of pixels; the tiny 0.7% discrepancy occurs right along the shape borders, where bilinear interpolation blended the image's edge pixels while nearest-neighbor kept the mask sharp.
+- **`agreement, two calls: 0.400`:** calling `train_tf(img)` and `train_tf(mask)` separately samples two independent crops, flips, and rotations. Only 40% of pixels match afterwards—feeding that pair into training would teach the model from a misaligned mask.
+- **`eval image`:** the validation/test pipeline is a separate `Compose` containing only deterministic steps, so the same input image always produces the exact same output tensor:
+
+```python
+eval_tf = v2.Compose([v2.Resize(110), v2.CenterCrop(96),
+                      v2.ToDtype(torch.float32, scale=True)])
+```
+
+To add RandAugment to a training pipeline, insert `v2.RandAugment(num_ops=2, magnitude=9)` ($N = 2$, $M = 9$, torchvision's defaults). Note that torchvision's default magnitude scale has 31 bins (`num_magnitude_bins=31`), rather than the 0-to-10 scale of the original paper. If your pretrained backbone expects normalized inputs, append `v2.Normalize(mean, std)` at the end of both pipelines.
+
+## Common pitfalls
+
+:::caution[Augmenting the entire dataset before splitting into train and test]
+If you generate augmented copies for every image first and then randomly split into train and test, a 1-pixel shifted copy of an image lands in the training set while the original lands in the test set. A model that simply memorizes training images will score artificially high on test—classic data leakage. Always split into train, validation, and test on the original images first (and group by subject or patient if multiple photos show the same entity). Only then augment the training set, ideally sampling fresh random transforms on the fly each epoch.
+:::
+
+:::caution[Transforming the image while forgetting the mask or bounding boxes]
+In segmentation and object detection, every geometric transform must be applied to the image, mask, and bounding boxes using **the exact same random draw**. Calling the pipeline twice in separate statements desynchronizes the image and mask, as shown in the PyTorch cell above (agreement drops to 40%). Wrap targets in `tv_tensors.Mask` and `tv_tensors.BoundingBoxes` and pass them in a single call. If you write custom code, always interpolate masks with nearest-neighbor, never bilinear. And after random cropping, boxes may be clipped to thin slivers or pushed completely outside the frame—use `v2.SanitizeBoundingBoxes` to clean them up.
+:::
+
+:::caution[Copy-pasting default augmentations without checking whether labels stay valid]
+Boilerplate snippets online almost always include `RandomHorizontalFlip` and `ColorJitter` because they work well on ImageNet. Copy-pasting them into an OCR task, a traffic-sign classifier, a medical imaging pipeline, or a color-based grading system can silently flip ground-truth labels. Before launching a long training run, always visualize a grid of augmented training examples alongside their labels and inspect them with your own eyes.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` field of the frontmatter. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Data augmentation encodes domain knowledge into training data: "this transform leaves the label unchanged" (invariance, for classification) or "the target transforms the same way as the image" (equivariance, for segmentation and detection). Minimizing expected loss over random transforms both expands the effective dataset and regularizes the model.
+- Geometric transforms (flips, crops, rotations) move pixels and must be applied identically to masks and bounding boxes; photometric transforms (brightness, contrast, color jitter, noise, blur) only alter pixel intensities. Whether a transform is safe depends on the task: rotating 180 degrees turns a 6 into a 9.
+- Cutout masks out a square patch, mixup blends pairs of images and labels via $\tilde{\mathbf{y}} = \lambda\mathbf{y}^{(i)} + (1-\lambda)\mathbf{y}^{(j)}$, and CutMix pastes a rectangular patch from one image onto another while weighting labels by area. RandAugment replaces expensive policy search with two hyperparameters $N$ and $M$.
+- Augment only the training set, after splitting the dataset. Validation and test sets use deterministic preprocessing only, with test-time augmentation as a deliberate inference-time exception.
+
+**Further reading:**
+
+- Shorten, C., Khoshgoftaar, T. M. (2019). [*A survey on Image Data Augmentation for Deep Learning*](https://doi.org/10.1186/s40537-019-0197-0). Journal of Big Data 6, 60. Broad overview of augmentation families; see the sections on geometric vs. photometric transforms and label safety.
+- Zhang, H., Cissé, M., Dauphin, Y. N., Lopez-Paz, D. (2018). [*mixup: Beyond Empirical Risk Minimization*](https://arxiv.org/abs/1710.09412). ICLR 2018. Section 2 gives the formula and a self-contained PyTorch implementation in a few lines of code.
+- Yun, S., Han, D., Oh, S. J., Chun, S., Choe, J., Yoo, Y. (2019). [*CutMix: Regularization Strategy to Train Strong Classifiers with Localizable Features*](https://arxiv.org/abs/1905.04899). ICCV 2019. Section 3 details how the bounding box is sampled from $\lambda$ and compares CutMix directly against cutout and mixup.
+- Cubuk, E. D., Zoph, B., Shlens, J., Le, Q. V. (2020). [*RandAugment: Practical automated data augmentation with a reduced search space*](https://arxiv.org/abs/1909.13719). Section 3 gives the entire algorithm in two lines of Python; Figure 3 shows how optimal distortion magnitude scales with model size and dataset size.
+- PyTorch. [*Transforming and augmenting images*](https://docs.pytorch.org/vision/stable/transforms.html), torchvision documentation. Reference for `transforms.v2` and joint transformations with `tv_tensors`.
+
+<LessonProgress />

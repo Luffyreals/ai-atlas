@@ -1,0 +1,455 @@
+---
+title: 'Image Generation (2): Diffusion, Stable Diffusion, LoRA'
+description: Corrupt an image with noise a little at a time, then train a network to reverse the process. Covers DDPM, DDIM, Stable Diffusion's latent diffusion, classifier-free guidance, and LoRA.
+quiz:
+  - question: 'When training a DDPM with $T = 1000$, a mini-batch needs the noisy image $\mathbf{x}_{700}$ for each clean image. What is the right and cheapest way to produce it?'
+    options:
+      - 'Add noise 700 times in a row using each $\beta_t$, because the forward process is defined step by step'
+      - 'Precompute $\bar\alpha_{700}$ once and draw $\mathbf{x}_{700} = \sqrt{\bar\alpha_{700}}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_{700}}\,\boldsymbol\epsilon$ with a single noise sample $\boldsymbol\epsilon$'
+      - 'Run the network $\boldsymbol\epsilon_\theta$ backward from $\mathbf{x}_{1000}$ down to $\mathbf{x}_{700}$'
+      - 'Add $700\,\beta_{700}$ times a single noise vector to the original image'
+    answer: 1
+    explanation: 'The sum of independent Gaussian noises is still a single Gaussian, so 700 steps collapse into one closed-form step with coefficients $\sqrt{\bar\alpha_{700}}$ and $\sqrt{1-\bar\alpha_{700}}$. Adding noise 700 times gives the exact same distribution at 700x the cost. The last option is wrong because the $\beta_t$ values are not all equal and the clean image is scaled down by the product $\bar\alpha_t$, not a sum.'
+  - question: 'Stable Diffusion v1''s autoencoder has a downsampling factor $f = 8$ and a 4-channel latent. You generate a $768 \times 768 \times 3$ image. What is the shape of the latent, and how many times fewer numbers does it have than the image?'
+    options:
+      - '$96 \times 96 \times 4$, 48 times smaller, just like for a $512 \times 512$ image'
+      - '$64 \times 64 \times 4$, because the latent always has a fixed spatial size'
+      - '$96 \times 96 \times 4$, 64 times smaller, because each side is divided by 8'
+      - '$96 \times 96 \times 3$, 64 times smaller'
+    answer: 0
+    explanation: 'Each spatial side is divided by 8: $768/8 = 96$, and the channels change from 3 to 4. The total number of elements shrinks by a factor of $8 \cdot 8 \cdot 3/4 = 48$, regardless of image resolution. The "64 times" option forgets that the latent has 4 channels rather than the image''s 3 color channels.'
+  - question: 'With classifier-free guidance $\tilde{\boldsymbol\epsilon} = \boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing) + s\,\big(\boldsymbol\epsilon_\theta(\mathbf{x}_t, \mathbf{c}) - \boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing)\big)$, what happens when you set $s = 1$?'
+    options:
+      - 'The model ignores the prompt and generates an unconditional image'
+      - 'The image follows the prompt as strongly as possible'
+      - 'Only the conditional prediction $\boldsymbol\epsilon_\theta(\mathbf{x}_t, \mathbf{c})$ remains: the prompt is used, but without extra amplification'
+      - 'Each step has to run the network three times'
+    answer: 2
+    explanation: 'Substitute $s = 1$: the two $\boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing)$ terms cancel out, leaving the plain conditional prediction. Unconditional generation corresponds to $s = 0$. Guidance only pushes harder in the prompt''s direction when $s > 1$—for instance, 7.5 is the default in Stable Diffusion v1''s sampling script.'
+  - question: 'A cross-attention layer in the U-Net has $d = 640$ channels, and text features have 768 dimensions. You attach LoRA with rank $r = 4$ only to the two projections `to_k` and `to_v` (each mapping 768 dimensions to 640). How many trainable parameters are added?'
+    options:
+      - '983,040'
+      - '10,240'
+      - '5,632'
+      - '11,264'
+    answer: 3
+    explanation: 'Each projection with $d_{\text{in}} = 768$ and $d_{\text{out}} = 640$ learns $r(d_{\text{in}} + d_{\text{out}}) = 4 \cdot 1\,408 = 5\,632$ parameters; two projections give $11\,264$. The number 983,040 is $2 \cdot 768 \cdot 640$, which is full fine-tuning of both matrices. The number 10,240 mistakenly sets $d_{\text{in}}$ to 640.'
+  - question: 'You have already trained a DDPM with $T = 1000$. To sample images with DDIM in just 50 steps, what do you need to do?'
+    options:
+      - 'Retrain the network with $T = 50$'
+      - 'Nothing: DDIM reuses the exact same network $\boldsymbol\epsilon_\theta$ and only changes the reverse update rule'
+      - 'Train an extra classifier network to guide the steps'
+      - 'It is impossible, because a DDPM must step through all 1,000 steps'
+    answer: 1
+    explanation: 'DDIM keeps the exact same training objective as DDPM. At each sampling step it estimates $\hat{\mathbf{x}}_0$ from the predicted noise and uses the closed-form forward equation to jump directly to a much smaller timestep, skipping most intermediate steps. An external classifier is used in classifier guidance, which has nothing to do with step count.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import forwardNoiseCode from '@code/cv/diffusion-models/forward-noise.en.py?raw';
+import tinyDdpmCode from '@code/cv/diffusion-models/tiny-ddpm.en.py?raw';
+import loraAttentionCode from '@code/cv/diffusion-models/lora-attention.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand the core idea of a **diffusion model**: corrupt an image with noise a little at a time, then train a network to undo the noise step by step.
+- Derive the closed-form forward equation $\mathbf{x}_t = \sqrt{\bar\alpha_t}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon$ of DDPM by hand, and understand why the network only needs to **predict the noise** using an MSE loss.
+- Explain the three pillars of Stable Diffusion: **latent diffusion** (denoising inside a VAE's compressed space), text conditioning via **cross-attention**, and **classifier-free guidance**.
+- Count the trainable parameters when attaching LoRA to U-Net attention layers, and implement a tiny DDPM in PyTorch.
+
+## Prerequisites
+
+{/* List populated from prerequisites in roadmap.ts. Do not write manual links here. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In [Image Generation (1): VAE, GAN, CycleGAN, Pix2Pix](/en/cv/vae-gan/), a **VAE** compresses an image into a small **latent variable** $\mathbf{z}$ and decodes it back—training is stable, but outputs tend to look slightly blurry. A **GAN** pits a generator $G$ against a discriminator $D$—outputs are crisp, but training is fragile and prone to mode collapse.
+:::
+
+## Intuition
+
+### Dropping ink into a glass of water
+
+Drop a bead of ink into a glass of water. At first you can still see the shape of the droplet. A few seconds later it clouds outward. A few minutes later, the entire glass is a uniform pale gray. That physical process is **diffusion**, and in nature it only runs one way: nobody ever sees a gray glass of water spontaneously gather itself back into a drop of ink.
+
+A diffusion model does the exact same thing to an image. Take a clean image and add a tiny amount of random noise. Repeat a few hundred times. Eventually the image is indistinguishable from pure static, with no trace of the original picture left.
+
+The magic is learning to run the movie backward. Each forward step only corrupts the image **a tiny bit**. Looking at a slightly noisy image, guessing "which part of this is the noise that was just added" is manageable. If we can train a neural network to do that small cleanup step, we can start from pure random noise and apply the network over and over: each step peels off a little noise until a brand-new image emerges.
+
+### Why not generate an image in a single step?
+
+GANs and VAEs generate an image in a single forward pass: from $\mathbf{z}$ straight to pixels. That is a giant leap from random numbers to a finished picture. A GAN learns that leap through a delicate adversarial game; a VAE learns it with a pixel reconstruction loss that averages over possibilities and blurs fine detail.
+
+Diffusion breaks that one giant leap into a thousand small steps. Each step is an ordinary regression problem: look at a noisy image, predict the noise. Training is as stable as fitting a standard regression network—no adversarial game required. The trade-off is that generating a single image requires running the network many times in sequence.
+
+### From digits to "an astronaut riding a horse"
+
+On $8 \times 8$ digits, this idea works right out of the box. But a $512 \times 512$ color image has nearly 800,000 numbers, and running a large network a thousand times on that many numbers is painfully slow. On top of that, we want to steer the image with a text prompt like "an astronaut riding a horse," and we want to teach the model a new artistic style without retraining nearly a billion parameters.
+
+Those three practical needs motivate the three pieces of Stable Diffusion covered in this lesson: denoising in a compressed latent space, conditioning on text, and LoRA.
+
+**The core question of this lesson: how do we train a network to reverse the noise-adding process so it can walk from pure noise to a new image, and how do we make that fast on high-resolution images, faithful to a text prompt, and tunable with a tiny fraction of the parameters?**
+
+## Theory
+
+### Notation
+
+The clean image is $\mathbf{x}_0$, and the image after $t$ noise steps is $\mathbf{x}_t$, for $t = 1, \dots, T$. **Throughout this lesson $T$ is the number of diffusion steps**, not the sampling temperature $T$ from the LLM lessons. Each step has a small number $\beta_t$ called the **noise variance** at step $t$; the sequence $\beta_1, \dots, \beta_T$ is the **noise schedule**. We also define:
+
+$$
+\alpha_t = 1 - \beta_t,
+\qquad
+\bar\alpha_t = \prod_{s=1}^{t} \alpha_s = \alpha_1 \alpha_2 \cdots \alpha_t
+$$
+
+Here $\boldsymbol\epsilon \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ is standard Gaussian noise with the same shape as the image: every element is independent with mean 0 and variance 1. DDPM (Ho, Jain, & Abbeel, 2020) scales pixel values to $[-1, 1]$ first so the clean image and standard normal noise live on the same scale.
+
+### Forward process: adding noise step by step
+
+A single noise-adding step in DDPM is:
+
+$$
+\mathbf{x}_t = \sqrt{\alpha_t}\,\mathbf{x}_{t-1} + \sqrt{1 - \alpha_t}\,\boldsymbol\epsilon_{t-1}
+$$
+
+where $\boldsymbol\epsilon_{t-1}$ is a fresh standard normal noise sample, independent of all previous steps. This is the **forward process**. Nothing in it is learned; it is a fixed formula.
+
+Why scale the previous image by $\sqrt{\alpha_t}$ instead of simply adding noise? Suppose each element of $\mathbf{x}_{t-1}$ has variance 1. Then the scaled image term contributes variance $\alpha_t$ and the noise term contributes variance $1 - \alpha_t$, which sum to $\alpha_t + (1 - \alpha_t) = 1$. The overall variance stays at 1 across all $T$ steps instead of blowing up; only the mix between "signal" and "noise" shifts.
+
+DDPM uses $T = 1000$ and a linear schedule where $\beta_t$ increases linearly from $\beta_1 = 10^{-4}$ to $\beta_T = 0.02$. Early steps add a whisper of noise; later steps add much more.
+
+### Closed form: jumping straight to step $t$
+
+If we need $\mathbf{x}_{500}$ during training, do we have to run the loop 500 times? Thankfully, no. We can derive a closed-form shortcut straight from $\mathbf{x}_0$.
+
+**Step 1: unroll one step.** Express $\mathbf{x}_{t-1}$ in terms of $\mathbf{x}_{t-2}$ using the same step rule and substitute it into the equation for $\mathbf{x}_t$:
+
+$$
+\begin{aligned}
+\mathbf{x}_t &= \sqrt{\alpha_t}\Big(\sqrt{\alpha_{t-1}}\,\mathbf{x}_{t-2} + \sqrt{1-\alpha_{t-1}}\,\boldsymbol\epsilon_{t-2}\Big) + \sqrt{1-\alpha_t}\,\boldsymbol\epsilon_{t-1} \\
+&= \sqrt{\alpha_t\alpha_{t-1}}\,\mathbf{x}_{t-2} + \sqrt{\alpha_t(1-\alpha_{t-1})}\,\boldsymbol\epsilon_{t-2} + \sqrt{1-\alpha_t}\,\boldsymbol\epsilon_{t-1}
+\end{aligned}
+$$
+
+The second line simply distributes $\sqrt{\alpha_t}$ across the parentheses.
+
+**Step 2: merge the two noise terms into one.** The last two terms are independent zero-mean Gaussian variables with variances $\alpha_t(1-\alpha_{t-1})$ and $1-\alpha_t$. Because the sum of two independent Gaussians is another Gaussian whose variance is the sum of the two variances:
+
+$$
+\alpha_t(1-\alpha_{t-1}) + (1-\alpha_t) = 1 - \alpha_t\alpha_{t-1}
+$$
+
+the sum of those two noise terms has the exact same distribution as $\sqrt{1-\alpha_t\alpha_{t-1}}\,\bar{\boldsymbol\epsilon}$ for a single standard normal vector $\bar{\boldsymbol\epsilon}$:
+
+$$
+\mathbf{x}_t = \sqrt{\alpha_t\alpha_{t-1}}\,\mathbf{x}_{t-2} + \sqrt{1-\alpha_t\alpha_{t-1}}\,\bar{\boldsymbol\epsilon}
+$$
+
+**Step 3: unroll all the way back to $\mathbf{x}_0$.** This two-step formula has the exact same form as the one-step formula, with $\alpha_t$ replaced by the product $\alpha_t\alpha_{t-1}$. Unrolling $\mathbf{x}_{t-2}$, then $\mathbf{x}_{t-3}$, and so on down to $\mathbf{x}_0$ turns the coefficient into the cumulative product $\bar\alpha_t$:
+
+$$
+\mathbf{x}_t = \sqrt{\bar\alpha_t}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon,
+\qquad \boldsymbol\epsilon \sim \mathcal{N}(\mathbf{0}, \mathbf{I})
+$$
+
+This is the centerpiece of the forward process. Under DDPM's linear schedule (numbers taken from the NumPy cell below):
+
+| $t$ | $\sqrt{\bar\alpha_t}$ (signal weight) | $\sqrt{1-\bar\alpha_t}$ (noise weight) |
+|---:|---:|---:|
+| 100 | 0.9471 | 0.3209 |
+| 250 | 0.7239 | 0.6899 |
+| 500 | 0.2803 | 0.9599 |
+| 1000 | 0.0064 | 1.0000 |
+
+At $t = 1000$, the original image weight is down to 0.0064: $\mathbf{x}_T$ is virtually pure standard normal noise. That is why image generation at test time can start from a freshly drawn standard normal sample.
+
+:::note[Key takeaway]
+$\mathbf{x}_t = \sqrt{\bar\alpha_t}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon$. With $\bar\alpha_t$ precomputed, we can jump to a noisy image at **any** step $t$ in a single addition, without simulating the steps before it.
+:::
+
+### Training: predicting the noise
+
+Look again at the closed-form equation. If you are given $\mathbf{x}_t$, the step index $t$, and the exact noise $\boldsymbol\epsilon$ that was mixed in, you can solve directly for the clean image:
+
+$$
+\mathbf{x}_0 = \frac{\mathbf{x}_t - \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon}{\sqrt{\bar\alpha_t}}
+$$
+
+(subtract the noise term and divide by $\sqrt{\bar\alpha_t}$). Thus, "predicting the noise" and "predicting the clean image" are two ways of phrasing the exact same problem. DDPM chooses to train a network to predict the noise. Call that network $\boldsymbol\epsilon_\theta(\mathbf{x}_t, t)$: it takes the noisy image and the step index $t$, and outputs a tensor of the same shape as the image. Passing $t$ tells the network how noisy the input is expected to be.
+
+Ho et al. derive the training objective from a variational lower bound on the log-likelihood (Section 3 of the paper) and show that a simplified, unweighted version produces better sample quality. That simplified loss is just the mean squared error between the true noise and the predicted noise:
+
+$$
+\mathcal{L}_{\text{simple}} = \mathbb{E}_{\mathbf{x}_0,\, t,\, \boldsymbol\epsilon}\Big[\big\lVert \boldsymbol\epsilon - \boldsymbol\epsilon_\theta\big(\sqrt{\bar\alpha_t}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon,\; t\big)\big\rVert^2\Big]
+$$
+
+A single training step (Algorithm 1 in the paper) is therefore remarkably compact: pick a clean image $\mathbf{x}_0$, sample $t$ uniformly from $\{1, \dots, T\}$, draw $\boldsymbol\epsilon \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$, form $\mathbf{x}_t$ with the closed-form formula, and take a gradient descent step on $\lVert \boldsymbol\epsilon - \boldsymbol\epsilon_\theta(\mathbf{x}_t, t)\rVert^2$. The closed-form jump is what makes training cheap: each training example costs a single weighted sum, even when $t = 900$.
+
+In DDPM, $\boldsymbol\epsilon_\theta$ is a **U-Net**: a convolutional network with symmetric downsampling and upsampling paths whose output has the exact same spatial size as its input (see [Semantic Segmentation](/en/cv/semantic-segmentation/)). The integer step $t$ is converted into a sinusoidal embedding (just like Transformer positional encodings) and added into every block of the U-Net. One shared network handles all $T$ steps.
+
+### Sampling: stepping backward
+
+Once $\boldsymbol\epsilon_\theta$ is trained, we generate a new image using Algorithm 2 of the paper. Start from pure noise $\mathbf{x}_T \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$, and for $t = T, T-1, \dots, 1$ compute:
+
+$$
+\mathbf{x}_{t-1} = \frac{1}{\sqrt{\alpha_t}}\left(\mathbf{x}_t - \frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\,\boldsymbol\epsilon_\theta(\mathbf{x}_t, t)\right) + \sigma_t\,\mathbf{z}
+$$
+
+where $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ when $t > 1$ and $\mathbf{z} = \mathbf{0}$ on the final step $t = 1$. Reading the formula from the inside out:
+
+- **Subtract a fraction of the predicted noise.** The network predicts the total cumulative noise $\boldsymbol\epsilon$; a single reverse step only removes the slice corresponding to step $t$, scaled by the small factor $\beta_t/\sqrt{1-\bar\alpha_t}$.
+- **Divide by $\sqrt{\alpha_t}$.** The forward step multiplied the signal by $\sqrt{\alpha_t}$, so dividing restores the scale.
+- **Add a small amount of fresh noise** $\sigma_t\mathbf{z}$. Many slightly different $\mathbf{x}_{t-1}$ images could plausibly have produced $\mathbf{x}_t$. Injecting fresh noise samples one of those possibilities, preserving diversity. The paper tests $\sigma_t^2 = \beta_t$ alongside a second variance choice and finds both work similarly well.
+
+The expression inside the parentheses is the mean of the reverse transition derived in the paper (Equation 11), which we do not re-derive here. The crucial practical point: every reverse step runs the network once, so generating a single image with DDPM costs $T = 1000$ U-Net evaluations.
+
+### DDIM: fewer steps without retraining
+
+Running a large U-Net 1,000 times per image is slow. DDIM (Song, Meng, & Ermon, 2021) keeps the **exact same** trained network $\boldsymbol\epsilon_\theta$ and changes only the reverse update rule. At step $t$, it first estimates the clean image using the algebraic inversion formula from earlier:
+
+$$
+\hat{\mathbf{x}}_0 = \frac{\mathbf{x}_t - \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon_\theta(\mathbf{x}_t, t)}{\sqrt{\bar\alpha_t}}
+$$
+
+and then plugs $\hat{\mathbf{x}}_0$ and the predicted noise back into the closed-form forward equation to jump directly to any earlier step $t' < t$:
+
+$$
+\mathbf{x}_{t'} = \sqrt{\bar\alpha_{t'}}\,\hat{\mathbf{x}}_0 + \sqrt{1-\bar\alpha_{t'}}\,\boldsymbol\epsilon_\theta(\mathbf{x}_t, t)
+$$
+
+This is the deterministic version of DDIM: no fresh random noise is added. Because $t'$ can be dozens of steps below $t$, you only need around 50 steps instead of 1,000. The paper reports that DDIM produces high-quality samples 10 to 50 times faster in wall-clock time than DDPM.
+
+### Latent diffusion: denoising in a compressed space
+
+A $512 \times 512 \times 3$ image contains $786\,432$ numbers. Running a U-Net dozens of times on a tensor that size for every generated image is expensive, and training it is even more expensive. Worse, most of those numbers describe imperceptible high-frequency pixel variations.
+
+Rombach et al. (2022) proposed **latent diffusion**, splitting the job into two stages:
+
+1. **A pretrained autoencoder, trained once.** An encoder $\mathcal{E}$ compresses image $\mathbf{x}$ into a much smaller latent tensor $\mathbf{z} = \mathcal{E}(\mathbf{x})$, and a decoder $\mathcal{D}$ reconstructs the image from $\mathbf{z}$. The main autoencoder in the paper includes a light KL penalty toward a standard normal prior—a close cousin of the VAE from the previous lesson.
+2. **Diffusion inside the latent space.** Every DDPM/DDIM equation stays identical, except the clean image $\mathbf{x}_0$ is replaced by the clean latent $\mathbf{z}_0$. The training loss becomes $\mathbb{E}\big[\lVert \boldsymbol\epsilon - \boldsymbol\epsilon_\theta(\mathbf{z}_t, t)\rVert^2\big]$. At generation time, once the final latent is denoised, a single pass through $\mathcal{D}$ turns it back into a full-resolution pixel image.
+
+In Stable Diffusion v1, the autoencoder downsamples each spatial side by a factor of $f = 8$ and outputs 4 latent channels: an $H \times W \times 3$ image becomes an $H/8 \times W/8 \times 4$ latent. For a $512 \times 512 \times 3$ image:
+
+$$
+\frac{512 \cdot 512 \cdot 3}{64 \cdot 64 \cdot 4} = \frac{786\,432}{16\,384} = 48
+$$
+
+The diffusion U-Net operates on a tensor with 48 times fewer numbers (computed). The paper experiments with downsampling factors $f$ from 1 to 32 and finds that $f = 4$ and $f = 8$ hit the sweet spot between visual fidelity and speed; larger $f$ values lose too much detail.
+
+### Text conditioning: cross-attention
+
+To steer generation with a text prompt $y$, latent diffusion encodes the prompt with a text encoder $\tau_\theta$ and injects those features into the U-Net via **cross-attention**. Let $\boldsymbol\varphi(\mathbf{z}_t)$ denote the U-Net's intermediate feature map at some layer, flattened into a sequence of spatial positions. A cross-attention layer computes:
+
+$$
+\mathbf{Q} = \boldsymbol\varphi(\mathbf{z}_t)\,\mathbf{W}_Q,
+\quad
+\mathbf{K} = \tau_\theta(y)\,\mathbf{W}_K,
+\quad
+\mathbf{V} = \tau_\theta(y)\,\mathbf{W}_V
+$$
+
+followed by $\mathrm{softmax}(\mathbf{Q}\mathbf{K}^\top/\sqrt{d})\,\mathbf{V}$ just like standard attention. Queries come from the image features, while keys and values come from the text: each spatial position in the latent "asks" the prompt tokens what it should draw there. (The paper writes these products with column vectors as $\mathbf{W}_Q\,\boldsymbol\varphi$; we write row vectors here to match [Multimodal](/en/llm/multimodal/).)
+
+In the original latent diffusion paper, the text-to-image model trained a Transformer text encoder jointly with the U-Net. **Stable Diffusion v1** (2022), built on latent diffusion, replaces $\tau_\theta$ with the **frozen** text encoder of CLIP ViT-L/14. According to the official README, Stable Diffusion v1 has an 860M-parameter U-Net and a 123M-parameter text encoder, trained on a subset of LAION-5B first at $256 \times 256$ and then fine-tuned at $512 \times 512$. Because CLIP was trained to align images with text (see [Vision and Language (1): CLIP, BLIP, GLIP](/en/cv/clip-blip-glip/)), its text features already carry visual meaning.
+
+### Classifier-free guidance
+
+Conditional diffusion models often treat the prompt too gently: the generated image looks plausible, but only loosely matches the text. **Classifier-free guidance** (Ho & Salimans, 2022) amplifies the prompt's influence without needing a separate classifier network.
+
+**During training:** randomly replace the text prompt with an empty prompt $\varnothing$ a fraction of the time (Stable Diffusion v1-4 drops the condition 10% of the time). That teaches a single network to do both jobs: predict noise with a prompt, $\boldsymbol\epsilon_\theta(\mathbf{x}_t, \mathbf{c})$, and without one, $\boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing)$.
+
+**During sampling:** run the network twice at each step and extrapolate. The paper writes the combined prediction with weight $w$:
+
+$$
+\tilde{\boldsymbol\epsilon} = (1+w)\,\boldsymbol\epsilon_\theta(\mathbf{x}_t, \mathbf{c}) - w\,\boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing)
+$$
+
+Adding and subtracting $\boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing)$ and setting the **guidance scale** $s = 1 + w$ gives the form used in most libraries:
+
+$$
+\begin{aligned}
+\tilde{\boldsymbol\epsilon} &= \boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing) + (1+w)\,\boldsymbol\epsilon_\theta(\mathbf{x}_t, \mathbf{c}) - (1+w)\,\boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing) \\
+&= \boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing) + s\,\big(\boldsymbol\epsilon_\theta(\mathbf{x}_t, \mathbf{c}) - \boldsymbol\epsilon_\theta(\mathbf{x}_t, \varnothing)\big)
+\end{aligned}
+$$
+
+The difference in parentheses is "the direction in which the prompt pulls the image." Setting $s = 0$ gives unconditional generation, $s = 1$ gives standard conditional generation, and $s > 1$ pushes further along the prompt direction. Stable Diffusion v1's sampling script defaults to $s = 7.5$. As the paper shows, increasing the guidance scale trades sample diversity for sharper, more prompt-faithful individual images; pushing it too high makes images oversaturated and repetitive.
+
+### LoRA for diffusion
+
+Suppose you want the model to paint in your own illustration style, or draw your specific pet cat. Fine-tuning all 860 million parameters of the U-Net takes heavy GPU memory, and saving each custom style produces a multi-gigabyte checkpoint.
+
+**LoRA** (Hu et al., 2022) was originally developed for LLMs and derived in detail in [Model Evaluation and PEFT](/en/llm/evaluation-peft/). To recap: given a frozen weight matrix $\mathbf{W}_0 \in \mathbb{R}^{d_{\text{out}} \times d_{\text{in}}}$, LoRA learns two low-rank matrices $\mathbf{B} \in \mathbb{R}^{d_{\text{out}} \times r}$ and $\mathbf{A} \in \mathbb{R}^{r \times d_{\text{in}}}$ with small rank $r$:
+
+$$
+\mathbf{h} = \mathbf{W}_0\mathbf{x} + \frac{\alpha}{r}\,\mathbf{B}\mathbf{A}\mathbf{x}
+$$
+
+Each adapted matrix learns only $r(d_{\text{in}} + d_{\text{out}})$ parameters, and initializing $\mathbf{B} = \mathbf{0}$ ensures the adapted model starts out identical to the base model.
+
+In Stable Diffusion, the natural place to attach LoRA is the **U-Net's attention layers**: the four linear projections for queries, keys, values, and output (`to_q`, `to_k`, `to_v`, `to_out`) across every self-attention and cross-attention layer. That is the exact setup in the `diffusers` library's LoRA training script, with default rank $r = 4$. Cross-attention is where text meets image, so adapting those projections directly adjusts how words map to visual features.
+
+Let's count parameters for a single cross-attention layer at a $d = 320$ channel stage with 768-dimensional CLIP text features and $r = 4$: `to_q` and `to_out` are $320 \to 320$, costing $4 \cdot 640 = 2\,560$ parameters each; `to_k` and `to_v` are $768 \to 320$, costing $4 \cdot 1\,088 = 4\,352$ parameters each. Together that is $13\,824$ numbers. Across all 32 attention layers of Stable Diffusion v1's U-Net, the PyTorch cell below counts $797\,184$ trainable parameters—about 0.09% of the U-Net. Stored in 32-bit float, that is roughly 3.2 MB (computed) instead of several gigabytes.
+
+**DreamBooth** (Ruiz et al., 2023) is a complementary personalization technique: given just a few photos of a specific subject, it binds that subject to a rare identifier token in the prompt. While original DreamBooth fine-tuned the full model, in practice it is commonly paired with LoRA to keep memory and file sizes tiny.
+
+:::note[Key takeaway]
+Stable Diffusion = an autoencoder that compresses images ($f = 8$, 4-channel latent) + a U-Net predicting noise in latent space + a frozen CLIP text encoder wired into the U-Net via cross-attention + classifier-free guidance at sampling time. LoRA adapts the attention projections using less than 0.1% of the U-Net's parameters.
+:::
+
+### Limitations
+
+- **Slow sampling.** Every reverse step runs the U-Net once—or twice with classifier-free guidance. DDIM cuts the step count to ~50; newer distillation and flow-based samplers cut it further, beyond the scope of this lesson.
+- **Noise schedules are not interchangeable.** Stable Diffusion v1 uses a different schedule from DDPM's linear $10^{-4} \to 0.02$ (see "Common pitfalls" below), and our 2D PyTorch example has to rescale $\beta_t$ because it uses a smaller $T$.
+- **Visual fidelity is bounded by the autoencoder.** Any fine detail lost during latent compression—such as tiny text or distant faces—cannot be recovered by the diffusion process.
+
+## Illustration
+
+The interactive visualization below shows the closed-form forward process on a small image. The slider selects step $t$; the noisy image $\mathbf{x}_t$ blends the clean image with **one fixed noise realization**, so you can watch the image gradually sink into the exact same noise pattern. The small chart plots the signal weight $\sqrt{\bar\alpha_t}$ and noise weight $\sqrt{1-\bar\alpha_t}$ across $t$, marking the current step. Try these steps:
+
+1. Set $t = 100$: the image is still crisp, with signal weight 0.9471 and noise weight 0.3209.
+2. Drag to $t = 250$: the two weights are nearly equal (0.7239 and 0.6899), and the two curves on the chart are about to cross. The shape is still recognizable but grainy.
+3. Drag to $t = 500$: the signal weight is down to 0.2803. Only a faint ghost of the shape remains.
+4. Drag all the way to $t = 1000$: the signal weight is 0.0064 and the image is pure static. This is the starting point for reverse sampling.
+
+{/* VIZ: DiffusionNoiseViz
+    Idea: x_t = sqrt(ᾱ_t) x_0 + sqrt(1 − ᾱ_t) ε; as t increases, the signal weight shrinks and the noise weight grows until t = 1000 is nearly pure noise.
+    Interaction: slider for t from 0 to 1000 (step 1); redraws x_t immediately; displays sqrt(ᾱ_t) and sqrt(1 − ᾱ_t) to 4 decimal places; small two-curve chart over t with a vertical marker at the current t.
+    Data: fixed 16 × 16 image (scaled to [−1, 1]); fixed noise ε generated with a seeded PRNG and reused across all t. DDPM linear schedule: β_1 = 1e-4 to β_T = 0.02, T = 1000. Numbers must match the NumPy cell (t = 100: 0.9471 / 0.3209; 250: 0.7239 / 0.6899; 500: 0.2803 / 0.9599; 1000: 0.0064 / 1.0000). Math in src/lib/viz/diffusion.ts.
+    Symbols: t, T, β_t, ᾱ_t, x_0, x_t, ε, matching the Theory section. */}
+
+The table below compares the three major families of image generative models. Compare the "Training" and "Sampling one image" rows: diffusion trades sampling speed for rock-solid training stability.
+
+| Criterion | VAE | GAN | Diffusion |
+|---|---|---|---|
+| Core idea | Compress image into $\mathbf{z}$, then decode | Generator $G$ vs. discriminator $D$ | Add noise step by step, learn to denoise backward |
+| Training | Stable: reconstruction + KL | Fragile balance between $G$ and $D$ | Stable: MSE on predicted noise |
+| Sampling one image | Single decoder pass | Single generator pass | Dozens to 1,000 network passes |
+| Image sharpness | Often slightly blurry | Sharp | Sharp |
+| Diversity | Good | Prone to mode collapse | Good |
+| Role in Stable Diffusion | Autoencoder compresses pixels into latents | Not used | U-Net denoises in latent space |
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the NumPy cell with Python 3.14, NumPy 2.4, scikit-learn 1.8, and matplotlib (in Pyodide); the two PyTorch cells with Python 3.14, PyTorch 2.15, and scikit-learn 1.9 on CPU. The NumPy cell runs right in the browser; the two PyTorch cells run on your machine. All cells are independent and share no variables. The first run of the NumPy cell takes a bit longer while the browser downloads scikit-learn and matplotlib.
+
+### Forward process on a single digit
+
+The cell below takes the first digit from `load_digits` (a zero of size $8 \times 8$), scales it to $[-1, 1]$, and applies DDPM's closed-form formula with the linear schedule to produce $\mathbf{x}_t$ at $t = 0, 100, 250, 500, 1000$ using a single shared noise array $\boldsymbol\epsilon$. At the end, it verifies our derivation: it adds noise **step by step** 500 times across 20,000 copies of a single pixel $x_0 = 1$, and compares the resulting sample mean and standard deviation against the closed-form formula.
+
+<PythonRunner
+  code={forwardNoiseCode}
+  title="Adding noise with DDPM's closed-form equation"
+  figureAlt={['Five 8 × 8 grayscale images in a row labeled t = 0, 100, 250, 500, 1000. At t = 0, a crisp digit 0 appears as a bright loop on a dark background. At t = 100, the loop is still clear with slight grain. At t = 250, the loop is still recognizable but heavily speckled. At t = 500, only faint random blotches remain. At t = 1000, the image is pure random noise.']}
+/>
+
+Reading the output:
+
+- **First five lines:** reproduce the table in the Theory section. The two weights cross right after $t = 250$; by $t = 1000$, the clean image weight is down to 0.0064.
+- **Figure:** because the same noise array is reused across all five panels, you see the exact same digit sinking into static from left to right.
+- **Last two lines:** adding noise step by step 500 times gives mean 0.2742 and standard deviation 0.9624; the closed-form jump gives 0.2803 and 0.9599. The tiny gap is well within Monte Carlo error for 20,000 trials (standard error of the mean is roughly $0.96/\sqrt{20\,000} \approx 0.007$). Five hundred sequential steps really do collapse into a single formula.
+
+### A tiny DDPM on 2D data
+
+Training a diffusion model on real images requires a U-Net and a GPU. To watch the complete training and reverse-sampling loop run on a CPU, the script below replaces images with **2D points**: 2,000 points arranged in two interlocking half-moons (`make_moons`), standardized to zero mean and unit variance. The noise-prediction network $\boldsymbol\epsilon_\theta$ is a small MLP that takes $(x, y, t/T)$ and outputs 2 numbers. The training loop implements Algorithm 1, and the sampling loop implements Algorithm 2 with $\sigma_t^2 = \beta_t$, following the exact formulas from the Theory section.
+
+Because we use only $T = 100$ steps, the schedule is scaled up by a factor of 10: $\beta_t$ runs from $10^{-3}$ to $0.2$. If you kept the original $\beta_t$ bounds with $T = 100$, $\bar\alpha_T$ would still be around 0.36, leaving plenty of clean signal in $\mathbf{x}_T$ and breaking reverse sampling from pure standard normal noise. CPU installation instructions for PyTorch are in [Build Your First LLM](/en/llm/build-first-llm/).
+
+<LocalCode
+  code={tinyDdpmCode}
+  title="Tiny DDPM: training and sampling on two half-moons"
+  packages={['torch', 'scikit-learn']}
+  hardware="CPU is enough; no GPU needed. Takes ~2 minutes on a dev machine (longer on slower or busy CPUs)"
+>
+
+```text
+step    0  loss 0.895
+step 1000  loss 0.192
+step 2000  loss 0.214
+step 3000  loss 0.236
+step 4000  loss 0.197
+step 5000  loss 0.243
+noise x_T: mean dist 0.262, within 0.1: 35%
+samples x_0: mean dist 0.042, within 0.1: 90%
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **Loss** drops quickly from 0.895 to around 0.2 and then fluctuates. It never reaches 0, which is completely normal: at large $t$, $\mathbf{x}_t$ is almost pure noise, so no network can recover the exact noise realization that was added. Because each batch samples random timesteps $t$, the loss jumps around from batch to batch.
+- **Last two lines** measure the distance from each generated point to the nearest real data point. The 1,000 initial noise points $\mathbf{x}_T$ sit at an average distance of 0.262 from the moons, with only 35% falling within a 0.1 radius (not zero, because the two moons span a fair portion of the center). After 100 reverse denoising steps, the average distance drops to 0.042 and 90% of the points land within 0.1 of the true moons: the cloud of noise has gathered itself back into two half-moons.
+
+Your exact numbers may vary slightly depending on your PyTorch version and CPU.
+
+### Counting LoRA parameters in U-Net attention
+
+The second script implements a `LoRALinear` layer following $\mathbf{W}_0\mathbf{x} + \frac{\alpha}{r}\mathbf{B}\mathbf{A}\mathbf{x}$, wraps the four projections of an attention layer sized like Stable Diffusion v1's U-Net, and counts the trainable parameters across all 32 attention layers (16 Transformer blocks, each containing one self-attention layer and one cross-attention layer). No pretrained weights are downloaded; it simply constructs linear layers of the exact dimensions.
+
+<LocalCode
+  code={loraAttentionCode}
+  title="LoRA parameters in U-Net attention layers"
+  packages={['torch']}
+  hardware="CPU is enough. Runs in a few seconds (mostly importing PyTorch)"
+  sampleVaries={false}
+>
+
+```text
+cross-attn d=320: full 696640, LoRA r=4: 13824
+same output at init: True
+LoRA r=4 on all 32 attention layers: 797184
+share of an 860M U-Net: 0.093%
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **`full 696640, LoRA r=4: 13824`:** a single cross-attention layer at $d = 320$ has nearly 700,000 parameters (mostly in `to_k` and `to_v`, which take 768-dimensional text inputs), while LoRA trains just 13,824—matching our hand calculation in the Theory section.
+- **`same output at init: True`:** because $\mathbf{B} = \mathbf{0}$ at initialization, the LoRA-wrapped projection produces the exact same output as the frozen base layer on a $64 \times 64$ latent (4,096 positions).
+- **`797184` and `0.093%`:** across the entire U-Net, LoRA learns roughly 0.8 million parameters. This number matches the exact trainable parameter count reported by the `peft` library when attaching rank-4 LoRA to a Stable Diffusion v1 U-Net in `diffusers`.
+
+## Common pitfalls
+
+:::caution[Thinking the network learns to draw the whole image in one shot]
+The network $\boldsymbol\epsilon_\theta$ only learns a modest local task: look at a noisy input at step $t$ and estimate the noise. The final picture emerges only after chaining dozens to thousands of network evaluations. Consequently, the "number of sampling steps" is a real inference knob: if you use too few steps with a standard DDPM sampler, the output remains noisy or distorted; switch to a sampler like DDIM instead of simply truncating DDPM's step loop.
+:::
+
+:::caution[Adding noise sequentially during training, or copying a noise schedule blindly]
+During training, always jump to $\mathbf{x}_t$ in one shot using $\sqrt{\bar\alpha_t}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon$; running $t$ sequential steps gives the same distribution at $t$ times the compute cost. Also remember that a noise schedule is tied to $T$ and to the specific model: the linear $10^{-4} \to 0.02$ schedule is calibrated for $T = 1000$ (our PyTorch script had to multiply it by 10 for $T = 100$), while Stable Diffusion v1 uses a scaled-linear schedule from 0.00085 to 0.012. When sampling from a pretrained checkpoint, always load the schedule from its own configuration file—and scale inputs to the range the model expects, such as $[-1, 1]$ for DDPM.
+:::
+
+:::caution[Cranking the guidance scale as high as possible, or assuming LoRA shrinks the model in memory]
+A larger guidance scale $s$ makes images follow the prompt more tightly, but sacrifices diversity, and pushing $s$ too high causes oversaturated, unnatural artifacts. Start from the model's default (7.5 for Stable Diffusion v1) and adjust gradually. Remember too that classifier-free guidance doubles the per-step compute cost because the U-Net runs twice per step. Finally, LoRA only shrinks the **trainable parameters** and the saved adapter file: at inference time, you still need the full 860M-parameter U-Net in memory, just as in [Model Evaluation and PEFT](/en/llm/evaluation-peft/).
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` field of the frontmatter. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Diffusion models corrupt an image with Gaussian noise over $T$ small steps (where $T$ is the step count, not temperature) and train a network to reverse the process. Because independent Gaussians sum to a Gaussian, we can jump to any step in closed form: $\mathbf{x}_t = \sqrt{\bar\alpha_t}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_t}\,\boldsymbol\epsilon$.
+- DDPM trains a noise-prediction network $\boldsymbol\epsilon_\theta(\mathbf{x}_t, t)$ with simple MSE loss and generates images by stepping backward 1,000 times from pure noise. DDIM reuses the exact same network to skip across steps, needing only ~50 steps.
+- Stable Diffusion runs diffusion inside the latent space of a pretrained autoencoder (shrinking a $512 \times 512 \times 3$ image into a $64 \times 64 \times 4$ latent, 48 times fewer numbers), injects CLIP text features via cross-attention, and uses classifier-free guidance $\boldsymbol\epsilon_\varnothing + s(\boldsymbol\epsilon_{\mathbf{c}} - \boldsymbol\epsilon_\varnothing)$ to follow the prompt.
+- Attaching LoRA to the U-Net's attention projections with rank $r = 4$ trains only ~0.8M parameters—under 0.1% of the U-Net—which is enough to teach a custom style or subject.
+
+**Further reading:**
+
+- Ho, J., Jain, A., Abbeel, P. (2020). [*Denoising Diffusion Probabilistic Models*](https://arxiv.org/abs/2006.11239), arXiv:2006.11239, Sections 2, 3.2, and Algorithms 1 and 2. The source of all DDPM equations in this lesson; Section 3.2 derives the reverse step.
+- Song, J., Meng, C., Ermon, S. (2021). [*Denoising Diffusion Implicit Models*](https://arxiv.org/abs/2010.02502), arXiv:2010.02502, Section 4. Derives the deterministic, few-step reverse sampler that reuses a trained DDPM network.
+- Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B. (2022). [*High-Resolution Image Synthesis with Latent Diffusion Models*](https://arxiv.org/abs/2112.10752), arXiv:2112.10752, Section 3. Introduces latent diffusion and cross-attention conditioning—the foundation of Stable Diffusion. Architectural details for Stable Diffusion v1 are documented in the [CompVis README](https://github.com/CompVis/stable-diffusion).
+- Ho, J., Salimans, T. (2022). [*Classifier-Free Diffusion Guidance*](https://arxiv.org/abs/2207.12598), arXiv:2207.12598, Section 3. Short and clear; introduces the guidance formula and the quality-vs.-diversity trade-off curves.
+- Hu, E. J. et al. (2022). [*LoRA: Low-Rank Adaptation of Large Language Models*](https://arxiv.org/abs/2106.09685), arXiv:2106.09685; Ruiz, N. et al. (2023). [*DreamBooth: Fine Tuning Text-to-Image Diffusion Models for Subject-Driven Generation*](https://arxiv.org/abs/2208.12242), arXiv:2208.12242; and the Hugging Face `diffusers` [*LoRA training guide*](https://huggingface.co/docs/diffusers/training/lora), which shows which U-Net attention projections are adapted.
+
+<LessonProgress />

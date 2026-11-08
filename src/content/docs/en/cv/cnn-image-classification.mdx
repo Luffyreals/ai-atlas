@@ -1,0 +1,418 @@
+---
+title: 'Image Classification with CNNs: AlexNet → VGG → ResNet → MobileNet → EfficientNet'
+description: Why convolution fits images, how to compute parameter counts and output sizes, and the core ideas of AlexNet, VGG, ResNet, MobileNet, and EfficientNet.
+quiz:
+  - question: 'A $28 \times 28$ grayscale image passes through a $5 \times 5$ convolutional layer with padding 0 and stride 1, followed by $2 \times 2$ max pooling with stride 2. What is the size of the final feature map?'
+    options: ['$24 \times 24$', '$12 \times 12$', '$14 \times 14$', '$11 \times 11$']
+    answer: 1
+    explanation: 'Convolutional layer: $\lfloor (28 + 0 - 5)/1 \rfloor + 1 = 24$. Pooling uses the same formula with $k = 2$, $s = 2$: $\lfloor (24 - 2)/2 \rfloor + 1 = 12$. Answering $14 \times 14$ forgets that an unpadded $5 \times 5$ kernel already trims 4 rows and 4 columns; $24 \times 24$ forgets the pooling step.'
+  - question: 'A $3 \times 3$ convolutional layer has 256 input channels and 256 output channels. Replacing it with a depthwise separable convolution of the same output size reduces the multiply-adds to roughly what fraction?'
+    options:
+      - 'About $1/256$, because each channel keeps only one kernel'
+      - 'Unchanged, because the kernel is still $3 \times 3$'
+      - 'About $1/9$, or roughly 8.7 times fewer'
+      - 'About $1/3$'
+    answer: 2
+    explanation: 'The ratio is $1/C_{\text{out}} + 1/k^2 = 1/256 + 1/9 \approx 0.115$, or roughly 8.7 times fewer. The depthwise part is indeed cheap (around $1/256$), but the $1 \times 1$ pointwise step still mixes 256 channels into 256 channels, accounting for nearly all of the remaining cost.'
+  - question: 'Why does adding residual connections (output $= F(\mathbf{x}) + \mathbf{x}$) make it possible to train very deep networks like ResNet-152?'
+    options:
+      - 'If a block is not helpful, it only needs to push $F(\mathbf{x})$ toward 0 to become an identity mapping, which is much easier than learning an identity mapping from scratch'
+      - 'The shortcut adds many parameters, making the network more expressive'
+      - 'The shortcut mainly prevents overfitting, since deep networks memorize data'
+      - 'The shortcut eliminates the need for ReLU activations'
+    answer: 0
+    explanation: 'A plain 56-layer network has higher error on the training set itself than a 20-layer network, so the issue is optimization difficulty, not overfitting. With a residual shortcut, "doing nothing" only requires small weights, so adding layers does not degrade the network. An identity shortcut adds zero parameters.'
+  - question: 'You double the number of channels in every convolutional layer of a CNN while keeping the number of layers and image size fixed. By roughly what factor does the compute cost of the convolutional layers increase?'
+    options: ['2x', '4x', '8x', 'Unchanged']
+    answer: 1
+    explanation: 'The cost of one layer is $k^2 \cdot C_{\text{in}} \cdot C_{\text{out}} \cdot H''W''$. Both $C_{\text{in}}$ and $C_{\text{out}}$ double, so their product increases by 4x. This is why EfficientNet notes that compute scales with $w^2$ (width) but only linearly with $d$ (depth).'
+  - question: 'In an image, a cat shifts 4 pixels to the left. How does the feature map output by a convolutional layer (stride 1, same kernel) change?'
+    options:
+      - 'It does not change at all, because convolution ignores position'
+      - 'It changes completely, so the model must relearn the pattern'
+      - 'It only changes near the image borders'
+      - 'Its values also shift 4 cells to the left, staying nearly identical'
+    answer: 3
+    explanation: 'The same kernel is applied at every location, so shifting a pattern shifts its response on the feature map by the same amount (except near the borders). The feature map itself is not invariant: only after pooling and global aggregation does the final output become nearly insensitive to position.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import conv2dCode from '@code/cv/cnn-image-classification/conv2d.en.py?raw';
+import paramsCode from '@code/cv/cnn-image-classification/params.en.py?raw';
+import tinyCnnCode from '@code/cv/cnn-image-classification/tiny-cnn.en.py?raw';
+import countParamsCode from '@code/cv/cnn-image-classification/count-params.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand why **convolution** fits images: local connectivity and weight sharing require hundreds of thousands of times fewer parameters than a **fully connected layer**.
+- Compute the output size $\lfloor (H + 2p - k)/s \rfloor + 1$, the parameter count of a layer, and the **receptive field** of a stack of layers by hand.
+- Summarize the key contribution of each milestone in **image classification**—AlexNet, VGG, ResNet, MobileNet, and EfficientNet—and the problem each one solved.
+- Implement 2D convolution in NumPy, train a small CNN in PyTorch, and count the parameters of pretrained architectures in torchvision.
+
+## Prerequisites
+
+{/* List populated from prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+The Deep Learning lessons on Convolutional Neural Networks (CNNs) and Modern CNN Architectures are not published yet, so here is a brief summary of what this lesson uses. An image is an array of numbers; **convolution** slides a small matrix called a **kernel** (or filter, e.g. $3 \times 3$) across the image, multiplies overlapping cells at each position, sums them into a single number, and arranges those numbers into a **feature map**. A layer has multiple kernels, each producing one feature map; the number of maps is the number of output **channels**, just as an RGB image has 3 channels (R, G, B). Convolution is typically followed by a ReLU activation, $\max(0, x)$, and **pooling**: $2 \times 2$ max pooling keeps the largest value in each $2 \times 2$ block, halving the height and width of the map. The numbers inside the kernels are model parameters learned via **backpropagation** and [gradient descent](/en/ml/gradient-descent/), just like the weights of a standard neural network.
+:::
+
+## Intuition
+
+### The problem: one image in, one label out
+
+You have an $8 \times 8$ image of a handwritten digit and want the computer to tell you which digit it is. Or you have a $224 \times 224$ photograph and want the computer to say whether it shows a cat, a dog, or a teapot. That is **image classification**: the input is an image, and the output is a single label chosen from a fixed list of classes.
+
+This task has a famous proving ground: the [ImageNet Large Scale Visual Recognition Challenge](https://arxiv.org/abs/1409.0575) (ILSVRC, Russakovsky et al., 2015), held annually starting in 2010. Its classification track has 1,000 classes and roughly 1.2 million training images. All five networks in the title of this lesson are milestones along that path.
+
+### A naive attempt: flattening the image
+
+The first approach anyone might try is to flatten the image into one long vector and feed it into a standard neural network. A $224 \times 224 \times 3$ image has 150,528 numbers. A single fully connected layer with just 1,000 output neurons already requires roughly 150 million weights.
+
+Worse still is how it handles position. Each weight is tied to **one** fixed pixel. A cat in the top-left corner and a cat in the bottom-right corner pass through two completely different sets of weights. The network would have to relearn "what a cat ear looks like" separately at every location in the image.
+
+### Two observations about images
+
+- **Locality.** Detecting an edge, a stroke, or a corner only requires looking at a few neighboring pixels. There is no need to connect a pixel in the top corner to one in the bottom corner in the very first layer.
+- **Stationarity (patterns repeat everywhere).** A vertical edge on the left looks just like a vertical edge on the right. So we can apply the **exact same** filter at every position.
+
+Picture a small magnifying glass tuned to spot one specific stroke pattern. You slide it across a page and record wherever it "lights up." That is a single kernel. A collection of magnifying glasses, each looking for a different stroke, forms a convolutional layer. Stack many layers together: the early layers detect edges, the middle layers combine edges into curves and corners, then into eyes and ears, and finally into a cat.
+
+The central question of this lesson is: **how do we build a model that takes an image as input, uses few parameters, recognizes the same pattern anywhere, and is deep enough to assemble small strokes into whole objects—and then how do we make it deeper and more accurate while keeping it fast?**
+
+## Theory
+
+### Problem formulation
+
+An image is $\mathbf{X} \in \mathbb{R}^{H \times W \times C}$: height $H$, width $W$ pixels, and $C$ channels ($C = 1$ for grayscale, $C = 3$ for color). A CNN is a parameterized function $f_{\boldsymbol{\theta}}$ that maps the image to a vector of **logits**, one score per class. Softmax turns the logits into probabilities, and the class with the highest probability is the prediction $\hat{y}$. Training chooses $\boldsymbol{\theta}$ to minimize the cross-entropy loss $\mathcal{L}$ over the training set.
+
+ILSVRC evaluates models using **top-5 error**: a prediction counts as correct if the true label appears among the 5 classes with the highest predicted probabilities. This is because many photos contain more than one object, and the 1,000 classes include many fine-grained distinctions (such as dozens of dog breeds).
+
+### Single-channel convolution
+
+Take a single-channel image $\mathbf{X}$ and a $k \times k$ kernel $\mathbf{K}$. The value at cell $(i, j)$ of the output feature map $\mathbf{F}$ is:
+
+$$
+F_{i,j} = \sum_{u=0}^{k-1} \sum_{v=0}^{k-1} X_{i+u,\; j+v}\, K_{u,v} + b
+$$
+
+In plain words: place the top-left corner of the kernel at cell $(i, j)$ of the image, multiply each pair of overlapping cells, sum all $k^2$ products, and add a scalar bias $b$. Indices start at 0, matching NumPy and the code example below.
+
+Consider a vertical-edge kernel:
+
+$$
+\mathbf{K} = \begin{bmatrix} 1 & 0 & -1 \\ 1 & 0 & -1 \\ 1 & 0 & -1 \end{bmatrix}
+$$
+
+It subtracts the sum of the right column of the window from the sum of the left column. A flat region (both columns equal) yields 0. A region that is dark on the left and bright on the right yields a negative number; bright on the left and dark on the right yields a positive number. Thus the feature map "lights up" along vertical edges, and the sign tells you which way the brightness transitions.
+
+Mathematically, the formula above is **cross-correlation**: true convolution flips the kernel both horizontally and vertically before sliding. Deep learning libraries do not flip the kernel, even though they call the operation convolution; since the kernel weights are learned from data, flipping makes no difference.
+
+### Multiple input and output channels
+
+A color image has $C_{\text{in}} = 3$ channels. Each kernel then has shape $k \times k \times C_{\text{in}}$: it spans all three input channels at once, and the sum in the formula runs over the channel axis as well. One kernel still produces **one** 2D feature map. A layer with $C_{\text{out}}$ kernels produces $C_{\text{out}}$ maps, meaning the output has $C_{\text{out}}$ channels.
+
+Counting parameters: each kernel has $k^2 C_{\text{in}}$ weights plus one bias term, and there are $C_{\text{out}}$ kernels, giving
+
+$$
+\text{parameters} = k^2\, C_{\text{in}}\, C_{\text{out}} + C_{\text{out}}
+$$
+
+Notice that this count **does not depend on the image size** $H \times W$: the exact same kernels slide over a small image or a high-resolution image.
+
+Compare this with a fully connected layer that maps a $32 \times 32 \times 3$ image to 16 feature maps of size $32 \times 32$. A fully connected layer links every output value to every input value, requiring $(32 \cdot 32 \cdot 3) \cdot (32 \cdot 32 \cdot 16) = 50,331,648$ weights. A $3 \times 3$ convolutional layer needs only $3^2 \cdot 3 \cdot 16 = 432$ weights (the second code cell prints both numbers)—roughly 116,000 times fewer. The two observations from the Intuition section are the exact two sources of savings: **locality** (each output looks at 27 inputs instead of 3,072) and **weight sharing** (every spatial position reuses the same kernel).
+
+Weight sharing also gives another property: shifting the input image shifts the feature map by the exact same amount (**translation equivariance**). A pattern is recognized regardless of where it appears.
+
+### Output dimensions
+
+Two more hyperparameters control how the kernel slides. **Padding** $p$ adds $p$ rows and columns of zeros around the border of the image. **Stride** $s$ moves the kernel by $s$ cells at a time instead of 1.
+
+Along one dimension, the padded image has length $H + 2p$. The top (or left) edge of the window can land at positions $0, s, 2s, \dots$ as long as the window fits inside the padded image—meaning its starting index cannot exceed $H + 2p - k$. The number of valid positions is the number of steps of size $s$ that fit in that range, plus 1 for position 0:
+
+$$
+H' = \left\lfloor \frac{H + 2p - k}{s} \right\rfloor + 1
+$$
+
+The floor $\lfloor \cdot \rfloor$ appears because the final step may fall short of a full window, and any leftover border pixels are dropped. The output width $W'$ follows the exact same formula. For an $8 \times 8$ image with $k = 3$:
+
+| Padding $p$ | Stride $s$ | Output size |
+|---:|---:|---|
+| 0 | 1 | $6 \times 6$ |
+| 1 | 1 | $8 \times 8$ (preserves size) |
+| 0 | 2 | $3 \times 3$ |
+| 1 | 2 | $4 \times 4$ |
+
+Pooling uses the exact same formula: $2 \times 2$ max pooling with $s = 2, p = 0$ gives $\lfloor (H - 2)/2 \rfloor + 1 = H/2$ when $H$ is even. VGG uses $k = 3, p = 1, s = 1$ for every convolutional layer to preserve spatial dimensions, leaving all downsampling to pooling: $224 \to 112 \to 56 \to 28 \to 14 \to 7$.
+
+### Receptive field
+
+How many original image pixels does a single cell in a feature map "see"? That region is called its **receptive field**. After one $3 \times 3$ layer, each cell sees a $3 \times 3$ patch of pixels. Stack a second $3 \times 3$ layer on top: each cell in the second layer looks at $3 \times 3$ cells of the first layer, which overlap and each look at $3 \times 3$ pixels, covering a $5 \times 5$ region in total. Every $k \times k$ layer with stride 1 widens the receptive field by $k - 1$:
+
+$$
+r_L = 1 + L\,(k - 1)
+$$
+
+When earlier layers use a stride greater than 1, subsequent steps cover even more ground because each cell in a deeper layer corresponds to multiple pixels in the input. If layer $l$ has kernel size $k_l$ and stride $s_l$:
+
+$$
+r_L = 1 + \sum_{l=1}^{L} (k_l - 1) \prod_{m=1}^{l-1} s_m
+$$
+
+The product of preceding strides tells you how many input pixels correspond to a single step at layer $l$. Take the small CNN in the PyTorch code cell: a $3 \times 3$ conv (receptive field 3), $2 \times 2$ max pooling with stride 2 (adds $1 \cdot 1$, reaching 4), another $3 \times 3$ conv after a stride of 2 (adds $2 \cdot 2$, reaching 8), and another pooling layer (adds $1 \cdot 2$, reaching 10). Each cell of the final feature map sees a $10 \times 10$ region—wider than the entire $8 \times 8$ digit image (with the overhang falling on padding). That is how a deep network "sees" large objects even though every individual kernel is just $3 \times 3$.
+
+:::note[Key takeaway]
+A convolutional layer has $k^2 C_{\text{in}} C_{\text{out}} + C_{\text{out}}$ parameters, independent of image resolution. Its output size along each dimension is $\lfloor (H + 2p - k)/s \rfloor + 1$. Stacking small layers grows the receptive field linearly; stride and pooling make it grow multiplicatively.
+:::
+
+### AlexNet (2012): deep networks on GPUs
+
+AlexNet (Krizhevsky, Sutskever, and Hinton, 2012) has 5 convolutional layers and 3 fully connected layers, totaling roughly 60 million parameters. Its first layer applies 96 kernels of size $11 \times 11 \times 3$ with stride 4 on $224 \times 224$ images. At ILSVRC-2012, a variant achieved a top-5 error of 15.3%, while the runner-up stood at 26.2%.
+
+According to the paper, the breakthrough came from using **ReLU** instead of $\tanh$ (training several times faster), **dropout** and **data augmentation** (random crops and horizontal flips) to curb overfitting, and training across two GTX 580 GPUs for 5 to 6 days. Most of its parameters live in the final fully connected layers, just as our parameter count formula predicts: the torchvision implementation has about 2.5 million parameters in the convolutional backbone and 58.6 million in the classifier head.
+
+### VGG (2014): only $3 \times 3$ kernels
+
+VGG (Simonyan and Zisserman, 2014; published at ICLR 2015) asked: what if we use only the smallest kernel that can still capture left/right and up/down—namely $3 \times 3$—and stack many layers deep? The resulting networks have 16 to 19 weight layers, where every convolution uses $k = 3, s = 1, p = 1$, interleaved with 5 max-pooling layers. VGG won first place in localization and second place in classification at ILSVRC 2014.
+
+Why are three stacked $3 \times 3$ layers better than a single $7 \times 7$ layer? By our receptive field formula, three $3 \times 3$ layers cover $1 + 3 \cdot 2 = 7$ pixels per side, matching a $7 \times 7$ layer. Yet with $C$ input and output channels:
+
+$$
+3 \cdot (3^2 C^2) = 27 C^2 \quad \text{vs.} \quad 7^2 C^2 = 49 C^2
+$$
+
+A single $7 \times 7$ layer costs 81% more parameters. Moreover, stacking three layers inserts three ReLU nonlinearities instead of one, making the composite function more expressive. The catch: VGG-16 has roughly 138 million parameters (again mostly in its fully connected layers) and costs about 15.3 billion multiply-adds per image.
+
+### ResNet (2015–2016): residual blocks
+
+If deeper is better, can we just keep stacking layers? He et al. (2016) observed the opposite. On CIFAR-10, a plain 56-layer network had higher error **on the training set itself** than a 20-layer network. This is not overfitting (where training error is low and test error is high); the authors called it the **degradation** problem.
+
+Their reasoning went as follows: take a trained shallow network and stack extra layers on top that simply perform an **identity mapping** (output equals input). This deeper network would produce the exact same predictions as the shallow one, proving that a deeper model has at least one solution no worse than the shallow model. Yet gradient descent fails to find it: fitting an identity mapping through a stack of nonlinear layers turns out to be surprisingly hard.
+
+Their fix: let $H(\mathbf{x})$ be the target mapping a few stacked layers should learn. Instead of fitting $H$ directly, let the layers fit the **residual** $F(\mathbf{x}) = H(\mathbf{x}) - \mathbf{x}$, and add the original input back via a **residual connection** (or shortcut):
+
+$$
+\mathbf{y} = F(\mathbf{x}) + \mathbf{x}
+$$
+
+If the identity mapping is optimal, the layers only need to drive their weights toward zero so that $F(\mathbf{x}) \approx \mathbf{0}$, which is much easier. Adding extra blocks no longer hurts training error. An identity shortcut adds zero parameters and almost no compute (just an element-wise addition). When the number of channels or spatial size changes, the shortcut uses a $1 \times 1$ convolution to match dimensions.
+
+{/* FIG: ResidualBlockFigure
+    Idea: input passes through two conv layers and is added back to itself via a shortcut; the block only needs to learn the residual F(x).
+    Blocks and arrows: x (top) → 3x3 conv → ReLU → 3x3 conv → add node (focal point) → ReLU → y. A curved arrow from x loops around the right into the add node (shortcut, secondary group, distinct stroke). Bracket on the left of the two conv layers labeled F(x).
+    Labels: "Input x"; "3×3 conv"; "ReLU"; "3×3 conv"; "Add"; "Output y"; "Shortcut (identity)"; "Residual F(x)".
+    Caption: A residual block computes $\mathbf{y} = F(\mathbf{x}) + \mathbf{x}$; if the block is not needed, it only requires $F(\mathbf{x}) \approx \mathbf{0}$. An identity shortcut has zero parameters. */}
+
+A complementary view from the same group's follow-up paper (He et al., 2016, "Identity Mappings") notes that because the derivative of $\mathbf{x}$ with respect to itself is the identity matrix, gradients have an unimpeded highway backward through the additions from the final layer all the way to the early layers.
+
+Networks of 50 layers or more use a "bottleneck" block ($1 \times 1 \to 3 \times 3 \to 1 \times 1$) that squeezes the channel count, applies the $3 \times 3$ convolution, and expands the channels back to save compute. ResNet-152 has 152 layers—8 times deeper than VGG-19—yet requires only 11.3 billion multiply-adds, fewer than VGG-16. An ensemble of ResNets achieved a 3.57% top-5 error and won first place in ILSVRC 2015 classification.
+
+### MobileNet (2017): splitting convolution in two
+
+By this point CNNs were accurate, but far too heavy for mobile phones. MobileNet (Howard et al., 2017) replaces each standard convolution with a **depthwise separable convolution**, which factors the operation into two steps:
+
+1. **Depthwise convolution:** each input channel gets its **own** single $k \times k$ kernel that filters only within that channel. It filters spatially without mixing channels.
+2. **Pointwise convolution:** a $1 \times 1$ convolution mixes the $C_{\text{in}}$ channels into $C_{\text{out}}$ channels. It mixes channels without looking at spatial neighbors.
+
+Standard convolution does both jobs in a single step. Let's count the multiply-adds for an output feature map of size $H' \times W'$: each of the $H'W'C_{\text{out}}$ output values in a standard convolution costs $k^2 C_{\text{in}}$ operations, whereas the two separated steps cost $k^2$ operations for each of the $H'W'C_{\text{in}}$ intermediate values plus $C_{\text{in}}$ operations for each of the $H'W'C_{\text{out}}$ final values:
+
+$$
+\begin{aligned}
+\text{standard} &= k^2\, C_{\text{in}}\, C_{\text{out}}\, H'W' \\
+\text{separable} &= k^2\, C_{\text{in}}\, H'W' + C_{\text{in}}\, C_{\text{out}}\, H'W'
+\end{aligned}
+$$
+
+Dividing the bottom line by the top line cancels $C_{\text{in}} H'W'$, leaving:
+
+$$
+\frac{\text{separable}}{\text{standard}} = \frac{k^2 + C_{\text{out}}}{k^2\, C_{\text{out}}} = \frac{1}{C_{\text{out}}} + \frac{1}{k^2}
+$$
+
+With $k = 3$ and $C_{\text{out}}$ in the hundreds, $1/C_{\text{out}}$ is tiny and the ratio is close to $1/9$—an 8x to 9x reduction. For the example from the paper (computed in the second code cell), a $14 \times 14$ map with 512 input and output channels requires 462.4 million multiply-adds with standard convolution, versus just 52.3 million with depthwise separable convolution. Parameter counts drop by the exact same ratio (just drop $H'W'$ from both lines). The full MobileNet has 4.2 million parameters, 569 million multiply-adds, and 70.6% top-1 accuracy on ImageNet. Two hyperparameters—a width multiplier $\alpha$ (scaling channel counts) and a resolution multiplier $\rho$ (scaling image size)—let you shrink the model even further.
+
+Follow-up versions, MobileNetV2 (Sandler et al., 2018) and MobileNetV3 (Howard et al., 2019), added inverted residual connections and neural architecture search.
+
+### EfficientNet (2019): scaling all three dimensions together
+
+When you have a larger compute budget, along which dimension should you scale up a CNN: deeper (more layers, depth $d$), wider (more channels, width $w$), or higher input resolution $r$? Tan and Le (2019) noted that compute scales linearly with $d$, but quadratically with $w^2$ and $r^2$: doubling the channels doubles both $C_{\text{in}}$ and $C_{\text{out}}$, and doubling the image side quadruples $H'W'$.
+
+They observed that scaling any single dimension alone quickly hits diminishing returns, and proposed **compound scaling** governed by a single coefficient $\phi$:
+
+$$
+d = \alpha^{\phi}, \quad w = \beta^{\phi}, \quad r = \gamma^{\phi}, \qquad \alpha \cdot \beta^2 \cdot \gamma^2 \approx 2
+$$
+
+The constraint $\alpha \beta^2 \gamma^2 \approx 2$ ensures that total compute—proportional to $d \cdot w^2 \cdot r^2 = (\alpha \beta^2 \gamma^2)^{\phi}$—grows by roughly $2^{\phi}$, doubling with each integer step in $\phi$. A small grid search on the baseline model found $\alpha = 1.2$, $\beta = 1.1$, $\gamma = 1.15$ (where $\alpha\beta^2\gamma^2 \approx 1.92$).
+
+The baseline network, EfficientNet-B0, was found via neural architecture search using MobileNetV2's inverted residual blocks (MBConv) with squeeze-and-excitation. B0 has 5.3 million parameters, 0.39 billion multiply-adds, and 77.1% top-1 accuracy. Scaling $\phi$ up produces B1 through B7; according to the paper, B7 reaches 84.3% top-1 accuracy while being 8.4x smaller and 6.1x faster than the best prior CNN.
+
+### Reusing pretrained networks
+
+In practice, you rarely train these architectures from scratch. **Transfer learning** takes a network pretrained on ImageNet and replaces its final classification layer with a new layer matching the number of classes in your task. Following the [PyTorch transfer learning tutorial](https://docs.pytorch.org/tutorials/beginner/transfer_learning_tutorial.html), two approaches are standard: **freezing** all convolutional layers and training only the new linear head, or fine-tuning the entire network with a small learning rate $\eta$. Transfer learning works because early layers learn general-purpose features—edges, colors, and textures—that are useful across almost any visual domain.
+
+### Limitations
+
+- **Convolution is local.** Long-range relationships between distant regions only emerge in deep layers. [Image Classification with Transformers](/en/cv/vision-transformer/) lets every image patch attend to every other patch right from the first layer.
+- **Parameter count does not equal wall-clock speed.** MobileNet uses very few multiply-adds, but actual latency depends heavily on hardware memory bandwidth and library support for depthwise operations.
+- **Whole-image classification only.** Assigning a class label to every individual pixel is covered in [Semantic Segmentation](/en/cv/semantic-segmentation/); diversifying training images is covered in [Image Augmentation](/en/cv/image-augmentation/).
+
+## Illustration
+
+The interactive visualization below lets you slide a $3 \times 3$ kernel across an $8 \times 8$ handwritten digit. On the left is the input image with the sliding window; on the right is the resulting $6 \times 6$ feature map ($p = 0, s = 1$). Below them is the arithmetic breakdown showing the nine element-wise products summing to the highlighted output cell. Try the following:
+
+1. Select the identity kernel (only the center cell is 1): each cell of the feature map equals the center pixel of the window, so the output is simply the original image with its 1-pixel border cropped off.
+2. Select the vertical-edge kernel and place the window on an empty background region: all nine products are 0, so the output cell is 0.
+3. Slide the window across the left and right edges of a vertical stroke: one side yields negative values, the other yields positive values, and the middle of a thick stroke is near 0.
+4. Switch to the horizontal-edge kernel at the same position: vertical strokes nearly vanish while horizontal strokes light up.
+
+{/* VIZ: ConvolutionViz
+    Idea: a kernel slides over an image, producing the sum of element-wise products at each position; changing the kernel changes which feature is detected.
+    Interaction: choose among 4 preset kernels (identity, box blur, vertical edge, horizontal edge); slider or Prev/Next buttons move the window position (i, j); window on image and corresponding cell on feature map highlight; equation line below shows the 9 products summing up.
+    Data: fixed 8x8 digit array (values 0–1) in src/data/datasets/; padding 0, stride 1, 6x6 feature map. Math in src/lib/viz/convolution.ts, unit-tested against the NumPy conv2d cell (cross-correlation, unflipped kernel).
+    Symbols: X (image), K (3x3 kernel), F (feature map), (i, j), F_{i,j} = sum X_{i+u, j+v} K_{u,v}; no bias b. */}
+
+The table below compares all five architectures side by side. The "Parameters" column lists exact counts from `torchvision` in the second PyTorch code cell (1,000-class ImageNet versions). Note that `torchvision`'s AlexNet follows the "One weird trick" variant (Krizhevsky, 2014), which differs slightly from the 2012 paper, and the original MobileNet (v1) is not in `torchvision` so its paper count is listed.
+
+| Network | Year | Core idea | Parameters |
+|---|---:|---|---:|
+| AlexNet | 2012 | Deep CNN on GPUs, ReLU, dropout, data augmentation | 61.1M |
+| VGG-16 | 2014 | Stacked $3 \times 3$ kernels only, 16 weight layers | 138.4M |
+| ResNet-18 / ResNet-50 | 2015 | Residual blocks $F(\mathbf{x}) + \mathbf{x}$, enabling 100+ layers | 11.7M / 25.6M |
+| MobileNet | 2017 | Depthwise separable convolution, 8–9x fewer operations | 4.2M (paper) |
+| MobileNetV2 / V3-Small | 2018 / 2019 | Inverted residuals and neural architecture search | 3.5M / 2.5M |
+| EfficientNet-B0 | 2019 | Compound scaling of depth, width, and resolution | 5.3M |
+
+The Year column reflects the first arXiv preprint (ResNet appeared in December 2015 and at CVPR 2016). Look at the last column: after VGG, models became more accurate while **shrinking** dramatically, because subsequent innovations focused on parameter and compute efficiency.
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the two NumPy cells with Python 3.14, NumPy 2.4, SciPy 1.18, and scikit-learn 1.8 (bundled in Pyodide); the two PyTorch cells with Python 3.14, PyTorch 2.15, and torchvision 0.29 on CPU. The two NumPy cells run directly in your browser, while the two PyTorch scripts run on your local machine. Each cell is self-contained. The first cell takes slightly longer on its initial run while the browser downloads SciPy and scikit-learn.
+
+### Hand-written convolution in NumPy
+
+The cell below grabs the first image of the digit 1 from scikit-learn's `load_digits` ($8 \times 8$ pixels with values from 0 to 16, divided by 16 to scale into $[0, 1]$), slides a vertical-edge kernel across it using two explicit loops matching our formula, and compares the result with `scipy.signal.correlate2d`. Finally, it prints the output dimensions for several $(p, s)$ pairs.
+
+<PythonRunner code={conv2dCode} title="2D convolution on an 8×8 digit" />
+
+Reading the output:
+
+- **Image and `feature map: (6, 6)`:** the vertical stroke of the digit 1 sits in columns 3 and 4 (0-indexed); the output size is $\lfloor (8 + 0 - 3)/1 \rfloor + 1 = 6$.
+- **Feature map columns:** columns 1 and 2 are negative (roughly $-1.8$ to $-3$) where the window has dark background on the left and the bright stroke on the right. Columns 3 and 4 are positive (up to $3.00$) along the right edge of the stroke. The kernel detects both sides of the vertical stroke, and the sign tells them apart.
+- **`same as scipy correlate2d: True`:** our hand-written loops match SciPy's cross-correlation.
+- **`same as convolve2d (flipped): False`:** `convolve2d` flips the kernel before sliding (true mathematical convolution), giving a different result. For this particular kernel, flipping left-to-right simply negates every entry, flipping the sign of the entire feature map.
+- **Last four lines:** match the output dimension table in the Theory section.
+
+### Counting parameters and operations
+
+The second cell uses pure Python to reproduce the three parameter/compute comparisons from the Theory section: a fully connected layer vs. convolution, standard vs. depthwise separable convolution (on MobileNet's $14 \times 14 \times 512$ layer), and three $3 \times 3$ layers vs. one $7 \times 7$ layer along with their growing receptive field. Biases are omitted for brevity.
+
+<PythonRunner code={paramsCode} title="Counting parameters: dense, conv, and depthwise separable" />
+
+Reading the output:
+
+- **50,331,648 vs. 432:** mapping a $32 \times 32 \times 3$ image to 16 channels of size $32 \times 32$ takes roughly 116,000 times fewer weights with convolution.
+- **462.4M and 52.3M mult-adds:** matches Table 3 of the MobileNet paper. The ratio 0.1131 equals $1/512 + 1/9$, or roughly 8.8x fewer operations.
+- **110,592 vs. 200,704:** with $C = 64$, these are $27C^2$ and $49C^2$ from VGG. The last three lines print receptive fields of $3, 5, 7$, confirming that three $3 \times 3$ layers cover the same $7 \times 7$ region.
+
+### A small CNN trained on digit images
+
+The script below trains a two-block CNN on all 1,797 digit images in `load_digits`, split 80% for training and 20% for testing. Each block applies a $3 \times 3$ convolution (padding 1, preserving size), ReLU, and $2 \times 2$ max pooling: $8 \times 8 \to 4 \times 4 \to 2 \times 2$. A final linear layer maps the flattened features to 10 class logits. No external download is required since the dataset ships with scikit-learn.
+
+<LocalCode
+  code={tinyCnnCode}
+  title="Two-block CNN on load_digits"
+  packages={['torch', 'scikit-learn']}
+  hardware="CPU is sufficient, no GPU required. Runs in under a minute on a development machine; importing PyTorch may take a few extra seconds"
+>
+
+```text
+input: (1437, 1, 8, 8) params: 1898
+feature maps: (1, 16, 2, 2)
+epoch 10  train loss 0.104  test acc 0.961
+epoch 20  train loss 0.037  test acc 0.961
+epoch 30  train loss 0.014  test acc 0.975
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **`params: 1898`:** the first conv layer has $3^2 \cdot 1 \cdot 8 + 8 = 80$ parameters, the second has $3^2 \cdot 8 \cdot 16 + 16 = 1,168$, and the linear head has $64 \cdot 10 + 10 = 650$, totaling 1,898—matching our formula.
+- **`feature maps: (1, 16, 2, 2)`:** after two pooling steps, each image is reduced to 16 maps of size $2 \times 2$, or 64 numbers entering the linear layer. Each cell of these maps has a $10 \times 10$ receptive field, covering the entire digit.
+- **`test acc 0.975`:** after 30 epochs, a network with fewer than 2,000 parameters classifies 97.5% of unseen test digits correctly. Numbers may vary slightly across machines or PyTorch versions.
+
+In the NumPy cell you specified a vertical-edge kernel by hand; here `loss.backward()` computes $\partial \mathcal{L}$ with respect to every cell of every kernel, and the network learns its own filters automatically.
+
+### Counting parameters of torchvision models
+
+The final script instantiates the seven architectures from our comparison table with `weights=None`: it builds only the model structure with random weights and downloads nothing from the internet. To load ImageNet-pretrained weights for transfer learning, change `weights=None` to `weights="DEFAULT"` and torchvision will download the checkpoint automatically.
+
+<LocalCode
+  code={countParamsCode}
+  title="Parameter counts of seven CNNs in torchvision"
+  packages={['torch', 'torchvision']}
+  hardware="CPU is sufficient; requires about 1 GB of free RAM for VGG-16. Takes a few seconds to a couple of minutes, mostly spent instantiating VGG-16"
+  sampleVaries={false}
+>
+
+```text
+alexnet                61.1M params
+vgg16                 138.4M params
+resnet18               11.7M params
+resnet50               25.6M params
+mobilenet_v2            3.5M params
+mobilenet_v3_small      2.5M params
+efficientnet_b0         5.3M params
+```
+
+</LocalCode>
+
+VGG-16 has over 10 times as many parameters as ResNet-18 despite being shallower, because its three final fully connected layers alone hold roughly 124 million parameters. ResNet replaces them with global average pooling over each feature map followed by a single linear layer. EfficientNet-B0 comes in at 5.3 million, matching the paper.
+
+## Common pitfalls
+
+:::caution[Forgetting padding and stride when computing output shapes]
+A "shape mismatch" error at the first linear layer almost always comes from miscalculating the spatial size of the feature map before it. Track each layer's size using $\lfloor (H + 2p - k)/s \rfloor + 1$, including pooling layers, or print the intermediate shape before training as our small CNN script does with `feature maps`. Also remember that PyTorch orders tensor axes as $(N, C, H, W)$: batch, channel, height, width. An $8 \times 8$ grayscale image still needs an explicit channel axis of size 1—`(1, 8, 8)`—which is why the script calls `unsqueeze(1)`.
+:::
+
+:::caution[Thinking ResNet was invented to fix vanishing gradients or overfitting]
+The ResNet paper explicitly shows that plain deep networks suffer from higher **training error**, ruling out overfitting. Their plain networks already used batch normalization, and the authors verified that gradients had healthy norms rather than vanishing. The core insight is optimization ease: with a residual shortcut, learning to "do nothing" only requires pushing weights toward zero, so extra layers do not hurt. The "unimpeded gradient highway" perspective came from their follow-up paper as a complementary explanation, not the original motivation.
+:::
+
+:::caution[Confusing deep learning's convolution with mathematical convolution]
+`torch.nn.Conv2d` computes cross-correlation without flipping the kernel, whereas `scipy.signal.convolve2d` flips the kernel. When comparing against a signal-processing library, use `correlate2d` as our NumPy example does. For a learned network this distinction does not matter, but if you plug in a hand-crafted filter (such as an edge detector) using the wrong convention, the signs of your output can be inverted.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Convolution slides a small kernel across an image: local connectivity and weight sharing mean a layer needs only $k^2 C_{\text{in}} C_{\text{out}} + C_{\text{out}}$ parameters regardless of image size, and recognizes patterns anywhere.
+- Output size along each dimension is $\lfloor (H + 2p - k)/s \rfloor + 1$. Stacking small kernels grows the receptive field linearly, $r_L = 1 + L(k - 1)$ when stride is 1.
+- AlexNet (2012) brought deep CNNs to GPUs; VGG (2014) stacked uniform $3 \times 3$ kernels; ResNet (2015–2016) introduced residual blocks $\mathbf{y} = F(\mathbf{x}) + \mathbf{x}$ to train networks over a hundred layers deep.
+- MobileNet (2017) factored convolution into depthwise and pointwise steps, cutting cost to roughly $1/C_{\text{out}} + 1/k^2$; EfficientNet (2019) scaled depth, width, and resolution together via a single compound coefficient $\phi$.
+
+**Further reading:**
+
+- Zhang, A., Lipton, Z. C., Li, M., Smola, A. J. [*Dive into Deep Learning*](https://d2l.ai/chapter_convolutional-modern/index.html), Chapter 8 "Modern Convolutional Neural Networks". Open-source textbook with runnable implementations of AlexNet, VGG, ResNet, and more in historical order.
+- Stanford CS231n. [*Convolutional Neural Networks for Visual Recognition: Convolutional Networks*](https://cs231n.github.io/convolutional-networks/). Lecture notes covering output size formulas, weight sharing, and a layer-by-layer breakdown of VGG (using $F$ for kernel size and $S, P$ for stride and padding).
+- Krizhevsky, A., Sutskever, I., Hinton, G. E. (2012). [*ImageNet Classification with Deep Convolutional Neural Networks*](https://papers.nips.cc/paper_files/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html), NeurIPS 2012; and Simonyan, K., Zisserman, A. (2014). [*Very Deep Convolutional Networks for Large-Scale Image Recognition*](https://arxiv.org/abs/1409.1556), arXiv:1409.1556, Section 2.3. The two foundational papers; Section 2.3 of VGG explains the three-$3 \times 3$ receptive field argument.
+- He, K., Zhang, X., Ren, S., Sun, J. (2016). [*Deep Residual Learning for Image Recognition*](https://arxiv.org/abs/1512.03385), arXiv:1512.03385, Sections 1 and 3; and He et al. (2016). [*Identity Mappings in Deep Residual Networks*](https://arxiv.org/abs/1603.05027), arXiv:1603.05027. The degradation problem, residual blocks, and why identity shortcuts let signals propagate cleanly.
+- Howard, A. G. et al. (2017). [*MobileNets: Efficient Convolutional Neural Networks for Mobile Vision Applications*](https://arxiv.org/abs/1704.04861), arXiv:1704.04861, Section 3.1; and Tan, M., Le, Q. V. (2019). [*EfficientNet: Rethinking Model Scaling for Convolutional Neural Networks*](https://arxiv.org/abs/1905.11946), arXiv:1905.11946, Section 3. Depthwise separable cost analysis and compound scaling. For pretrained checkpoints, see the [torchvision 0.29 model catalog](https://docs.pytorch.org/vision/0.29/models.html).
+
+<LessonProgress />

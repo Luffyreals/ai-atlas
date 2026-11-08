@@ -1,0 +1,222 @@
+---
+title: 'Data Visualization: Matplotlib and Seaborn'
+description: 'Master data visualization for AI: Figure and Axes architecture, Exploratory Data Analysis (EDA), loss curves, feature scatter plots, and correlation heatmaps.'
+quiz:
+  - question: 'In Matplotlib''s object-oriented architecture, how do `Figure` and `Axes` relate to each other?'
+    options:
+      - '`Axes` is the outer canvas, while `Figure` represents the individual lines drawn inside it'
+      - '`Figure` is the overall canvas that can contain one or more `Axes` coordinate systems where data is actually plotted'
+      - '`Figure` and `Axes` are completely synonymous in Matplotlib'
+      - '`Axes` is only used for 3D plots, while `Figure` is used for 2D plots'
+    answer: 1
+    explanation: '`Figure` acts as the top-level blank page or canvas holding the entire graphic window. Inside a `Figure`, you create one or more `Axes` (individual subplots with their own coordinate axes) to draw lines, scatter points, bars, or heatmaps.'
+  - question: 'During Exploratory Data Analysis (EDA), which plot type is the standard tool for spotting outliers based on the interquartile range (IQR)?'
+    options:
+      - 'Pie chart'
+      - 'Box plot'
+      - 'Line plot'
+      - 'Radar chart'
+    answer: 1
+    explanation: 'A box plot displays five key summary statistics: minimum, first quartile ($Q_1$), median ($Q_2$), third quartile ($Q_3$), and maximum. Data points falling outside $[Q_1 - 1.5 \times \text{IQR}, Q_3 + 1.5 \times \text{IQR}]$ are plotted as individual dots, making outliers immediately visible.'
+  - question: 'Looking at a training plot, the Train Loss curve steadily decreases toward 0, while the Validation Loss curve decreases until epoch 6 and then starts climbing upward. What phenomenon does this chart indicate?'
+    options:
+      - 'Underfitting, because the model is too simple'
+      - 'Overfitting, because the model has started memorizing the training data and losing generalization ability'
+      - 'The learning rate is set too small'
+      - 'The validation dataset was shuffled in reverse order'
+    answer: 1
+    explanation: 'When Train Loss keeps dropping while Validation Loss diverges upward, it is the classic signature of overfitting. The model is memorizing noise in the training set rather than learning generalizable patterns—making epoch 6 the ideal point for Early Stopping.'
+  - question: 'On a Correlation Heatmap, if two input features have a Pearson correlation coefficient of $0.98$, what issue can arise and how should you address it?'
+    options:
+      - 'No issue at all; higher correlation between input features always improves model accuracy'
+      - 'Multicollinearity occurs, making weight estimates in linear models unstable; you should drop one of the redundant features or apply dimensionality reduction'
+      - 'The model will crash with a division-by-zero error'
+      - 'You must double the number of training samples'
+    answer: 1
+    explanation: 'A correlation of $0.98$ means the two features carry almost identical information (multicollinearity). In linear or logistic regression, this makes the covariance matrix nearly singular, causing learned weights to fluctuate wildly. Dropping one feature or applying PCA resolves the redundancy.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import lossCurvesCode from '@code/python/data-visualization/loss-curves.en.py?raw';
+import scatterClustersCode from '@code/python/data-visualization/scatter-clusters.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand the role of data visualization in **Exploratory Data Analysis (EDA)** before training any machine learning model.
+- Master Matplotlib's object-oriented architecture, clearly distinguishing the top-level **Figure** container from individual **Axes** coordinate systems.
+- Choose and interpret essential plots for AI workflows: line plots (loss curves), scatter plots (feature spaces), distribution plots, and correlation heatmaps.
+- Read training curves to diagnose model behavior: convergence, overfitting, and underfitting.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In the previous lesson, you learned how to manipulate NumPy arrays and Pandas DataFrames. In this lesson, you will turn raw numbers and matrices into clear visual insights using Python's two core plotting libraries: **Matplotlib** and **Seaborn**.
+:::
+
+## Intuition
+
+In the famous story of *Anscombe's quartet*, four distinct datasets share the exact same mean, variance, correlation coefficient, and linear regression line. Yet the moment you plot them on a graph:
+- One dataset follows a clean linear trend with mild noise.
+- A second dataset forms a smooth parabolic curve.
+- Another dataset is skewed dramatically by a single extreme outlier!
+
+If you rely solely on summary statistics, your data can easily fool you. **Data Visualization** acts as your microscope to:
+1. Catch anomalies, corrupted values, and outliers before feeding data into a neural network.
+2. Monitor the "heartbeat" of your machine learning model throughout training via loss curves.
+
+## Theory
+
+### Matplotlib's Object-Oriented Architecture
+
+Matplotlib offers two interfaces: a stateful MATLAB-style interface (`plt.plot(...)`) and an explicit **Object-Oriented (OO) API**. In professional AI codebases, the object-oriented approach is the gold standard:
+
+```python
+fig, ax = plt.subplots(figsize=(8, 5))
+```
+
+- **`Figure` (Canvas):** The top-level container holding the entire graphic. It controls overall figure dimensions, background color, figure-wide titles, and all child subplots.
+- **`Axes` (Coordinate System):** The actual plotting area inside a Figure. Each `Axes` owns an X-axis, a Y-axis, ticks, axis labels, a grid, and the plotted data artists. A single `Figure` can hold multiple `Axes` arranged in a grid (for instance, an input image on the left and a class probability bar chart on the right).
+
+### Essential Plots in Machine Learning
+
+#### 1. Line Plot: Monitoring Training Progress
+
+A line plot connects sequential data points across time or training epochs.
+- X-axis: Epoch number (or gradient update step).
+- Y-axis: Loss value or evaluation metric (accuracy, F1-score).
+- AI use case: Monitoring convergence speed and spotting the exact epoch where validation loss diverges from training loss (overfitting).
+
+#### 2. Scatter Plot: Exploring Feature Space
+
+A scatter plot renders each data sample as a point on a 2D plane $(x_1, x_2)$:
+- Reveals linear or nonlinear relationships between two features.
+- Highlights natural clusters in unsupervised learning.
+- Visualizes decision boundaries separating classification classes.
+
+#### 3. Histogram and Kernel Density Estimation (KDE): Inspecting Distributions
+
+- **Histogram:** Divides a continuous range into intervals (**bins**) and counts how many samples fall into each bin.
+- **KDE (Kernel Density Estimation):** Smooths the histogram into a continuous probability density curve.
+- AI use case: Checking whether a feature follows a bell-shaped Gaussian distribution or is heavily skewed. Many algorithms (such as Linear Regression and PCA) perform best when input features are roughly symmetric and unimodal.
+
+#### 4. Box Plot: Detecting Outliers
+
+A box plot summarizes a distribution through five key percentiles:
+- Median ($Q_2$): The line dividing the box.
+- Interquartile box: Spans the middle 50% of the data from $Q_1$ (25th percentile) to $Q_3$ (75th percentile), with width $\text{IQR} = Q_3 - Q_1$.
+- Whiskers: Extend to the most extreme data points within $[Q_1 - 1.5 \times \text{IQR}, Q_3 + 1.5 \times \text{IQR}]$.
+- Individual points plotted beyond the whiskers are **outliers** that warrant closer inspection.
+
+#### 5. Correlation Heatmap
+
+Built on top of Matplotlib, **Seaborn** provides the `sns.heatmap()` function for visualizing matrices:
+- Compute pairwise correlations across all columns with `corr = df.corr()`.
+- Render values as color-coded cells: warm colors indicate strong positive correlation, cool colors indicate strong negative correlation.
+- Quickly spot **multicollinearity** so you can drop redundant features.
+
+## Illustration
+
+The hierarchical relationship between `Figure` and `Axes` in Matplotlib:
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│  Figure (Top-level outer canvas)                             │
+│                                                              │
+│  ┌────────────────────────────┐  ┌─────────────────────────┐ │
+│  │ Axes 1 (Train Loss plot)   │  │ Axes 2 (Val Loss plot)  │ │
+│  │  ▲ Loss                    │  │  ▲ Loss                 │ │
+│  │  │ ╲                       │  │  │ ╲    ╱               │ │
+│  │  │  ╲                      │  │  │  ╲──╱                │ │
+│  │  └────────► Epoch          │  │  └────────► Epoch       │ │
+│  └────────────────────────────┘  └─────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
+```
+
+Diagnosing overfitting from training and validation loss curves:
+
+```text
+ Loss
+  ▲
+  │   Train Loss keeps dropping ──► Model memorizes training set
+  │╲
+  │ ╲       Early Stopping point
+  │  ╲            ▼
+  │   ╲───────────┬───────────────
+  │    ╲          │   ╱
+  │     ╲─────────┴──╱  ◄─── Val Loss rebounds upward (Overfitting!)
+  └──────────────────────────────► Epoch
+```
+
+## Code examples
+
+The cells below run independently. Click **Run** to render the generated charts right in your browser.
+
+The first cell plots training loss (Train Loss) and validation loss (Val Loss) across epochs using Matplotlib's object-oriented API:
+
+<PythonRunner
+  code={lossCurvesCode}
+  title="Line plot tracking training and validation loss curves"
+  figureAlt={[
+    'Line plot showing Train Loss and Val Loss across 8 epochs. Train Loss decreases steadily from 0.82 to 0.08; Val Loss decreases from 0.85 to a minimum of 0.30 at epoch 6 before rising slightly to 0.35, illustrating overfitting.',
+  ]}
+/>
+
+The chart clearly reveals divergence starting after epoch 6: while Train Loss keeps falling, Val Loss turns upward. This visual signal tells you exactly when to trigger Early Stopping.
+
+The second cell generates a 2D feature space scatter plot, distinguishing two classification clusters and marking each cluster's centroid:
+
+<PythonRunner
+  code={scatterClustersCode}
+  title="Feature space scatter plot"
+  figureAlt={[
+    'Scatter plot showing two clusters of data points representing two classes. Class 0 in blue is centered around (2, 2); Class 1 in red is centered around (4.5, 4.5); each cluster centroid is marked with a prominent black X.',
+  ]}
+/>
+
+The scatter plot reveals the geometric structure of the data: because the two clusters are cleanly separated in feature space, a simple linear classifier can easily find an optimal separating boundary.
+
+## Common pitfalls
+
+:::caution[Mixing stateful `plt.*` calls with the Object-Oriented `ax.*` API]
+Mixing `plt.plot()` and `ax.plot()` in the same script makes subplot customization confusing and error-prone when working with multi-panel figures. Always initialize with `fig, ax = plt.subplots()` and call methods directly on `ax` (`ax.set_title()`, `ax.set_xlabel()`).
+:::
+
+:::caution[Forgetting to close figures in loops and leaking RAM]
+When generating hundreds of plots inside an evaluation or image-saving loop, Matplotlib keeps every open figure object in memory until explicitly closed. Always call `plt.close(fig)` after saving a figure to disk to prevent out-of-memory crashes.
+:::
+
+:::caution[Ignoring wildly different axis scales]
+When plotting 2D feature scatter plots or gradient descent contour maps, if one axis spans `0` to `1` while the other spans `0` to `10,000`, the visual geometry becomes severely distorted unless you standardize features or set equal aspect ratios (`ax.set_aspect('equal')`).
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Exploratory Data Analysis (EDA) is mandatory before training any machine learning model; visualization uncovers structural patterns that summary statistics miss.
+- Use Matplotlib's object-oriented API: `Figure` is the outer canvas and `Axes` is the coordinate system holding a specific subplot.
+- Line plots track loss curves and provide early warning of overfitting or underfitting.
+- Box plots and scatter plots are indispensable for spotting outliers and understanding feature space geometry.
+
+**Further reading:**
+
+- Hunter, J. D. (2007). [*Matplotlib: A 2D graphics environment*](https://doi.org/10.1109/MCSE.2007.55). *Computing in Science & Engineering*, 9(3), 90–95. The foundational paper introducing Matplotlib.
+- Waskom, M. L. (2021). [*Seaborn: statistical data visualization*](https://doi.org/10.21105/joss.03021). *Journal of Open Source Software*, 6(60), 3021.
+- Matplotlib Development Team (2024). [*Matplotlib Application Interfaces: Explicit vs Implicit*](https://matplotlib.org/stable/users/explain/quick_start.html). Official guide explaining the Figure/Axes hierarchy and object-oriented API.
+
+<LessonProgress />

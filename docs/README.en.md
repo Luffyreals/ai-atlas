@@ -68,7 +68,7 @@ The learning path spans 5 core stages:
 | **UI Components** | [React 19](https://react.dev) | Interactive widgets (VIZs, Quizzes, Python Runner) loaded on demand |
 | **Python Runtime** | [Pyodide](https://pyodide.org) | In-browser Python 3.10 and data science libraries executed via Web Workers |
 | **Search Engine** | [Pagefind](https://pagefind.app) | Fast, serverless, static full-text search index |
-| **Automated Testing** | [Vitest](https://vitest.dev) + [Playwright](https://playwright.dev) | Over 2,200 unit tests and multi-viewport end-to-end test suites |
+| **Automated Testing** | [Vitest](https://vitest.dev) + [Playwright](https://playwright.dev) | Nearly 2,500 unit tests (2,496 tests) and multi-viewport end-to-end test suites |
 | **Hosting & Edge CDN** | [Cloudflare Pages](https://pages.cloudflare.com) | Edge delivery, automated HTTPS, and HTTP response security headers |
 
 ---
@@ -80,7 +80,7 @@ ai-atlas/
 ├── src/
 │   ├── content/docs/
 │   │   ├── vi/               # Complete 78 Vietnamese lessons
-│   │   └── en/               # English translations
+│   │   └── en/               # Complete 78 English lessons
 │   ├── content/i18n/         # UI localization dictionaries (vi.json, en.json)
 │   ├── components/           # React & Astro components (Quiz, Runner, VIZ, Figures)
 │   ├── lib/                  # Mathematical utilities, SEO helpers, Pyodide client, Fonts
@@ -92,7 +92,7 @@ ai-atlas/
 │   ├── decisions.md          # Chronological record of architectural decisions
 │   └── architecture/         # Detailed engineering specs (homepage, VIZ, launch, etc.)
 ├── tests/
-│   ├── unit/                 # 2,200+ Vitest unit tests (math, content, syntax checks)
+│   ├── unit/                 # 2,490+ Vitest unit tests (math, content, syntax checks)
 │   └── e2e/                  # Playwright end-to-end integration test suites
 ├── public/                   # Static assets, robots.txt, OpenGraph images, Cloudflare _headers
 ├── astro.config.ts           # Astro, Starlight, Fonts API, and KaTeX configuration

@@ -1,0 +1,288 @@
+---
+title: Debugging Language Models
+description: Your language model trains smoothly without throwing an error, yet its outputs are terrible—or suspiciously good. Fast sanity checks across coding, training, and inference, plus a 9-step checklist.
+quiz:
+  - question: 'You just initialized a language model with a vocabulary of $V = 32\,000$ tokens. Before taking a single training step, the loss on the first batch is $45$. What should you think?'
+    options:
+      - 'Normal: an untrained model is supposed to have a high loss'
+      - 'There is a bug before training even starts—for example, bad output-layer initialization or wrong logit scaling—because the expected initial loss is $\ln V \approx 10.4$'
+      - 'The learning rate is too small, so you should increase $\eta$'
+      - 'The model is overfitting'
+    answer: 1
+    explanation: 'An untrained model should assign roughly uniform probabilities across the vocabulary, giving an initial loss near $\ln 32\,000 \approx 10.4$. A loss of $45$ means the model is already wildly confident in wrong tokens at step 0, typically due to overly large initial logits. The first option sounds plausible because "high loss at the start" feels natural, but an untrained model has a sharp theoretical baseline of $\ln V$, not an arbitrarily large number. Learning rate and overfitting only apply after training steps have been taken.'
+  - question: 'You train for 500 steps on a single fixed batch of 2 sentences (20 tokens each) using AdamW with $\eta = 3 \times 10^{-3}$. The loss plateaus at $2.1$ and refuses to drop further. What is the most reasonable conclusion?'
+    options:
+      - 'You need more training data'
+      - 'Normal, because 2 sentences are too few to learn anything'
+      - 'There is still a bug in the code or setup (labels, masks, loss function, or optimizer step) that must be fixed before scaling up to real data'
+      - 'You should reduce the number of steps to prevent overfitting'
+    answer: 2
+    explanation: 'A working model must be able to memorize 2 short sentences almost completely—that is the entire point of the single-batch overfit test. Failing to do so means something is actively blocking learning, such as misaligned labels, frozen parameters, or a broken loss computation. Adding more data only makes optimization harder. The second option gets the test backward: fewer examples make memorization easier, not harder. Even the irreducible entropy floor from shared prefixes is tiny: across $2 \times 19 = 38$ predicted positions, at most one branching point between the two sentences is ambiguous, bounding the floor by $2\ln 2/38 \approx 0.036$. A loss of $2.1$ is guaranteed to be a bug.'
+  - question: 'You log the return value of `clip_grad_norm_(params, max_norm=1.0)` at every step. It hovers around $1$ for the first thousand steps, then suddenly spikes to $600$, while the loss is still finite. Which statement is true?'
+    options:
+      - 'Gradients are exploding: $600$ is the pre-clipping norm, a genuine warning sign; inspect your learning rate, warmup schedule, or the current data batch'
+      - 'Gradient clipping is broken, because the gradient norm must always be $\le 1$'
+      - 'Everything is fine, because clipping already rescaled the gradient so no action is needed'
+      - 'The loss is about to reach 0'
+    answer: 0
+    explanation: '`clip_grad_norm_` returns the total gradient norm computed *before* clipping. Clipping is doing its job—rescaling the gradient vector passed to the optimizer to length $c = 1$ (so with SGD, the parameter step has length at most $\eta c$). However, a several-hundred-fold jump in the pre-clip norm is a real symptom of instability: in our experiment, the norm spikes alongside the loss. Clipping prevents immediate overflow, but it cannot cure an excessive learning rate, so ignoring the spike is dangerous.'
+  - question: 'Your fine-tuned model answers well when you send prompts one by one. When you batch 8 prompts of different lengths together for faster generation, the shorter prompts produce gibberish while the longest prompt still works fine. What is the most likely cause?'
+    options:
+      - 'The sampling temperature $T$ is too low'
+      - 'You forgot `add_generation_prompt=True`'
+      - 'You did not set `max_new_tokens`'
+      - 'Right-side padding: shorter prompts are forced to continue generating after trailing pad tokens'
+    answer: 3
+    explanation: 'Only the shorter prompts break while the longest prompt (which receives zero padding) works normally—that is the unmistakable fingerprint of a padding bug. Because a decoder-only model continues generating from the final token of the input sequence, batched generation requires left-side padding (`padding_side="left"`). A bad temperature or missing `add_generation_prompt` would affect all prompts equally, even at batch size 1. Missing `max_new_tokens` truncates outputs early rather than turning them into gibberish.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import shiftMaskCode from '@code/llm/debugging-language-models/shift-mask.en.py?raw';
+import overfitBatchCode from '@code/llm/debugging-language-models/overfit-batch.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Understand why bugs in language model training are usually **silent**: the code runs without crashing and the loss goes down, yet the learned behavior is wrong.
+- Spot common bugs across three phases: coding (tensor shapes, label shifting, causal masking, special tokens, padding), training (NaNs, learning rate, warmup, gradient clipping), and inference (chat templates, padding side, repetition, and test-set contamination).
+- Implement fast sanity checks: testing for "peeking at the future", comparing initial loss against $\ln V$, overfitting a single small batch, and pinpointing NaNs with `detect_anomaly`.
+- Follow a 9-step pre-flight checklist before spending GPU hours on a long training run.
+
+## Prerequisites
+
+{/* List taken from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In [Build Your First LLM](/en/llm/build-first-llm/), a language model is trained by minimizing average cross-entropy $\mathcal{L} = -\frac{1}{m}\sum_t \ln p_{\boldsymbol{\theta}}(x_t \mid x_{<t})$, and a model that guesses uniformly over $V$ tokens has $\mathcal{L} = \ln V$. GPT is a stack of self-attention blocks with a **causal mask**, ensuring the output at position $t$ depends only on tokens at positions $\le t$.
+:::
+
+## Intuition
+
+### Silent bugs
+
+Suppose you copy the small GPT from [Build Your First LLM](/en/llm/build-first-llm/) onto a larger dataset, tweak a few lines, and launch training. No exception is raised. Within a few hundred steps, the training loss drops from 4.3 down to 0.02. Delighted, you ask the model to generate a sample—and out comes complete gibberish.
+
+What happened? Perhaps you accidentally deleted the line that applies the causal mask. Every matrix still has the exact expected shape, so PyTorch has no reason to complain. The model simply learned a trivial shortcut: peek at the next token in the input and copy it to the output.
+
+Andrej Karpathy famously summarized this as "neural net training fails silently": most of the time, broken training code still runs and still produces a plausible-looking loss curve—just worse results than it should. Traditional software crashes loudly when you make a mistake; a broken neural network quietly adapts around your bug. That means you must **actively prove every assumption** with a small, targeted check rather than waiting for an error message.
+
+### Diagnosing layer by layer
+
+Work like a physician: observe the symptom, then test one layer of the system at a time using a cheap diagnostic check instead of guessing and changing five things at once. For a language model, bugs fall into three phases matching your workflow:
+
+1. **Coding:** are the inputs, shifted labels, masks, and tokenizer actually doing what you think they are doing?
+2. **Training:** does the loss start at the right baseline, can it go down on a tiny batch, and does it stay finite?
+3. **Inference and evaluation:** does the prompt format at test time match training time, and can you trust your evaluation score?
+
+The problem of this lesson is: **when a language model produces terrible outputs—or suspiciously good losses—without raising any error, how do you isolate the bug in seconds using small sanity checks?**
+
+## Theory
+
+### Phase 1: coding bugs
+
+**Matching shapes do not guarantee correct data.** The nastiest shape bugs come from using `view` or `reshape` where you needed `transpose` or `permute`. Both produce the exact same output dimensions, so execution continues without complaint while scrambling features across tokens or even across different examples in the batch. Two habits catch this early: assert or print shapes at each transformation, and during testing, pick **distinct prime-like sizes for every axis**. Our PyTorch script below uses batch size 4, sequence length $L = 16$, embedding dimension 32, and vocabulary size 14. If your batch size, sequence length, and head dimension are all 8, an accidental transpose will pass every shape check unnoticed.
+
+**Unshifted labels.** The logit at position $t$ must predict token $t + 1$. For a sequence $x_1, \dots, x_L$, the proper next-token loss is:
+
+$$
+\mathcal{L} = -\frac{1}{L - 1}\sum_{t=1}^{L-1} \ln p_{\boldsymbol{\theta}}(x_{t+1} \mid x_{\le t})
+$$
+
+The sum runs only up to $L - 1$, because the final token has no following target token. If you forget to shift the labels, each term becomes $\ln p_{\boldsymbol{\theta}}(x_t \mid x_{\le t})$: the target token is already sitting right at the current input position $t$. A model that merely copies its current input token achieves near-zero loss without learning anything. The sanity check: construct a mock "copy-input model" and compute its loss. When labels are shifted properly, a copy model must get a **high** loss, because the next token is rarely identical to the current token. Our NumPy cell in Code examples runs this exact check. (Pairing `logits[:, :-1]` with `labels[:, 1:]` was introduced in [GPT Family and Multi-Task Fine-Tuning](/en/llm/gpt-family-finetuning/).)
+
+**Missing or inverted causal mask.** The causal requirement translates directly into a testable invariant: **changing a token at any future position $j > t$ must have zero effect on the model's output at position $t$**. Think of grading an exam: if changing a student's answer on Question 10 alters their score on Question 3, something leaked backward. The check is equally direct: run the model on two sequences that differ only at position $t + 1$, and compare the outputs at all positions $\le t$. With a working causal mask, the maximum difference must be **0** (up to tiny floating-point rounding around $10^{-7}$ on GPU, never $0.1$). Karpathy suggests a related gradient-based variant: backpropagate the loss from position $t$ and verify that the input gradients are zero at all positions $> t$. Also watch PyTorch's mask sign conventions: for a boolean `attn_mask` in `nn.MultiheadAttention`, `True` means **blocked** (masked out), whereas `F.scaled_dot_product_attention` uses the opposite convention (`True` means allowed to attend). See [Build Your First LLM](/en/llm/build-first-llm/) for details.
+
+**Special tokens and padding.** Three silent pitfalls crop up repeatedly:
+
+- **Missing or duplicated special tokens.** Masking out the `<EOS>` token at the end of an assistant response prevents the model from learning when to stop talking. Conversely, passing an already-formatted chat string into a tokenizer with default settings can prepend a second `<BOS>` token. Both traps were covered in [GPT Family and Multi-Task Fine-Tuning](/en/llm/gpt-family-finetuning/).
+- **Computing loss on pad tokens.** **Padding** tokens are appended (or prepended) only so sequences in a batch share the same length. Every padded target position must be set to $-100$, the default `ignore_index` of `F.cross_entropy`.
+- **An entire batch where every label is $-100$.** If a long prompt pushes the assistant response past your truncation limit on every example in the batch, all labels become $-100$. The denominator of the mean cross-entropy is the number of non-ignored targets—which is now 0—resulting in `0 / 0 = nan`, as demonstrated in our PyTorch script below.
+
+### Phase 2: training bugs
+
+**Check the initial loss at step 0.** A freshly initialized model knows nothing yet, so it should assign roughly uniform probability $1/V$ to every token in the vocabulary. At step 0, your cross-entropy loss should therefore sit close to:
+
+$$
+\mathcal{L}_{\text{init}} \approx -\ln \frac{1}{V} = \ln V
+$$
+
+For $V = 50\,257$ (GPT-2's vocabulary), this baseline is $\ln V \approx 10.82$. This check is completely free—it requires zero training steps. "Close to" means the same ballpark, not exact to three decimal places: in our PyTorch script with $V = 14$, $\ln V = 2.639$ and the step-0 loss is 2.951 (about 12% higher because random initial logits are not perfectly zero), which is healthy. An initial loss of 30 when $\ln V = 10.8$ is a red flag: the network is starting out wildly overconfident in wrong tokens, usually due to an unscaled output projection. Conversely, an initial loss much *lower* than $\ln V$ is equally suspicious, since random weights cannot beat uniform guessing—check whether your loss denominator is accidentally dividing by total sequence length including ignored padding positions.
+
+**Overfit a single small batch.** Grab a fixed batch of 2 to 4 short sequences and train on that exact same batch for a few hundred steps. Any working model and optimizer must be able to memorize a handful of sequences, driving training loss down near zero. Think of it as revving an engine in neutral before pulling onto the highway: if the car cannot run sitting still, driving it cross-country is hopeless. If loss refuses to drop on 2 sequences, you have a bug in your labels, mask, loss reduction, or parameter updates—fix that before worrying about dataset size or model capacity. Note that "near zero" means approaching the entropy floor of repeated prefixes in the batch, not necessarily 0.0000 (our PyTorch example walks through the exact math).
+
+**NaNs and infinities.** Once a single loss value turns into `nan`, every subsequent gradient and weight update becomes `nan` permanently. Common culprits include dividing by zero, `log(0)`, taking the derivative of `sqrt(x)` at $x = 0$ (where $\frac{1}{2\sqrt{x}} = \infty$), `exp` overflow on huge logits, a batch where all labels are $-100$, or a learning rate so large that weights explode to infinity. Two tools save hours of guesswork:
+
+- Check `torch.isfinite(loss)` at every step and halt immediately with the step index. Knowing the exact step where instability begins narrows down the search dramatically.
+- Wrap the suspect forward/backward pass in `torch.autograd.detect_anomaly()`. It catches the exact backward operation that first produced `nan` and prints the stack trace of the corresponding forward line that created that node. Because PyTorch's documentation warns that anomaly detection adds heavy runtime overhead, leave it off during normal training: use `isfinite` to find the failing step, then re-run that step with `detect_anomaly()` enabled.
+
+**Learning rate too high.** The classic symptom is a loss that spikes into the thousands or turns `nan` within a few steps. A vital dashboard metric to log alongside the loss is the **gradient norm**: it spikes simultaneously with loss instabilities and remains visible even when gradient clipping is active (see the extra experiment in Code examples). The first remedy is to lower the learning rate $\eta$, typically by factors of 3 to 10 (see [Gradient Descent](/en/ml/gradient-descent/)).
+
+**Gradient clipping.** Let $\mathbf{g} = \nabla_{\boldsymbol{\theta}}\mathcal{L}$ be the global vector formed by concatenating the gradients of all model parameters, and let $c$ be the maximum norm threshold. Before the optimizer updates the weights, rescale $\mathbf{g}$:
+
+$$
+\mathbf{g} \leftarrow \mathbf{g} \cdot \min\!\left(1, \frac{c}{\lVert\mathbf{g}\rVert_2}\right)
+$$
+
+When $\lVert\mathbf{g}\rVert_2 \le c$, the factor is 1 and the gradient is untouched. When $\lVert\mathbf{g}\rVert_2 > c$, the factor is $c / \lVert\mathbf{g}\rVert_2 < 1$, rescaling the vector so its Euclidean norm equals $c$. The **direction** of the gradient is preserved; only its magnitude is capped. [Pascanu et al. (2012)](https://arxiv.org/abs/1211.5063) introduced this technique to combat exploding gradients in recurrent neural networks. In PyTorch, call `torch.nn.utils.clip_grad_norm_(model.parameters(), c)` **after** `loss.backward()` and **before** `optimizer.step()`. The function modifies gradients in-place and returns the global norm **before clipping**—logging this return value gives you the exact instability gauge described above.
+
+**Learning rate warmup.** Instead of starting training at the full peak learning rate $\eta$, we ramp $\eta$ up linearly from near 0 over the first $s$ steps, and only then decay it. The original Transformer (Vaswani et al., 2017) used the schedule:
+
+$$
+\eta_t = d_{\text{model}}^{-0.5} \cdot \min\!\left(t^{-0.5},\ t \cdot s^{-1.5}\right)
+$$
+
+where $t$ is the step number, $s$ is the number of warmup steps ($4\,000$ in the paper), and $d_{\text{model}}$ is the model hidden dimension. Compare the two branches inside $\min$: $t \cdot s^{-1.5} < t^{-0.5}$ if and only if $t^{1.5} < s^{1.5}$, i.e., $t < s$. Thus for $t < s$, the linear ramp $t \cdot s^{-1.5}$ is smaller and wins; for $t > s$, the inverse-square-root decay $t^{-0.5}$ is smaller and wins. The two branches meet at $t = s$, where $\eta_t$ reaches its peak: for $d_{\text{model}} = 512$ and $s = 4\,000$, the peak is $1/\sqrt{512 \cdot 4\,000} \approx 7 \times 10^{-4}$.
+
+Why is warmup needed in the first place? Xiong et al. (2020) proved theoretically and empirically that in the original Transformer—which places LayerNorm **after** the residual addition (Post-LN)—parameter gradients near the output layers are very large at initialization, so taking large Adam steps immediately destabilizes training. When LayerNorm is placed **before** attention and MLP inside the residual branch (Pre-LN, as in GPT-2, LLaMA, and the small GPT in [Build Your First LLM](/en/llm/build-first-llm/)), initial gradients are well-behaved and training can succeed even without warmup. Warmup is therefore a targeted stabilizer for early gradient variance, though it remains standard practice at large scale.
+
+### Phase 3: inference and evaluation bugs
+
+**Mismatched chat template.** Every instruction-tuned chat model expects the exact special-token framing it was trained on. The Hugging Face Transformers documentation illustrates how two chat models fine-tuned from the exact same base model can use `[INST] ... [/INST]` in one case and `<|user|> ... <|assistant|>` in another—and warns that feeding the wrong template degrades output quality severely. Two related mistakes: forgetting `add_generation_prompt=True` at inference time (so the model tries to continue the user's question rather than starting the assistant's reply), and feeding raw untemplated strings into a chat model. Follow Karpathy's rule: inspect the exact input **right before it enters the model** by decoding the final token IDs back to text and reading them with your own eyes.
+
+**Wrong padding side during batched generation.** A decoder-only model predicts the next token immediately following the final token of the input sequence. If you pad shorter prompts on the right, those prompts end with a run of `<PAD>` tokens, forcing the model to generate a continuation after padding—a context it never learned to handle. The Transformers documentation shows a concrete example with Mistral-7B (2023): given the prompt `"1, 2, 3"`, right-padding produces `"1, 2, 33333333333"`, whereas left-padding cleanly produces `"1, 2, 3, 4, 5, 6,"`. The rule is simple: **for batched autoregressive generation, always pad on the left** (`padding_side="left"`).
+
+**Truncated or repetitive outputs.** In Hugging Face Transformers, `model.generate()` defaults to a total length of 20 tokens (including the prompt!) if neither the call nor the model config specifies `max_new_tokens`. Abruptly cut-off answers are often just a missing `max_new_tokens` argument. Similarly, repetitive loops do not necessarily mean your weights are broken: `generate()` defaults to greedy decoding, and [Holtzman et al. (2019)](https://arxiv.org/abs/1904.09751) showed that likelihood-maximizing decoding (greedy and beam search) naturally degenerates into bland, repetitive loops even on strong human-level language models. Before blaming your training run, switch to sampling with temperature $T$, top-$k$, or top-$p$ (see [Using Text Generation APIs](/en/llm/text-api/)), or set `repetition_penalty > 1.0`.
+
+**Test-set contamination.** If test examples leak into the training corpus, your evaluation metric measures **memorization** rather than generalization. As discussed in [Model Evaluation and PEFT](/en/llm/evaluation-peft/), the GPT-3 paper (Brown et al., 2020) audited contamination by flagging test examples sharing 13-gram overlaps with the pre-training corpus and comparing clean vs. full scores—after discovering a bug in their own deduplication script that had left some overlaps in the training data. Always split train and test sets **before** any preprocessing or augmentation, deduplicate across splits, and treat "too-good-to-be-true" validation losses with suspicion. (By contrast, training loss going down while validation loss goes up is ordinary overfitting—see [Overfitting and Underfitting](/en/ml/overfitting-underfitting/)—not a code bug.)
+
+:::note[Key takeaway]
+Language model bugs are usually silent, so every assumption deserves an explicit check. The two essential Phase 1 checks are "a copy-input model must get high loss" and "changing a future token must leave past outputs unchanged". The two essential Phase 2 checks are "initial loss $\approx \ln V$" and "overfit a single small batch". Gradient clipping $\mathbf{g} \leftarrow \mathbf{g} \cdot \min(1, c/\lVert\mathbf{g}\rVert_2)$ prevents overflow spikes but does not replace tuning $\eta$. And inference bugs usually live in the input formatting rather than the model weights.
+:::
+
+### Limitations
+
+- **Sanity checks catch bugs, not mediocre models.** Passing every step of the checklist only guarantees your pipeline is wired correctly; measuring actual downstream capability is the subject of [Model Evaluation and PEFT](/en/llm/evaluation-peft/).
+- **Specific numbers depend on model size and seed** (such as the exact loss values in our PyTorch cell). The qualitative patterns hold universally, while the exact numbers vary.
+- **Large-scale distributed failure modes**—such as loss spikes appearing after tens of thousands of steps or synchronization bugs across multi-GPU tensor/pipeline parallelism—are outside this lesson's scope. See [The LLaMA Family: RoPE and Parallel Training](/en/llm/llama-family/) for multi-GPU training concepts.
+
+## Illustration
+
+The reference table below organizes the bugs from this lesson by their observable symptom. Start in the left column with what you see on screen, then read across to find the prime suspects and the fastest check to run.
+
+| Observable symptom | Common root cause | Fast check to run |
+|---|---|---|
+| Training loss drops near 0 almost immediately, but generated text is gibberish | Forgot to shift labels, or missing/inverted causal mask | Evaluate a mock copy-input model; Perturb token $t+1$ and verify outputs at $\le t$ change by $0$ |
+| Step-0 loss is far from $\ln V$ | Bad output-layer init or logit scaling (if much higher); wrong loss denominator (if much lower) | Compare step-0 loss against $\ln V$ before taking any optimizer step |
+| Loss refuses to drop even on 2–4 short sequences | Misaligned labels, frozen parameters, broken loss, or extreme learning rate $\eta$ | Run the single-batch overfit test |
+| Loss is `nan` on the very first step | All labels in batch are $-100$, `log(0)`, or division by zero | Count labels $\ne -100$ per batch; run under `detect_anomaly` |
+| Gradient norm and loss spike together, sometimes hitting `nan` | Learning rate $\eta$ too large, or missing warmup | Log the return value of `clip_grad_norm_`; lower $\eta$, add warmup and clipping |
+| Training loss decreases while validation loss increases | Overfitting | Plot both curves; add data, regularization, or early stopping |
+| Validation loss or benchmark score is suspiciously good | Test-set contamination | Check n-gram overlap between train and test splits; split before preprocessing |
+| Model continues the user's question or speaks out of character | Wrong chat template, missing `add_generation_prompt=True`, or duplicate `<BOS>` token | Decode and print the exact tokenized string right before it enters the model |
+| Model rambles forever and never stops | `<EOS>` token was masked to $-100$ during fine-tuning | Inspect target labels at the end of assistant turns |
+| Batched generation ruins short prompts while single prompts work | Right-side padding (`padding_side="right"`) | Set `padding_side="left"` when batch-generating with decoder-only models |
+| Outputs cut off after a few words, or get stuck repeating phrases | Missing `max_new_tokens`; default greedy decoding | Set `max_new_tokens`; switch to temperature / top-$p$ sampling or `repetition_penalty` |
+
+Distilling the table above gives a practical **9-step pre-flight checklist** before launching any long training run:
+
+1. Assert tensor shapes at key boundaries using distinct sizes for every axis ($B, L, D, V$).
+2. Decode a tokenized training example back to text and visually verify `<BOS>`, `<EOS>`, and chat template tags.
+3. Verify label alignment: logit $t$ predicts token $t + 1$, pad positions have label $-100$, assistant `<EOS>` is unmasked, and every batch has at least one valid label $\ne -100$.
+4. Verify causal masking: perturbing token $t + 1$ must change outputs at positions $\le t$ by 0.
+5. Check that step-0 loss is close to $\ln V$.
+6. Overfit a single small batch of 2–4 sequences down to the entropy floor.
+7. Log loss and pre-clip gradient norm at every step, halt immediately on non-finite values, and use gradient clipping and warmup as needed.
+8. Split train and validation sets before any preprocessing and check for n-gram leakage.
+9. At inference time: apply the exact chat template with `add_generation_prompt=True`, pad on the left for batched generation, set `max_new_tokens`, and test sampling parameters.
+
+## Code examples
+
+The code in this lesson was last tested in October 2026: the NumPy cell with Python 3.14 and NumPy 2.4 (in Pyodide), and the PyTorch cell with Python 3.14 and PyTorch 2.14 on CPU. The NumPy cell runs directly in your browser; the PyTorch cell runs on your machine.
+
+### Checking label shifting and the causal mask
+
+The cell below runs both Phase 1 checks on the character sequence `"trăm năm trong cõi người ta"` (one character per token). Part 1 builds a cheating "copy model" that assigns logit 20 to the exact token it is currently reading and 0 to all other tokens, comparing its loss when labels are unshifted (bug) versus properly shifted. Part 2 builds a single attention head with random weights, perturbs the token at index `t + 1 = 10`, and measures the maximum absolute change in the output across positions `0` through `t = 9` with and without a causal mask.
+
+<PythonRunner code={shiftMaskCode} title="Checking label shifting and future-token leakage" />
+
+Reading the output:
+
+- **`no shift: 0.0000`**: when labels are not shifted, a trivial copy-input model achieves a perfect 0.0000 loss without learning anything about language. That is why an implausibly fast drop to zero loss should immediately trigger suspicion.
+- **`shifted:  20.0000`**: when labels are properly shifted so position $t$ predicts position $t + 1$, the copy model is heavily penalized at every position because no two adjacent characters in this string are identical. (The exact number 20 simply reflects the peak logit value of 20 chosen in the script; the takeaway is that the loss is **high**.)
+- **`causal=True: ... 0.00e+00`**: with the causal mask enabled, changing token 10 changes outputs at positions $0 \dots 9$ by **exact 0**.
+- **`causal=False: ... 1.04e-01`**: without the causal mask, future information leaks backward and alters earlier positions by $0.104$. Any non-zero value above floating-point rounding proves a causal leak.
+
+On your own model, simply replace the `attend` function with a forward pass of your network and compare the output logits at `[:t + 1]`.
+
+### Overfitting a single batch and catching NaNs
+
+The script below builds a miniature language model in PyTorch: token and positional embeddings, a 4-head `nn.MultiheadAttention` layer with a boolean causal mask, and a linear head projecting to $V = 14$ logits. The dataset is a single fixed batch of 4 **random** sequences of length 16. Because the sequences are random, there is no generalizable pattern—the model can only succeed by memorizing the batch, which is the exact purpose of the test. The script prints the step-0 loss alongside $\ln V$, trains for 201 steps with AdamW on that single batch while checking `isfinite` and clipping gradients at $c = 1$, and finishes by demonstrating two deliberate NaN bugs: an all-`-100` batch and a `sqrt(0)` derivative caught by `detect_anomaly`.
+
+<LocalCode
+  code={overfitBatchCode}
+  title="Initial loss check, single-batch overfit, and catching NaNs"
+  packages={['torch']}
+  hardware="CPU is sufficient, no GPU required. Takes about 10 seconds on a dev laptop"
+  sampleVaries={false}
+>
+
+```text
+first two tokens: [[4, 3], [4, 2], [11, 12], [4, 5]]
+ln V = 2.639  start loss = 2.951
+step   0  loss 2.9513  grad norm 1.12
+step  50  loss 0.0691  grad norm 0.05
+step 100  loss 0.0569  grad norm 0.01
+step 150  loss 0.0561  grad norm 0.00
+step 200  loss 0.0557  grad norm 0.00
+all labels -100: tensor(nan)
+anomaly: Function 'SqrtBackward0' returned nan values in its 0th output.
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **Initial loss is 2.951**, right next to the theoretical uniform baseline $\ln V = 2.639$.
+- **Overfitting succeeds:** loss drops from 2.951 to below 0.07 in 50 steps and converges to 0.0557. The mask, shifted labels, loss function, and optimizer wiring are all working.
+- **Why does the loss plateau at 0.0557 instead of 0.0000?** Look at the first line of output: three of the four random sequences happen to start with token `4`, and then branch to `3`, `2`, and `5` at the second token. At position 0, the model only sees `[4]`, so no causal model can know which of the three sequences it is in. All three share the exact same next-token distribution at position 0, and the sum $-(\ln p_3 + \ln p_2 + \ln p_5)$ is minimized when $p_3 = p_2 = p_5 = 1/3$, contributing $3\ln 3$ to the total loss sum. Across $4 \times 15 = 60$ predicted positions in the batch, the theoretical minimum loss is therefore $3\ln 3 / 60 \approx 0.055$. Reaching 0.0557 means the model has hit the exact information-theoretic floor of the batch!
+- **`grad norm`** logs the pre-clip norm returned by `clip_grad_norm_`: 1.12 at step 0, decaying smoothly to 0.00 as the batch is memorized.
+- **`all labels -100: tensor(nan)`**: when every target in a batch is ignored, `cross_entropy` divides 0 by 0 and returns `nan`.
+- **`anomaly`**: `detect_anomaly` pinpoints `SqrtBackward0`. Because the derivative of $\sqrt{x}$ at $x = 0$ is $\infty$, multiplying by the upstream gradient of `0` yields $\infty \times 0 = \text{nan}$. In a real run, the accompanying forward stack trace points straight to the offending line `(torch.sqrt(x) * 0).sum().backward()`.
+
+**Extra experiment: what happens when the learning rate is way too high?** If you change the optimizer in the script to `torch.optim.SGD(model.parameters(), lr=10)` and disable clipping by setting the threshold to `float("inf")`, logging every step shows the pre-clip gradient norm exploding in lockstep with the loss: Step 1 has loss 4.75 and grad norm 4.30; Step 2 jumps to loss 389 and grad norm 575; Step 3 hits loss $5.9 \times 10^{10}$ and grad norm $1.1 \times 10^{11}$; and at Step 4 the `isfinite` guard halts the loop with `loss = nan at step 4`. If you keep the clipping threshold at `1.0` with `lr=10`, clipping prevents the `nan` crash, but between steps 50 and 200 the loss bounces chaotically between 12 and 200, never once dropping below the initial 2.95. Clipping prevents overflow, but it cannot make an absurd learning rate converge.
+
+## Common pitfalls
+
+:::caution[Assuming "no exception and decreasing loss" means the code is bug-free]
+Missing causal masks, unshifted labels, and wrong-side padding all preserve tensor shapes, so PyTorch runs without a single warning. Worse, an unusually fast drop in loss is often a symptom of label leakage: in our NumPy cell, a trivial copy-input model achieved 0.0000 loss when labels were not shifted. Run the Phase 1 and Phase 2 sanity checks before trusting any pretty loss curve.
+:::
+
+:::caution[Thinking gradient clipping replaces tuning the learning rate]
+`clip_grad_norm_` only caps the norm of the gradient vector handed to the optimizer (bounding an SGD step to length $\eta c$). If $\eta$ is far too large, clipping prevents `nan` overflow, but the model still fails to learn—as our `lr=10` experiment showed. A second common confusion is thinking the value returned by `clip_grad_norm_` is the *post-clip* norm and concluding that clipping "isn't working" when the logged number exceeds $c$. The return value is the *pre-clip* norm, which is precisely what makes it a great diagnostic gauge.
+:::
+
+:::caution[Blaming model weights when the inference pipeline is misconfigured]
+Off-topic, repetitive, or truncated outputs from a trained model are usually caused by the inference wrapper rather than the weights: mismatched chat templates, right-side padding in batched generation, missing `max_new_tokens`, or default greedy decoding. (When calling hosted APIs, the provider handles the chat template and batching for you, though `temperature`, `top_p`, and `max_tokens` remain under your control.) Always decode and inspect the exact token sequence entering the model before retraining.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Language model bugs almost always fail silently. Debugging means proving each assumption with a fast, targeted test across three phases: coding, training, and inference.
+- Phase 1 (coding): a mock copy-input model must get high loss when labels are properly shifted; perturbing a future token at $t + 1$ must change outputs at $\le t$ by exact 0; pad positions must use label $-100$ while assistant `<EOS>` tokens remain unmasked.
+- Phase 2 (training): step-0 loss must sit near $\ln V$; the model must overfit a single batch of 2–4 sequences down to its entropy floor; halt immediately on non-finite loss; monitor pre-clip gradient norms; remember that $\mathbf{g} \leftarrow \mathbf{g} \cdot \min(1, c/\lVert\mathbf{g}\rVert_2)$ prevents overflow spikes without replacing a proper $\eta$; and use warmup especially with Post-LN architectures.
+- Phase 3 (inference): match the exact chat template with `add_generation_prompt=True`, use `padding_side="left"` for batched generation, set `max_new_tokens`, test sampling hyperparameters before blaming the weights, and split/deduplicate test sets before preprocessing to prevent contamination.
+
+**Further reading:**
+
+- Karpathy, A. (2019). [*A Recipe for Training Neural Networks*](https://karpathy.github.io/2019/04/25/recipe/), personal blog, especially "Neural net training fails silently" and Step 2. The classic practitioner guide that inspired the initial-loss check, single-batch overfit test, visualizing inputs right before the model, and gradient-based dependency checks.
+- PyTorch. [*Automatic differentiation package*](https://docs.pytorch.org/docs/2.14/autograd.html) (anomaly detection) and [*clip_grad_norm_*](https://docs.pytorch.org/docs/2.14/generated/torch.nn.utils.clip_grad_norm_.html) (PyTorch 2.14 official documentation, accessed October 2026). Details `detect_anomaly` and the pre-clip return value of `clip_grad_norm_`.
+- Hugging Face. [*Text generation*](https://huggingface.co/docs/transformers/v5.20.2/en/llm_tutorial) and [*Chat templates*](https://huggingface.co/docs/transformers/v5.20.2/en/chat_templating) (Transformers 5.20.2 official documentation, accessed October 2026). See the "Pitfalls" sections covering output length, decoding strategies, left vs. right padding, and prompt formatting.
+- Xiong, R., Yang, Y., He, D., et al. (2020). [*On Layer Normalization in the Transformer Architecture*](https://arxiv.org/abs/2002.04745), arXiv:2002.04745, ICML 2020. Explains why Post-LN Transformers require learning rate warmup whereas Pre-LN Transformers have well-behaved initial gradients.
+- Brown, T. B., Mann, B., Ryder, N., et al. (2020). [*Language Models are Few-Shot Learners*](https://arxiv.org/abs/2005.14165), arXiv:2005.14165, Section 4. Details the 13-gram contamination audit and the authors' own deduplication bug.
+
+<LessonProgress />

@@ -3,13 +3,13 @@ from PIL import Image, ImageDraw
 from transformers import CLIPModel, CLIPProcessor
 
 torch.manual_seed(0)
-NAME = "openai/clip-vit-base-patch32"  # lần đầu tải 0.6 tới 1.2 GB
+NAME = "openai/clip-vit-base-patch32"  # first run downloads 0.6 to 1.2 GB
 model = CLIPModel.from_pretrained(NAME).eval()
 processor = CLIPProcessor.from_pretrained(NAME)
 
 
 def draw(shape, color, n=1):
-    # Ảnh 224 x 224 nền trắng, n hình cùng loại xếp thành hàng ngang
+    # 224 x 224 white canvas with n identical shapes arranged in a row
     img = Image.new("RGB", (224, 224), "white")
     d = ImageDraw.Draw(img)
     step = 180 // n
@@ -33,7 +33,7 @@ def zero_shot(images, labels):
                        return_tensors="pt", padding=True)
     with torch.no_grad():
         out = model(**inputs)
-    # logits = cosine / tau; softmax theo hàng: mỗi ảnh một phân phối
+    # logits = cosine / tau; row-wise softmax gives a distribution per image
     return out.logits_per_image.softmax(dim=1)
 
 
@@ -46,7 +46,7 @@ for (s, c), row in zip(shapes, probs):
     cells = " ".join(f"{p:.3f}" for p in row.tolist())
     print(f"{c} {s}: {cells} -> {labels[row.argmax()]}")
 
-# Đếm: ảnh có 3 hình tròn đỏ, hỏi có mấy hình
+# Counting: image with 3 red circles, asking how many shapes there are
 counts = ["one red circle", "two red circles", "three red circles",
           "four red circles"]
 row = zero_shot([draw("circle", "red", n=3)], counts)[0]

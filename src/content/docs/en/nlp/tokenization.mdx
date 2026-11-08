@@ -1,0 +1,337 @@
+---
+title: Tokenization
+description: Splitting text into tokens for language models. Word, character, and subword tokenization; Vietnamese word segmentation; BPE, WordPiece, Unigram, and SentencePiece; and why Vietnamese costs more tokens.
+quiz:
+  - question: 'A tiny corpus has word counts: `nhà` 5 times, `nhanh` 4 times, `anh` 3 times. Each word is split into characters with `_` appended at the end. Which pair does BPE merge in step 1, and with what count?'
+    options:
+      - '`n` + `h`, with count 12'
+      - '`n` + `h`, with count 16'
+      - '`a` + `n`, with count 7'
+      - '`h` + `_`, with count 7'
+    answer: 1
+    explanation: 'Each occurrence of a pair inside a word is weighted by that word''s frequency. Because `nhanh` contains `n h` twice (at the beginning and at the end), it contributes $2 \times 4 = 8$; `nhà` contributes 5 and `anh` contributes 3, for a total of 16. Getting 12 comes from counting each word only once and forgetting that a pair can appear multiple times within the same word. Both `a n` and `h _` have count 7.'
+  - question: 'A byte-level BPE tokenizer like GPT-2''s encounters a string of Khmer script that never appeared in its training corpus. What happens?'
+    options:
+      - 'The entire string is replaced by a single `[UNK]` token'
+      - 'The tokenizer raises an error because the characters are out of vocabulary'
+      - 'The string is split into its UTF-8 bytes; every byte is in the base vocabulary so no unknown token occurs, but the string takes many tokens'
+      - 'Unseen characters are silently stripped, leaving only spaces and punctuation'
+    answer: 2
+    explanation: 'The base vocabulary of byte-level BPE contains all 256 possible byte values, and every UTF-8 string is a sequence of bytes. Thus any text can be tokenized without ever producing `[UNK]`. The trade-off is that because few or no merges were learned for Khmer byte sequences, each 3-byte Khmer character may remain split into up to 3 separate byte tokens. `[UNK]` occurs in character-based subword tokenizers like BERT''s WordPiece when a base character is missing from the vocabulary.'
+  - question: 'A dictionary contains `học sinh`, `sinh học`, `học`, and `sinh`. How do left-to-right and right-to-left maximum matching segment the 3-syllable phrase `sinh học sinh`?'
+    options:
+      - 'Left-to-right: `sinh học | sinh`. Right-to-left: `sinh học | sinh`'
+      - 'Left-to-right: `sinh | học sinh`. Right-to-left: `sinh học | sinh`'
+      - 'Both directions: `sinh | học | sinh`'
+      - 'Left-to-right: `sinh học | sinh`. Right-to-left: `sinh | học sinh`'
+    answer: 3
+    explanation: 'Scanning from the left, the first two syllables `sinh học` form a dictionary entry and are matched greedily, leaving `sinh`. Scanning from the right, the last two syllables `học sinh` form a dictionary entry and are matched first, leaving `sinh` at the front. The two directions disagree because the middle syllable `học` can pair with either neighbor—an example of overlapping ambiguity that requires sentence context rather than a lexicon alone to resolve.'
+  - question: 'In the token-counting code cell, the Vietnamese sentence takes 33 tokens with GPT-2''s tokenizer but only 9 tokens with mBERT''s tokenizer. Which explanation is most accurate?'
+    options:
+      - 'GPT-2''s BPE merges were learned from almost exclusively English text, so the multi-byte UTF-8 sequences of accented Vietnamese vowels are rarely merged and stay split into 2–3 byte tokens each'
+      - 'GPT-2 tokenizes text character by character, whereas mBERT tokenizes word by word'
+      - 'GPT-2 strips Vietnamese diacritics first and uses extra tokens to record the removed tone marks'
+      - 'mBERT runs a Vietnamese word segmenter first so every multi-syllable compound becomes a single token'
+    answer: 0
+    explanation: 'GPT-2 uses byte-level BPE, whose learned merges reflect its English-heavy training data: common English words like `Students` or ` studying` become single tokens, whereas the 3 UTF-8 bytes of `ọ` remain 3 separate tokens. mBERT has a 119,547-piece WordPiece vocabulary trained on multilingual Wikipedia, so whole Vietnamese syllables like `Học` and `trường` sit in its vocabulary as single tokens. Neither tokenizer performs Vietnamese word segmentation: `học sinh` is still split at the space into `học` and `sinh`.'
+  - question: 'You train a BPE tokenizer on a fixed corpus and increase the number of merge operations from 8,000 to 64,000. Which statement is true?'
+    options:
+      - 'Tokenized sequences get longer because there are more tokens to choose from'
+      - 'Nothing changes in how words are split because BPE is deterministic'
+      - 'Tokenized sequences get shorter on average, but the model''s embedding and output projection matrices grow larger and late merges correspond to rarer substrings'
+      - 'Every word in the language is now guaranteed to be a single token'
+    answer: 2
+    explanation: 'Each additional merge introduces a longer subword token into the vocabulary, so encoding the same text requires fewer tokens. In exchange, every vocabulary entry adds a row to the input embedding matrix and the output language-modeling head, and the later merges combine increasingly rare substrings that receive fewer updates during training. Rare words can still be split into multiple pieces. Vocabulary size (via the number of merges $K$) is a core design trade-off.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import BpeMergeViz from '@components/viz/BpeMergeViz.astro';
+import maxMatchCode from '@code/nlp/tokenization/max-match.en.py?raw';
+import bpeCode from '@code/nlp/tokenization/bpe.en.py?raw';
+import countTokensCode from '@code/nlp/tokenization/count-tokens.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Compare the three main ways of splitting text into **tokens**—by word, by character, and by **subword**—and explain why modern language models use subwords.
+- Explain why Vietnamese poses a special challenge: spaces separate syllables rather than words, while many words span multiple syllables. Implement **maximum matching** and show where it fails.
+- Trace the **BPE** (Byte Pair Encoding) algorithm by hand, and explain how WordPiece, Unigram LM, SentencePiece, and byte-level BPE differ from one another.
+- Count tokens with real pretrained tokenizers, explain why expressing the same meaning in Vietnamese can cost several times more tokens than in English, and recognize the role of **special tokens**.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+## Intuition
+
+### Models do not read characters—they read numbers
+
+Suppose you want to feed the Vietnamese sentence `"Học sinh đang học sinh học ở trường."` (*"Students are studying biology at school."*) into a neural language model. Neural networks only accept tensors of numbers: each piece of text must first be mapped to an integer index in a fixed list called the **vocabulary**. Before any matrix multiplication can happen, we have to answer two questions: how do we slice the sentence into pieces, and which integer ID does each piece get? That slicing process is **tokenization**, each piece is a **token**, and the component that performs it is the **tokenizer**.
+
+There are three natural granularities to choose from:
+
+| Granularity | How the sentence above is split | Token count | Vocabulary size required |
+|---|---|---:|---|
+| Word / syllable level (split on spaces & punctuation) | `Học` `sinh` `đang` `học` `sinh` `học` `ở` `trường` `.` | 9 | Huge: every word and variant |
+| Character level | `H` `ọ` `c`, space, `s` `i` … | 36 | Tiny: a few hundred characters |
+| Subword level | frequent pieces stay whole, rare pieces split into smaller parts | in between | Chosen by you (typically 30k–128k) |
+
+**Word-level tokenization** keeps sequences short, but no fixed vocabulary can ever cover every word you will meet at test time. Whenever the model encounters a typo (`"truong"`), a new proper name, or a coinages/loanword, it has to replace it with a generic unknown token, usually written `[UNK]`. This is the **out-of-vocabulary** (OOV) problem. Splitting on regex word boundaries as in [Regular Expressions (Regex)](/en/nlp/regex/) is a useful first pass, but it cannot solve OOV words on its own.
+
+**Character-level tokenization** eliminates unknown words almost completely, but sequences become 4–5 times longer and individual characters carry very little semantic meaning on their own ([Build Your First LLM](/en/llm/build-first-llm/) used character tokens to keep the code tiny, noting that limitation).
+
+**Subword tokenization** hits the sweet spot between the two: common words or syllables like `"trường"` remain a single token, while rarer words are broken into a few familiar subword pieces. Nothing turns into `[UNK]`, and sequences stay compact.
+
+### Why Vietnamese is tricky: spaces separate syllables, not words
+
+In English, spaces almost always mark word boundaries. In written Vietnamese, spaces separate **syllables** (*tiếng*), whereas a single word often consists of two or more syllables: `"học sinh"` (*student*), `"sinh học"` (*biology*), `"máy tính"` (*computer*), `"giáo viên"` (*teacher*). Look again at our example sentence: `"Học sinh | đang | học | sinh học | ở | trường"`. The exact same two-syllable sequence `"học sinh"` appears twice—first as a single compound noun meaning *student*, and right after as the verb `"học"` (*study*) followed by the first syllable of `"sinh học"` (*biology*).
+
+In NLP, it is important to keep two terms distinct: **tokenization** in the broad sense (mapping raw text to model tokens) versus **Vietnamese word segmentation** (grouping space-separated Vietnamese syllables into linguistic words). Most multilingual subword tokenizers (like GPT's or mBERT's) do *not* perform Vietnamese word segmentation at all, as we will see in the third code cell.
+
+The problem for this lesson is: **choose a way to segment arbitrary text into pieces drawn from a fixed-size vocabulary so that unknown tokens are avoided, token sequences stay reasonably short, and the segmentation rules are learned automatically from data rather than hand-crafted.**
+
+## Theory
+
+### What steps make up a tokenizer
+
+Let $V$ denote the vocabulary of size $|V|$. A modern subword tokenizer pipeline typically runs four stages in order:
+
+1. **Normalization**: clean and standardize the raw string—for instance, converting Unicode to a canonical form such as NFC or NFKC. [Text Normalization](/en/nlp/text-normalization/) covers this stage in detail.
+2. **Pre-tokenization**: split the normalized string into coarse chunks (words or syllables) around whitespace and punctuation, usually with a regular expression. Subsequent subword merges are never allowed to cross these pre-tokenization boundaries.
+3. **Subword model**: split each coarse chunk into subword tokens from $V$ using rules learned from a training corpus (such as BPE, WordPiece, or Unigram).
+4. **Post-processing & indexing**: map each token string to its integer **token ID** in $V$, and insert any model-specific **special tokens** (such as `[CLS]` or `<|endoftext|>`).
+
+Running the pipeline in reverse—mapping a sequence of integer IDs back to a human-readable string—is called **decoding**. A well-designed tokenizer is lossless (or near-lossless), decoding back to the original text.
+
+### Vietnamese word segmentation by maximum matching
+
+Before diving into statistical subwords, let us look at how dictionary-based **Vietnamese word segmentation** groups syllables into compound words. The classic baseline is **maximum matching** (also called greedy longest-match). Scanning from left to right, at each syllable position the algorithm checks the longest possible span first (say, 3 syllables, then 2, then 1). As soon as it finds a span present in the dictionary, it emits that span as a word and advances past it. Single syllables are always accepted as a fallback so the scan never gets stuck.
+
+On `"giáo viên chấm bài tập trên máy tính"` (*"the teacher grades homework on a computer"*), left-to-right maximum matching gets every compound right: `giáo viên | chấm | bài tập | trên | máy tính`. On `"học sinh học sinh học"` (*"students study biology"*), however, it greedily grabs `học sinh`, then grabs `học sinh` again, leaving a stray `học` at the end: `học sinh | học sinh | học`. Scanning from right to left fails in the opposite direction, producing `học | sinh học | sinh học`. This failure mode is called **overlapping ambiguity**: when a middle syllable (`học`) can validly pair with either its left neighbor (`học sinh`) or its right neighbor (`sinh học`), a word list alone cannot decide. Resolving it requires sentence context—i.e., a sequence labeling model trained on annotated text.
+
+Production Vietnamese NLP toolkits use machine learning for exactly this reason. **VnCoreNLP** (Vu et al., 2018) trains a transformation-based / feature-driven word segmenter that reaches 97.90% F1 on the VLSP 2013 benchmark (Nguyen et al., 2018), joining multi-syllable words with underscores (`học_sinh`). Python libraries such as [underthesea](https://github.com/undertheseanlp/underthesea) and [pyvi](https://github.com/trungtv/pyvi) provide similar segmentation APIs, and monolingual Vietnamese encoders like PhoBERT (Nguyen & Nguyen, 2020) require input text to be word-segmented with underscores before subword tokenization.
+
+### BPE: learning a vocabulary by iterative merging
+
+Subword tokenizers do not need a human-curated dictionary. Instead, they discover frequent character patterns directly from a raw text corpus. The most widely used algorithm is **Byte Pair Encoding** (BPE), originally a data compression algorithm by Gage (1994) that Sennrich, Haddow, and Birch (2016) adapted for neural machine translation.
+
+**Training corpus.** After pre-tokenization on whitespace, we have a set of distinct words (or Vietnamese syllables) $w$ together with their corpus frequencies $f(w)$. To make the merges concrete and intuitive, we will use a toy corpus of 7 Vietnamese syllables sharing common consonant clusters (`ng`, `nh`, `tr`) and rhymes (`ường`):
+
+| Syllable $w$ | người | ngành | nghề | trường | đường | thương | nhà |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Frequency $f(w)$ | 8 | 3 | 4 | 6 | 5 | 3 | 7 |
+
+**Step 0: split into characters.** Represent each syllable as a sequence of individual characters, appending an end-of-word symbol `_` to the end so `người` becomes `n g ư ờ i _`. The trailing `_` lets the tokenizer distinguish word-initial `ng` (as in `người`) from word-final `ng_` (as in `trường`); Sennrich et al. wrote `</w>` for this marker. The initial base vocabulary $V_0$ consists of all unique characters present (including `_`): here $|V_0| = 13$.
+
+**Step 1: count all adjacent symbol pairs.** Weight each occurrence of an adjacent pair $(a, b)$ inside word $w$ by the word's corpus frequency $f(w)$:
+
+$$
+\operatorname{count}(a, b) = \sum_{w} f(w) \cdot n_{ab}(w)
+$$
+
+where $n_{ab}(w)$ is the number of times symbol $a$ is immediately followed by symbol $b$ in the current segmentation of $w$. For the pair `(n, g)`: `"người"` contributes 8, `"ngành"` 3, `"nghề"` 4, `"trường"` 6, `"đường"` 5, and `"thương"` 3, totaling $29$—the highest count of any pair.
+
+**Step 2: merge the most frequent pair.** Add the new concatenated symbol `ng` to the vocabulary, replace every adjacent `n g` across the corpus with `ng`, and append the rule `(n, g) -> ng` to our ordered list of **merges**.
+
+**Step 3: repeat** on the updated segmentations. In merge 2, `ư` + `ờ` wins with count $8 + 6 + 5 = 19$ (from `"người"`, `"trường"`, `"đường"`). In merge 3, `ng` + `_` wins with count $6 + 5 + 3 = 14$. In merge 4, `ườ` + `ng_` wins with count $6 + 5 = 11$, giving `"trường"` and `"đường"` the shared rhyme piece `ường_`. Whenever two pairs tie in count, our implementation breaks ties by picking whichever pair appears first when scanning the word list from top to bottom, left to right.
+
+After $K$ merge operations, the vocabulary size is:
+
+$$
+|V| = |V_0| + K
+$$
+
+because each merge adds exactly one new symbol. The number of merges $K$ is the main hyperparameter you choose. In our toy example we stop at $K = 12$, giving $|V| = 13 + 12 = 25$; real LLM tokenizers run tens or hundreds of thousands of merges.
+
+**Tokenizing new text at inference time.** Split each incoming word into characters plus `_`, then replay the learned merge rules **in the exact order they were learned**. Even though `"nhường"` never appeared in our 7-word training set, replaying the merges turns it into `nh` + `ường_`—two familiar subwords! Only a character that never appeared in $V_0$ at all would be unknown; every combination of known characters can be segmented.
+
+Notice one telling detail after 12 merges: `"thương"` is still split into 5 pieces `t h ư ơ ng_`. That is because `"ơ"` (in `"thương"`) and `"ờ"` (in `"trường"`) are two distinct Unicode characters due to the grave tone mark. In Vietnamese, 6 tones across 12 base vowels create dozens of distinct vowel characters, fragmenting character-pair counts across tone variants.
+
+:::note[Key takeaway]
+BPE starts from individual characters, repeatedly merges the adjacent symbol pair with the highest frequency-weighted count $\sum_w f(w)\, n_{ab}(w)$, and records the merge order. After $K$ merges, the vocabulary has $|V_0| + K$ tokens. Tokenizing new text simply replays those merges in order: frequent words coalesce into single tokens, rare words split into reusable subwords, and no OOV word occurs as long as its base characters are in $V_0$.
+:::
+
+### Relatives of BPE
+
+**WordPiece** (Schuster & Nakajima, 2012; Wu et al., 2016) also merges pairs bottom-up, but instead of picking the pair with the highest raw count, it picks the pair that maximizes the **likelihood** of the training corpus under a unigram language model. Equivalently, as the Hugging Face course notes, it scores each pair $(a, b)$ by $\operatorname{count}(a, b) / (\operatorname{count}(a)\,\operatorname{count}(b))$, favoring pairs whose two parts occur together much more often than chance would predict. BERT (Devlin et al., 2019) uses WordPiece with a 30,000-token vocabulary, marking non-initial subwords with a `##` prefix (for example, `như` + `##ờng`). At inference time, rather than replaying merge rules, BERT's WordPiece tokenizer segments each word using greedy longest-match-first (`MaxMatch`) over the vocabulary; if even a single character is unknown, the entire word falls back to `[UNK]`.
+
+**Unigram LM** (Kudo, 2018) works top-down instead of bottom-up. It starts from a very large seed vocabulary of candidate substrings and **iteratively prunes** the pieces that contribute least. Modeling a segmentation $\mathbf{x} = (x_1, \dots, x_M)$ as a sequence of independent subwords with probabilities $p(x_i)$:
+
+$$
+P(\mathbf{x}) = \prod_{i=1}^{M} p(x_i)
+$$
+
+the most probable segmentation of a word is found via the Viterbi algorithm, and the piece probabilities $p(x_i)$ are estimated via Expectation-Maximization (EM). At each pruning round, the algorithm computes how much the corpus log-likelihood would drop if each piece were removed, and drops the bottom 10–20% of pieces (while always keeping single characters so every word remains segmentable). Because Unigram assigns a probability to *every* valid segmentation of a word, during training it can **sample** different segmentations on the fly (**subword regularization**), making the model more robust to noisy inputs and spelling variations.
+
+**SentencePiece** (Kudo & Richardson, 2018) is an open-source software library rather than a third algorithm: it implements both BPE and Unigram, but applies them **directly to raw text streams without whitespace pre-tokenization**. It treats the space character as an ordinary symbol, rendered as `▁` (U+2581), so `"Hello world."` becomes `[Hello] [▁wor] [ld] [.]` and can be decoded back losslessly by concatenating tokens and replacing `▁` with a space. This language-agnostic design works seamlessly for languages written without spaces between words (Chinese, Japanese, Thai) and is used by T5, mT5, XLM-R, and LLaMA 1 & 2 (Llama 3 switched to a 128K byte-level BPE tokenizer via `tiktoken`).
+
+**Byte-level BPE** runs BPE over **raw UTF-8 bytes** rather than Unicode characters. Introduced with GPT-2 (Radford et al., 2019), it solves a dilemma of character-level base vocabularies: Unicode defines over 150,000 characters, which would bloat $V_0$, whereas a single byte has only $2^8 = 256$ possible values. With all 256 bytes in $V_0$, **every possible UTF-8 string can be tokenized with zero `[UNK]` tokens**. GPT-2 uses a 50,257-token vocabulary (256 base bytes + 50,000 merges + `<|endoftext|>`) together with a pre-tokenization regex that prevents merges across character categories (e.g., preventing a word from merging with its trailing punctuation into separate tokens `dog.`, `dog!`, `dog?`).
+
+| Algorithm | Base units $V_0$ | How $V$ is learned | Unknown tokens | Notable users |
+|---|---|---|---|---|
+| Character BPE | Characters in corpus | Merge pair with highest count | Only unseen characters | Sennrich et al. (2016) NMT |
+| WordPiece | Characters in corpus | Merge pair maximizing likelihood ratio | Whole word becomes `[UNK]` | BERT, DistilBERT, mBERT |
+| Unigram LM | Large seed of substrings | Prune pieces with smallest likelihood loss | Only unseen characters | ALBERT, T5, mBART (via SentencePiece) |
+| Byte-level BPE | All 256 bytes | Merge pair with highest count | None (`[UNK]` impossible) | GPT-2/3/4, RoBERTa, Llama 3 |
+
+### Special tokens
+
+Alongside text subwords, a tokenizer's vocabulary reserves several **special tokens** for structural control. BERT uses `[CLS]` at the start of every input (its final hidden state often feeds a sentence classifier), `[SEP]` between or after segments, `[MASK]` for masked language modeling, `[UNK]` for unknown words, and `[PAD]` for **padding**. GPT-2 uses a single special token, `<|endoftext|>`, to mark document boundaries (acting as `<eos>`, end-of-sequence).
+
+Padding is needed whenever you batch sequences of different lengths into a rectangular tensor: shorter sequences are padded with `[PAD]` IDs, and the tokenizer returns a parallel binary **attention mask** (`1` for real tokens, `0` for padding) so self-attention ignores the padded positions.
+
+### The token cost of Vietnamese
+
+In UTF-8 encoding, basic ASCII letters (`a`–`z`) take 1 byte each, Vietnamese letters with horn/stroke modifiers like `"đ"`, `"ư"`, `"ơ"` take 2 bytes, and vowels carrying both a modifier and a tone mark like `"ọ"`, `"ờ"`, `"ở"` take 3 bytes. Our 36-character Vietnamese sentence `"Học sinh đang học sinh học ở trường."` occupies 48 UTF-8 bytes. In a byte-level BPE tokenizer, every unmerged byte is a separate token—and how many Vietnamese byte sequences get merged depends directly on how much Vietnamese text the tokenizer saw during training.
+
+Petrov et al. (2023) measured this disparity systematically across 200 languages on the parallel FLORES-200 benchmark (2,000 Wikipedia sentences translated into 200 languages). Dividing each language's token count by the English token count for the exact same sentences defines the **tokenization premium**. For Vietnamese, the premium is **4.54$\times$** on GPT-2's tokenizer and **2.45$\times$** on GPT-4's `cl100k_base` tokenizer. Larger, more multilingual vocabularies narrow the gap, but do not erase it completely.
+
+The practical consequences are immediate: commercial LLM APIs bill per token and enforce **context window** limits in tokens ([Using Text Generation APIs](/en/llm/text-api/)). When a tokenizer fragments Vietnamese into 2–4 times as many tokens as English, Vietnamese users pay more per paragraph, wait longer for generation (since autoregressive decoding emits one token per forward pass), and fit less text into the same context window.
+
+### Limitations
+
+- **A tokenizer is permanently coupled to its model.** Row $i$ of a model's embedding table ([Vector Semantics and Embeddings](/en/nlp/vector-semantics-embeddings/)) stores the vector learned for token ID $i$. Feeding token IDs produced by one tokenizer into a model trained with another scrambles every word meaning silently.
+- **Most BPE tokenizers never merge across spaces** because pre-tokenization splits on whitespace first. Thus a Vietnamese compound like `"học sinh"` always remains at least two separate tokens, leaving it up to the Transformer layers to compose them.
+- **Numbers get split inconsistently.** Depending on which digit pairs happened to be frequent in training data, `" 2026"` might split as ` 20` + `26` while `" 12345"` splits as ` 123` + `45`, making multi-digit arithmetic harder for language models (which is why newer models like Llama 3 split digits individually or in fixed 1–3 digit chunks).
+- **Unicode normalization mismatches.** A single visual character like `"ọ"` can be encoded as 1 precomposed code point (NFC) or 2 decomposed code points (NFD), producing completely different tokenizations if not normalized first ([Text Normalization](/en/nlp/text-normalization/)).
+
+## Illustration
+
+The interactive widget below runs BPE step by step on our 7-syllable Vietnamese toy corpus from the Theory section. At each step you can inspect the adjacent-pair frequency table (with the winning pair highlighted), the growing list of learned merge rules, and how each syllable is currently segmented. Click **Next step** to apply one merge, or **Reset** to return to step 0:
+
+1. Click **Next step** once: the pair `n + g` wins with count 29, and every syllable containing `"ng"` collapses those two characters into `ng`.
+2. Step forward to merge 4: `ườ + ng_` (count 11) merges, giving `"trường"` and `"đường"` the shared rhyme subword `ường_`.
+3. Step forward to merge 8: `"người_"` becomes a single whole-syllable token. Notice how at merge 6, three pairs tie at count 8, and the first pair encountered (`ng + ườ`) wins.
+4. Step to merge 12: `"trường_"` is now a single token, whereas `"thương"` is still split into 5 pieces `t h ư ơ ng_`.
+
+{/* VIZ: BPE iteratively merges the most frequent adjacent pair; common patterns (ng, ường_, người_) become single tokens while rarer syllables like "thương" stay fragmented. */}
+
+<BpeMergeViz />
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the first two pure-Python cells with Python 3.14 (in Pyodide), and the third cell with Python 3.14 and Hugging Face `transformers` 5.22. The first two cells run directly in the page with zero external dependencies; the third downloads real tokenizer vocabularies from Hugging Face Hub and runs on your machine.
+
+### Maximum matching for Vietnamese
+
+The cell below implements dictionary-based maximum matching in both directions—left-to-right (`left`) and right-to-left (`right`)—using a small 15-entry lexicon. Because written Vietnamese already separates syllables with spaces, `segment` takes a list of syllables produced by `sent.split()`.
+
+<PythonRunner code={maxMatchCode} title="Vietnamese word segmentation by maximum matching" />
+
+Reading the output:
+
+- **The first sentence is segmented identically and करत-correctly in both directions:** `giáo viên | chấm | bài tập | trên | máy tính`. When compounds do not overlap, a lexicon is enough.
+- **The second sentence fails in both directions.** Left-to-right produces `học sinh | học sinh | học`, while right-to-left produces `học | sinh học | sinh học`. The intended segmentation—`học sinh | học | sinh học` (*"students | study | biology"*)—sits in the middle, and neither greedy direction can find it without grammatical context.
+
+Try adding `"sinh viên"` to the sentence or removing `"sinh học"` from `DICT` to see how the greedy boundaries shift.
+
+### Toy BPE from scratch
+
+This cell implements the exact BPE training and inference loop from the Theory section on the 7 Vietnamese syllables shown in the interactive diagram above. The helper `merge` replaces every adjacent occurrence of `pair` with a single concatenated string. We run 12 merges, printing the winning pair and its weighted count at each step, and then segment four test syllables by replaying the learned merges in order.
+
+<PythonRunner code={bpeCode} title="Toy BPE on 7 Vietnamese syllables" />
+
+Reading the output:
+
+- **`start vocab: 13`, `end vocab: 25`:** matches $|V| = |V_0| + K = 13 + 12$.
+- **The first three merges** are `n + g (29)`, `ư + ờ (19)`, and `ng + _ (14)`, matching our hand calculation. Without any linguistic rules built in, pure frequency counting rediscovers Vietnamese onset clusters (`ng`, `nh`, `tr`) and rhymes (`ường`).
+- **Merges 6, 7, and 8** all have count 8: once `"người"` starts merging, its internal pairs all share its word frequency of 8, coalescing all the way to the whole syllable `người_`.
+- **Segmenting test words:** seen `"trường"` becomes a single token `trường_`. Unseen `"nhường"` splits cleanly into `nh` + `ường_`. Unseen `"nghiêng"` becomes `ng h i ê ng_`, and `"thương"` stays in 5 pieces because its unaccented `"ơ"` never merged with `"ư"`.
+
+Try changing the frequency of `"thương"` in `WORDS` from `3` to `20` and re-running: merges 3 through 6 now assemble `thương_` into a single token, pushing `"trường"` down to `t r ường_`. A BPE vocabulary directly mirrors the frequency distribution of its training corpus.
+
+### Counting tokens with real tokenizers
+
+The final cell loads two pretrained tokenizers using `AutoTokenizer` from `transformers`: GPT-2 (byte-level BPE, Radford et al., 2019) and multilingual BERT / mBERT (WordPiece, Devlin et al., 2019). Only the lightweight tokenizer vocabulary files are downloaded (a few megabytes, no neural network weights). It compares the token counts of a parallel Vietnamese–English sentence pair, inspects a rarer Vietnamese compound (`"nhường nhịn"`), and shows the integer `input_ids` with special tokens included.
+
+<LocalCode
+  code={countTokensCode}
+  title="Counting Vietnamese and English tokens with GPT-2 and mBERT"
+  packages={['transformers']}
+  hardware="CPU is enough. Downloads only the tokenizer vocabulary files (~6 MB total)."
+  sampleVaries={false}
+>
+
+```text
+36 chars, 48 bytes: Học sinh đang học sinh học ở trường.
+40 chars, 40 bytes: Students are studying biology at school.
+
+openai-community/gpt2 (vocab 50257)
+vi: 33 tokens
+    ['H', 'á', '»', 'į', 'c', 'Ġsin', 'h', 'ĠÄ', 'ĳ', 'ang', 'Ġh', 'á', '»', 'į', 'c', 'Ġsin', 'h', 'Ġh', 'á', '»', 'į', 'c', 'Ġá', '»', 'Ł', 'Ġtr', 'Æ', '°', 'á', '»', 'Ŀ', 'ng', '.']
+en: 7 tokens
+    ['Students', 'Ġare', 'Ġstudying', 'Ġbiology', 'Ġat', 'Ġschool', '.']
+rare: ['n', 'h', 'Æ', '°', 'á', '»', 'Ŀ', 'ng', 'Ġn', 'h', 'á', '»', 'ĭ', 'n']
+ids: [28239, 389, 11065, 17219, 379, 1524, 13]
+back: Students are studying biology at school.
+
+google-bert/bert-base-multilingual-cased (vocab 119547)
+vi: 9 tokens
+    ['Học', 'sinh', 'đang', 'học', 'sinh', 'học', 'ở', 'trường', '.']
+en: 7 tokens
+    ['Students', 'are', 'studying', 'biology', 'at', 'school', '.']
+rare: ['như', '##ờng', 'n', '##hị', '##n']
+ids: [101, 30356, 10301, 47308, 48262, 10160, 11393, 119, 102]
+back: [CLS] Students are studying biology at school. [SEP]
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **First two lines:** the Vietnamese sentence is shorter in characters (36 vs. 40) but longer in UTF-8 bytes (48 vs. 40) because accented letters take 2–3 bytes each.
+- **GPT-2 needs 33 tokens for the Vietnamese sentence vs. 7 for English**—a $4.7\times$ ratio right in line with Petrov et al.'s 4.54$\times$ benchmark. The pieces look strange because GPT-2 maps every byte to a printable Unicode character: `Ġ` represents a leading space (`0x20`), while `"ọ"` (UTF-8 bytes `E1 BB 8D`) becomes the three tokens `'á'`, `'»'`, `'į'`. The single syllable `"Học"` takes 5 tokens and `"trường"` takes 7, whereas English `"Students"` and `" studying"` are 1 token each.
+- **mBERT needs 9 tokens for Vietnamese**, one per syllable plus the period, because its 119,547-piece WordPiece vocabulary was trained on over 100 Wikipedias including Vietnamese. Notice, though, that it still splits at spaces: `"học sinh"` is two tokens `'học'` and `'sinh'`.
+- **On the rarer compound `"nhường nhịn"`**, mBERT's WordPiece splits into `'như'`, `'##ờng'`, `'n'`, `'##hị'`, `'##n'`, showing the `##` continuation prefix in action; GPT-2 takes 14 byte-level tokens for the same two syllables.
+- **Special tokens:** calling `tok(SENTS["en"])` (unlike `tok.tokenize(...)`) wraps mBERT's output with `[CLS]` (ID 101) at the start and `[SEP]` (ID 102) at the end, giving 9 IDs for 7 word pieces. GPT-2 adds no wrapper tokens by default, and `tok.decode(ids)` reconstructs the exact original string.
+
+## Common pitfalls
+
+:::caution[Pairing a model with the wrong tokenizer]
+Every pretrained model understands only the token ID mapping of the exact tokenizer it was trained with. In the output above, `"Students"` is ID `28239` in GPT-2 and ID `30356` in mBERT. Passing GPT-2 token IDs into mBERT (or vice versa) runs without a shape error as long as IDs fall below `vocab_size`, but every ID looks up the wrong row of the embedding matrix, turning the input into gibberish. Always load `AutoTokenizer.from_pretrained(name)` and `AutoModel.from_pretrained(name)` with the exact same `name`.
+:::
+
+:::caution[Estimating token counts by counting whitespace-separated words]
+`len(text.split())` counts 8 syllables in our Vietnamese sentence, yet GPT-2 turns it into 33 tokens. Estimating API cost or context-window usage from word counts can be off by $2\times$–$4\times$ on Vietnamese text. Always count tokens with the target model's actual tokenizer (`tiktoken` or `AutoTokenizer`), and remember that special tokens (`[CLS]`, `[SEP]`, chat role headers) count toward the model's maximum sequence length too.
+:::
+
+:::caution[Hitting `UnicodeEncodeError` when redirecting Vietnamese output on Windows]
+Printing Vietnamese tokens in an interactive terminal works fine, but redirecting output to a file (`python count-tokens.py > out.txt`) on Windows may default to a legacy code page (`cp1252`) and crash with `UnicodeEncodeError` on the first accented letter. Run Python in UTF-8 mode via `python -X utf8 count-tokens.py` or set `PYTHONUTF8=1` in your environment.
+:::
+
+:::caution[Feeding NFD-decomposed Vietnamese text into a tokenizer]
+A visual character like `"ọ"` can be stored as a single precomposed NFC character or as `"o"` plus a combining dot-below in NFD. To your eyes they look identical, but to a tokenizer that does not normalize to NFC first, they are completely different character sequences. In our test, converting the Vietnamese sentence to NFD caused `bert-base-multilingual-cased` to emit `[UNK]` for 5 out of the 9 tokens (every syllable carrying a tone mark: `"Học"`, `"học"`, `"học"`, `"ở"`, `"trường"`), while GPT-2's token count rose from 33 to 34. Always normalize Vietnamese text to NFC (`unicodedata.normalize("NFC", text)`), as covered next in [Text Normalization](/en/nlp/text-normalization/).
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- A tokenizer maps raw text into a sequence of integer token IDs from a fixed vocabulary $V$. Word-level tokenization suffers from out-of-vocabulary words, while character-level tokenization produces overly long sequences; subword tokenization keeps common words whole and splits rare words into reusable pieces.
+- Written Vietnamese places spaces between syllables rather than words. Greedy dictionary-based maximum matching segments many compounds accurately but fails on overlapping ambiguities like `"học sinh học sinh học"`; production Vietnamese segmenters (VnCoreNLP, underthesea, pyvi) resolve these using context-aware statistical models.
+- BPE iteratively merges the adjacent symbol pair with the highest corpus count $\sum_w f(w)\,n_{ab}(w)$, producing $|V| = |V_0| + K$ tokens after $K$ merges. WordPiece merges by likelihood ratio (BERT, `##` prefix), Unigram LM prunes a large seed vocabulary top-down, SentencePiece tokenizes raw text without whitespace pre-tokenization using `▁`, and byte-level BPE starts from all 256 UTF-8 bytes so `[UNK]` can never occur.
+- Because accented Vietnamese characters take 2–3 UTF-8 bytes and English-heavy tokenizers learn fewer merges for Vietnamese byte sequences, Vietnamese text can require $2\times$–$4.5\times$ as many tokens as English for the same meaning.
+
+**Further reading:**
+
+- Vu, T., Nguyen, D. Q., Nguyen, D. Q., Dras, M., Johnson, M. (2018). [*VnCoreNLP: A Vietnamese Natural Language Processing Toolkit*](https://aclanthology.org/N18-5012/), NAACL 2018 (Demonstrations). Describes VnCoreNLP's Vietnamese word segmentation component and benchmarks on VLSP data.
+- Sennrich, R., Haddow, B., Birch, A. (2016). [*Neural Machine Translation of Rare Words with Subword Units*](https://aclanthology.org/P16-1162/), ACL 2016, Section 3.2. The paper that introduced BPE for NLP, complete with a compact Python reference implementation (using `</w>` where this lesson writes `_`).
+- Kudo, T. (2018). [*Subword Regularization: Improving Neural Network Translation Models with Multiple Subword Candidates*](https://aclanthology.org/P18-1007/), ACL 2018, Section 3. Introduces the Unigram subword language model and subword sampling; see also Kudo & Richardson (2018), [*SentencePiece*](https://aclanthology.org/D18-2012/), EMNLP 2018.
+- Radford, A., Wu, J., Child, R., Luan, D., Amodei, D., Sutskever, I. (2019). [*Language Models are Unsupervised Multitask Learners*](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) (PDF), OpenAI technical report, Section 2.2. Explains why GPT-2 adopted byte-level BPE and character-category pre-tokenization.
+- Petrov, A., La Malfa, E., Torr, P. H. S., Bibi, A. (2023). [*Language Model Tokenizers Introduce Unfairness Between Languages*](https://arxiv.org/abs/2305.15425), NeurIPS 2023, Section 4. Measures the tokenization premium across 200 languages on FLORES-200, including Vietnamese.
+- Hugging Face. [*LLM Course*, Chapter 6: Byte-Pair Encoding, WordPiece, and Unigram tokenization](https://huggingface.co/learn/llm-course/chapter6/5). Step-by-step Python implementations of BPE, WordPiece, and Unigram alongside the `tokenizers` library.
+
+<LessonProgress />

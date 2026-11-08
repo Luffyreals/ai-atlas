@@ -4,16 +4,18 @@ import re
 from collections import Counter
 
 text = (
-    "Sáng 3/11, Đà Nẵng đưa vào hoạt động tuyến xe buýt điện đầu tiên, "
-    "nối sân bay với biển Mỹ Khê. Tuyến dài 18 km, có 12 xe, chạy từ 5 giờ "
-    "sáng đến 10 giờ tối. Giá vé là 8 nghìn đồng một lượt, học sinh được "
-    "giảm một nửa. Trong tháng đầu, thành phố miễn phí vé xe buýt điện cho "
-    "mọi hành khách. Mỗi xe chạy được 250 km sau một lần sạc. Nhiều người "
-    "dân khen xe chạy êm và không có khói. Thành phố dự kiến mở thêm ba "
-    "tuyến xe buýt điện vào năm sau."
+    "Sáng 3/11, Đà Nẵng đưa vào hoạt động tuyến xe buýt điện "
+    "đầu tiên, nối sân bay với biển Mỹ Khê. Tuyến dài 18 km, "
+    "có 12 xe, chạy từ 5 giờ sáng đến 10 giờ tối. Giá vé là "
+    "8 nghìn đồng một lượt, học sinh được giảm một nửa. Trong "
+    "tháng đầu, thành phố miễn phí vé xe buýt điện cho mọi "
+    "hành khách. Mỗi xe chạy được 250 km sau một lần sạc. "
+    "Nhiều người dân khen xe chạy êm và không có khói. Thành "
+    "phố dự kiến mở thêm ba tuyến xe buýt điện vào năm sau."
 )
-ref = ("Đà Nẵng mở tuyến xe buýt điện đầu tiên nối sân bay với biển Mỹ Khê. "
-       "Tháng đầu miễn phí vé, năm sau mở thêm ba tuyến.")
+ref = ("Đà Nẵng mở tuyến xe buýt điện đầu tiên nối sân bay "
+       "với biển Mỹ Khê. Tháng đầu miễn phí vé, năm sau mở "
+       "thêm ba tuyến.")
 
 def words(s):  # chữ thường, mỗi âm tiết là một từ
     return re.findall(r"\w+", s.lower())

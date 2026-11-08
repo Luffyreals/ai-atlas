@@ -1,0 +1,215 @@
+---
+title: 'Functions, Strings, and File I/O'
+description: 'Structure clean Python code for AI: functions, type hints, default arguments, string immutability, and safe JSON/CSV file I/O with context managers.'
+quiz:
+  - question: 'Given `def append_token(tok, tokens=[]): tokens.append(tok); return tokens`, what do two consecutive calls `append_token("a")` followed by `append_token("b")` return?'
+    options:
+      - '`["a"]` and `["b"]`'
+      - '`["a"]` and `["a", "b"]`'
+      - '`["a"]` and `["b", "a"]`'
+      - 'A `TypeError` because an empty list cannot be used as a default argument'
+    answer: 1
+    explanation: 'This is the classic mutable default argument trap. The default value expression `tokens=[]` is evaluated only once when the function is defined, not each time the function is called. Subsequent calls reuse the exact same list object, so the second call returns `["a", "b"]`.'
+  - question: 'In what order does Python search variable scopes (from innermost to outermost)?'
+    options:
+      - 'Global $\to$ Local $\to$ Enclosing $\to$ Built-in'
+      - 'Local $\to$ Enclosing $\to$ Global $\to$ Built-in (LEGB)'
+      - 'Built-in $\to$ Global $\to$ Local $\to$ Enclosing'
+      - 'Local $\to$ Global $\to$ Enclosing $\to$ Built-in'
+    answer: 1
+    explanation: 'Python resolves variable names following the LEGB rule: Local (inside the current function), Enclosing (inside any enclosing outer functions), Global (at the module level), and finally Built-in (Python''s built-in functions and names).'
+  - question: 'Why does concatenating strings inside a 100,000-iteration loop using the `+` operator (`s = s + token`) severely degrade performance?'
+    options:
+      - 'Because Python limits strings to a maximum length of 1,000 characters'
+      - 'Because strings are immutable, so every `+` allocates a brand-new memory block and copies all existing characters over, resulting in $O(N^2)$ time complexity'
+      - 'Because the `+` operator automatically casts strings into lists of integers'
+      - 'Because Python''s garbage collector freezes when strings grow too long'
+    answer: 1
+    explanation: 'Because Python strings are immutable, they cannot be modified in place. Running `s = s + token` repeatedly allocates a new string and copies all characters from the old string each time, causing total copy operations to grow quadratically ($O(N^2)$). The optimal approach is to collect tokens in a `list` and call `"".join(tokens)` once in $O(N)$ time.'
+  - question: 'What is the primary benefit of using the context manager syntax `with open("data.csv", "r", encoding="utf-8") as f:` when working with files?'
+    options:
+      - 'It doubles the raw disk read speed'
+      - 'It guarantees the file is automatically closed and OS resources are released even if an exception occurs inside the block'
+      - 'It automatically fixes syntax errors in malformed CSV files'
+      - 'It allows multiple processes to write to the same file simultaneously without conflict'
+    answer: 1
+    explanation: 'The `with` statement acts as a Context Manager (invoking `__enter__` on entry and `__exit__` on exit). It guarantees that the file is closed and buffers are flushed even if an unhandled exception is raised inside the block. Explicitly passing `encoding="utf-8"` also prevents character decoding errors across different operating systems.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import textCode from '@code/python/functions-strings-files/text-preprocessor.en.py?raw';
+import logCode from '@code/python/functions-strings-files/metrics-logger.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Define and organize clean functions using positional arguments, keyword arguments, default values, and type hints.
+- Understand the LEGB variable scope rule (Local, Enclosing, Global, Built-in) and Python's pass-by-object-reference mechanism.
+- Understand string (`str`) immutability and use core string methods to normalize text data for NLP.
+- Read and write files safely using context managers (`with open(...)`), working with structured JSON data and UTF-8 encoding.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In the previous lesson, you worked with `list` and `dict` data structures. This lesson builds on those structures to store data loaded from disk files and pass structured information between processing functions.
+:::
+
+## Intuition
+
+As an AI project grows, you cannot cram thousands of lines of code into a single flat script. You need to:
+
+- Package repeated logic into reusable **functions**: a data loader function, a loss calculation function, a text normalization function.
+- Ensure that modifying variables inside a function does not accidentally corrupt data elsewhere in your program.
+- Read training datasets from disk and save model weights or training logs after each epoch.
+
+Every production AI system—from data preprocessing pipelines to checkpoint loaders—relies on three pillars: **functions for modular logic**, **strings for text representation**, and **file I/O for persistent storage**.
+
+## Theory
+
+### Function Structure and Type Hints
+
+A standard Python function starts with the `def` keyword, a function name, a parameter list, and a `return` statement:
+
+```python
+def compute_loss(y_true: float, y_pred: float) -> float:
+    """Compute the squared error between true and predicted values."""
+    return (y_true - y_pred) ** 2
+```
+
+- **Type hints:** Help human readers and static type checkers (such as MyPy) catch type mismatches early without slowing down runtime execution.
+- **Positional and keyword arguments:** You can call `compute_loss(1.0, 0.8)` positionally or explicitly by name: `compute_loss(y_pred=0.8, y_true=1.0)`.
+- **Flexible arguments `*args` and `**kwargs`:**
+  - `*args`: Packs extra positional arguments into a `tuple`.
+  - `**kwargs`: Packs extra keyword arguments into a `dict`.
+
+### Variable Scope (LEGB Rule)
+
+When you reference a variable name inside a function, Python looks it up in **LEGB** order:
+
+1. **L (Local):** Variables defined inside the current function.
+2. **E (Enclosing):** Variables in the outer enclosing function (for nested functions).
+3. **G (Global):** Variables defined at the top level of the module/file.
+4. **B (Built-in):** Python's built-in functions and names (`print`, `len`, `range`).
+
+To reassign a global variable from inside a function, you would have to declare `global`. However, in production AI code, mutating global variables is strongly discouraged because it makes state hard to track and introduces hidden side effects.
+
+### String Processing
+
+Strings (`str`) in Python are **immutable**. Once a string is created in memory, you cannot modify individual characters in place (`s[0] = 'H'` raises a `TypeError`).
+
+Essential string normalization methods for NLP:
+- `.strip()`: Removes leading and trailing whitespace.
+- `.lower()`: Converts all characters to lowercase.
+- `.replace(old, new)`: Replaces occurrences of a substring.
+- `.split(sep)`: Splits a string into a list of tokens.
+- `sep.join(list_of_strings)`: Joins a list of strings into a single string using `sep` as the delimiter.
+
+### Safe File I/O with Context Managers
+
+When a program opens a file, the operating system allocates a file descriptor. If your code opens many files without closing them, the OS will eventually run out of file handles or leave data unwritten in memory buffers.
+
+The idiomatic way to work with files in Python is the `with` statement:
+
+```python
+with open("data.txt", mode="r", encoding="utf-8") as f:
+    content = f.read()
+# As soon as execution leaves the with block, the file is closed automatically!
+```
+
+Common file modes (`mode`):
+- `"r"`: Read text (raises `FileNotFoundError` if the file does not exist).
+- `"w"`: Write text (overwrites existing contents or creates a new file).
+- `"a"`: Append text to the end of the file.
+
+**Structured storage with JSON:** Python's standard `json` module converts seamlessly between Python objects (`dict`, `list`) and JSON text files via two main functions:
+- `json.dump(obj, file)`: Serializes a Python object directly to a file.
+- `json.load(file)`: Reads and parses a JSON file back into a Python object.
+
+## Illustration
+
+Python's LEGB variable lookup hierarchy:
+
+```text
+        [ B - Built-in Scope ] (Built-in names: print, len, sum...)
+                  ▲
+        [ G - Global Scope ] (Module-level variables)
+                  ▲
+        [ E - Enclosing Scope ] (Outer enclosing function)
+                  ▲
+        [ L - Local Scope ] (Inside the currently executing function)
+```
+
+Safe file lifecycle with a `with` Context Manager:
+
+```text
+[ open("file.json", "w") ] ──► Calls __enter__(): Opens file, allocates File Descriptor
+           │
+           ▼
+[ Execute code block ] ──► Writes data to disk, runs processing logic...
+           │
+           ├─► (Completes normally) ─────┐
+           │                             ├──► Calls __exit__(): CLOSES FILE AUTOMATICALLY!
+           └─► (Raises an Exception) ────┘
+```
+
+## Code examples
+
+The cells below run independently. Click **Run** to see the output immediately.
+
+The first cell builds a complete NLP text preprocessing function using type hints, default arguments, string methods (`strip`, `lower`, `replace`, `split`), and `join`.
+
+<PythonRunner code={textCode} title="NLP text preprocessing and normalization function" />
+
+The function takes a messy string with extra whitespace and punctuation, cleans it up, and returns a normalized list of tokens—an essential first step in sentiment analysis or machine translation pipelines.
+
+The second cell simulates saving and reloading a machine learning model's training history in JSON format using a `with open(...)` context manager.
+
+<PythonRunner code={logCode} title="Writing and reading model training logs with JSON" />
+
+The training metrics dictionary is serialized to JSON, written to a temporary file on disk, and safely loaded back into memory, allowing you to inspect the final epoch's `loss` and `val_loss`.
+
+## Common pitfalls
+
+:::caution[The Mutable Default Argument Trap]
+When you write `def train_step(data, history=[]):`, the empty list `[]` is created **only once** when Python first loads the function definition. If you call the function multiple times without passing `history`, every call mutates that same shared list! Always use `None` as the default instead: `def train_step(data, history=None): if history is None: history = []`.
+:::
+
+:::caution[Forgetting `encoding="utf-8"` when opening files]
+On Windows, `open()` may default to a legacy locale encoding (such as CP1252), causing `UnicodeDecodeError` or garbled characters when reading multilingual text datasets. Always pass `encoding="utf-8"` explicitly whenever opening text files.
+:::
+
+:::caution[Concatenating strings with `+` inside large loops]
+Because strings are immutable, writing `text += token` in a loop allocates a new string and copies the entire existing string on every iteration. Across tens of thousands of tokens, runtime balloons quadratically. Append tokens to a `list` first and call `"".join(tokens)` once at the end.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Functions encapsulate reusable logic; type hints clarify expected types and help catch bugs early.
+- Avoid mutable default arguments: always default to `None` for parameters that hold a `list` or `dict`.
+- The LEGB rule governs how Python resolves variable names from local to built-in scopes.
+- Strings are immutable: every string transformation creates a new object, so use `.join()` when combining many substrings.
+- Always use `with open(...)` and `encoding="utf-8"` to guarantee safe resource cleanup and consistent text encoding.
+
+**Further reading:**
+
+- Python Software Foundation (2024). [*The Python Tutorial: Defining Functions*](https://docs.python.org/3/tutorial/controlflow.html#defining-functions). Official guide to defining functions, default arguments, and keyword parameters.
+- Python Software Foundation (2024). [*PEP 484 – Type Hints*](https://peps.python.org/pep-0484/). The official Python Enhancement Proposal introducing type annotations.
+- Python Software Foundation (2024). [*Reading and Writing Files*](https://docs.python.org/3/tutorial/inputoutput.html#reading-and-writing-files). Official tutorial on file objects, context managers, and the `json` module.
+
+<LessonProgress />

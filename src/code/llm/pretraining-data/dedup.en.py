@@ -4,10 +4,10 @@ import re
 import unicodedata
 import numpy as np
 
-docs = ["Hà Nội là thủ đô của Việt Nam, một thành phố hơn nghìn năm tuổi.",
-        "Hà Nội là thủ đô của Việt Nam, một thành phố cổ hơn nghìn năm tuổi.",
-        "Phở là món ăn nổi tiếng của Việt Nam.",
-        "Mua ngay giá rẻ, bấm vào đây để nhận quà miễn phí!"]
+docs = ["Hanoi is the capital of Vietnam, a city over a thousand years old.",
+        "Hanoi is the capital of Vietnam, an old city over 1000 years old.",
+        "Pho is a famous traditional noodle soup of Vietnam.",
+        "Buy now at cheap prices, click here to get free gifts today!"]
 # Line 1: a copy of line 0, but upper case, decomposed (NFD), extra spaces
 docs.insert(1, "  " + unicodedata.normalize("NFD", docs[0]).upper())
 words = [re.findall(r"\w+", unicodedata.normalize("NFC", d).lower())

@@ -1,0 +1,433 @@
+---
+title: 'Image Generation (1): VAE, GAN, CycleGAN, Pix2Pix'
+description: 'How can a machine draw an image that has never existed before? VAEs compress images into a distribution and sample from it, GANs pit two networks against each other, and Pix2Pix and CycleGAN translate one image into another.'
+quiz:
+  - question: 'In a VAE, you sample $\mathbf{z}$ directly from $\mathcal{N}(\boldsymbol\mu, \mathrm{diag}(\boldsymbol\sigma^2))$ using `torch.distributions.Normal(mu, sigma).sample()`, instead of writing $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$. The code still runs. What breaks?'
+    options:
+      - 'Nothing breaks; both give the exact same distribution for $\mathbf{z}$ and therefore the same gradients'
+      - 'The reconstruction loss no longer has gradients flowing back to the encoder, so $\boldsymbol\mu$ and $\boldsymbol\sigma$ only learn from the KL term'
+      - 'The KL term can no longer be computed in closed form'
+      - 'The decoder no longer receives $\mathbf{z}$'
+    answer: 1
+    explanation: 'The distribution of $\mathbf{z}$ is indeed identical, but direct sampling is not a differentiable function of $\boldsymbol\mu$ and $\boldsymbol\sigma$, so backpropagation stops there (`sample()` runs inside `torch.no_grad()`, detaching $\mathbf{z}$ from the computation graph; PyTorch provides `rsample()` specifically for the reparameterization trick). The KL term is still computed analytically from $\boldsymbol\mu$ and $\boldsymbol\sigma$, so its gradient remains intact: the encoder is merely pulled toward $\mathcal{N}(\mathbf{0}, \mathbf{I})$ without learning to encode images. Writing $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$ moves the randomness into $\boldsymbol\epsilon$, making the path from the loss to $\boldsymbol\mu$ and $\boldsymbol\sigma$ ordinary addition and multiplication.'
+  - question: 'Hold the generator $G$ fixed. At an image $\mathbf{x}$, the real data density is $p_{\text{data}}(\mathbf{x}) = 0.3$ and the generated density is $p_g(\mathbf{x}) = 0.1$. What is the optimal discriminator value $D^*(\mathbf{x})$?'
+    options: ['$0.3$', '$0.5$', '$0.75$', '$0.25$']
+    answer: 2
+    explanation: '$D^*(\mathbf{x}) = p_{\text{data}} / (p_{\text{data}} + p_g) = 0.3 / 0.4 = 0.75$: real images are three times as dense as fake ones at this point, so predicting "real" with probability 3/4 is optimal. $0.5$ holds only when $p_g = p_{\text{data}}$, i.e., when $G$ has finished learning.'
+  - question: 'Early in GAN training, $D$ spots fake images easily: $D(G(\mathbf{z})) \approx 0.01$. Write $D = \sigma(a)$ where $a$ is the logit. Why should $G$ maximize $\log D(G(\mathbf{z}))$ instead of minimizing $\log(1 - D(G(\mathbf{z})))$?'
+    options:
+      - 'Because the derivative with respect to $a$ of $\log(1 - \sigma(a))$ is $-\sigma(a) \approx -0.01$, barely pushing $G$; whereas the derivative of $\log \sigma(a)$ is $1 - \sigma(a) \approx 0.99$'
+      - 'Because the two functions have different optima, and only $\log D$ yields $p_g = p_{\text{data}}$'
+      - 'Because $\log(1 - D)$ is negative, while a loss function must be positive'
+    answer: 0
+    explanation: 'Both objectives push $D(G(\mathbf{z}))$ upward in the same direction. They differ in gradient magnitude: when $D$ dominates, $\log(1 - \sigma(a))$ is nearly flat (saturated), so $G$ learns glacially slowly. Goodfellow et al. (2014) proposed switching to $\log D$ because it provides strong gradients right in this early stage. The sign of a loss value does not matter: adding a constant never changes gradients.'
+  - question: 'You have 3,000 daytime street photos and 2,000 nighttime street photos taken at different locations. You want to turn daytime photos into nighttime photos. Which method should you choose?'
+    options:
+      - 'Pix2Pix, because its U-Net and PatchGAN preserve fine details well'
+      - 'A VAE, because it does not require class labels'
+      - 'CycleGAN, because the two sets are unpaired and the cycle-consistency loss forces the nighttime output to preserve the daytime photo''s content'
+      - 'A standard GAN, because the generator will learn nighttime images on its own'
+    answer: 2
+    explanation: 'Pix2Pix requires aligned pairs (a daytime photo and that exact same scene at night) to compute its L1 loss, which you do not have here. A standard GAN generates nighttime images from random noise without tying them to any input daytime photo. CycleGAN uses two generators $G: X \to Y$ and $F: Y \to X$ and enforces $F(G(\mathbf{x})) \approx \mathbf{x}$, forcing the nighttime image to retain enough information to reconstruct the original daytime scene.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import LocalCode from '@components/LocalCode.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import reparamCode from '@code/cv/vae-gan/reparam-kl.en.py?raw';
+import vaeCode from '@code/cv/vae-gan/tiny-vae.en.py?raw';
+import ganCode from '@code/cv/vae-gan/tiny-gan.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand what a **generative model** is: learning the data distribution so you can sample brand-new images.
+- Derive the **ELBO** (evidence lower bound) of a **VAE** (variational autoencoder), the closed-form KL divergence for diagonal Gaussians, and explain why the **reparameterization trick** is necessary.
+- Understand the game between the **generator** and **discriminator** in a **GAN** (generative adversarial network): the optimal discriminator, the non-saturating loss, and why GANs are tricky to train.
+- Distinguish Pix2Pix (requires paired images) from CycleGAN (works on unpaired sets), and pick the right approach for the data you have.
+
+## Prerequisites
+
+{/* List populated from prerequisites in roadmap.ts. Do not write manual links here. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+Two prerequisite lessons are not yet published, so here is what this lesson uses. A **probability distribution** $p(\mathbf{x})$ tells how likely each value is; **sampling** means drawing a random value from that distribution. A **multivariate normal distribution** with diagonal covariance, written $\mathcal{N}(\boldsymbol\mu, \mathrm{diag}(\boldsymbol\sigma^2))$, consists of $J$ independent 1D normal distributions where dimension $j$ has mean $\mu_j$ and standard deviation $\sigma_j$; $\mathcal{N}(\mathbf{0}, \mathbf{I})$ is the special case where every $\mu_j = 0$ and $\sigma_j = 1$. An **expectation** $\mathbb{E}_{p}[f(\mathbf{z})]$ is the average value of $f$ when $\mathbf{z}$ is drawn from $p$, which can be estimated by averaging over many samples (a **Monte Carlo** estimate). The **KL divergence** (Kullback–Leibler divergence) $D_{\mathrm{KL}}(q \parallel p) = \mathbb{E}_{q}[\log q - \log p]$ measures how much $q$ differs from $p$: it is always non-negative and equals 0 when the two distributions match, just as in [RLHF](/en/llm/rlhf/). Finally, an **autoencoder** is a neural network made of an **encoder** that compresses an image into a short vector and a **decoder** that reconstructs the image from that vector, trained by minimizing the difference between input and output.
+:::
+
+## Intuition
+
+### Generating images is sampling
+
+You have 1,797 handwritten digit images of size $8 \times 8$ (scikit-learn's `load_digits` dataset). You want the machine to draw **new digits**: ones that look handwritten, without copying any existing image.
+
+Think of each image as a point in 64-dimensional space (64 pixels). Real digit images are not spread uniformly across that space. Pick 64 numbers at random and you get speckled TV static—almost never a digit. Real digits cluster inside a tiny, intricately shaped region. "Drawing a new image" means **sampling a point from that exact region**: drawing a sample from the true data distribution, $p_{\text{data}}(\mathbf{x})$.
+
+We do not have a formula for $p_{\text{data}}$, only samples from it. A generative model must learn from those samples how to draw new ones.
+
+### Two ideas
+
+**Idea 1: compress, then decompress.** Every handwritten "3" varies along a few factors: how much it slants, how thick the stroke is, how wide the top loop is. If we can summarize an image with a few such numbers (a **latent variable**, denoted $\mathbf{z}$) and know how those numbers are distributed, generating a new image is easy: draw a few numbers at random, then "decompress" them into an image. An ordinary autoencoder already has a decoder. What it lacks is a **well-organized** $\mathbf{z}$ space where picking a random $\mathbf{z}$ still decodes into a plausible image. A VAE adds exactly that order.
+
+**Idea 2: counterfeiter vs. inspector.** One person practices printing counterfeit bills; another practices spotting fakes. As the inspector gets sharper, the counterfeiter must print more convincing bills, and vice versa. Neither writes down an explicit formula for "what real money looks like"; the counterfeiter simply learns where they got caught. A GAN plays this game between two neural networks.
+
+Beyond generating from scratch, a very practical variant **translates one image into another**—turning a sketch into a photograph, or a daytime street into night. That is the domain of Pix2Pix and CycleGAN.
+
+The central question of this lesson is: **given only a collection of sample images, how do we learn a way to draw realistic new images, and how do we train it with gradient descent?**
+
+## Theory
+
+### Notation
+
+An image is flattened into a vector $\mathbf{x}$ (64 numbers for an $8 \times 8$ digit). The latent variable $\mathbf{z} \in \mathbb{R}^J$ has $J$ dimensions, following the notation of the VAE paper. The **prior** distribution over $\mathbf{z}$ is $p(\mathbf{z}) = \mathcal{N}(\mathbf{0}, \mathbf{I})$. The encoder $q_\phi(\mathbf{z} \mid \mathbf{x})$ has parameters $\phi$, and the decoder $p_\theta(\mathbf{x} \mid \mathbf{z})$ has parameters $\theta$.
+
+In the GAN section, $G$ is the generator and **$D$ is the discriminator**: a network that takes an image and outputs the probability that the image is real. Do not confuse this $D$ with the embedding dimension $D$ in the ViT lessons, or with the $D$ in $D_{\mathrm{KL}}$ (KL divergence).
+
+### What a generative model learns
+
+The classic way to fit a distribution $p_\theta(\mathbf{x})$ is maximum **likelihood**: choose $\theta$ so that $\log p_\theta(\mathbf{x})$ is large on real images. In a latent-variable model, an image is generated in two steps: first draw $\mathbf{z} \sim p(\mathbf{z})$, then draw $\mathbf{x} \sim p_\theta(\mathbf{x} \mid \mathbf{z})$. The probability of an image integrates over every possible $\mathbf{z}$ that could have produced it:
+
+$$
+p_\theta(\mathbf{x}) = \int p_\theta(\mathbf{x} \mid \mathbf{z})\, p(\mathbf{z})\, d\mathbf{z}
+$$
+
+When the decoder is a neural network, this integral over all $\mathbf{z}$ is intractable. Estimating it by drawing random $\mathbf{z}$ vectors from $p(\mathbf{z})$ fails too: almost every random $\mathbf{z}$ decodes into an image that looks nothing like $\mathbf{x}$, so you would need an astronomical number of samples. We need to know **which $\mathbf{z}$ values are likely to have generated $\mathbf{x}$**. That is the job of the encoder.
+
+### VAE: from autoencoder to distribution
+
+A VAE (Kingma & Welling, 2014) modifies an autoencoder in one crucial way: instead of outputting a **single** vector $\mathbf{z}$, the encoder outputs a **distribution** over $\mathbf{z}$. For each image, the encoder outputs two $J$-dimensional vectors $\boldsymbol\mu$ and $\boldsymbol\sigma$, defining:
+
+$$
+q_\phi(\mathbf{z} \mid \mathbf{x}) = \mathcal{N}\big(\boldsymbol\mu, \mathrm{diag}(\boldsymbol\sigma^2)\big)
+$$
+
+Intuitively, an image is mapped not to a single pinprick, but to a small "cloud." The decoder must reconstruct the image from any point drawn inside that cloud. At the same time, every cloud is pulled toward $\mathcal{N}(\mathbf{0}, \mathbf{I})$. Together, these two forces make the latent space smooth and gap-free: there are no dead zones between images, so sampling $\mathbf{z}$ from $\mathcal{N}(\mathbf{0}, \mathbf{I})$ and decoding produces a meaningful image. Those two forces correspond directly to the two terms of the ELBO below.
+
+### Deriving the ELBO step by step
+
+**Step 1: write $\log p_\theta(\mathbf{x})$ as an expectation.** Since $\log p_\theta(\mathbf{x})$ does not depend on $\mathbf{z}$, its expectation under any distribution over $\mathbf{z}$ is just itself. Choose the encoder distribution $q_\phi(\mathbf{z} \mid \mathbf{x})$:
+
+$$
+\log p_\theta(\mathbf{x}) = \mathbb{E}_{q_\phi(\mathbf{z} \mid \mathbf{x})}\big[\log p_\theta(\mathbf{x})\big]
+$$
+
+**Step 2: apply the product rule of probability.** The joint distribution factors as $p_\theta(\mathbf{x}, \mathbf{z}) = p_\theta(\mathbf{x})\, p_\theta(\mathbf{z} \mid \mathbf{x})$. Dividing by $p_\theta(\mathbf{z} \mid \mathbf{x})$ gives $p_\theta(\mathbf{x}) = p_\theta(\mathbf{x}, \mathbf{z}) / p_\theta(\mathbf{z} \mid \mathbf{x})$. Multiply numerator and denominator by $q_\phi(\mathbf{z} \mid \mathbf{x})$ (leaving the value unchanged) and split the log of a product into a sum of logs:
+
+$$
+\begin{aligned}
+\log p_\theta(\mathbf{x})
+&= \mathbb{E}_{q}\left[\log \frac{p_\theta(\mathbf{x}, \mathbf{z})}{p_\theta(\mathbf{z} \mid \mathbf{x})}\right] \\
+&= \mathbb{E}_{q}\left[\log \frac{p_\theta(\mathbf{x}, \mathbf{z})}{q_\phi(\mathbf{z} \mid \mathbf{x})}\right]
+ + \mathbb{E}_{q}\left[\log \frac{q_\phi(\mathbf{z} \mid \mathbf{x})}{p_\theta(\mathbf{z} \mid \mathbf{x})}\right]
+\end{aligned}
+$$
+
+Here $\mathbb{E}_q$ is shorthand for $\mathbb{E}_{q_\phi(\mathbf{z} \mid \mathbf{x})}$.
+
+**Step 3: recognize the KL divergence.** The second term is the exact definition of $D_{\mathrm{KL}}\big(q_\phi(\mathbf{z} \mid \mathbf{x}) \parallel p_\theta(\mathbf{z} \mid \mathbf{x})\big)$, which is always non-negative. Dropping it can only make the right-hand side smaller or equal, so the first term is a **lower bound** on $\log p_\theta(\mathbf{x})$. We call it the ELBO:
+
+$$
+\log p_\theta(\mathbf{x}) \ge \mathcal{L}_{\text{ELBO}} = \mathbb{E}_{q}\left[\log \frac{p_\theta(\mathbf{x}, \mathbf{z})}{q_\phi(\mathbf{z} \mid \mathbf{x})}\right]
+$$
+
+The gap between the two sides is the KL divergence we just dropped: the closer $q_\phi$ is to the true posterior $p_\theta(\mathbf{z} \mid \mathbf{x})$, the tighter the bound. Maximizing the ELBO therefore both pushes $\log p_\theta(\mathbf{x})$ up and teaches the encoder to approximate the true posterior. The word "evidence" in Evidence Lower Bound refers to $\log p_\theta(\mathbf{x})$.
+
+**Step 4: split into reconstruction minus KL.** Rewrite $p_\theta(\mathbf{x}, \mathbf{z}) = p_\theta(\mathbf{x} \mid \mathbf{z})\, p(\mathbf{z})$ (draw $\mathbf{z}$ first, then $\mathbf{x}$) and split the logarithm:
+
+$$
+\begin{aligned}
+\mathcal{L}_{\text{ELBO}}
+&= \mathbb{E}_{q}\big[\log p_\theta(\mathbf{x} \mid \mathbf{z})\big]
+ + \mathbb{E}_{q}\left[\log \frac{p(\mathbf{z})}{q_\phi(\mathbf{z} \mid \mathbf{x})}\right] \\
+&= \underbrace{\mathbb{E}_{q}\big[\log p_\theta(\mathbf{x} \mid \mathbf{z})\big]}_{\text{(1)}}
+ - \underbrace{D_{\mathrm{KL}}\big(q_\phi(\mathbf{z} \mid \mathbf{x}) \parallel p(\mathbf{z})\big)}_{\text{(2)}}
+\end{aligned}
+$$
+
+The second line flips the sign because $\log(p/q) = -\log(q/p)$. Term (1) is the **reconstruction** term: it is large when the decoder accurately reconstructs $\mathbf{x}$ from $\mathbf{z}$ drawn inside $\mathbf{x}$'s cloud. Term (2) is the **KL** penalty pulling $q_\phi$ toward the prior: it is small when the cloud stays close to $\mathcal{N}(\mathbf{0}, \mathbf{I})$. Those are the two forces from our intuition. During training, we minimize $-\mathcal{L}_{\text{ELBO}}$, averaged across the images in a mini-batch.
+
+### Closed-form KL for a diagonal Gaussian
+
+Because both $q_\phi$ and $p(\mathbf{z})$ are Gaussian, the KL term has an exact closed-form formula—no sampling required. Since the $J$ dimensions are independent, the log density is a sum over dimensions, and the total KL is the sum of $J$ one-dimensional KL divergences. For a single dimension with $q = \mathcal{N}(\mu, \sigma^2)$ and $p = \mathcal{N}(0, 1)$, the log densities are:
+
+$$
+\begin{aligned}
+\log q(z) &= -\tfrac12 \log(2\pi) - \log \sigma - \frac{(z - \mu)^2}{2\sigma^2} \\
+\log p(z) &= -\tfrac12 \log(2\pi) - \frac{z^2}{2}
+\end{aligned}
+$$
+
+Subtracting the two cancels the $-\tfrac12 \log(2\pi)$ constant. Taking the expectation under $z \sim q$ uses two standard facts: $\mathbb{E}_q[(z - \mu)^2] = \sigma^2$ (the definition of variance) and $\mathbb{E}_q[z^2] = \mu^2 + \sigma^2$ (variance plus mean squared). Substituting both gives:
+
+$$
+\begin{aligned}
+D_{\mathrm{KL}}(q \parallel p)
+&= \mathbb{E}_q\big[\log q(z) - \log p(z)\big] \\
+&= -\log \sigma - \frac{\sigma^2}{2\sigma^2} + \frac{\mu^2 + \sigma^2}{2} \\
+&= \tfrac12\big(\mu^2 + \sigma^2 - 1 - \log \sigma^2\big)
+\end{aligned}
+$$
+
+The last line groups terms and rewrites $-\log \sigma = -\tfrac12 \log \sigma^2$. Summing across all $J$ dimensions yields:
+
+$$
+D_{\mathrm{KL}}\big(q_\phi(\mathbf{z} \mid \mathbf{x}) \parallel \mathcal{N}(\mathbf{0}, \mathbf{I})\big)
+= \frac12 \sum_{j=1}^{J} \big(\mu_j^2 + \sigma_j^2 - 1 - \log \sigma_j^2\big)
+$$
+
+Quick sanity check: when $\mu_j = 0$ and $\sigma_j = 1$, each term is $0 + 1 - 1 - 0 = 0$, as expected when the two distributions are identical. This is the formula from Appendix B of the VAE paper, and the NumPy cell below compares it against Monte Carlo estimates. In code, the encoder usually outputs $\log \sigma^2$ rather than $\sigma$ so that $\sigma = \exp(\tfrac12 \log \sigma^2)$ is guaranteed positive without extra constraints.
+
+### The reparameterization trick
+
+The reconstruction term is an expectation under $q_\phi$, which we estimate by drawing $\mathbf{z}$ (the VAE paper uses a single sample per image when the batch size is large enough, say 100 images). Here is the catch: to train the encoder, we need derivatives of the loss with respect to $\boldsymbol\mu$ and $\boldsymbol\sigma$. However, "draw a random number from $\mathcal{N}(\boldsymbol\mu, \boldsymbol\sigma^2)$" is not a differentiable operation—backpropagation cannot flow through a random number generator.
+
+The trick is to factor the randomness outside the parameters. Draw $\boldsymbol\epsilon \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$—noise that depends on no learnable parameters—and compute:
+
+$$
+\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon
+$$
+
+where $\odot$ denotes elementwise multiplication. Shifting a standard normal variable by $\mu_j$ and scaling it by $\sigma_j$ produces the exact distribution $\mathcal{N}(\mu_j, \sigma_j^2)$, so $\mathbf{z}$ has the same distribution as before. Crucially, once $\boldsymbol\epsilon$ is drawn, $\mathbf{z}$ is an ordinary deterministic function of $\boldsymbol\mu$ and $\boldsymbol\sigma$, with $\partial z_j / \partial \mu_j = 1$ and $\partial z_j / \partial \sigma_j = \epsilon_j$. Gradients now flow from the decoder, through $\mathbf{z}$, and back into the encoder just like in any other layer.
+
+:::note[Key takeaway]
+The VAE loss is $-\mathcal{L}_{\text{ELBO}}$ = (reconstruction error) + $\frac12 \sum_j (\mu_j^2 + \sigma_j^2 - 1 - \log \sigma_j^2)$, using $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$ so gradients pass through the sampling step. To generate a new image: sample $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ and pass it through the decoder.
+:::
+
+What the reconstruction term looks like depends on how we model $p_\theta(\mathbf{x} \mid \mathbf{z})$. Treating each pixel (scaled to $[0, 1]$) as an independent Bernoulli variable makes $-\log p_\theta(\mathbf{x} \mid \mathbf{z})$ the binary cross-entropy summed over pixels; treating it as a Gaussian with fixed variance makes it the sum of squared errors (up to a constant). The VAE paper uses both, and the code in this lesson uses the Bernoulli version.
+
+### Why VAE images are often blurry
+
+Both the Bernoulli and Gaussian decoders above treat pixels as **conditionally independent** given $\mathbf{z}$. Suppose a region of $\mathbf{z}$ space corresponds to several slightly different images—say, a digit "1" shifted a hair to the left or a hair to the right. Squared error is minimized when the decoder outputs the **average** of those images: a smudged stroke in the middle. And clouds in $\mathbf{z}$ space inevitably overlap, because the KL term inflates every cloud and pulls them all toward the origin. As a result, generated images look like averages of several plausible images—in other words, blurry. The Pix2Pix paper notes the exact same effect for L1 and L2 losses in image generation: they encourage blurry averages. The ASCII sample in the VAE code cell below shows this effect firsthand.
+
+### GAN: a two-player game
+
+A GAN (Goodfellow et al., 2014) drops likelihood entirely. The generator $G$ maps noise $\mathbf{z} \sim p(\mathbf{z})$ into an image $G(\mathbf{z})$; let $p_g$ denote the distribution of these generated images. The discriminator $D$ takes an image and outputs $D(\mathbf{x}) \in (0, 1)$, the probability that the image is real. The two networks play a **minimax game**:
+
+$$
+\min_G \max_D V(D, G)
+= \mathbb{E}_{\mathbf{x} \sim p_{\text{data}}}\big[\log D(\mathbf{x})\big]
++ \mathbb{E}_{\mathbf{z} \sim p(\mathbf{z})}\big[\log\big(1 - D(G(\mathbf{z}))\big)\big]
+$$
+
+Reading the two terms: $D$ wants $V$ to be large, meaning $D(\mathbf{x})$ near 1 on real images and $D(G(\mathbf{z}))$ near 0 on fake ones. That is simply negated binary cross-entropy for a "real vs. fake" classifier. Meanwhile, $G$ only affects the second term and wants it small—it wants to fool $D$ into outputting values near 1.
+
+**The optimal discriminator.** Hold $G$ fixed and write the expectations as an integral over $\mathbf{x}$ (since fake images $G(\mathbf{z})$ follow distribution $p_g$):
+
+$$
+V = \int \Big( p_{\text{data}}(\mathbf{x}) \log D(\mathbf{x}) + p_g(\mathbf{x}) \log\big(1 - D(\mathbf{x})\big) \Big)\, d\mathbf{x}
+$$
+
+Because $D(\mathbf{x})$ can be chosen independently at each point $\mathbf{x}$, we maximize the integrand pointwise. Setting $a = p_{\text{data}}(\mathbf{x})$ and $b = p_g(\mathbf{x})$, the function $a \log y + b \log(1 - y)$ has derivative $a/y - b/(1 - y) = 0$ at $y = a/(a + b)$. Therefore:
+
+$$
+D^*(\mathbf{x}) = \frac{p_{\text{data}}(\mathbf{x})}{p_{\text{data}}(\mathbf{x}) + p_g(\mathbf{x})}
+$$
+
+Intuitively, wherever real images are denser than fake ones, $D^*$ leans toward "real." The GAN paper substitutes $D^*$ back into $V$ and proves that the minimum over $G$ is $-\log 4$, achieved if and only if $p_g = p_{\text{data}}$. At that point $D^* = 1/2$ everywhere: the discriminator is reduced to flipping a coin. That is the equilibrium the game aims for.
+
+**Non-saturating loss.** Early in training, fake images look terrible and $D$ rejects them effortlessly: $D(G(\mathbf{z})) \approx 0$. Write $D = \sigma(a)$ where $a$ is the logit (the pre-sigmoid output). The derivatives with respect to $a$ are:
+
+$$
+\frac{\partial}{\partial a} \log\big(1 - \sigma(a)\big) = -\sigma(a),
+\qquad
+\frac{\partial}{\partial a} \log \sigma(a) = 1 - \sigma(a)
+$$
+
+When $\sigma(a) \approx 0$, the first derivative vanishes: $\log(1 - D)$ **saturates**, leaving $G$ with almost no learning signal. The second derivative, by contrast, is close to 1. Right in the original paper, Goodfellow et al. therefore proposed training $G$ to **maximize $\log D(G(\mathbf{z}))$** instead of minimizing $\log(1 - D(G(\mathbf{z})))$. Both push in the same direction, but the non-saturating version gives strong gradients at the start of training. In code, this is simply binary cross-entropy on fake images with **target label 1**.
+
+**Alternating training.** Each iteration updates $D$ for one or more steps (one step in the original paper), then updates $G$ for one step. During the $D$ update, fake images are detached from the computation graph so gradients do not accidentally update $G$.
+
+### Why GANs are hard to train
+
+- **No single loss curve that steadily decreases.** Because both networks are moving targets, each side's loss depends on the other. An increase in $G$'s loss might mean $D$ just got sharper, not that $G$ got worse. Moreover, the $D^*$ analysis above assumes $D$ is trained to optimality at every step and both networks have unlimited capacity; in practice neither holds, and training can oscillate instead of converging.
+- **Mode collapse.** $G$ discovers a handful of images that fool $D$ and produces only those, ignoring the rest of the data distribution (for instance, drawing only one or two digits). The GAN paper calls this the "Helvetica scenario" and advises against updating $G$ too many times per $D$ update. The GAN code cell below checks whether generated images cover all ten digits to spot mode collapse.
+- **Sensitivity to architecture and hyperparameters.** DCGAN (Radford et al., 2016) introduced a set of architectural guidelines that stabilized convolutional GANs: replace pooling with strided convolutions (in $D$) and transposed convolutions (in $G$), use batch normalization in both networks, remove hidden fully connected layers, use ReLU in $G$ with Tanh at the output, and use LeakyReLU in $D$. They trained with Adam at learning rate $0.0002$ and $\beta_1 = 0.5$—the exact values used in our GAN code cell below. DCGAN also showed that vector arithmetic in $\mathbf{z}$ space produces semantic edits on generated faces.
+
+### Pix2Pix: conditional GAN with paired images
+
+Many tasks do not require generating images out of thin air, but **image-to-image translation**: turning semantic label maps into street scenes, grayscale photos into color, or edge sketches into photographs. In this section, $\mathbf{x}$ is the source image and $\mathbf{y}$ is the target image (an image, not a class label). Pix2Pix (Isola et al., 2017) requires **paired** training examples $(\mathbf{x}, \mathbf{y})$.
+
+Pix2Pix is a **conditional GAN**: both $G$ and $D$ observe the source image $\mathbf{x}$. Instead of asking "is this image real?", $D$ asks "is this image a plausible target **for this specific source image**?":
+
+$$
+\mathcal{L}_{\text{cGAN}}(G, D) = \mathbb{E}_{\mathbf{x}, \mathbf{y}}\big[\log D(\mathbf{x}, \mathbf{y})\big] + \mathbb{E}_{\mathbf{x}, \mathbf{z}}\big[\log\big(1 - D(\mathbf{x}, G(\mathbf{x}, \mathbf{z}))\big)\big]
+$$
+
+Because ground-truth target $\mathbf{y}$ is available, Pix2Pix adds an L1 loss pulling the generated image toward $\mathbf{y}$, choosing L1 over L2 because L1 produces less blur:
+
+$$
+G^* = \arg\min_G \max_D \; \mathcal{L}_{\text{cGAN}}(G, D) + \lambda\, \mathbb{E}_{\mathbf{x}, \mathbf{y}, \mathbf{z}}\big[\lVert \mathbf{y} - G(\mathbf{x}, \mathbf{z}) \rVert_1\big]
+$$
+
+The authors set $\lambda = 100$. The division of labor is clean: L1 gets the low-frequency structure right (overall colors and layout), while $D$ enforces crisp high-frequency details that L1 alone would blur out. Three architectural choices stand out:
+
+- **U-Net generator:** an encoder–decoder with **skip connections** from layer $i$ to layer $n - i$, allowing fine spatial details like edges to bypass the bottleneck directly from input to output. You saw this architecture in [Semantic Segmentation](/en/cv/semantic-segmentation/).
+- **PatchGAN discriminator:** $D$ scores "real or fake" on every $N \times N$ patch of the image and averages the responses, rather than outputting a single scalar for the whole image. $70 \times 70$ patches worked best in the authors' experiments. Smaller patches mean fewer parameters, faster execution, and applicability to arbitrarily sized images.
+- **Noise via dropout:** the authors found that $G$ simply learned to ignore an explicit noise vector $\mathbf{z}$, so they injected randomness only through dropout layers kept active at both training and test time. Even so, the outputs show limited diversity.
+
+### CycleGAN: no pairs needed
+
+Often paired data simply does not exist: nobody has a photo of a horse and a photo of a zebra in the exact same pose in the exact same field. CycleGAN (Zhu et al., 2017) learns from two **unpaired** image collections: domain $X$ (say, horses) and domain $Y$ (zebras).
+
+A single GAN is not enough here. A generator $G: X \to Y$ could produce a realistic zebra that has **nothing to do** with the input horse; $D_Y$ only checks whether the output looks like *some* zebra. Infinitely many mappings could fool $D_Y$. CycleGAN introduces a reverse generator $F: Y \to X$ and demands that translating forward and back returns you to where you started: horse → zebra → horse must reconstruct the original horse. This is the **cycle consistency loss**:
+
+$$
+\mathcal{L}_{\text{cyc}}(G, F) = \mathbb{E}_{\mathbf{x}}\big[\lVert F(G(\mathbf{x})) - \mathbf{x} \rVert_1\big] + \mathbb{E}_{\mathbf{y}}\big[\lVert G(F(\mathbf{y})) - \mathbf{y} \rVert_1\big]
+$$
+
+To reconstruct $\mathbf{x}$ on the way back, $G(\mathbf{x})$ is forced to preserve the content of $\mathbf{x}$—its pose, background, and layout. The full objective combines two adversarial games ($G$ vs. $D_Y$, and $F$ vs. $D_X$) plus $\lambda \mathcal{L}_{\text{cyc}}$, with $\lambda = 10$ in the paper. For training stability, the authors replace the standard log-likelihood GAN loss with a least-squares loss (LSGAN) and use a $70 \times 70$ PatchGAN discriminator.
+
+A limitation highlighted by the authors themselves: CycleGAN excels at changing colors and textures (horse to zebra, photo to Monet painting), but largely fails when the translation requires **geometric shape changes**, such as turning a dog into a cat.
+
+### Limitations
+
+- **Quality vs. diversity.** VAEs produce blurry images; GANs produce sharp images but suffer from mode collapse and unstable training. Diffusion models, covered in [Image Generation (2): Diffusion, Stable Diffusion, LoRA](/en/cv/diffusion-models/), largely capture the strengths of both—and Stable Diffusion brings back a pretrained autoencoder to compress images first.
+- **Evaluating generated images** is harder than evaluating a classifier because there is no single ground-truth answer. This lesson uses only a lightweight check in the GAN cell (counting predicted digit classes with a classifier).
+- **Our code cells use small MLPs on $8 \times 8$ digits** so they run quickly on CPU; real-world models use convolutional architectures like DCGAN and U-Net.
+
+## Illustration
+
+The diagram below places the two generative frameworks side by side. Notice where $\mathbf{z}$ comes from: in a VAE, $\mathbf{z}$ is sampled from the $(\boldsymbol\mu, \boldsymbol\sigma)$ cloud produced by the encoder; in a GAN, $\mathbf{z}$ is pure random noise, and real images only ever enter $D$, never touching $G$.
+
+{/* FIG: GenerativeModelsFigure — two rows. VAE row: image x → encoder → μ, σ boxes → z = μ + σ ⊙ ε (ε enters from the side) → decoder → reconstructed image; two loss labels: "reconstruction" between input and output images, "KL" at μ, σ. GAN row: noise z → G → fake image; real image and fake image both enter D → "real or fake". */}
+
+The table below compares the four models covered in this lesson. The "Loss function" column lists the formulation from each original paper.
+
+| Criterion | VAE | GAN | Pix2Pix | CycleGAN |
+|---|---|---|---|---|
+| Paper | Kingma & Welling, 2014 | Goodfellow et al., 2014 | Isola et al., 2017 | Zhu et al., 2017 |
+| Required data | Unlabeled image set | Unlabeled image set | Paired images (source, target) | Two unpaired image sets from two domains |
+| Generates from | $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ | Noise $\mathbf{z}$ | Source image | Image from the other domain |
+| Loss function | $-$ELBO: reconstruction + KL | Minimax $G$ vs. $D$ (usually non-saturating in practice) | cGAN + $\lambda$ L1, $\lambda = 100$ | Two GANs + $\lambda \mathcal{L}_{\text{cyc}}$, $\lambda = 10$ |
+| Strengths | Stable training, provides an encoder $\mathbf{x} \to \mathbf{z}$, principled likelihood lower bound | Sharp images | Faithful to source layout, works with small datasets (a few hundred pairs) | No paired data needed |
+| Weaknesses | Blurry images | Unstable training, mode collapse, no encoder by default | Requires aligned image pairs, low output diversity | Struggles with shape changes, trains four networks at once |
+
+## Code examples
+
+The code in this lesson was last tested in November 2026: the NumPy cell with Python 3.14 and NumPy 2.4 (in Pyodide), and the two PyTorch cells with Python 3.14, PyTorch 2.15, and scikit-learn 1.9 on CPU. The NumPy cell runs directly on the page; the two PyTorch cells run on your machine. All cells are independent and share no variables.
+
+### Reparameterization and KL in NumPy
+
+The cell below takes a 2D distribution $q(\mathbf{z} \mid \mathbf{x})$ with $\boldsymbol\mu = (1, -0.5)$ and $\boldsymbol\sigma = (0.5, 1.5)$. It computes the exact KL divergence against $\mathcal{N}(\mathbf{0}, \mathbf{I})$ using the closed-form formula, then estimates it via Monte Carlo: drawing $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$ and averaging $\log q(\mathbf{z}) - \log p(\mathbf{z})$ over increasing sample sizes. Finally, it estimates the derivatives of the KL with respect to $\boldsymbol\mu$ and $\boldsymbol\sigma$ **through the samples $\mathbf{z}$ themselves**, just as backpropagation does.
+
+<PythonRunner code={reparamCode} title="Reparameterization trick and KL: Monte Carlo vs. closed form" />
+
+Reading the output:
+
+- **`closed form KL = 1.1627`:** the first dimension contributes $\frac12(1 + 0.25 - 1 + 1.386) \approx 0.818$, and the second contributes $\frac12(0.25 + 2.25 - 1 - 0.811) \approx 0.344$.
+- **Monte Carlo table:** with 10 samples, the estimate is 0.6253—off by more than 0.5. With 1,000 samples, the error drops to ~0.02; with 10,000 and 100,000 samples, it is below 0.005. Because sample-mean error shrinks at rate $1/\sqrt{n}$ with random fluctuations, it does not decrease monotonically on every single row. The closed-form formula gives the exact answer with zero sampling variance—which is why VAEs use it for the KL term and only sample for the reconstruction term.
+- **`mean of z`, `std of z`:** close to $(1, -0.5)$ and $(0.5, 1.5)$. Shifting and scaling standard normal noise produces the exact distribution $q$.
+- **The two `grad` lines:** the Monte Carlo gradient with respect to $\boldsymbol\mu$ is $(1.001, -0.503)$, matching the exact derivative $\boldsymbol\mu$ (from $\frac12 \mu_j^2$); with respect to $\boldsymbol\sigma$ it is $(-1.497, 0.84)$, matching $\sigma_j - 1/\sigma_j = (-1.5, 0.833)$. Gradients flow cleanly through the sampling step because $\mathbf{z}$ is a differentiable function of $\boldsymbol\mu$ and $\boldsymbol\sigma$ once $\boldsymbol\epsilon$ is fixed.
+
+### A tiny VAE on $8 \times 8$ digits
+
+The script below builds an MLP VAE: encoder $64 \to 128 \to (\boldsymbol\mu, \log \boldsymbol\sigma^2)$ with $J = 2$, and decoder $2 \to 128 \to 64$. Pixel values are divided by 16 into $[0, 1]$, reconstruction uses binary cross-entropy (a Bernoulli decoder), and the KL term uses the closed-form formula. It trains for 60 epochs with batch size 64 and Adam. Every few epochs it prints both terms (averaged per image); at the end it draws $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$, decodes it, and prints the generated digit as ASCII art (from `' '` for white to `'#'` for darkest). CPU installation instructions for PyTorch are in [Build Your First LLM](/en/llm/build-first-llm/).
+
+<LocalCode
+  code={vaeCode}
+  title="Tiny VAE on load_digits"
+  packages={['torch', 'scikit-learn']}
+  hardware="CPU is enough; no GPU or network download needed. Takes ~6 seconds on an idle dev machine (mostly importing PyTorch)"
+  sampleVaries={false}
+>
+
+```text
+epoch  1  recon  38.65  KL  0.33
+epoch  5  recon  27.75  KL  0.73
+epoch 10  recon  26.45  KL  0.61
+epoch 20  recon  24.14  KL  1.55
+epoch 40  recon  23.07  KL  2.03
+epoch 60  recon  22.74  KL  2.13
+  .++:  
+  +*=-  
+ .*-.-  
+ .*-:-. 
+ .+--+: 
+  +..+- 
+  +=-*: 
+  .+*=. 
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **Reconstruction drops from 38.65 to 22.74.** It cannot reach 0: many pixels have intermediate gray values (such as 0.5), and binary cross-entropy with a fractional target has a strictly positive minimum. Furthermore, a 2-number latent vector $\mathbf{z}$ has to summarize 64 pixels.
+- **KL rises from 0.33 to 2.13.** At the very start, the decoder does not yet know how to use $\mathbf{z}$, so the cheapest strategy is to keep $q$ close to the prior (small KL). As training progresses, the model pays a higher KL cost so $\mathbf{z}$ can carry information about the image, trading it for a much lower reconstruction loss. That is the tug-of-war between the two terms of the ELBO.
+- **The generated image** has the silhouette of a digit (a looped stroke resembling a 0 or 8), but contains not a single `#` character: every pixel sits at a medium intensity. Because the decoder outputs per-pixel **probabilities** that average over the images mapped near that $\mathbf{z}$, the stroke looks soft and blurry—matching the theory section.
+
+Try changing `J = 2` to `J = 8`: reconstruction loss will drop further while the KL term increases.
+
+### A tiny GAN on $8 \times 8$ digits
+
+The second script trains an MLP GAN on the same dataset, scaled to $[-1, 1]$ to match $G$'s Tanh output layer. $G$ is $16 \to 128 \to 64$; $D$ is $64 \to 128 \to 1$ (outputting logits, with LeakyReLU 0.2). Each iteration updates $D$ once and $G$ once using the non-saturating loss (target label 1 for fake images during the $G$ step), using Adam with learning rate $0.0002$ and $\beta_1 = 0.5$ as in DCGAN. At selected epochs it prints the last batch's losses along with $D$'s average output on real images (`D(real)`) and fake images (`D(fake)`). Finally, it generates 1,000 fake images and asks a logistic regression classifier (trained on the real digits) to predict which digit each fake image resembles, checking whether $G$ covers all ten classes.
+
+<LocalCode
+  code={ganCode}
+  title="Tiny GAN on load_digits"
+  packages={['torch', 'scikit-learn', 'numpy']}
+  hardware="CPU is enough; no GPU or network download needed. Takes ~10 seconds on an idle dev machine"
+  sampleVaries={false}
+>
+
+```text
+epoch   1  loss D 1.229  loss G 0.571  D(real) 0.68  D(fake) 0.57
+epoch  10  loss D 1.263  loss G 0.642  D(real) 0.60  D(fake) 0.53
+epoch  25  loss D 1.139  loss G 0.791  D(real) 0.61  D(fake) 0.46
+epoch  50  loss D 1.295  loss G 0.780  D(real) 0.52  D(fake) 0.46
+epoch 100  loss D 1.268  loss G 0.785  D(real) 0.53  D(fake) 0.46
+digits among 1000 fakes: [ 77  90 148 115 128 112  81  64 104  81]
+```
+
+</LocalCode>
+
+Reading the output:
+
+- **`D(real)` and `D(fake)` both drift toward 0.5** (0.53 and 0.46 at epoch 100): the discriminator can no longer cleanly separate real from fake, moving toward the theoretical equilibrium $D^* = 1/2$. The two numbers do not hit 0.50 exactly and fluctuate across epochs because the networks are small and minimax training does not converge as smoothly as the idealized theory.
+- **The losses do not monotonically decrease like a classifier's loss.** $D$'s loss hovers around 1.1 to 1.3, near the $2\ln 2 \approx 1.386$ value of a discriminator that guesses 0.5 on everything. Meanwhile, $G$'s loss **increases** from 0.571 to ~0.78 (i.e., $-\ln 0.46$): early on $D$ is naive and easy to fool, whereas later $D$ is sharper and harder to fool. A rising generator loss here does not mean $G$ is getting worse.
+- **All ten digits are represented**, with counts ranging from 64 to 148 across 1,000 generated samples (ideally ~100 per digit). This run did not suffer mode collapse. Note that this check only measures **diversity**: a classifier will assign *some* digit label even to a noisy blob, so it does not by itself prove visual quality.
+
+Try removing `.detach()` in the $D$ step, or replacing the `ones` target in the $G$ step with the saturating loss (minimizing $-$BCE with `zeros`), and see how `D(fake)` and the digit counts change.
+
+## Common pitfalls
+
+:::caution[Reading GAN loss curves like classifier loss curves]
+An increasing generator loss does not mean $G$ is getting worse, and a decreasing discriminator loss does not mean the overall model is improving—each network is playing against a constantly shifting opponent. A discriminator loss near $2\ln 2 \approx 1.386$ (the sum of two binary cross-entropies when $D$ outputs 0.5 everywhere) only tells you the two networks are evenly matched, not that the generated images look good. Inspect generated samples periodically and check diversity (as in the digit-counting step). Conversely, if $D$'s loss drops to 0 and stays there, $D$ has won overwhelmingly and $G$ is starved of gradients.
+:::
+
+:::caution[Summing the two VAE terms on mismatched scales]
+A classic bug: computing reconstruction loss with default `F.mse_loss(...)`, which **averages** over pixels, while **summing** the KL term over the $J$ latent dimensions. That divides the reconstruction term by 64 (or by hundreds of thousands on full-size images), letting the KL term dominate: the encoder collapses every $q$ onto $\mathcal{N}(\mathbf{0}, \mathbf{I})$, and the decoder ignores $\mathbf{z}$ and outputs a single blurry average image for every input. The ELBO requires $\log p_\theta(\mathbf{x} \mid \mathbf{z})$ for the **entire image**, so sum over all pixels (`reduction="sum"`, as in our VAE script) before dividing by the batch size. If you want to reweight the two terms, use an explicit coefficient in front of the KL term rather than an accidental mismatch in reduction modes.
+:::
+
+:::caution[Choosing Pix2Pix without paired images, or expecting CycleGAN to change shapes]
+Pix2Pix requires pixel-aligned image pairs because its L1 loss compares the generated image directly against the ground-truth target image. Having two collections of images on the "same theme" is not enough; for unpaired sets, use CycleGAN. Conversely, because CycleGAN's cycle-consistency loss preserves the spatial layout of the source image, it excels at color and texture transfer but largely fails at geometric shape changes—the paper notes dog-to-cat translation as a typical failure case.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` field of the frontmatter. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Generative models learn how to sample from the data distribution. A VAE maximizes the ELBO $= \mathbb{E}_q[\log p_\theta(\mathbf{x} \mid \mathbf{z})] - D_{\mathrm{KL}}(q_\phi(\mathbf{z} \mid \mathbf{x}) \parallel \mathcal{N}(\mathbf{0}, \mathbf{I}))$, a lower bound on $\log p_\theta(\mathbf{x})$, and generates new images by sampling $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ and decoding.
+- For diagonal Gaussians, the KL term has the closed form $\frac12 \sum_j (\mu_j^2 + \sigma_j^2 - 1 - \log \sigma_j^2)$. The reparameterization trick $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$ moves randomness outside the parameters so gradients can flow through sampling. VAE images tend to be blurry because the decoder averages over plausible outputs.
+- A GAN pits generator $G$ against discriminator $D$ in a minimax game. The optimal discriminator is $D^* = p_{\text{data}} / (p_{\text{data}} + p_g)$, reaching equilibrium when $p_g = p_{\text{data}}$. In practice, $G$ uses the non-saturating loss; training can oscillate or suffer mode collapse.
+- Pix2Pix trains a conditional GAN on paired images with an added $\lambda$ L1 loss, a U-Net generator, and a PatchGAN discriminator. CycleGAN translates between unpaired domains using two generators and a cycle-consistency loss $F(G(\mathbf{x})) \approx \mathbf{x}$.
+
+**Further reading:**
+
+- Kingma, D. P., Welling, M. (2014). [*Auto-Encoding Variational Bayes*](https://arxiv.org/abs/1312.6114), arXiv:1312.6114, Sections 2.2–2.4, Section 3, and Appendix B. Concise; derives the variational lower bound, the reparameterization trick, and the closed-form Gaussian KL. Note that the paper writes $\mathcal{L}$ for the ELBO (the quantity being maximized), whereas this lesson writes $\mathcal{L}_{\text{ELBO}}$ to avoid confusion with a loss to minimize.
+- Kingma, D. P., Welling, M. (2019). [*An Introduction to Variational Autoencoders*](https://arxiv.org/abs/1906.02691), arXiv:1906.02691, Chapter 2. A gentler, well-illustrated walkthrough of VAEs by the original authors.
+- Goodfellow, I. et al. (2014). [*Generative Adversarial Networks*](https://arxiv.org/abs/1406.2661), arXiv:1406.2661, Sections 3, 4, and 6. Covers the minimax game, the non-saturating loss, the proof of $D^*$, and the global optimum $p_g = p_{\text{data}}$.
+- Radford, A., Metz, L., Chintala, S. (2016). [*Unsupervised Representation Learning with Deep Convolutional Generative Adversarial Networks*](https://arxiv.org/abs/1511.06434), arXiv:1511.06434, Section 3. The DCGAN architectural guidelines.
+- Isola, P., Zhu, J.-Y., Zhou, T., Efros, A. A. (2017). [*Image-to-Image Translation with Conditional Adversarial Networks*](https://arxiv.org/abs/1611.07004), arXiv:1611.07004, Section 3; and Zhu, J.-Y., Park, T., Isola, P., Efros, A. A. (2017). [*Unpaired Image-to-Image Translation using Cycle-Consistent Adversarial Networks*](https://arxiv.org/abs/1703.10593), arXiv:1703.10593, Sections 3 and 6. Objectives for Pix2Pix and CycleGAN, along with CycleGAN's failure cases.
+
+<LessonProgress />

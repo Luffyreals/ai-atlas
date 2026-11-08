@@ -13,21 +13,21 @@ X_tr, X_te, y_tr, y_te = train_test_split(
 
 
 def random_shift(imgs):
-    # Mỗi ảnh dịch ngẫu nhiên tối đa 1 px theo mỗi chiều, ô trống điền 0
+    # Shift each image randomly by up to 1 px per axis, filling blanks with 0
     moves = rng.integers(-1, 2, size=(len(imgs), 2))
     return np.stack([ndimage.shift(im, mv, order=0, cval=0)
                      for im, mv in zip(imgs, moves)])
 
 
-# Tập test thứ hai: cùng các ảnh test, mỗi ảnh bị dịch ngẫu nhiên
+# Second test set: the same test images, each shifted randomly
 X_te_shift = random_shift(X_te)
 
-# Augmentation chỉ cho tập train: thêm 4 bản dịch ngẫu nhiên của mỗi ảnh
+# Augmentation on the training set only: add 4 random shifts per image
 X_aug = np.concatenate([X_tr] + [random_shift(X_tr) for _ in range(4)])
 y_aug = np.tile(y_tr, 5)
 
 for name, Xa, ya in [("no aug", X_tr, y_tr), ("shift aug", X_aug, y_aug)]:
-    # MLP nhỏ: một lớp ẩn 64 nơ-ron, cùng seed cho cả hai lần
+    # Small MLP: one hidden layer of 64 neurons, same seed for both runs
     clf = MLPClassifier((64,), max_iter=1000, random_state=0)
     clf.fit(Xa.reshape(len(Xa), -1), ya)
     acc = clf.score(X_te.reshape(len(X_te), -1), y_te)

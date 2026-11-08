@@ -68,7 +68,7 @@ Lộ trình học tập được thiết kế mạch lạc qua 5 giai đoạn ch
 | **Tương tác UI** | [React 19](https://react.dev) | Xây dựng các widget tương tác VIZ, Quiz, Runner với độ tải tối ưu |
 | **Thực thi Python** | [Pyodide](https://pyodide.org) | Chạy Python 3.10 và các thư viện khoa học dữ liệu trực tiếp trong Web Worker |
 | **Tìm kiếm nội dung** | [Pagefind](https://pagefind.app) | Công cụ tìm kiếm tĩnh toàn văn bản, không phụ thuộc server bên ngoài |
-| **Kiểm thử tự động** | [Vitest](https://vitest.dev) + [Playwright](https://playwright.dev) | Hơn 2.200 unit tests và kiểm thử E2E đa màn hình đảm bảo chất lượng tuyệt đối |
+| **Kiểm thử tự động** | [Vitest](https://vitest.dev) + [Playwright](https://playwright.dev) | Gần 2.500 unit tests (2.496 tests) và kiểm thử E2E đa màn hình đảm bảo chất lượng tuyệt đối |
 | **Hosting & CDN** | [Cloudflare Pages](https://pages.cloudflare.com) | Phân phối toàn cầu tốc độ cao, bảo mật HTTP headers và HTTPS tự động |
 
 ---
@@ -80,7 +80,7 @@ ai-atlas/
 ├── src/
 │   ├── content/docs/
 │   │   ├── vi/               # Toàn bộ 78 bài học tiếng Việt
-│   │   └── en/               # Các bài học tiếng Anh tương ứng
+│   │   └── en/               # Toàn bộ 78 bài học tiếng Anh tương ứng
 │   ├── content/i18n/         # Chuỗi ngôn ngữ giao diện (vi.json, en.json)
 │   ├── components/           # Component React & Astro (Quiz, PythonRunner, VIZ, Figures)
 │   ├── lib/                  # Thư viện tính toán toán học, SEO, Pyodide client, Fonts
@@ -92,7 +92,7 @@ ai-atlas/
 │   ├── decisions.md          # Nhật ký các quyết định kỹ thuật đã thống nhất
 │   └── architecture/         # Tài liệu thiết kế chi tiết (homepage, VIZ, launch, v.v.)
 ├── tests/
-│   ├── unit/                 # Hơn 2.200 unit tests (Vitest) cho toán học, nội dung, cú pháp
+│   ├── unit/                 # Gần 2.500 unit tests (Vitest) cho toán học, nội dung, cú pháp
 │   └── e2e/                  # Bộ kiểm thử giao diện & luồng người dùng (Playwright)
 ├── public/                   # Tài nguyên tĩnh, robots.txt, OpenGraph images, Cloudflare _headers
 ├── astro.config.ts           # Cấu hình Astro, Starlight, Fonts API, và KaTeX
@@ -129,7 +129,7 @@ Mở trình duyệt và truy cập: [http://localhost:4321/vi/](http://localhost
 |---|---|
 | `npm run dev` | Khởi động máy chủ phát triển cục bộ với Hot Module Reloading |
 | `npm run check` | Kiểm tra toàn bộ kiểu dữ liệu TypeScript (`astro check`) |
-| `npm test` | Chạy toàn bộ bộ kiểm thử đơn vị (>2.200 tests với Vitest) |
+| `npm test` | Chạy toàn bộ bộ kiểm thử đơn vị (2.496 tests với Vitest) |
 | `npm run test:watch` | Chạy kiểm thử đơn vị ở chế độ quan sát theo thời gian thực |
 | `npm run test:e2e` | Chạy bộ kiểm thử tự động giao diện End-to-End (Playwright) |
 | `npm run build` | Đóng gói sản phẩm production ra thư mục `dist/` và kiểm tra liên kết |

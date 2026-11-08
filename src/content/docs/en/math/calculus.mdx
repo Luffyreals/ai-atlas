@@ -1,0 +1,287 @@
+---
+title: 'Calculus'
+description: 'Master calculus for AI: derivatives, partial derivatives, the gradient vector, the chain rule in backpropagation, and the Hessian matrix.'
+quiz:
+  - question: 'Which direction on a multivariable function''s surface does the gradient vector $\nabla f(\mathbf{x})$ point to at point $\mathbf{x}$?'
+    options:
+      - 'The direction of steepest decrease of the function'
+      - 'The direction of steepest increase (ascent) of the function'
+      - 'The horizontal tangent direction where the function value does not change'
+      - 'Always straight toward the origin $(0, 0)$'
+    answer: 1
+    explanation: 'By definition in multivariable calculus, the gradient vector $\nabla f(\mathbf{x})$ collects the partial derivatives and always points in the direction of steepest ascent of the function. Therefore, in machine learning, to minimize a loss function we step in the opposite direction of the gradient, $-\nabla f(\mathbf{x})$ (the Gradient Descent algorithm).'
+  - question: 'Consider a composite neural network loss function $L = g(h(w))$. By the Chain Rule, which expression gives the derivative of $L$ with respect to the weight $w$?'
+    options:
+      - '$\frac{\partial L}{\partial w} = \frac{\partial g}{\partial h} + \frac{\partial h}{\partial w}$'
+      - '$\frac{\partial L}{\partial w} = \frac{\partial L}{\partial h} \cdot \frac{\partial h}{\partial w}$'
+      - '$\frac{\partial L}{\partial w} = \frac{\partial L}{\partial h} / \frac{\partial h}{\partial w}$'
+      - '$\frac{\partial L}{\partial w} = \left(\frac{\partial L}{\partial h}\right)^2$'
+    answer: 1
+    explanation: 'The Chain Rule states that the rate of change of the final output $L$ with respect to an earlier variable $w$ is the product of the intermediate rates of change: $\frac{\partial L}{\partial w} = \frac{\partial L}{\partial h} \cdot \frac{\partial h}{\partial w}$. This is the core principle behind Backpropagation, allowing derivatives to be computed across hundreds of neural network layers by multiplying local gradients.'
+  - question: 'Why does gradient checking use the central difference $\frac{f(x+\epsilon) - f(x-\epsilon)}{2\epsilon}$ instead of the forward difference $\frac{f(x+\epsilon) - f(x)}{\epsilon}$?'
+    options:
+      - 'Because the central difference only evaluates the function once'
+      - 'Because the central difference has second-order approximation error $\mathcal{O}(\epsilon^2)$, which is far more accurate than the first-order $\mathcal{O}(\epsilon)$ error of the forward difference'
+      - 'Because the forward difference cannot be applied to negative numbers'
+      - 'Because the central difference always gives an exact result with zero error'
+    answer: 1
+    explanation: 'When expanding the Taylor series around $x$, the forward difference leaves a first-order remainder term proportional to the second derivative, giving an error of $\mathcal{O}(\epsilon)$. In the central difference, the even-order terms cancel out automatically, leaving an error of $\mathcal{O}(\epsilon^2)$. With $\epsilon = 10^{-5}$, the forward difference error is $\approx 10^{-5}$, whereas the central difference achieves an ultra-small error of $\approx 10^{-10}$.'
+  - question: 'What is the Hessian matrix $\mathbf{H}$ in multivariable calculus, and what information does it provide about the loss surface?'
+    options:
+      - 'A matrix of first-order partial derivatives indicating the direction of steepest ascent'
+      - 'A matrix containing all second-order partial derivatives $\frac{\partial^2 f}{\partial x_i \partial x_j}$, describing the curvature of the function'
+      - 'A matrix that reverses the data space'
+      - 'A matrix storing loss values across training epochs'
+    answer: 1
+    explanation: 'The Hessian matrix collects all second-order partial derivatives of a multivariable function. While the gradient vector gives the first-order slope, the Hessian describes the second-order curvature. Regions of high curvature (large Hessian eigenvalues) require a small learning rate $\eta$ to avoid oscillating and diverging out of the valley.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import numericalGradCode from '@code/math/calculus/numerical-gradient.en.py?raw';
+import chainRuleCode from '@code/math/calculus/chain-rule-backprop.en.py?raw';
+
+## Goals
+
+After this lesson, you will:
+
+- Understand the core nature of a **derivative** as an instantaneous rate of change and tangent slope.
+- Generalize to multivariable functions with **partial derivatives** and the **Gradient** vector ($\nabla f$) — the compass guiding model optimization.
+- Master the **Chain Rule** and see how it powers the **Backpropagation** algorithm in deep neural networks.
+- Understand second-order Taylor approximations and the **Hessian** matrix (curvature), explaining why gradients oscillate or diverge when the learning rate is poorly chosen.
+
+## Prerequisites
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In [Linear Algebra](/en/math/linear-algebra/), you learned vector and matrix operations. In this lesson, we combine linear algebra with **differential calculus** to see how an AI model automatically adjusts millions of weights to minimize its error.
+:::
+
+## Intuition
+
+Imagine you are blindfolded at the top of a mountain shrouded in thick fog. Your goal is to find your way down to the bottom of the valley as safely and quickly as possible. How would you do it?
+
+Because you cannot see the whole landscape, your only option is to feel the slope of the ground right beneath your feet:
+1. You feel around in a circle to find which direction slopes **downward the steepest**.
+2. You take a careful small step in that downhill direction.
+3. At your new spot, you feel the slope again and take another step.
+
+In machine learning:
+- The foggy mountain is the high-dimensional **loss surface**.
+- The slope of the ground beneath your feet is the **derivative** and **Gradient vector**.
+- Each step you take is a weight update in the **Gradient Descent** algorithm.
+
+Calculus is the mathematical tool that lets a computer "feel the slope" and automatically step toward the optimal minimum!
+
+## Theory
+
+### 1. Derivatives: Instantaneous Rate of Change
+
+Consider a single-variable function $f(x)$. When we perturb the input by a tiny amount $\epsilon$, the output changes by $f(x + \epsilon) - f(x)$. The **derivative** of the function at $x$, denoted $f'(x)$ or $\frac{df}{dx}$, is the rate of change as $\epsilon$ approaches $0$:
+
+$$
+f'(x) = \lim_{\epsilon \to 0} \frac{f(x + \epsilon) - f(x)}{\epsilon}
+$$
+
+Geometric meaning: $f'(x)$ is the **slope** of the line tangent to the graph at $x$:
+- If $f'(x) > 0$: the function is increasing. Increasing $x$ increases $f(x)$; to decrease $f(x)$, we must decrease $x$.
+- If $f'(x) < 0$: the function is decreasing. Increasing $x$ decreases $f(x)$.
+- If $f'(x) = 0$: the tangent line is horizontal; $x$ may be a local minimum, a local maximum, or a saddle/inflection point.
+
+### 2. Partial Derivatives and the Gradient Vector
+
+In practice, an AI model has thousands or billions of weights $w_1, w_2, \dots, w_n$. The loss function $\mathcal{L}(\mathbf{w})$ is a multivariable function.
+
+#### Partial Derivatives
+
+The **partial derivative** of $f$ with respect to $x_i$, denoted $\frac{\partial f}{\partial x_i}$, measures how $f$ changes when we nudge only $x_i$ while **holding all other variables constant**:
+
+$$
+\frac{\partial f}{\partial x_i} = \lim_{\epsilon \to 0} \frac{f(x_1, \dots, x_i + \epsilon, \dots, x_n) - f(x_1, \dots, x_i, \dots, x_n)}{\epsilon}
+$$
+
+#### The Gradient Vector ($\nabla f$)
+
+Stacking all partial derivatives of a function into a column vector gives the **Gradient vector**, denoted $\nabla f(\mathbf{x})$:
+
+$$
+\nabla f(\mathbf{x}) = \begin{bmatrix} \frac{\partial f}{\partial x_1} \\ \frac{\partial f}{\partial x_2} \\ \vdots \\ \frac{\partial f}{\partial x_n} \end{bmatrix} = \left[ \frac{\partial f}{\partial x_1}, \frac{\partial f}{\partial x_2}, \dots, \frac{\partial f}{\partial x_n} \right]^\top
+$$
+
+**The most important properties of the Gradient in optimization:**
+1. The vector $\nabla f(\mathbf{x})$ always points in the **direction of steepest increase** of the function.
+2. Its magnitude $\|\nabla f(\mathbf{x})\|_2$ measures how steep that maximum slope is.
+3. The opposite vector $-\nabla f(\mathbf{x})$ always points in the **direction of steepest decrease**.
+
+That is why the parameter update rule in Gradient Descent has a minus sign:
+
+$$
+\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \eta \nabla \mathcal{L}(\boldsymbol{\theta})
+$$
+
+where $\eta > 0$ is the **learning rate** controlling the size of each step.
+
+:::note[Key takeaway]
+The gradient is the compass of machine learning: follow $+\nabla f$ to maximize an objective, and step along $-\nabla f$ to minimize loss.
+:::
+
+---
+
+### 3. The Chain Rule and Backpropagation
+
+A deep neural network is a massive composite function of stacked layers:
+Input $\mathbf{x} \longrightarrow$ Layer 1 ($z_1$) $\longrightarrow$ Layer 2 ($z_2$) $\longrightarrow \dots \longrightarrow$ Prediction $\hat{y} \longrightarrow$ Loss $\mathcal{L}$.
+
+How can we compute the derivative of the final loss $\mathcal{L}$ with respect to a weight $w$ all the way back in the first layer?
+
+#### The Chain Rule in Calculus
+
+If $z$ depends on $y$, and $y$ depends on $x$ ($z = f(g(x))$), then the rate of change of $z$ with respect to $x$ is the product of the intermediate rates of change:
+
+$$
+\frac{dz}{dx} = \frac{dz}{dy} \cdot \frac{dy}{dx}
+$$
+
+When an intermediate variable branches into multiple paths — say $z = f(y_1, y_2)$ where each $y_j = g_j(x)$ — we sum over all paths:
+
+$$
+\frac{\partial z}{\partial x} = \sum_{j} \frac{\partial z}{\partial y_j} \cdot \frac{\partial y_j}{\partial x}
+$$
+
+#### Application in Backpropagation
+
+Consider a simple linear regression neuron:
+1. **Forward pass:**
+   $$
+   \hat{y} = w x + b
+   $$
+   $$
+   \mathcal{L} = (\hat{y} - y)^2
+   $$
+2. **Backward pass:**
+   - Derivative of the loss with respect to the prediction:
+     $$
+     \frac{\partial \mathcal{L}}{\partial \hat{y}} = 2(\hat{y} - y)
+     $$
+   - Derivatives of the prediction with respect to weight $w$ and bias $b$:
+     $$
+     \frac{\partial \hat{y}}{\partial w} = x, \quad \frac{\partial \hat{y}}{\partial b} = 1
+     $$
+   - Applying the chain rule:
+     $$
+     \frac{\partial \mathcal{L}}{\partial w} = \frac{\partial \mathcal{L}}{\partial \hat{y}} \cdot \frac{\partial \hat{y}}{\partial w} = 2(\hat{y} - y) x
+     $$
+     $$
+     \frac{\partial \mathcal{L}}{\partial b} = \frac{\partial \mathcal{L}}{\partial \hat{y}} \cdot \frac{\partial \hat{y}}{\partial b} = 2(\hat{y} - y)
+     $$
+
+Thanks to the chain rule, we never need to derive a giant monolithic symbolic formula for the entire neural network at once. Instead, each layer simply computes the local gradient of its own operation and multiplies it backward from output to input.
+
+---
+
+### 4. Second Derivatives and the Hessian Matrix
+
+The first derivative tells us the slope, but not whether the surface is flat or sharply curved. The **second derivative** measures the **curvature** of a function.
+
+For a multivariable function, all second-order partial derivatives are organized into the **Hessian matrix** $\mathbf{H} \in \mathbb{R}^{n \times n}$:
+
+$$
+\mathbf{H}_{ij} = \frac{\partial^2 f}{\partial x_i \partial x_j}
+$$
+
+By the second-order Taylor expansion:
+
+$$
+f(\mathbf{x} + \boldsymbol{\Delta x}) \approx f(\mathbf{x}) + \nabla f(\mathbf{x})^\top \boldsymbol{\Delta x} + \frac{1}{2} \boldsymbol{\Delta x}^\top \mathbf{H} \boldsymbol{\Delta x}
+$$
+
+- If the Hessian matrix has a maximum eigenvalue $L$ ($\lambda_{\max} = L$), the surface curves very steeply along that direction. Choosing a learning rate $\eta > \frac{2}{L}$ causes Gradient Descent to overshoot the valley walls and **diverge**.
+- A large gap between the sharpest and flattest curvatures (the condition number $\kappa = \lambda_{\max}/\lambda_{\min}$) explains why narrow "ravine" loss surfaces cause Gradient Descent to zig-zag slowly back and forth.
+
+### Limitations
+
+- **Saddle points:** In spaces with thousands of dimensions, a zero gradient ($\nabla f = \mathbf{0}$) is far more likely to be a saddle point (curving up along some directions and down along others) than a true global minimum.
+- **Vanishing and exploding gradients:** When a neural network has many layers, multiplying dozens of local derivatives smaller than $1$ drives the gradient toward $0$ (vanishing gradient), stalling learning; conversely, factors larger than $1$ cause the gradient to blow up (exploding gradient).
+
+## Illustration
+
+The diagram below contrasts finite-difference gradient checking methods and traces the backward flow of the chain rule in backpropagation:
+
+```text
+1. FINITE DIFFERENCES FOR GRADIENT CHECKING:
+    Forward difference (one-sided, error O(ε)):
+           f(x + ε) - f(x)
+      ─────────────────────────
+                  ε
+    Central difference (symmetric two-sided, error O(ε²)):
+       f(x + ε) - f(x - ε)
+      ─────────────────────   ◄── Millions of times more accurate!
+              2ε
+
+2. CHAIN RULE FLOW (BACKPROPAGATION):
+    Forward pass:
+       x ──► [ × w ] ──► z ──► [ + b ] ──► y_hat ──► [ Loss ] ──► L
+    Backward pass:
+       dL/dw ◄── [ * x ] ◄── dL/dz ◄── [ * 1 ] ◄── dL/dy_hat ◄── dL/dL (= 1)
+```
+
+## Code examples
+
+The cells below run independently and do not share state.
+
+The first cell performs **Gradient Checking**: comparing the analytical gradient (derived via calculus) against the numerical gradient (computed via central differences) to verify that the derivative implementation is bug-free.
+
+<PythonRunner code={numericalGradCode} title="Checking analytical gradients with central differences" />
+
+The output shows:
+- At the test point $\mathbf{x} = [2.0, -1.0]$, the analytical gradient evaluates to $[1.0, 2.0]$.
+- The numerical gradient using central differences with step size $\epsilon = 10^{-5}$ also yields $[1.0, 2.0]$.
+- The absolute difference between the two methods is tiny: $3.89 \times 10^{-11}$. The check `diff < 1e-7` returns `True`, confirming our analytical derivative formula is exact.
+
+The second cell demonstrates step-by-step Backpropagation for a simple regression neuron by applying the chain rule directly and comparing the result against the direct analytical formula.
+
+<PythonRunner code={chainRuleCode} title="Step-by-step chain rule implementation for backpropagation" />
+
+The printed comparison shows:
+- With $x = 2.0$, $y = 7.0$, $w = 1.5$, $b = 0.5$, the model predicts $\hat{y} = 3.5$, giving a loss of $\mathcal{L} = (3.5 - 7.0)^2 = 12.25$.
+- Propagating through the intermediate derivative $\frac{\partial \mathcal{L}}{\partial \hat{y}} = -7.0$ via the chain rule yields $\frac{\partial \mathcal{L}}{\partial w} = -14.0000$ and $\frac{\partial \mathcal{L}}{\partial b} = -7.0000$.
+- Both chain-rule derivatives match the direct analytical formulas to the last decimal place. The negative signs indicate that increasing $w$ and $b$ will push $\hat{y}$ closer to $7.0$ and reduce the loss.
+
+## Common pitfalls
+
+:::caution[Forgetting the minus sign when updating weights in Gradient Descent]
+The correct update rule is $\mathbf{w} \leftarrow \mathbf{w} - \eta \nabla \mathcal{L}$. If you accidentally write $\mathbf{w} \leftarrow \mathbf{w} + \eta \nabla \mathcal{L}$, you are running Gradient Ascent to maximize the loss! The loss value will rapidly explode to infinity (`inf` or `NaN`) within a few iterations.
+:::
+
+:::caution[Choosing a step size $\epsilon$ that is too large or too small in gradient checking]
+If you pick $\epsilon$ too large (e.g., $\epsilon = 0.1$), Taylor series truncation error will make the numerical gradient inaccurate. Conversely, if you pick $\epsilon$ too small (below $10^{-12}$), floating-point subtraction suffers from catastrophic cancellation in 64-bit precision (`float64`). In practice, the sweet spot is $\epsilon \approx 10^{-5}$ or $10^{-7}$.
+:::
+
+:::caution[Forgetting to treat other variables as constants when taking partial derivatives]
+When computing $\frac{\partial}{\partial x_1}(x_1^2 + 3 x_1 x_2 + 2 x_2^2)$, learners often forget that $x_2$ acts as a fixed constant and miscalculate the $3 x_1 x_2$ term. Because the derivative of $c \cdot x_1$ with respect to $x_1$ is simply $c$, setting $c = 3 x_2$ gives the exact partial derivative $3 x_2$.
+:::
+
+## Quick check
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- A derivative measures the instantaneous rate of change; the gradient vector collects partial derivatives and points in the direction of steepest ascent.
+- Gradient Descent optimizes models by stepping opposite to the gradient: $\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \eta \nabla \mathcal{L}(\boldsymbol{\theta})$.
+- The Chain Rule is the mathematical foundation that enables Backpropagation to efficiently compute derivatives across hundreds of neural network layers.
+- Second derivatives and the Hessian matrix govern the curvature of the loss surface and dictate how large the learning rate $\eta$ can safely be.
+
+**Further reading:**
+
+- Grant Sanderson (3Blue1Brown) (2017). [*Essence of Calculus*](https://www.3blue1brown.com/topics/calculus), an outstanding visual series building geometric intuition for calculus.
+- Ian Goodfellow, Yoshua Bengio, Aaron Courville (2016). [*Deep Learning*](https://www.deeplearningbook.org/), Chapter 4: Numerical Computation, covering gradient descent, saddle points, and the Hessian matrix.
+- Michael Nielsen (2015). [*Neural Networks and Deep Learning*](http://neuralnetworksanddeeplearning.com/chap2.html), Chapter 2: How the backpropagation algorithm works, deriving the four fundamental equations of backpropagation.
+- Christopher M. Bishop (2006). [*Pattern Recognition and Machine Learning*](https://www.microsoft.com/en-us/research/people/cmbishop/prml-book/), Section 5.3 (Error Backpropagation).
+
+<LessonProgress />

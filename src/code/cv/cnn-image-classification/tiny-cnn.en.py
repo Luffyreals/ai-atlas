@@ -5,14 +5,14 @@ from sklearn.model_selection import train_test_split
 
 torch.manual_seed(0)
 
-# 1 797 ảnh chữ số 8x8, giá trị đưa về [0, 1], thêm trục kênh
+# 1,797 8x8 digit images, scaled to [0, 1], with a channel axis added
 digits = load_digits()
 X = torch.tensor(digits.images / 16.0, dtype=torch.float32).unsqueeze(1)
 y = torch.tensor(digits.target)
 X_tr, X_te, y_tr, y_te = train_test_split(
     X, y, test_size=0.2, random_state=0, stratify=y)
 
-# Hai khối tích chập: 8x8 -> 4x4 -> 2x2, rồi một lớp phân loại
+# Two conv blocks: 8x8 -> 4x4 -> 2x2, then one classification layer
 model = nn.Sequential(
     nn.Conv2d(1, 8, kernel_size=3, padding=1), nn.ReLU(),
     nn.MaxPool2d(2),
@@ -35,7 +35,7 @@ for epoch in range(1, 31):
         batch = perm[start:start + 64]
         loss = loss_fn(model(X_tr[batch]), y_tr[batch])
         opt.zero_grad()
-        loss.backward()  # lan truyền ngược tới từng ô của kernel
+        loss.backward()  # backpropagate to every cell of every kernel
         opt.step()
         total += loss.item() * len(batch)
     if epoch % 10 == 0:

@@ -1,0 +1,237 @@
+---
+title: 'Object-Oriented Programming (OOP)'
+description: 'Master Object-Oriented Programming in Python for AI: classes, objects, self, and the four OOP pillars applied directly in PyTorch and Scikit-Learn.'
+quiz:
+  - question: 'Given the class definition `class DenseLayer: weights = []`, if you instantiate `layer1 = DenseLayer()` and `layer2 = DenseLayer()` and then call `layer1.weights.append(0.5)`, what will `layer2.weights` evaluate to?'
+    options:
+      - '`[]` (an empty list because the two instances are independent)'
+      - '`[0.5]` (a single-element list)'
+      - 'An `AttributeError` because `weights` was not assigned inside `__init__`'
+      - '`None`'
+    answer: 1
+    explanation: '`weights = []` is declared directly in the class body, making it a class attribute. All instances created from that class share the exact same list object in memory. To give each layer its own independent weights, you must assign `self.weights = []` inside the `__init__` constructor.'
+  - question: 'In Python, what is the role of `self` in a method definition like `def forward(self, x):`?'
+    options:
+      - 'It is a mandatory system keyword required to trigger garbage collection'
+      - 'It is a reference representing the specific instance on which the method was called'
+      - 'It is a pointer to the parent class'
+      - 'It is a static counter tracking how many instances have been created'
+    answer: 1
+    explanation: 'When you call `model.forward(x)`, Python automatically translates the call into `ModelClass.forward(model, x)`. The first parameter refers to the specific object instance executing the method. Naming it `self` is the universal convention across the Python community.'
+  - question: 'When building a custom neural network class that inherits from a base class (such as `torch.nn.Module`), why must the first line inside `def __init__(self):` always be `super().__init__()`?'
+    options:
+      - 'To activate Python''s automatic garbage collector'
+      - 'To invoke the parent class constructor, which initializes internal registries for parameters, buffers, and hooks'
+      - 'To move all subclass data onto the GPU automatically'
+      - 'To freeze model weights so gradients are not updated'
+    answer: 1
+    explanation: '`super().__init__()` calls the parent class constructor. In deep learning frameworks like PyTorch, this step initializes internal dictionaries that track trainable parameters (`_parameters`), submodules (`_modules`), and computation state. Omitting this line causes an error as soon as you assign child layers.'
+  - question: 'Which OOP principle allows Scikit-Learn''s `cross_val_score(model, X, y)` function to evaluate dozens of different models (LinearRegression, RandomForest, SVM) without rewriting the evaluation code?'
+    options:
+      - 'Encapsulation'
+      - 'Polymorphism'
+      - 'Recursion'
+      - 'Immutability'
+    answer: 1
+    explanation: 'Polymorphism allows objects of different classes to expose a unified interface—such as `.fit(X, y)` and `.predict(X)`. The external evaluation function interacts solely through this standard interface without needing to know how each algorithm works internally.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import linearModelCode from '@code/python/oop/linear-model.en.py?raw';
+import batcherCode from '@code/python/oop/data-batcher.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Understand **Classes** and **Objects**, and use the `__init__` constructor along with the `self` instance reference.
+- Distinguish independent instance attributes from shared class attributes to prevent weight-sharing bugs.
+- Master the four pillars of Object-Oriented Programming (**Encapsulation**, **Inheritance**, **Polymorphism**, **Abstraction**) and see how they power AI frameworks like PyTorch and Scikit-Learn.
+- Implement magic (dunder) methods such as `__len__`, `__getitem__`, and `__call__` to build clean dataset batchers and machine learning models.
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+In the previous lesson, you organized code into standalone functions. This lesson takes code organization to the next level by bundling **data state** (variables, model weights) and **computational behavior** (functions, algorithms) together into self-contained objects.
+:::
+
+## Intuition
+
+Imagine building a computer vision system with a 50-layer neural network:
+- Each layer holds thousands of weight parameters $\mathbf{W}$ and biases $\mathbf{b}$.
+- Each layer needs to cache intermediate activations during the forward pass to compute gradients during backpropagation.
+- If you only used standalone functions and loose dictionaries (`dict`), you would have to pass dozens of parameter dictionaries back and forth between functions. A single typo in a dictionary key would silently break your entire network.
+
+**Object-Oriented Programming (OOP)** solves this problem cleanly. It lets you treat each neural network layer as a **self-contained machine**:
+- Each machine stores its own weights safely inside its housing (**Encapsulation**).
+- New machines can be built on top of an existing standard blueprint without starting from scratch (**Inheritance**).
+- Every machine exposes the exact same "Predict" button on the outside, whether its interior is a convolutional layer or a Transformer block (**Polymorphism**).
+
+## Theory
+
+### Classes, Objects, and `self`
+
+- **Class:** A blueprint or template that defines what attributes an entity has and what operations it can perform.
+- **Object (Instance):** A concrete entity created in memory from a class blueprint.
+- **`__init__`:** A special initializer method that Python calls automatically whenever a new object instance is created.
+- **`self`:** The first parameter of every instance method, referring to the specific object instance on which the method is called.
+
+```python
+class Neuron:
+    def __init__(self, weight: float, bias: float):
+        # Instance attributes
+        self.w = weight
+        self.b = bias
+
+    def activate(self, x: float) -> float:
+        # Instance method
+        return self.w * x + self.b
+```
+
+### Class Attributes vs. Instance Attributes
+
+One of the most common pitfalls in Python AI programming is confusing two kinds of attributes:
+
+1. **Instance Attributes:** Assigned via `self.attribute_name` inside methods (typically `__init__`). Every object instance gets its own independent copy in memory.
+2. **Class Attributes:** Defined directly inside the `class` body, outside of any method. Every instance of the class shares the exact same memory reference. If a class attribute holds a mutable object (such as a `list` or `dict`), mutating it on one instance silently mutates it across all other instances!
+
+### The Four Pillars of OOP in AI
+
+#### 1. Encapsulation
+
+Encapsulation bundles data (attributes) and the methods that operate on that data into a single unit while restricting direct external tampering.
+
+In Python, encapsulation relies on naming conventions with leading underscores:
+- `_attribute`: Protected convention—signals that the attribute is internal and should not be accessed directly from outside the class.
+- `__attribute`: Triggers name mangling to prevent accidental name collisions in subclasses.
+
+#### 2. Inheritance
+
+Inheritance lets a new class (**child class** or subclass) inherit all attributes and methods from an existing class (**parent class** or superclass), while adding new features or overriding specific methods.
+
+In PyTorch, every neural network model inherits from `torch.nn.Module`:
+
+```python
+# Subclass inheriting from parent class nn.Module
+class MyClassifier(nn.Module):
+    def __init__(self, in_features: int, out_features: int):
+        super().__init__()  # Initialize nn.Module internals
+        self.linear = nn.Linear(in_features, out_features)
+
+    def forward(self, x):
+        return self.linear(x)
+```
+
+Calling `super().__init__()` sets up `nn.Module`'s internal machinery so the model automatically tracks gradients, moves parameters between CPU and GPU, and exports checkpoints.
+
+#### 3. Polymorphism
+
+Polymorphism is the ability of different object types to respond in their own way to the same method call.
+
+The Scikit-Learn ecosystem is a textbook example of polymorphism:
+- Every estimator—from `LinearRegression` and `DecisionTreeClassifier` to `RandomForestRegressor`—implements two standard methods:
+  - `model.fit(X, y)`: Train the model to find optimal parameters.
+  - `model.predict(X)`: Run inference to produce predictions.
+- Thanks to polymorphism, you can write a single evaluation pipeline that accepts any estimator object without changing a single line of evaluation code.
+
+#### 4. Abstraction
+
+Abstraction hides complex internal implementation details and exposes only a clean, minimal interface to the outside world.
+
+Python supports formal abstraction through the standard `abc` (Abstract Base Classes) module. An abstract base class marks required methods with the `@abstractmethod` decorator, forcing every concrete subclass to implement them before it can be instantiated.
+
+### Magic Methods (Dunder Methods)
+
+Python provides special methods surrounded by double underscores (**dunder methods**) that let your custom objects integrate seamlessly with built-in Python syntax:
+
+- `__len__(self)`: Enables calling `len(obj)`—commonly used to return the number of samples or batches in a dataset.
+- `__getitem__(self, idx)`: Enables indexing syntax `obj[idx]`.
+- `__call__(self, *args)`: Makes an object callable like a function: `obj(x)`. This is how PyTorch lets you write `output = model(input)` instead of explicitly calling `model.forward(input)`.
+
+## Illustration
+
+Class inheritance and polymorphic interfaces in a machine learning architecture:
+
+```text
+       ┌────────────────────────────────────────────────────────┐
+       │             Abstract Class: BaseEstimator              │
+       │  - Abstract interface: fit(X, y), predict(X)           │
+       └───────────────────────────┬────────────────────────────┘
+                                   │
+              ┌────────────────────┴────────────────────┐
+              ▼                                         ▼
+   ┌───────────────────────┐                 ┌───────────────────────┐
+   │ LinearRegression      │                 │ DecisionTreeModel     │
+   │ - self.w, self.b      │                 │ - self.tree_nodes     │
+   │ - fit(): solve OLS    │                 │ - fit(): split nodes  │
+   │ - predict(): w*x + b  │                 │ - predict(): traverse │
+   └───────────────────────┘                 └───────────────────────┘
+              │                                         │
+              └────────────────────┬────────────────────┘
+                                   │ (Polymorphism)
+                                   ▼
+          ┌──────────────────────────────────────────────────┐
+          │ Pipeline / cross_val_score(model, X_val, y_val)  │
+          │ Calls uniformly: model.fit(...) & model.predict  │
+          └──────────────────────────────────────────────────┘
+```
+
+## Code examples
+
+The cells below run independently. Click **Run** to see the output immediately.
+
+The first cell builds a complete `LinearModel` class from scratch: it encapsulates weights `self.w` and bias `self.b`, implements `fit()` using gradient descent, and provides `predict()` for inference.
+
+<PythonRunner code={linearModelCode} title="Building a linear regression model class with OOP" />
+
+All partial derivative calculations and parameter updates are neatly encapsulated inside `fit()`. External callers interact with the model through a clean, intuitive interface.
+
+The second cell implements a `DataBatcher` class that simulates deep learning mini-batching, demonstrating data encapsulation and the `__len__` dunder method.
+
+<PythonRunner code={batcherCode} title="Building a DataBatcher class for mini-batching" />
+
+The `batcher` object hides the internal list slicing logic, automatically computes the total number of batches via `len(batcher)`, and yields mini-batches for each training step.
+
+## Common pitfalls
+
+:::caution[Using mutable class attributes instead of instance attributes]
+If you declare `class Model: layers = []`, that single `layers` list is shared across every instance of `Model`. When one model appends a layer, every other model instance sees it too! Always initialize mutable attributes inside `def __init__(self): self.layers = []`.
+:::
+
+:::caution[Forgetting `self` as the first parameter of a method]
+Every instance method definition inside a class must list `self` as its first parameter: `def predict(self, x):`. If you write `def predict(x):`, calling `model.predict(x)` will raise `TypeError: predict() takes 1 positional argument but 2 were given`.
+:::
+
+:::caution[Forgetting `super().__init__()` when subclassing]
+When inheriting from a framework base class like `torch.nn.Module`, forgetting to call `super().__init__()` at the start of `__init__` leaves the parent class's internal parameter registries uninitialized, causing cryptic runtime errors later.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- A class is a blueprint and an object is a concrete instance; `self` refers to the active instance executing a method.
+- Always initialize instance-specific state inside `__init__` so objects remain independent in memory.
+- The four pillars of OOP (Encapsulation, Inheritance, Polymorphism, Abstraction) form the architectural foundation of modern AI libraries (PyTorch, Scikit-Learn, Hugging Face).
+- Dunder methods (`__len__`, `__getitem__`, `__call__`) let custom classes behave like native Python objects.
+
+**Further reading:**
+
+- Python Software Foundation (2024). [*The Python Tutorial: Classes*](https://docs.python.org/3/tutorial/classes.html). Official documentation on Python's object-oriented syntax, scopes, and namespaces.
+- PyTorch Team (2024). [*torch.nn.Module Documentation*](https://pytorch.org/docs/stable/generated/torch.nn.Module.html). Official reference for the base class of all neural network modules in PyTorch.
+- Scikit-Learn Developers (2024). [*Developing Scikit-Learn Estimators*](https://scikit-learn.org/stable/developers/develop.html). Design guide for machine learning estimators using the `fit` and `predict` interface.
+
+<LessonProgress />

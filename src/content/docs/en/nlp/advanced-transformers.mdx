@@ -1,0 +1,320 @@
+---
+title: Advanced Transformers
+description: 'Why does the same Transformer block give rise to BERT, GPT, and T5? Three architectural families, position encodings from sin/cos to ALiBi, Pre-LN, and overcoming the L² cost of attention.'
+quiz:
+  - question: 'A model uses ALiBi with 8 heads. A query at position 100 attends to a key at position 20. What bias is added to this pair''s score in head 1 ($m_1 = 1/2$) and in head 8 ($m_8 = 1/256$), and what does that imply?'
+    options:
+      - '$-40$ in both heads, because the distance between the two tokens is the same'
+      - '$+40$ and $+0.3125$: distant tokens receive a bonus so the model remembers long context'
+      - '$-40$ and $-0.3125$: head 1 essentially looks only at nearby tokens, while head 8 can still attend to distant tokens'
+      - '$0$ in both heads, because ALiBi only penalizes tokens beyond the training sequence length'
+    answer: 2
+    explanation: 'The bias is $-m_h (i - j)$ with $i - j = 80$: head 1 gets $-80/2 = -40$, and head 8 gets $-80/256 = -0.3125$. After softmax, $-40$ drives the attention weight to virtually 0, whereas $-0.3125$ barely reduces it. Because each head has its own slope, the same distance receives a different penalty per head. The bias is always non-positive: ALiBi penalizes distance, never rewards it.'
+  - question: 'A causal decoder has 3 layers, each using sliding-window attention with $w = 4$ (each token attends to itself and the 3 immediately preceding tokens). At the output of the 3rd layer, what is the earliest token position whose information can reach position 20?'
+    options:
+      - 'Position 17'
+      - 'Position 11'
+      - 'Position 8'
+      - 'Position 1, because attention always sees the entire sequence'
+    answer: 1
+    explanation: 'Each layer extends the receptive field backward by $w - 1 = 3$ positions. Layer 1 lets position 20 see back to 17; in layer 2, position 17 already carries information from 14; in layer 3 that reaches $20 - 3 \cdot 3 = 11$. Position 17 is the reach of a single layer, and position 8 comes from subtracting $w = 4$ instead of $w - 1$ per layer.'
+  - question: 'Compared with a standard attention implementation, what does FlashAttention change?'
+    options:
+      - 'It drops distant token pairs, reducing the number of scores computed to roughly $L \cdot w$'
+      - 'It replaces softmax with $\phi(\mathbf{q})^\top\phi(\mathbf{k})$ so compute scales linearly with $L$'
+      - 'It approximates the attention matrix with a low-rank matrix, running faster at the cost of accuracy'
+      - 'It produces the exact same output (up to floating-point rounding), but tiles the computation in fast on-chip SRAM without materializing the $L \times L$ matrix in GPU main memory'
+    answer: 3
+    explanation: 'FlashAttention is exact attention: it still evaluates all valid token pairs, so FLOPs still scale as $L^2$. It runs much faster by cutting slow HBM reads and writes, and its memory footprint scales linearly with $L$ because the full $L \times L$ matrix is never stored in HBM. The first option describes sliding-window attention; the second describes linear attention—both change the mathematical function.'
+  - question: 'You need to tag every token (person names, locations) across 50,000 news sentences on a CPU-only machine. Which Transformer family is the best starting point?'
+    options:
+      - 'Encoder-only like BERT: every token sees both sides, producing one vector per token that feeds directly into a linear classifier'
+      - 'Decoder-only, because generative models are larger and therefore always more accurate'
+      - 'Encoder–decoder, because you have to generate a brand-new sequence of labels'
+      - 'Any family works equally well, since all three use the same Transformer block'
+    answer: 0
+    explanation: 'Token labeling requires one output per input token, and a word''s tag depends on words to its right as well as its left ("Trường Sa" is a location, whereas in "Trường nói"—"Trường said"—"Trường" is a person). An encoder-only model provides bidirectional representations for every token and is small enough to run efficiently on CPU. Decoder-only models only look left and large ones are far more expensive; encoder–decoder models work but carry an unnecessary decoder.'
+  - question: 'A 48-layer Post-LN Transformer sees its loss blow up to NaN after a few hundred steps when you remove learning-rate warmup. According to Xiong et al. (2020), which architectural change directly addresses the root cause?'
+    options:
+      - 'Remove residual connections so gradients do not accumulate across layers'
+      - 'Move layer normalization inside each sub-layer branch (Pre-LN) so the residual path remains a clean identity sum'
+      - 'Increase the learning rate so the model escapes bad regions faster'
+      - 'Switch from learned position embeddings to ALiBi'
+    answer: 1
+    explanation: 'In Post-LN, parameter gradients near the output layer are large at initialization, so taking large learning-rate steps right away destabilizes training; warmup is a workaround for that symptom. Pre-LN keeps the residual stream as a pure sum, making initial gradients smaller and balanced across depth so Xiong et al. could train without warmup. Removing residual connections makes deep networks nearly untrainable, and position encodings are unrelated.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import masksCode from '@code/nlp/advanced-transformers/masks-alibi.en.py?raw';
+import costCode from '@code/nlp/advanced-transformers/attention-cost.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Place BERT, GPT, T5, and BART into the three Transformer families—**encoder-only**, **decoder-only**, and **encoder–decoder**—and explain which tasks each family suits best based on its attention mask and pre-training objective.
+- Compare positional encoding schemes: sinusoidal (sin/cos), learned absolute embeddings, relative position biases, RoPE (rotary position embedding), and **ALiBi** (attention with linear biases), especially their **extrapolation** behavior on sequences longer than those seen during training.
+- Explain why placing layer normalization before each sub-layer (**Pre-LN**) makes deep Transformers much easier to train than placing it after (**Post-LN**).
+- Calculate the $L^2$ cost of self-attention and identify what each efficiency method trades off: **sliding window attention**, **linear attention**, **FlashAttention**, and KV caching with MQA (multi-query attention) and GQA (grouped-query attention).
+
+## Prerequisites
+
+{/* List populated from the lesson's prerequisites in roadmap.ts. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+As in [Building Your First LLM](/en/llm/build-first-llm/), each attention head projects tokens into **queries** $\mathbf{Q}$, **keys** $\mathbf{K}$, and **values** $\mathbf{V}$, each of shape $L \times d$, and computes $\mathrm{softmax}(\mathbf{Q}\mathbf{K}^\top/\sqrt{d} + \mathbf{M})\,\mathbf{V}$. The **mask** $\mathbf{M}$ holds $0$ at visible entries and $-\infty$ at blocked entries. BERT uses an all-zero mask (every token sees both sides), while GPT uses a **causal mask** (looking backward only). Throughout this lesson, $i$ indexes the query position (row) and $j$ indexes the key position (column).
+:::
+
+## Intuition
+
+### One blueprint, three kinds of buildings
+
+The original Transformer (Vaswani et al., 2017) was built for machine translation: an encoder reads the source sentence, and a decoder writes the target sentence. Within two years, that same set of building blocks had branched into three distinct model families:
+
+- **BERT** (2019) keeps only the encoder. It reads the whole sentence at once, letting every word look left and right, and returns a contextual vector for each token. Built for **understanding**: classifying sentences, tagging named entities.
+- **GPT** (2018 onward) keeps only the decoder. It reads strictly from left to right and predicts the next token. Built for **continuing text**.
+- **T5** and **BART** (2020) keep both halves. Built for **transforming** one text into another: translation, summarization.
+
+Think of three buildings constructed from the exact same bricks: they differ only in where the walls are placed (the attention mask) and what the building is used for (the pre-training objective).
+
+### From 512 tokens to over 128,000 tokens
+
+Original BERT could read at most 512 tokens—roughly a single page. Llama 3.1 (2024) reads 128K tokens, the length of a book (see [The LLaMA Family](/en/llm/llama-family/)). Two things had to change to bridge that gap:
+
+1. **Position.** BERT learns a separate vector for each position from 0 to 511. Feed in a 600th token and there is no row for it in the table. We need a way of encoding position that generalizes to lengths never seen during training.
+2. **Compute and memory cost.** Self-attention scores **every pair** of tokens. Doubling the sequence length quadruples the number of pairs. At 128K tokens, storing the full attention matrix for a single head in a single layer takes about 34 GB (the second code cell below calculates this).
+
+There is a third piece to the puzzle: the deeper a Transformer gets, the harder it is to train. Where you place a humble layer normalization operation turns out to matter much more than you might expect.
+
+The problem of this lesson is: **why does the same Transformer block give rise to three model families, and which components (positional encoding, layer norm placement, attention computation) must change so models can grow deeper and process sequences orders of magnitude longer?**
+
+## Theory
+
+### Three Transformer families
+
+The three families differ in two choices: the **attention mask** that decides which tokens may attend to which, and the **pre-training objective** that decides what the model learns to predict.
+
+**Encoder-only.** The mask is all zeros: every token attends to every token. You cannot train such a model with next-token prediction because the next token is already visible. BERT therefore masks out a subset of tokens and trains the model to reconstruct them (masked language modeling, MLM). Full details are in [BERT](/en/nlp/bert/).
+
+**Decoder-only.** Uses a causal mask. The objective is next-token prediction at every position. Every task—including translation or classification—is formatted as "read the prompt prefix, then generate the completion." Full details are in [GPT and Distributed Training](/en/nlp/gpt-distributed-training/).
+
+**Encoder–decoder.** The encoder is unmasked (bidirectional), while the decoder is causally masked and attends to the encoder's output via cross-attention, as covered in [Seq2Seq Models](/en/llm/seq2seq/). The two best-known pretrained models in this family differ in how they **corrupt** the input text during pre-training—a **denoising** objective:
+
+- **T5** (Raffel et al., 2020) uses **span corruption**. It randomly selects 15% of tokens, grouped into contiguous spans of average length 3 (the paper's final configuration). Each corrupted span is replaced by a **single unique sentinel token** such as `<X>`, `<Y>`. The decoder target consists only of the dropped spans, each preceded by its sentinel token, plus a final sentinel at the end.
+- **BART** (Lewis et al., 2020) explored several corruption schemes. Its final recipe combines **text infilling**—replacing spans whose lengths are drawn from a Poisson($\lambda = 3$) distribution with a **single** `[MASK]` token until 30% of tokens are masked—with **sentence permutation** (shuffling the sentences of the document). The decoder must reconstruct the **entire** original document from start to finish. Because a multi-token span collapses into a single `[MASK]`, the model also has to infer how many tokens are missing.
+
+Here is a concrete illustration on the Vietnamese sentence "Hà Nội là thủ đô của Việt Nam" ("Hanoi is the capital of Vietnam"), split by syllable for readability:
+
+| Objective | Encoder input | Decoder target |
+|---|---|---|
+| T5, span corruption | Hà Nội `<X>` đô của `<Y>` Nam | `<X>` là thủ `<Y>` Việt `<Z>` |
+| BART, text infilling | Hà Nội `[MASK]` đô của `[MASK]` Nam | Hà Nội là thủ đô của Việt Nam |
+
+T5's decoder target is much shorter, making each training step cheaper. The architectural comparison from the T5 paper is discussed further in [Seq2Seq Models](/en/llm/seq2seq/).
+
+### Positional information
+
+Self-attention is blind to word order. Without a mask, swapping two input tokens simply swaps their output vectors while leaving every value unchanged: "dog bites man" and "man bites dog" are the exact same **set** of tokens. Position must be injected explicitly. There are two places to inject it: **add it to the input embeddings** at the bottom of the network, or **modify the attention scores** inside every layer.
+
+**Sinusoidal / sin–cos (Vaswani et al., 2017).** Position $p$ is encoded as a $D$-dimensional vector (where $D$ is the model dimension) and added to the token embedding. Dimension pair $k$ oscillates as a sine and cosine wave:
+
+$$
+\mathrm{PE}_{(p,\,2k)} = \sin\!\left(\frac{p}{10\,000^{2k/D}}\right), \qquad
+\mathrm{PE}_{(p,\,2k+1)} = \cos\!\left(\frac{p}{10\,000^{2k/D}}\right)
+$$
+
+Each pair of coordinates rotates at a different frequency: early pairs vary rapidly with $p$, while late pairs vary very slowly, like the second and hour hands of a clock. The formula can be evaluated for any integer $p$ and has no learned parameters.
+
+**Learned absolute position embeddings.** Replace the fixed formula with a learned lookup table of shape $L_{\max} \times D$. Vaswani et al. tested both and found nearly identical translation quality, choosing sin/cos because they hoped it would extrapolate to sequences longer than those seen during training. BERT uses a learned table with $L_{\max} = 512$, and GPT-2 uses $L_{\max} = 1\,024$. This is the direct cause of BERT's hard 512-token limit: there is simply no row in the table for position 512 or beyond.
+
+**Relative positions.** Both methods above stamp each token with an absolute index. Yet what usually matters for language is the **pairwise offset** $j - i$: "cat" immediately preceding "chased" carries the same grammatical relation whether the clause appears in the first sentence or the tenth. Shaw, Uszkoreit, and Vaswani (2018) added learned relative vectors indexed by $j - i$ to the keys and values, clipped at $\pm k$ ($k = 16$): all offsets beyond $k$ share a single vector. T5 simplified this further: **add a learned scalar** $b_h(j - i)$ directly to the attention score. Each head $h$ has its own table of scalars shared across all layers, grouping offsets into 32 buckets that grow logarithmically up to distance 128 and share a single bucket beyond that.
+
+**RoPE** (Su et al., 2021) rotates the query $\mathbf{q}$ and key $\mathbf{k}$ by an angle proportional to their absolute position inside every attention layer. Because the dot product of two rotated vectors depends only on the difference between their rotation angles, $\mathbf{q}^\top\mathbf{k}$ becomes a function of relative distance. The full derivation and NumPy verification are in [The LLaMA Family](/en/llm/llama-family/).
+
+**ALiBi** (Press, Smith, and Lewis, 2022) drops position vectors altogether. Instead, it adds a **fixed, non-learned** penalty to each attention score proportional to the distance between query and key:
+
+$$
+s_{ij} = \frac{\mathbf{q}_i^\top \mathbf{k}_j}{\sqrt{d}} - m_h\,(i - j), \qquad j \le i
+$$
+
+- $s_{ij}$ is the pre-softmax attention score between query $i$ and key $j$. ALiBi was designed for causal language models, so we only consider $j \le i$; entries with $j > i$ are still masked out with $-\infty$.
+- $i - j \ge 0$ is the distance. The farther back a key is, the more its score is penalized. Distance 0 (attending to itself) receives zero penalty.
+- $m_h > 0$ is the head-specific **slope** for head $h$. (Here $m_h$ follows the notation of the ALiBi paper, not the sample count $m$ used elsewhere on the site.)
+
+**How are the slopes chosen?** For $H$ heads, the slopes form a geometric sequence starting at $2^{-8/H}$ with ratio $2^{-8/H}$ (when $H$ is a power of 2 such as 8 or 16). For $H = 8$, the slopes are $\tfrac{1}{2}, \tfrac{1}{4}, \dots, \tfrac{1}{256}$. A head with slope $m_h = 1/2$ subtracts 5 points from a token 10 positions away, making it focus sharply on immediate neighbors. A head with slope $m_h = 1/256$ subtracts only about 0.04 at distance 10, allowing it to look far back. The authors tried making the slopes learnable, found that learned slopes extrapolated worse, and kept them fixed.
+
+**Why does ALiBi extrapolate so well?** No parameter is tied to any specific absolute position index. At a longer test length, the model still sees "content dot product minus a linear distance penalty"—the exact pattern it trained on. In the paper's experiments, a 1.3B-parameter model trained at $L = 1\,024$ and evaluated at $L = 2\,048$ matched the perplexity of a sinusoidal model trained directly at $L = 2\,048$, while training 11% faster and using 11% less memory. On WikiText-103, ALiBi's perplexity is best around $2L$ to $3L$ and remains stable out to over 10,000 tokens even when trained at $L = 512$. In the same controlled comparison, sinusoidal embeddings extrapolated poorly despite being defined for all $p$; RoPE degraded more gracefully but still rose; and T5's relative bias extrapolated well but ran significantly slower.
+
+| Scheme | Where position enters | Learned params | Used in | Sequences longer than training length |
+|---|---|---|---|---|
+|Sinusoidal (sin/cos) | Added to input embeddings | None | Original Transformer | Computable, but quality degrades quickly |
+| Learned absolute | Added to input embeddings | $L_{\max} \times D$ table | BERT, GPT-2 | No vector exists for positions $\ge L_{\max}$ |
+| Relative bias (T5) | Added to scores, every layer | One scalar per distance bucket per head | T5 | Extrapolates fairly well, but slower |
+| RoPE | Rotates $\mathbf{q}$ and $\mathbf{k}$, every layer | None | Llama family | Degrades far past training length; extended via fine-tuning |
+| ALiBi | Adds $-m_h(i - j)$ to scores, every layer | None | ALiBi paper models, BLOOM, MPT | Best around $2L$, stable past 10,000 tokens |
+
+### Post-LN versus Pre-LN
+
+Every Transformer block contains two sub-layers: attention and a feed-forward network (FFN). Denoting either sub-layer by $F$, there are two ways to place layer normalization ($\mathrm{LN}$):
+
+$$
+\text{Post-LN:}\quad \mathbf{H} \leftarrow \mathrm{LN}\big(\mathbf{H} + F(\mathbf{H})\big)
+\qquad\qquad
+\text{Pre-LN:}\quad \mathbf{H} \leftarrow \mathbf{H} + F\big(\mathrm{LN}(\mathbf{H})\big)
+$$
+
+The original Transformer and BERT use Post-LN. GPT-2 switched to Pre-LN, adding one final $\mathrm{LN}$ after the last block. T5 and the Llama family also use pre-normalization, with scale-only variants (T5 drops the mean-centering bias, and Llama uses RMSNorm).
+
+**Follow the gradient highway.** Let $\mathbf{H}_l$ be the hidden state after sub-layer $l$ out of $N = 2N_{\text{layer}}$ sub-layers in a model of $N_{\text{layer}}$ blocks. Under Pre-LN, each sub-layer simply **adds** a residual correction, so unrolling the recurrence from $l$ to $N$ gives:
+
+$$
+\mathbf{H}_N = \mathbf{H}_l + \sum_{k=l+1}^{N} F_k\big(\mathrm{LN}(\mathbf{H}_{k-1})\big)
+$$
+
+The derivative of $\mathbf{H}_N$ with respect to $\mathbf{H}_l$ is therefore the **identity matrix plus** the derivative of the sum. That identity term comes from the **residual connection** and acts as an unobstructed expressway from the top of the network straight back to every earlier layer $l$: gradients flow back without being multiplied through any intermediate layer norms. Under Post-LN, $\mathrm{LN}$ sits directly on the main path, so gradients from the output must pass through the Jacobian of $\mathrm{LN}$ at every single block above $l$.
+
+Xiong et al. (2020) analyzed this at initialization. In Post-LN, the gradient norm of parameters in the final layer scales as $O(D\sqrt{\ln D})$ (where $D$ is the model dimension), independent of depth, and is much larger than the gradients in early layers. In Pre-LN, it scales as $O(D\sqrt{\ln D / N_{\text{layer}}})$—shrinking as the network grows deeper and staying well-balanced across all layers. Large top-layer gradients combined with a full learning rate at step 1 cause Post-LN training to diverge unless you use **learning-rate warmup** (ramping the learning rate up gradually from 0 over the first few thousand steps; see [Debugging Language Models](/en/llm/debugging-language-models/)). With Pre-LN, Xiong et al. were able to remove warmup entirely while reaching comparable accuracy in less training time.
+
+:::note[Key takeaway]
+The three Transformer families differ in their attention mask (bidirectional, causal, or both plus cross-attention) and pre-training objective (MLM, next-token prediction, or span denoising). Position can be added to input embeddings (sin/cos, learned table) or injected into attention scores at every layer (relative bias, RoPE, ALiBi); the latter generalizes much better to unseen lengths. Pre-LN keeps the residual stream as a pure sum, making deep Transformers stable to train.
+:::
+
+### The $L^2$ cost of attention
+
+The score matrix $\mathbf{Q}\mathbf{K}^\top$ has $L \times L$ entries, each requiring a $d$-dimensional dot product. Every head in every layer therefore costs roughly $L^2 d$ multiplications to compute the scores, another $L^2 d$ to multiply the weights by $\mathbf{V}$, and $L^2$ numbers of memory if the matrix is materialized. Doubling $L$ quadruples both compute and memory. At 512 tokens that is negligible; at 128K tokens it dominates everything. Four main directions address this bottleneck, each making a different trade-off.
+
+**1. Sparse / sliding-window attention: score only a subset of pairs.** Each token attends only to its $w$ nearest neighbors—a **sliding window**. Under a causal mask, token $i$ attends to positions $j$ with $i - w < j \le i$. Each row has at most $w$ active entries, dropping the cost from $O(L^2)$ to $O(L \cdot w)$, linear in $L$.
+
+- A token cannot directly attend further back than $w - 1$ positions in a single layer, but stacking layers expands the receptive field: after $N_{\text{layer}}$ layers, information can propagate up to $N_{\text{layer}} (w - 1)$ positions back, just like stacked convolutional layers. Mistral 7B (Jiang et al., 2023) uses $w = 4\,096$ across 32 layers for a theoretical receptive field of ~131K tokens, while also capping the KV cache at $w$ tokens per layer.
+- **Longformer** (Beltagy, Peters, and Cohan, 2020) is an encoder model: its bidirectional window lets each token attend to $w/2$ tokens on each side ($w = 512$), optionally **dilated** (leaving gaps inside the window to reach further). In addition, a few task-selected tokens are given **global attention** (such as `[CLS]` in classification or the question tokens in QA): they attend to every token in the document, and every token attends to them. Longformer processes 4,096 tokens—$8\times$ BERT's limit.
+- **BigBird** (Zaheer et al., 2020) combines three ingredients: a local window, a few global tokens, and a few **random** pairs per query. The authors prove this sparse graph preserves key theoretical properties of full attention while scaling to sequences $8\times$ longer on the same hardware.
+
+**2. Linear attention: change the order of matrix multiplication.** Write row $i$ of standard attention as a weighted average using a similarity function $\mathrm{sim}(\mathbf{q}, \mathbf{k}) = \exp(\mathbf{q}^\top\mathbf{k}/\sqrt{d})$:
+
+$$
+\mathbf{o}_i = \frac{\sum_{j} \mathrm{sim}(\mathbf{q}_i, \mathbf{k}_j)\, \mathbf{v}_j}{\sum_{j} \mathrm{sim}(\mathbf{q}_i, \mathbf{k}_j)}
+$$
+
+Katharopoulos et al. (2020) replace $\mathrm{sim}$ with a kernel dot product of non-negative feature maps, $\mathrm{sim}(\mathbf{q}, \mathbf{k}) = \phi(\mathbf{q})^\top\phi(\mathbf{k})$, using $\phi(x) = \mathrm{elu}(x) + 1$ elementwise. Substituting this in and factoring $\phi(\mathbf{q}_i)$ outside the sum over $j$ (since it does not depend on $j$) gives:
+
+$$
+\mathbf{o}_i = \frac{\sum_{j} \phi(\mathbf{q}_i)^\top\phi(\mathbf{k}_j)\, \mathbf{v}_j}{\sum_{j} \phi(\mathbf{q}_i)^\top\phi(\mathbf{k}_j)}
+= \frac{\phi(\mathbf{q}_i)^\top \Big(\sum_{j} \phi(\mathbf{k}_j)\,\mathbf{v}_j^\top\Big)}{\phi(\mathbf{q}_i)^\top \Big(\sum_{j} \phi(\mathbf{k}_j)\Big)}
+$$
+
+The two bracketed sums **do not depend on $i$**. The numerator sum is a compact $d \times d$ matrix, and the denominator sum is a $d$-dimensional vector. Compute both once, and each query row $i$ only requires multiplying by $\phi(\mathbf{q}_i)$: total cost drops from $O(L^2 d)$ to $O(L d^2)$, and no $L \times L$ matrix is ever formed. With a causal mask, the two sums become running prefix sums updated at each step $i$ like the hidden state of a recurrent neural network—hence the paper's title, *"Transformers are RNNs."* The trade-off: this defines a **different attention function** that does not match softmax attention, so models must be trained with it from scratch (or fine-tuned to adapt).
+
+**3. FlashAttention: compute exact softmax attention with far fewer memory reads/writes.** Dao et al. (2022) observed that on modern GPUs, attention is usually bottlenecked by **memory bandwidth** rather than arithmetic. A GPU has large but relatively slow main memory (HBM, tens of gigabytes) and tiny but ultra-fast on-chip SRAM (~20 MB on an A100). Standard attention writes the $L \times L$ score matrix out to HBM, reads it back to compute softmax, writes the weights to HBM, and reads them back again to multiply by $\mathbf{V}$.
+
+FlashAttention tiles $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ into small blocks that fit inside SRAM and fuses the entire calculation into a single GPU kernel without writing the $L \times L$ matrix to HBM. The obstacle is that softmax normalizes across the entire row. FlashAttention solves this with **online softmax**, maintaining two running scalars per row across blocks: the running maximum $\mu$ and the running rescaled sum $\ell = \sum_j e^{s_{ij} - \mu}$. Whenever a new block has a larger maximum $\mu' > \mu$, the old sum and accumulated output are simply multiplied by $e^{\mu - \mu'}$ to rebase them to $\mu'$, since $e^{s - \mu} \cdot e^{\mu - \mu'} = e^{s - \mu'}$. During backpropagation, FlashAttention recomputes the attention blocks in SRAM instead of saving the $L \times L$ matrix from the forward pass.
+
+The result is **exact attention**: the exact same output (up to floating-point rounding) and the same $O(L^2)$ FLOPs, but $O(L)$ memory and much faster wall-clock speed. The paper reports $3\times$ faster GPT-2 training at $L = 1\,024$ and a 15% speedup over the MLPerf 1.1 BERT-large training record at $L = 512$. Because it does not alter the mathematical function, you can drop it into existing pretrained models with zero retraining.
+
+**4. At inference time: KV cache, MQA, and GQA.** During autoregressive generation, keys and values from all past tokens are cached (**KV cache**), growing linearly with $L$. MQA (Shazeer, 2019) shares a single key/value head across all query heads; GQA (Ainslie et al., 2023) shares one key/value head per group of query heads. Both are covered in detail in [The LLaMA Family](/en/llm/llama-family/) and [Deploying LLMs: Multi-GPU and Distributed Serving](/en/llm/llm-deployment/).
+
+These four directions are orthogonal and can be combined: Mistral 7B uses sliding-window attention, GQA, and FlashAttention all at once.
+
+### Limitations
+
+- **Length extrapolation has limits.** ALiBi's perplexity peaks around $2L$, and RoPE requires continued training or frequency scaling to extend far beyond its training window. See the second box under Common pitfalls.
+- **Accepting a long context does not guarantee using all of it well.** Feeding 128K tokens does not mean the model reliably retrieves a fact buried in the middle; Liu et al. (2023) showed that models use information at the very beginning and very end of the prompt much better than information in the middle ("lost in the middle"; see [RAG and Modern Chatbots](/en/llm/rag-chatbot/)).
+- **This lesson focuses on the core ideas.** Full derivations of RoPE, RMSNorm, SwiGLU, and GQA are in [The LLaMA Family](/en/llm/llama-family/); mixture-of-experts (MoE) and multi-head latent attention (MLA) are in [The DeepSeek Family](/en/llm/deepseek-family/).
+
+## Illustration
+
+The first table places the three Transformer families side by side. Read down each column: the attention mask and pre-training objective in the first two rows determine the output shape and natural use cases below.
+
+| Criterion | Encoder-only | Decoder-only | Encoder–decoder |
+|---|---|---|---|
+| Attention mask | Bidirectional: every token sees every token | Causal: looks backward only | Bidirectional encoder; causal decoder + cross-attention to encoder |
+| Pre-training objective | Mask tokens and reconstruct them (MLM) | Predict the next token | Denoising: span corruption (T5), text infilling + sentence shuffling (BART) |
+| Output | One contextual vector per input token | Next-token distribution, generating one token at a time | A new output sequence, generated one token at a time |
+| Best suited for | Classification, token labeling, extractive QA, retrieval embeddings | Text generation, chat; general-purpose prompting | Translation, summarization, structured text-to-text |
+| Examples | BERT (2019), RoBERTa, PhoBERT | GPT (2018–2020), Llama | T5 (2020), BART (2020) |
+
+The second table compares the main approaches to reducing attention cost. The rightmost column highlights the catch.
+
+| Approach | Core idea | Scores computed | Score memory | Output vs. full attention | Trade-off |
+|---|---|---|---|---|---|
+| Full attention | Score every pair | $L^2$ | $L^2$ | Baseline | Quadratic in $L$ |
+| Sliding window (Longformer, BigBird) | Attend to $w$ nearest tokens + a few globals (BigBird adds random pairs) | $\sim L w$ | $\sim L w$ | Different | No direct single-layer link between distant tokens |
+| Linear attention | Reorder multiplication via kernel feature map $\phi$, drop softmax | No score matrix; $O(L d^2)$ ops | $d^2$ | Different | Different mathematical model; must train with it |
+| FlashAttention | Tile in on-chip SRAM with online softmax | $L^2$ | $L$ | Identical (up to rounding) | Requires hardware-aware custom GPU kernels |
+| MQA, GQA | Share K/V heads across all or groups of query heads | Same as full | Same as full; smaller KV cache | Different | Slight capacity reduction if not trained/adapted |
+
+## Code examples
+
+The code in this lesson was last tested in November 2026 with Python 3.14 and NumPy 2.4 (the versions bundled in Pyodide). Both cells run independently right on this page.
+
+### Masks and ALiBi biases
+
+The first cell constructs three matrices for a short sequence of length $L = 6$: a causal mask, a causal sliding-window mask with $w = 3$, and the ALiBi bias matrix for head 1. A `1` indicates a visible entry. It then adds the ALiBi bias to random query–key scores (seed 0) and verifies the resulting softmax weights.
+
+<PythonRunner code={masksCode} title="Causal mask, sliding window, and ALiBi bias" />
+
+Reading the output:
+
+- **Causal mask** is lower-triangular: row $i$ has $i + 1$ ones (0-indexed).
+- **Sliding window** is identical on the first three rows. Starting at row 3, each row keeps only 3 ones, and the band of ones slides right as you move down. The last row attends to positions 3, 4, and 5, and can no longer see position 0 directly.
+- **Slopes** for 8 heads are `0.5 0.25 0.125 ... 0.004` (printed to 3 decimal places; the 8th slope is $1/256 \approx 0.0039$).
+- **Head 1 bias** is `0` along the main diagonal, steps down by `-0.5` for each position further left, and is `-inf` above the diagonal (masked future positions). The bottom row is `-2.5, -2, ..., 0`. In head 8, that same bottom row is `-0.02, -0.016, ..., 0`—barely penalized at all.
+- **Last-row attention weights** are `0.03 0.072 0.107 0.116 0.448 0.228`, and **every row sums to 1**. Because the bias simply shifts pre-softmax logits, each row remains a valid probability distribution. Here $\mathbf{Q}$ and $\mathbf{K}$ are random so the weights do not decrease monotonically with distance, but the farthest token (position 0) suffers the largest penalty and ends up with the smallest weight.
+
+### Cost versus $L$ and linear attention
+
+The second cell counts the number of causal attention pairs scored in a single head of a single layer under full attention ($L(L+1)/2$ pairs) versus a sliding window of size $w = 512$. The `GB` column reports the memory needed to materialize the full $L \times L$ matrix at 2 bytes per number. The second half verifies the associative multiplication trick of linear attention with $L = 1\,000$ and $d = 16$, comparing both outputs and multiplication counts.
+
+<PythonRunner code={costCode} title="L² scaling and the linear-attention multiplication trick" />
+
+Reading the output:
+
+- **At $L = 512$**, both methods evaluate the exact same 131,328 pairs because the window already covers the entire sequence.
+- **Each time $L$ quadruples**, full-attention pairs grow by roughly $16\times$, whereas sliding-window pairs grow by $4\times$ once $L \gg w$ (from 512 to 2,048 the ratio is $7.0\times$ because the window was still saturating at 512). At $L = 131\,072$ (128K), full causal attention scores ~8.6 billion pairs while the window scores ~67 million—$128.3\times$ fewer, matching $L / (2w) = 131\,072 / 1\,024 = 128$ since full causal attention has $\sim L^2/2$ pairs and the window has $\sim L w$.
+- **The `GB` column** climbs from 0.001 GB at 512 tokens to 34.360 GB at 128K tokens—for **one** head in **one** layer. That is why FlashAttention never materializes the full $L \times L$ matrix in HBM.
+- **`same output: True`**: both multiplication orders produce the exact same matrix up to floating-point precision, confirming our derivation in the Theory section. Forming the $L \times L$ matrix takes 32,000,000 multiplications, whereas computing $\sum_j \phi(\mathbf{k}_j)\mathbf{v}_j^\top$ first takes only 512,000—$L/d = 62.5\times$ fewer.
+
+Try changing `w = 512` to `w = 4096` in the second cell: at 2,048 tokens the two columns are equal, and at 128K tokens the savings ratio is $16.3\times$. A wider window lets each layer see further back in exchange for a smaller reduction in compute.
+
+## Common pitfalls
+
+:::caution[Feeding text longer than 512 tokens into BERT]
+BERT has learned position embeddings for exactly 512 positions. If you pass a longer text, the tokenizer silently drops everything past token 512 when `truncation=True` is set, or raises an index error when it is not. Any truncated text is completely invisible to the model. For long documents, split the text into overlapping chunks and aggregate predictions, or switch to a long-context encoder such as Longformer.
+:::
+
+:::caution[Assuming flat perplexity on long sequences means the model uses distant information]
+ALiBi models maintain low perplexity when evaluated on sequences many times longer than their training length. However, Appendix B of the ALiBi paper itself points out that much of its perplexity advantage over sinusoidal embeddings on long segments comes from avoiding the **early token curse**: when a test document is split into non-overlapping segments, tokens near the start of each segment have almost no context, and longer segments simply have fewer such boundary tokens. When evaluated with a sliding window so every token has full context, perplexity stays nearly flat across segment lengths. Thus "perplexity did not blow up" does not prove "the model retrieves facts from 10,000 tokens away"—especially since most ALiBi heads heavily penalize distant tokens. Context extension for RoPE is covered in [The LLaMA Family](/en/llm/llama-family/). Before trusting a model on a 100-page document, test it on a task that actually requires retrieving distant facts.
+:::
+
+:::caution[Assuming every efficient attention method is a drop-in replacement]
+Only FlashAttention computes exact softmax attention: swapping it into an already-trained model leaves outputs unchanged up to rounding error. Sliding-window attention, sparse attention, and linear attention **change the mathematical function itself**: plugging them into a checkpoint trained with full softmax attention without adaptation will degrade outputs. Also avoid confusing the two window masks: Longformer's encoder window looks both left and right, whereas a causal decoder window like Mistral's only looks backward, as in the first code cell.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` field of the frontmatter. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- Built from the same Transformer block, the three families differ in their mask and objective: encoder-only (bidirectional, MLM, like BERT) for understanding; decoder-only (causal, next-token prediction, like GPT) for generation; and encoder–decoder (denoising: T5's span corruption, BART's text infilling) for transforming one sequence into another.
+- Positional information can be added to input embeddings (sin/cos, learned tables with BERT's 512-token cap) or injected into attention scores at every layer (T5 relative bias, RoPE, ALiBi). ALiBi subtracts $m_h(i - j)$ with fixed geometric slopes ($\tfrac{1}{2}, \dots, \tfrac{1}{256}$ for 8 heads) and maintains low perplexity well beyond its training length, though that alone does not guarantee long-range retrieval.
+- Pre-LN, $\mathbf{H} \leftarrow \mathbf{H} + F(\mathrm{LN}(\mathbf{H}))$, keeps the residual highway as a pure sum so initial gradients stay balanced across layers, allowing deep models to train stably without the warmup required by Post-LN.
+- Full attention costs $O(L^2)$ per head per layer. Sliding windows reduce this to $O(L w)$ by limiting direct range; linear attention reorders multiplication to $O(L d^2)$ at the cost of changing the attention function; FlashAttention keeps exact softmax outputs while tiling in SRAM to save memory traffic; and MQA/GQA shrink the inference KV cache.
+
+**Further reading:**
+
+- Tay, Y., Dehghani, M., Bahri, D., Metzler, D. (2022). [*Efficient Transformers: A Survey*](https://arxiv.org/abs/2009.06732), *ACM Computing Surveys* 55(6), [doi:10.1145/3530811](https://doi.org/10.1145/3530811), Section 3. Taxonomy of efficient attention methods across fixed patterns, learnable patterns, low-rank/kernel approximations, and hardware-aware designs.
+- Raffel, C. et al. (2020). [*Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer*](https://jmlr.org/papers/v21/20-074.html), *JMLR* 21(140), Sections 2.1, 3.2, and 3.3; and Lewis, M. et al. (2020). [*BART: Denoising Sequence-to-Sequence Pre-training for Natural Language Generation, Translation, and Comprehension*](https://aclanthology.org/2020.acl-main.703/), ACL 2020, Sections 2 and 4. T5's relative position bias and span corruption, plus BART's noising schemes and ablations.
+- Press, O., Smith, N. A., Lewis, M. (2022). [*Train Short, Test Long: Attention with Linear Biases Enables Input Length Extrapolation*](https://arxiv.org/abs/2108.12409), ICLR 2022, Sections 2 and 3. Introduces ALiBi and compares length extrapolation against sinusoidal, RoPE, and T5 bias on the same backbone. (The paper writes $m$ where this lesson writes $m_h$.)
+- Xiong, R. et al. (2020). [*On Layer Normalization in the Transformer Architecture*](https://arxiv.org/abs/2002.04745), ICML 2020, Section 3. Gradient-norm analysis at initialization for Post-LN vs. Pre-LN, and training without warmup.
+- Dao, T., Fu, D. Y., Ermon, S., Rudra, A., Ré, C. (2022). [*FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness*](https://arxiv.org/abs/2205.14135), NeurIPS 2022, Sections 2 and 3.1. Tiling and online softmax. For sparse and linear attention: Beltagy, I., Peters, M. E., Cohan, A. (2020). [*Longformer: The Long-Document Transformer*](https://arxiv.org/abs/2004.05150), arXiv:2004.05150; Zaheer, M. et al. (2020). [*Big Bird: Transformers for Longer Sequences*](https://arxiv.org/abs/2007.14062), NeurIPS 2020; Katharopoulos, A. et al. (2020). [*Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention*](https://arxiv.org/abs/2006.16236), ICML 2020.
+
+<LessonProgress />

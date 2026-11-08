@@ -1,0 +1,312 @@
+---
+title: RLHF
+description: 'SFT only teaches imitation. RLHF teaches a model which answers humans prefer: SFT, Bradley–Terry reward models, KL-regularized PPO, and why high reward scores can still mean bad answers.'
+quiz:
+  - question: 'A human labeler prefers response $\mathbf{y}_w$ over $\mathbf{y}_l$. Your reward model currently scores $r(\mathbf{y}_w) = 1.2$ and $r(\mathbf{y}_l) = 3.2$. Which statement is true?'
+    options:
+      - 'The pair''s loss is $-\ln\sigma(-2) \approx 2.13$, and this pair receives a strong gradient update weighted by $1 - \sigma(-2) \approx 0.88$'
+      - 'The pair''s loss is $-\ln\sigma(2) \approx 0.13$, because the two scores are 2 units apart'
+      - 'The loss is 0 because both reward scores are positive'
+      - 'Adding 5 to both scores reduces the loss on this pair'
+    answer: 0
+    explanation: 'The score margin is $\Delta = r(\mathbf{y}_w) - r(\mathbf{y}_l) = -2$: the RM currently ranks the pair opposite to the human labeler. The loss $-\ln\sigma(-2) \approx 2.13$ is large, and the gradient scales with $1 - \sigma(\Delta) \approx 0.88$, pushing hard to fix the inversion. The second option takes the absolute difference and forgets that the sign of $\Delta$ determines whether the ranking is right or wrong. Adding the same constant to both scores leaves their difference unchanged, so the loss does not change at all.'
+  - question: 'When running PPO, you set the KL penalty coefficient $\beta$ close to 0 while keeping the PPO clipping parameter $\epsilon = 0.2$. After many optimization rounds, what is most likely to happen?'
+    options:
+      - 'The policy stays close to the initial SFT model because PPO clipping holds it back'
+      - 'The reward model updates itself alongside the policy, so there is nothing to exploit'
+      - 'Each individual update step remains small, but the small steps accumulate over rounds so the policy can drift far from the SFT model and exploit flaws in the reward model'
+      - 'The reward model''s loss increases, causing training to stop automatically'
+    answer: 2
+    explanation: 'PPO clipping compares the current policy against the policy from the immediately preceding rollout batch ($\pi_{\text{old}}$), so it only bounds the size of each individual step. Nothing in the clip **directly** bounds the total cumulative drift from the original SFT reference model ($\pi_{\text{ref}}$)—that is the job of the KL penalty. Meanwhile, the reward model is frozen during stage 3, so it never adapts. The first option confuses the two leashes.'
+  - question: 'During RL training, the average reward model score of generated responses climbs steadily from start to finish. What is the soundest conclusion?'
+    options:
+      - 'True response quality has definitely improved, because the RM was trained directly on human preferences'
+      - 'You cannot be sure yet: you need human evaluation or an independent metric, because the policy may be exploiting blind spots where the RM assigns high scores to flawed answers'
+      - 'You should lower $\beta$ so the reward score climbs even faster'
+      - 'The RM is underfitting, so you should train the RM for several more epochs'
+    answer: 1
+    explanation: 'The RM is only an imperfect proxy learned from a finite set of comparisons. Because the policy is optimized directly against the RM, the RM score almost always goes up—even past the point where true human-judged quality starts falling (reward hacking / Goodhart''s law). Lowering $\beta$ only lets the policy drift further and hack faster, and training an RM for more epochs typically makes it overfit.'
+  - question: 'The KL-regularized optimal policy has the form $\pi^*(\mathbf{y} \mid \mathbf{x}) \propto \pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})\, e^{r(\mathbf{x}, \mathbf{y}) / \beta}$. Two candidate answers B and C have reward scores differing by 1 (with C higher) and $\beta = 0.5$. Relative to the reference model, by what factor does the probability ratio $\pi(C) / \pi(B)$ increase?'
+    options: ['By a factor of 2', 'By about 1.65 ($e^{0.5}$)', 'It stays the same because $\pi^*$ is normalized', 'By about 7.39 ($e^{2}$)']
+    answer: 3
+    explanation: 'Taking the ratio cancels the normalizing constant $Z(\mathbf{x})$: $\pi^*(C)/\pi^*(B) = \frac{\pi_{\text{ref}}(C)}{\pi_{\text{ref}}(B)} \cdot e^{(r_C - r_B)/\beta}$, multiplying the reference ratio by $e^{1/0.5} = e^2 \approx 7.39$. Picking 2 forgets the exponential, and picking $e^{0.5}$ multiplies by $\beta$ instead of dividing. Notice also that any response with near-zero probability under $\pi_{\text{ref}}$ still has near-zero probability under $\pi^*$.'
+---
+
+import Prerequisites from '@components/Prerequisites.astro';
+import PythonRunner from '@components/PythonRunner.astro';
+import Quiz from '@components/Quiz.astro';
+import LessonProgress from '@components/LessonProgress.astro';
+import RlhfStagesFigure from '@components/figures/RlhfStagesFigure.astro';
+import rewardModelCode from '@code/llm/rlhf/reward-model.en.py?raw';
+import klLeashCode from '@code/llm/rlhf/kl-leash.en.py?raw';
+
+## Goals
+
+After this lesson, you will be able to:
+
+- Describe the three stages of **Reinforcement Learning from Human Feedback** (**RLHF**) in InstructGPT: supervised fine-tuning (SFT), training a **reward model** (**RM**) from pairwise human preferences, and optimizing the **policy** with reinforcement learning.
+- Derive the Bradley–Terry reward model loss $-\ln\sigma(r_w - r_l)$ and its gradient from pairwise preference probabilities.
+- Explain the stage-3 RL objective—maximizing expected reward minus a **KL penalty** from the frozen SFT reference model—and distinguish the KL penalty from PPO's clipping ratio.
+- Recognize **reward hacking** (**overoptimization**), where reward model scores keep rising while true human-judged quality degrades.
+
+## Prerequisites
+
+{/* List populated from roadmap.ts prerequisites. Do not hardcode links. */}
+
+<Prerequisites />
+
+:::tip[Quick refresher]
+[The GPT Family and Multi-Task Fine-Tuning](/en/llm/gpt-family-finetuning/) ended at **supervised fine-tuning** (**SFT**): training a model on human-written **demonstrations** with cross-entropy loss computed only on the answer tokens. That is Stage 1 of InstructGPT. This lesson covers Stages 2 and 3.
+:::
+
+## Intuition
+
+### Imitation alone cannot tell good from better
+
+Suppose you have finished SFT on your language model. You ask it: *"Explain compound interest to a seventh grader."* Sampling three times with temperature gives you three different replies. All three are grammatically fluent and follow the instruction format:
+
+- Reply A is short, clear, and accurate.
+- Reply B is long-winded and packed with financial jargon.
+- Reply C uses a vivid piggy-bank analogy, but botches the arithmetic in its example.
+
+Standard SFT is stuck here. Cross-entropy on a single reference demonstration only pushes probability toward that specific wording; it has no way of telling the model that Reply A is much better than Reply B, or that Reply C's arithmetic mistake is worse than Reply B's dryness. And scaling SFT by paying humans to write a brand-new, flawless reference essay from scratch for every prompt is slow and expensive.
+
+There is a much easier human judgment task: put two model replies side by side and ask, **"Which one is better?"**. You do not have to be a master writer yourself to spot which of two explanations is clearer and more accurate. Pairwise comparisons also avoid calibration headaches where one annotator's "7 out of 10" is another annotator's "5 out of 10."
+
+### Three stages, like learning to cook
+
+Picture learning to cook a dish for a panel of judges:
+
+1. **Watch the head chef prepare the dish and imitate their steps.** That is **SFT**.
+2. **Cook several variations, let the judges taste pairs of plates, and note which plate they prefer.** After enough pairwise tastings, you build a mental model of the judges' palate—an "internal judge" that predicts how many points any plate would score. That is the **reward model (RM)**.
+3. **Practice cooking variations to maximize your internal judge's score.** Because your internal judge is only reliable on dishes similar to the ones the real judges tasted, you keep a tether pulling you back toward your foundational chef training so you do not wander into bizarre recipes. That is **RL with a KL penalty**.
+
+The trap hides in Stage 3. If the tether is too loose, you will eventually discover a loophole in your internal judge—for example, dumping a pound of sugar into the soup because the internal judge learned a slight correlation between sweetness and higher ratings—scoring a 10/10 from the proxy while making a dish no real human wants to eat.
+
+**The problem: given only pairwise human choices ("response $A$ is better than response $B$"), how do we train a scalar scoring function and use it to improve a language model—without letting the model exploit flaws in that scoring function?**
+
+## Theory
+
+### The three stages of InstructGPT
+
+The idea of learning a reward function from pairwise human preferences comes from deep reinforcement learning: Christiano et al. (2017) trained **agents** to play Atari games and control simulated robots using human comparisons on less than 1% of environment steps. Ziegler et al. (2019) adapted the pipeline to language models, Stiennon et al. (2020) applied it to text summarization, and InstructGPT (Ouyang et al., 2022) scaled it to general instruction following across three stages:
+
+1. **Supervised Fine-Tuning (SFT).** Fine-tune a pre-trained GPT-3 model on human-written demonstrations (~13,000 prompts).
+2. **Reward Model (RM) training.** For each prompt, sample several completions from the model, ask human labelers to rank them from best to worst, and train a reward model to predict those rankings (~33,000 prompts).
+3. **RL policy optimization.** Treat the frozen RM's score as a reward signal and optimize the language model policy using **PPO** with a KL penalty (~31,000 prompts). Stages 2 and 3 can also be iterated.
+
+In reinforcement learning terminology, the **policy** is the decision-making distribution that selects actions. Here, the policy is the language model itself, and its action is the response $\mathbf{y}$ it generates for a prompt $\mathbf{x}$. We write the policy as $\pi_{\boldsymbol{\phi}}(\mathbf{y} \mid \mathbf{x})$ with trainable parameters $\boldsymbol{\phi}$, and the reward model as $r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y})$ with parameters $\boldsymbol{\theta}$. We use two distinct parameter symbols because the policy and the RM are **two separate neural networks**.
+
+### The reward model (Bradley–Terry)
+
+**Architecture.** Start from an SFT model, remove the final unembedding layer (which projected hidden states to $V$ vocabulary logits), and replace it with a linear head that outputs **a single scalar number**. Given a `(prompt, response)` pair $(\mathbf{x}, \mathbf{y})$ as input, the final token's output is the scalar reward score $r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y}) \in \mathbb{R}$. InstructGPT used a 6B-parameter RM across all policy sizes, noting that it saved substantial compute and that 175B RMs were more prone to training instability.
+
+**Preference data.** Each training comparison is a triple $(\mathbf{x}, \mathbf{y}_w, \mathbf{y}_l)$ consisting of a prompt $\mathbf{x}$, the human-preferred (**winning**) response $\mathbf{y}_w$, and the rejected (**losing**) response $\mathbf{y}_l$. Because labelers only tell us which response won rather than assigning numerical scores, we need a probabilistic model linking latent scalar scores to pairwise win probabilities.
+
+**From score differences to win probabilities.** We want the probability $P(\mathbf{y}_w \succ \mathbf{y}_l \mid \mathbf{x})$ that a human prefers $\mathbf{y}_w$ over $\mathbf{y}_l$ to depend purely on their **score difference**. When the two scores are tied, the win probability should be $0.5$; as $r_w - r_l$ grows large and positive, the probability should approach $1$. Passing the score difference through the **logistic sigmoid** $\sigma(z) = \frac{1}{1 + e^{-z}}$ satisfies every requirement (including symmetry $\sigma(z) + \sigma(-z) = 1$, so the two outcomes sum to $1$). Writing $r_w = r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y}_w)$ and $r_l = r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y}_l)$:
+
+$$
+P(\mathbf{y}_w \succ \mathbf{y}_l \mid \mathbf{x}) = \sigma(r_w - r_l) = \frac{1}{1 + e^{-(r_w - r_l)}}
+$$
+
+**Connection to the Bradley–Terry model.** Multiply both numerator and denominator by $e^{r_w}$, noting that $e^{r_w} \cdot e^{-(r_w - r_l)} = e^{r_l}$:
+
+$$
+P(\mathbf{y}_w \succ \mathbf{y}_l \mid \mathbf{x}) = \frac{e^{r_w}}{e^{r_w} + e^{r_l}}
+$$
+
+This is the classic **Bradley–Terry** pairwise comparison model (Bradley and Terry, 1952), where each item has a positive "strength" $e^{r}$ and wins with probability proportional to its strength. As Christiano et al. note, this is identical in form to the **Elo rating system** in chess: only the difference in ratings $r_w - r_l$ determines the win probability. A margin of $0$ gives $50\%$, a margin of $2$ gives $\sigma(2) \approx 88\%$, and a margin of $4$ gives $\sigma(4) \approx 98\%$.
+
+**Loss function.** Treating comparisons in dataset $\mathcal{D}$ as independent, we maximize the log-likelihood of the observed human choices—or equivalently minimize the average negative log-likelihood:
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = -\,\mathbb{E}_{(\mathbf{x}, \mathbf{y}_w, \mathbf{y}_l) \sim \mathcal{D}}\Big[\ln \sigma\big(r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y}_w) - r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y}_l)\big)\Big]
+$$
+
+This is simply binary cross-entropy—the exact same loss as **logistic regression**—applied to the score **margin** $\Delta = r_w - r_l$:
+
+| Margin $\Delta = r_w - r_l$ | $-2$ | $-1$ | $0$ | $1$ | $2$ | $4$ |
+|---|---:|---:|---:|---:|---:|---:|
+| $\sigma(\Delta)$ | 0.119 | 0.269 | 0.500 | 0.731 | 0.881 | 0.982 |
+| $-\ln\sigma(\Delta)$ | 2.1269 | 1.3133 | 0.6931 | 0.3133 | 0.1269 | 0.0181 |
+
+When the RM is freshly initialized and assigns equal scores to both responses, $\Delta = 0$ and the loss is $\ln 2 \approx 0.6931$ (a 50/50 coin flip). When $\Delta < 0$, the RM ranks the pair backwards relative to the human labeler and pays a heavy loss.
+
+**Gradient.** Write $\ln\sigma(z) = -\ln(1 + e^{-z})$ and differentiate with respect to $z$: the derivative of $\ln u$ is $u' / u$ with $u = 1 + e^{-z}$ and $u' = -e^{-z}$, so the two minus signs cancel to give $\frac{e^{-z}}{1 + e^{-z}} = 1 - \sigma(z)$. Applying the chain rule to $-\ln\sigma(\Delta)$ with $\Delta = r_w - r_l$ yields the gradient for a single pair:
+
+$$
+\nabla_{\boldsymbol{\theta}}\big[-\ln\sigma(\Delta)\big] = -\big(1 - \sigma(\Delta)\big)\big(\nabla_{\boldsymbol{\theta}} r_w - \nabla_{\boldsymbol{\theta}} r_l\big)
+$$
+
+Stepping in the negative gradient direction pushes $r_w$ **up** and $r_l$ **down**. Notice the scalar multiplier $1 - \sigma(\Delta)$: it equals the probability the RM currently assigns to the *wrong* ordering. Pairs that the RM already ranks correctly by a wide margin ($1 - \sigma(\Delta) \approx 0$) receive almost no further push, whereas pairs that the RM currently gets backwards ($1 - \sigma(\Delta) \approx 1$) receive the strongest update. In our first code cell below, we use a linear RM $r(\mathbf{y}) = \mathbf{w}^\top\mathbf{f}(\mathbf{y})$ over a feature vector $\mathbf{f}(\mathbf{y})$, so $\nabla_{\mathbf{w}}(r_w - r_l) = \mathbf{f}(\mathbf{y}_w) - \mathbf{f}(\mathbf{y}_l)$.
+
+**Rewards are shift-invariant.** Because $\Delta = r_w - r_l$ depends only on differences, adding +100 to every reward score changes the loss by zero. A standalone score like $r = 5$ has no intrinsic meaning without a baseline. Before starting RL, InstructGPT shifts the RM by a constant bias so that human demonstrations receive a mean score of $0$.
+
+**Practical RM training details from InstructGPT.** To collect data efficiently, InstructGPT had labelers rank $K$ responses per prompt ($K$ between 4 and 9) at once, yielding $\binom{K}{2}$ comparison pairs from a single prompt reading. Because all $\binom{K}{2}$ pairs share the same prompt and responses, they are heavily correlated: shuffling them randomly across mini-batches caused the RM to overfit (see [Overfitting and Underfitting](/en/ml/overfitting-underfitting/)) within a single epoch. Placing all $\binom{K}{2}$ pairs from a prompt into the **same mini-batch** both prevented that overfitting and ran much faster (since the RM only had to run $K$ forward passes per prompt instead of $2\binom{K}{2}$). They also trained the RM for **just 1 epoch**—in sharp contrast to SFT, where 16 epochs continued to help. (In Hugging Face TRL 1.16.0, `RewardTrainer` implements this exact Bradley–Terry loss on `chosen` / `rejected` columns; note that `RewardConfig` defaults to `num_train_epochs=3.0`, so set `1.0` explicitly when following the InstructGPT recipe.)
+
+### Policy optimization with a KL penalty
+
+**Setup.** Now we enter Stage 3. The RM $r_{\boldsymbol{\theta}}$ is **frozen**. Each episode is a single-step bandit problem: sample a prompt $\mathbf{x}$ from the prompt distribution, let the policy $\pi_{\boldsymbol{\phi}}(\mathbf{y} \mid \mathbf{x})$ generate a complete response $\mathbf{y}$, score $(\mathbf{x}, \mathbf{y})$ once with the RM, and end the episode. We initialize $\pi_{\boldsymbol{\phi}}$ from the SFT model.
+
+Why do we need reinforcement learning here instead of backpropagating the gradient of $r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y})$ directly into $\boldsymbol{\phi}$? Because generating $\mathbf{y}$ requires **sampling discrete tokens** one by one, and discrete sampling is non-differentiable. Policy gradient methods bypass that roadblock: instead of differentiating *through* the text $\mathbf{y}$, they treat $r$ as a scalar weight and differentiate $\ln \pi_{\boldsymbol{\phi}}(\mathbf{y} \mid \mathbf{x})$, increasing the log-probability of sampled responses that achieved high rewards and decreasing the log-probability of responses that achieved low rewards.
+
+**The KL-regularized reward.** If we maximized $\mathbb{E}[r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y})]$ alone, the policy would quickly collapse to whatever narrow, repetitive strings exploit quirks in the RM. Following Ziegler et al. (2019), Stiennon et al. (2020), and InstructGPT, we subtract a penalty proportional to how far the policy has drifted from the initial SFT model:
+
+$$
+R(\mathbf{x}, \mathbf{y}) = r_{\boldsymbol{\theta}}(\mathbf{x}, \mathbf{y}) - \beta \ln\frac{\pi_{\boldsymbol{\phi}}(\mathbf{y} \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})}
+$$
+
+and maximize $\mathbb{E}_{\mathbf{x},\, \mathbf{y} \sim \pi_{\boldsymbol{\phi}}}[R(\mathbf{x}, \mathbf{y})]$. Walking through each piece:
+
+- **$\pi_{\text{ref}}$** is the frozen **reference model**—a read-only copy of the initial SFT model.
+- **The log-ratio $\ln\frac{\pi_{\boldsymbol{\phi}}(\mathbf{y} \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})}$** is positive when the current policy assigns higher probability to $\mathbf{y}$ than the SFT model did, and negative when it assigns lower probability.
+- **$\beta > 0$** controls the strength of the tether (InstructGPT used $\beta = 0.02$; Bai et al., 2022 used $0.001$).
+- **Decomposing per token.** For a response of length $L$, $\ln\pi(\mathbf{y} \mid \mathbf{x}) = \sum_{t=1}^{L} \ln\pi(y_t \mid \mathbf{x}, y_{<t})$, so the sequence log-ratio is simply the sum of per-token log-ratios—which is why InstructGPT calls this a **per-token KL penalty**.
+
+Why is this called a **KL** penalty? Taking the expectation of the log-ratio over responses $\mathbf{y} \sim \pi_{\boldsymbol{\phi}}(\cdot \mid \mathbf{x})$ gives the exact definition of the **Kullback–Leibler (KL) divergence** between $\pi_{\boldsymbol{\phi}}$ and $\pi_{\text{ref}}$:
+
+$$
+\mathbb{E}_{\mathbf{y} \sim \pi_{\boldsymbol{\phi}}}\left[\ln\frac{\pi_{\boldsymbol{\phi}}(\mathbf{y} \mid \mathbf{x})}{\pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})}\right] = D_{\mathrm{KL}}\big(\pi_{\boldsymbol{\phi}} \,\|\, \pi_{\text{ref}}\big)
+$$
+
+Because $D_{\mathrm{KL}}(\pi_{\boldsymbol{\phi}} \,\|\, \pi_{\text{ref}}) \ge 0$ always (and equals $0$ if and only if the two distributions are identical), maximizing $\mathbb{E}[R]$ is equivalent to maximizing $\mathbb{E}[r_{\boldsymbol{\theta}}] - \beta\, D_{\mathrm{KL}}(\pi_{\boldsymbol{\phi}} \,\|\, \pi_{\text{ref}})$: earn high reward, minus a penalty of $\beta$ per nat of KL drift away from the SFT reference model.
+
+As Stiennon et al. explain, this KL tether serves two purposes: it prevents the policy from collapsing its entropy onto a single mode, and it keeps generated responses inside the distribution where the reward model was trained and its scores remain trustworthy.
+
+**Closed-form optimal policy.** For any fixed prompt $\mathbf{x}$, if $\pi(\cdot \mid \mathbf{x})$ is allowed to be any probability distribution, the objective $\mathbb{E}[r] - \beta\, D_{\mathrm{KL}}(\pi \,\|\, \pi_{\text{ref}})$ has a unique closed-form maximizer:
+
+$$
+\pi^*(\mathbf{y} \mid \mathbf{x}) = \frac{1}{Z(\mathbf{x})}\,\pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})\, e^{r(\mathbf{x}, \mathbf{y}) / \beta}
+$$
+
+where $Z(\mathbf{x}) = \sum_{\mathbf{y}} \pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})\, e^{r(\mathbf{x}, \mathbf{y}) / \beta}$ normalizes the distribution to sum to $1$. (We will derive this identity step by step in [DPO](/en/llm/dpo/).) For now, just read what it says: start from the SFT reference probability $\pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})$, reweight each response by $e^{r / \beta}$, and renormalize. When $\beta \to \infty$, $e^{r / \beta} \to 1$ and $\pi^* = \pi_{\text{ref}}$ (the tether is rigid). When $\beta \to 0$, $e^{r / \beta}$ blows up on whichever response has the highest RM score, collapsing all probability mass onto that single response. Our second code cell lets you watch this transition numerically.
+
+### PPO, at an intuitive level
+
+In practice we cannot compute $Z(\mathbf{x})$ by summing over all possible strings $\mathbf{y}$, so InstructGPT optimizes the KL-regularized objective using **PPO** (**Proximal Policy Optimization**; Schulman et al., 2017). Here we focus on the core intuition rather than the full derivation.
+
+PPO is a policy gradient algorithm: sample a batch of responses from the current policy, see which ones beat a baseline **value function** (critic), and nudge $\boldsymbol{\phi}$ to make those winning responses more likely. Because sampling long responses from an LLM is slow, we want to take several gradient steps on each sampled batch. However, if we update $\boldsymbol{\phi}$ too far on one batch, the policy drifts away from the distribution $\pi_{\text{old}}$ that generated the batch, making the gradient estimates unstable. PPO prevents destructive updates by **clipping** the probability ratio $\rho = \pi_{\boldsymbol{\phi}}(\mathbf{y} \mid \mathbf{x}) / \pi_{\text{old}}(\mathbf{y} \mid \mathbf{x})$ to the interval $[1 - \epsilon, 1 + \epsilon]$ (typically $\epsilon = 0.2$). Once $\rho$ moves outside that window, the objective flattens out so the optimizer gets zero incentive to push the step any further.
+
+Do not confuse the **KL penalty** with **PPO clipping**—they are two completely different leashes:
+
+| Criterion | KL penalty ($\beta$) | PPO clipping ($\epsilon$) |
+|---|---|---|
+| Anchors the policy to | The original SFT model $\pi_{\text{ref}}$, which stays **fixed** for the entire training run | The rollout policy $\pi_{\text{old}}$ from the start of the current batch, which **resets** after every rollout round |
+| What it bounds | Total cumulative drift over the entire RL run | The size of a single optimization step within one rollout |
+| Where it lives | Inside the reward / objective function | Inside the PPO optimizer surrogate loss |
+
+Gao, Schulman, and Hilton (2022) highlight this distinction empirically: PPO's clip only penalizes divergence from the most recent rollout policy $\pi_{\text{old}}$, so without an explicit KL penalty ($\beta = 0$), the KL divergence from $\pi_{\text{ref}}$ grows steadily with the number of optimization steps.
+
+Notice also how heavy PPO is in memory: because it needs a learned **value function** (which InstructGPT initializes from the RM) to reduce gradient variance, running Stage 3 keeps **four models in memory at once**—the trainable policy $\pi_{\boldsymbol{\phi}}$, the frozen reference model $\pi_{\text{ref}}$, the frozen reward model $r_{\boldsymbol{\theta}}$, and the trainable value model.
+
+**PPO-ptx (mixing in pre-training gradients).** InstructGPT observed that pure RLHF caused performance regressions on several public NLP benchmarks—a trade-off they termed the **alignment tax**. To mitigate those regressions, their final models (**PPO-ptx**) added a pre-training log-likelihood term $\gamma\,\mathbb{E}_{\mathbf{x} \sim \mathcal{D}_{\text{pretrain}}}[\ln\pi_{\boldsymbol{\phi}}(\mathbf{x})]$ directly to the PPO objective, which recovered benchmark performance more effectively than simply cranking up $\beta$. (Bai et al., 2022 later found that the alignment tax depended on model scale: their smaller models suffered a tax, whereas their 13B and 52B RLHF models actually improved on zero-shot benchmarks.)
+
+### Reward hacking: when higher reward means worse answers
+
+A reward model is only an imperfect proxy learned from tens of thousands of human comparisons. Once Stage 3 begins, the RM is frozen and the policy searches relentlessly for responses that score high under $r_{\boldsymbol{\theta}}$. Inevitably, the policy discovers inputs where $r_{\boldsymbol{\theta}}$ overestimates quality relative to a real human—a failure mode known as **reward hacking** or **reward model overoptimization**. It is a textbook case of **Goodhart's law**: *"When a measure becomes a target, it ceases to be a good measure."*
+
+- **Stiennon et al. (2020)** on summarization: moderate RL optimization improved human preference ratings significantly over SFT, but optimizing further caused true human ratings to peak and then **drop below SFT**, even as the proxy RM score kept climbing.
+- **Gao, Schulman, and Hilton (2022)** studied this scaling behavior systematically by using a large "gold" RM as a synthetic ground-truth judge and training smaller "proxy" RMs on labels from the gold RM. As the policy drifted further from $\pi_{\text{ref}}$ (measured by $\sqrt{D_{\mathrm{KL}}}$), the proxy RM score increased monotonically, whereas the gold score followed a hump-shaped curve: rising at first, peaking, and then falling. Larger proxy RMs and larger preference datasets pushed the peak further out, but never eliminated the eventual downturn.
+- **What reward hacks look like in text.** Ziegler et al. (2019) found summarization policies copying whole sentences verbatim from the source article, exploiting labelers' reliance on simple heuristics. InstructGPT noted that RLHF models sometimes hedged excessively or added unnecessary disclaimers, likely exploiting labelers who rewarded cautious-sounding language. Today, **length bias**—writing longer, bullet-heavy answers because human labelers and RMs slightly favor longer responses—is one of the most common mild forms of reward hacking.
+
+Does the KL penalty cure reward hacking? Be precise here. Stiennon et al. use $\beta$ to keep the policy inside the region where the RM is reliable. However, in the controlled experiments of Gao et al. (2022), varying $\beta$ moved the final policy back and forth **along the exact same gold-score vs. KL curve** rather than lifting the curve higher—meaning the KL penalty acted much like **early stopping** at a smaller KL budget. Treat the KL penalty as a speed limit that prevents the policy from running too far from $\pi_{\text{ref}}$, not as a magic shield that makes the RM infallible. You still have to evaluate the resulting model with humans or independent benchmarks (see [Model Evaluation and PEFT](/en/llm/evaluation-peft/)).
+
+:::note[Key takeaway]
+RLHF runs in three stages: SFT, training a Bradley–Terry reward model via $-\ln\sigma(r_w - r_l)$ (which depends only on score differences), and optimizing the policy against $\mathbb{E}[r] - \beta\, D_{\mathrm{KL}}(\pi_{\boldsymbol{\phi}} \,\|\, \pi_{\text{ref}})$. The KL penalty tethers the policy to the frozen SFT model $\pi_{\text{ref}}$, whereas PPO clipping only bounds each step relative to the previous rollout batch $\pi_{\text{old}}$. Because optimizing an imperfect RM eventually triggers reward hacking, rising RM scores during RL never guarantee rising human quality.
+:::
+
+### Limitations
+
+- **Expensive and complex.** PPO-based RLHF requires human preference collection (InstructGPT employed ~40 contract labelers), four models coordinated in memory during Stage 3, and sensitive hyperparameters. [DPO](/en/llm/dpo/) shows how to optimize the exact same KL-regularized preference objective directly on preference pairs without training a separate RM or running PPO.
+- **RLHF shapes behavior, not factual knowledge.** As Ouyang et al. documented, InstructGPT still hallucinated facts and accepted false premises in user questions.
+- **Helpfulness and harmlessness can pull in opposite directions.** A model that refuses every slightly sensitive request is harmless but unhelpful; a model that complies with every request is helpful but unsafe. Bai et al. (2022) collected separate helpfulness and harmlessness preference datasets and updated their RM and policy iteratively online.
+- **RLHF is broader than PPO.** PPO was the optimizer used in InstructGPT, but other RL algorithms (such as REINFORCE variants or GRPO) can optimize the Stage 3 objective as well.
+
+## Illustration
+
+The diagram and table below place the three stages of InstructGPT side by side. Look at the middle two columns of the table: in each stage humans perform a different role, and a **different model** is being updated. Stage 2 trains a separate reward model; Stage 3 freezes that reward model and returns to updating the language model policy.
+
+{/* FIG: RLHF has three sequential stages; stage 3 uses the frozen RM and the frozen SFT reference model. */}
+<RlhfStagesFigure />
+
+| Stage | What humans do | Model being trained | Training objective | Prompt count in InstructGPT |
+|---|---|---|---|---:|
+| 1. SFT | Write reference demonstration answers | Language model initialized from base GPT-3 | Answer-only cross-entropy loss | ~13,000 |
+| 2. RM training | Rank $K \in \{4,\dots,9\}$ model answers per prompt | Scalar reward model initialized from SFT model | Pairwise Bradley–Terry loss $-\ln\sigma(r_w - r_l)$, 1 epoch | ~33,000 |
+| 3. RL (PPO) | No human in the loop during training | Policy $\pi_{\boldsymbol{\phi}}$ initialized from SFT model | Maximize $\mathbb{E}[r] - \beta\, D_{\mathrm{KL}}(\pi_{\boldsymbol{\phi}} \,\|\, \pi_{\text{ref}})$ via PPO / PPO-ptx | ~31,000 |
+
+One headline result from InstructGPT captures why RLHF became standard across the industry: on their prompt distribution, human raters **preferred the outputs of a 1.3B-parameter InstructGPT model over those of the 175B-parameter base GPT-3 model**, even though the RLHF model was more than $100\times$ smaller.
+
+## Code examples
+
+The code in this lesson was last tested in October 2026 with Python 3.14 and NumPy 2.4 (in Pyodide). Both cells run right in your browser using pure NumPy—no GPU required: the first cell implements Stage 2 (Bradley–Terry reward modeling and length bias), and the second implements Stage 3 (the closed-form KL-regularized policy and reward hacking).
+
+### Training a Bradley–Terry RM on six comparisons
+
+Here each candidate response is summarized by two features: `correctness` (from $0$ to $1$) and `length` (in hundreds of words). A linear reward model scores $r(\mathbf{y}) = \mathbf{w}^\top\mathbf{f}(\mathbf{y})$ (with no bias term $b$, since any constant cancels in $r_w - r_l$). We have 6 human comparison pairs: in 4 pairs the winner is more accurate, in 1 pair accuracy is tied, and in 1 pair the labeler gets charmed by a longer answer that is slightly less accurate; meanwhile, in 5 out of 6 pairs the winning answer happens to be longer. The script prints the initial loss and gradient at $\mathbf{w} = \mathbf{0}$, runs 100 steps of gradient descent with learning rate $\eta = 1.0$, logs the loss and pairwise accuracy after steps 1, 10, and 100, and finally evaluates the trained RM on a brand-new pair.
+
+<PythonRunner code={rewardModelCode} title="Bradley–Terry reward model on six preference pairs" />
+
+Walking through the output:
+
+- **`w = 0: loss 0.6931`**: equals $\ln 2$ to four decimal places, matching our Theory table. At $\mathbf{w} = \mathbf{0}$, every $\sigma(\Delta) = 0.5$, so the gradient is simply $-0.5$ times the average feature difference $\mathbf{f}(\mathbf{y}_w) - \mathbf{f}(\mathbf{y}_l)$, giving `[-0.1417, -0.3167]`. Notice that the length component is more than twice as large as the correctness component because the average length difference ($0.63$) is larger than the average correctness difference ($0.28$).
+- **`step 1: loss 0.5624, acc 0.83`**: after a single gradient step, the RM already orders 5 out of 6 pairs correctly; the only miss is the one pair where the human preferred the *shorter* accurate answer.
+- **`step 100: loss 0.0567, acc 1.00`**: all 6 pairs are ranked correctly and the loss keeps shrinking toward $0$ (because these 6 pairs are linearly separable, the loss only reaches $0$ as $\|\mathbf{w}\| \to \infty$—another reason real RMs are trained for just 1 epoch).
+- **`w [4.9  3.08]`**: the RM rewards accuracy ($4.9$), but also puts a large positive weight on raw length ($3.08$) because winning responses in the training set happened to be longer.
+- **The out-of-distribution test pair (`new pair`)**: a concise, 100% accurate 40-word answer (`[1.0, 0.4]`) scores `6.13`, whereas a completely wrong, rambling 300-word answer (`[0.0, 3.0]`—longer than anything seen in training) scores `9.25`! The RM predicts with **95.8% confidence** (`P(correct > wrong) = 0.042`) that a human would prefer the wrong 300-word essay. In Stage 3, an untethered policy will immediately exploit that blind spot.
+
+### The KL leash across three candidate answers
+
+Consider a single prompt with three possible responses: **A** is curt and unhelpful, **B** is accurate and concise, and **C** is long-winded and gets one fact wrong. Our SFT reference model $\pi_{\text{ref}}$ generates A, B, and C with probabilities $(0.6, 0.3, 0.1)$. Our length-biased proxy RM scores them $r = (0, 1, 3)$, rating the rambling answer C highest. We also define the **true human quality** $q = (0, 1, 0.3)$—the ground-truth number that only our toy simulation knows (analogous to the gold RM in Gao et al.). For each value of $\beta$, the script computes the closed-form optimal policy $\pi^* \propto \pi_{\text{ref}}\, e^{r / \beta}$, verifies that no random distribution out of 20,000 beats $\pi^*$ on the KL-regularized objective, and prints the KL divergence $D_{\mathrm{KL}}(\pi^* \,\|\, \pi_{\text{ref}})$, expected proxy reward $\mathbb{E}[r]$, and expected true quality $\mathbb{E}[q]$.
+
+<PythonRunner code={klLeashCode} title="Optimal policy and reward hacking as β varies" />
+
+Read the table from top to bottom as we loosen the KL leash (decreasing $\beta$):
+
+- **`ref` (initial SFT model):** proxy reward $\mathbb{E}[r] = 0.600$, true quality $\mathbb{E}[q] = 0.330$.
+- **$\beta = 10$:** the tether is very stiff. The policy barely moves ($D_{\mathrm{KL}} = 0.005$).
+- **$\beta = 1.5$:** the policy shifts mass away from the terrible answer A toward B and C ($D_{\mathrm{KL}} = 0.317$). True quality reaches its **peak** across the table at $\mathbb{E}[q] = 0.419$, because moving probability off A ($q = 0$) helps even when part of it lands on C ($q = 0.3$).
+- **$\beta = 0.5$ and $\beta = 0.3$:** with a loose tether, the policy pours $93.5\%$ and then $99.6\%$ of its probability onto the flawed, verbose answer C. By $\beta = 0.5$, true quality has fallen back to $0.332$ (no better than SFT); by $\beta = 0.3$, the proxy RM score hits $2.992$ (nearly the theoretical maximum of $3.0$), while true quality drops to $0.303$—**worse than the starting SFT model before RLHF!**
+
+Compare the last two columns: as $D_{\mathrm{KL}}$ grows from $0$ to $2.275$, proxy reward $\mathbb{E}[r]$ rises monotonically from $0.600$ to $2.992$, while true quality $\mathbb{E}[q]$ rises to $0.419$ and then falls to $0.303$. That is the exact overoptimization curve measured on real LLMs by Stiennon et al. (2020) and Gao et al. (2022). In real life you only see the `E[r]` column on your dashboard—which is why human evaluation is indispensable.
+
+## Common pitfalls
+
+:::caution[Treating a rising reward model score as proof of rising quality]
+An RM is a learned proxy with blind spots—just like our first code cell learning that "longer is better." During Stage 3 RL, the RM score almost always goes up because the policy is directly optimizing it. Never use the training RM score curve alone to pick checkpoints or claim model improvements: log $D_{\mathrm{KL}}(\pi_{\boldsymbol{\phi}} \,\|\, \pi_{\text{ref}})$, inspect actual generated samples, and evaluate on human raters or held-out benchmarks independent of the training RM. And remember that the KL penalty only slows down how fast the policy drifts from $\pi_{\text{ref}}$; it does not make the RM immune to exploitation.
+:::
+
+:::caution[Confusing the KL penalty ($\beta$) with PPO clipping ($\epsilon$)]
+The two mechanisms anchor the policy to different baselines (see the comparison table in Theory): PPO clipping keeps each gradient step close to the *latest rollout policy* $\pi_{\text{old}}$, whereas the KL penalty tethers the policy to the *original SFT model* $\pi_{\text{ref}}$. If you set $\beta = 0$ while keeping $\epsilon = 0.2$, every individual step stays small, yet over hundreds of rollout rounds the policy still drifts far away from the SFT model and collapses into reward hacking.
+:::
+
+:::caution[Training a reward model like an ordinary multi-epoch classifier]
+Do not randomly shuffle correlated comparison pairs from the same prompt across batches, and do not train an RM for many epochs "until training loss converges": RMs overfit rapidly on pairwise preference data (InstructGPT trained for just 1 epoch and grouped all pairs from each prompt into the same batch). Also remember that raw RM scores have no natural zero point—center or normalize rewards (for example, shifting demonstrations to mean $0$ or using `center_rewards_coefficient` in TRL) before feeding them into RL.
+:::
+
+## Quick check
+
+{/* Questions are defined in the `quiz` frontmatter field. */}
+
+<Quiz />
+
+## Summary and further reading
+
+**Key takeaways:**
+
+- RLHF follows SFT with two preference-learning stages: train a scalar reward model (RM) on human pairwise comparisons ("response $\mathbf{y}_w$ is better than $\mathbf{y}_l$"), then optimize the language model policy against the frozen RM using reinforcement learning. RLHF aligns behavior and style rather than injecting new factual knowledge.
+- The RM uses the Bradley–Terry model $P(\mathbf{y}_w \succ \mathbf{y}_l \mid \mathbf{x}) = \sigma(r_w - r_l)$ and minimizes $-\ln\sigma(r_w - r_l)$. Its gradient pushes $r_w$ up and $r_l$ down, weighted by $1 - \sigma(r_w - r_l)$ so misranked pairs get the largest updates. Because the loss depends only on score differences, RM scores are shift-invariant.
+- Stage 3 maximizes $\mathbb{E}[r] - \beta\, D_{\mathrm{KL}}(\pi_{\boldsymbol{\phi}} \,\|\, \pi_{\text{ref}})$, whose closed-form optimum is $\pi^*(\mathbf{y} \mid \mathbf{x}) \propto \pi_{\text{ref}}(\mathbf{y} \mid \mathbf{x})\, e^{r(\mathbf{x}, \mathbf{y}) / \beta}$. InstructGPT optimizes this with PPO (which clips per-step ratios against $\pi_{\text{old}}$, distinct from the KL tether to $\pi_{\text{ref}}$) and mixes in pre-training gradients (**PPO-ptx**) to reduce the alignment tax.
+- Optimizing too hard against an imperfect RM causes **reward hacking** (Goodhart's law): proxy RM scores keep climbing while true human-judged quality peaks and then degrades. The KL penalty slows down drift from SFT, but human or independent evaluation remains essential.
+
+**Further reading:**
+
+- Ouyang, L., Wu, J., Jiang, X. et al. (2022). [*Training language models to follow instructions with human feedback*](https://arxiv.org/abs/2203.02155), arXiv:2203.02155, Section 3.5 and Appendix C. InstructGPT: the three-stage pipeline, batching $\binom{K}{2}$ pairs per prompt, 1-epoch RM training, and PPO-ptx.
+- Stiennon, N., Ouyang, L., Wu, J. et al. (2020). [*Learning to summarize from human feedback*](https://arxiv.org/abs/2009.01325), arXiv:2009.01325, NeurIPS 2020, Sections 3 and 4.3. The summarization RLHF pipeline, KL penalty motivation, and empirical overoptimization curves.
+- Christiano, P., Leike, J., Brown, T. B., Martic, M., Legg, S., Amodei, D. (2017). [*Deep reinforcement learning from human preferences*](https://arxiv.org/abs/1706.03741), arXiv:1706.03741, Section 2.2. The foundational paper on learning reward functions from pairwise human comparisons via the Bradley–Terry / Elo model.
+- Gao, L., Schulman, J., Hilton, J. (2022). [*Scaling Laws for Reward Model Overoptimization*](https://arxiv.org/abs/2210.10760), arXiv:2210.10760, Sections 1 and 3.6. Systematic study of reward hacking using a synthetic gold RM, and how the KL penalty moves policies along the overoptimization curve.
+- Schulman, J., Wolski, F., Dhariwal, P., Radford, A., Klimov, O. (2017). [*Proximal Policy Optimization Algorithms*](https://arxiv.org/abs/1707.06347), arXiv:1707.06347, Section 3. Derivation of the clipped surrogate objective in PPO.
+- Bai, Y., Jones, A., Ndousse, K., Askell, A. et al. (2022). [*Training a Helpful and Harmless Assistant with Reinforcement Learning from Human Feedback*](https://arxiv.org/abs/2204.05862), arXiv:2204.05862. Helpfulness vs. harmlessness trade-offs and online iterative RLHF; preference dataset available at [Anthropic/hh-rlhf](https://huggingface.co/datasets/Anthropic/hh-rlhf) on Hugging Face.
+- Hugging Face. [*Reward Modeling*](https://huggingface.co/docs/trl/v1.16.0/en/reward_trainer) (`trl` 1.16.0), official documentation (checked 10/2026). `RewardTrainer`, `chosen` / `rejected` dataset schema, and `center_rewards_coefficient`.
+
+<LessonProgress />

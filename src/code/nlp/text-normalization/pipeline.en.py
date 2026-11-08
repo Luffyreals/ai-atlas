@@ -1,8 +1,8 @@
-# Pipeline chuẩn hóa văn bản: bật/tắt từng bước rồi xem trước và sau
+# Text normalization pipeline: toggle each step and compare before/after
 import re
 import unicodedata as ud
 
-# Đổi True/False để bật hoặc tắt từng bước
+# Flip True/False to enable or disable each step
 ON = {"nfc": True, "lower": True, "slot": True,
       "punct": True, "space": True, "strip_tone": False}
 
@@ -11,18 +11,18 @@ EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 NUM = re.compile(r"\d+(?:[.,]\d+)*")
 
 
-def slot(s):  # thay URL, email, số bằng token giữ chỗ
+def slot(s):  # replace URLs, emails, and numbers with placeholder tokens
     s = URL.sub(" <url> ", s)
     s = EMAIL.sub(" <email> ", s)
     return NUM.sub(" <num> ", s)
 
 
-def punct(s):  # bỏ dấu câu, giữ nguyên các token giữ chỗ
+def punct(s):  # strip punctuation while keeping placeholder tokens intact
     return re.sub(r"(<\w+>)|[^\w\s]", lambda m: m.group(1) or " ", s)
 
 
-def strip_tone(s):  # bỏ mọi dấu (mất thông tin!)
-    s = ud.normalize("NFD", s).replace("đ", "d").replace("Đ", "D")
+def strip_tone(s):  # strip all diacritics (loses meaning!)
+    s = ud.normalize("NFD", s).replace("đ", "d").replace("Đ", "D")  # data: vi
     s = "".join(ch for ch in s if ud.category(ch) != "Mn")
     return ud.normalize("NFC", s)
 
@@ -37,9 +37,9 @@ STEPS = [
 ]
 
 texts = [
-    "Sp OK lắm!!!   10đ, xem tại https://example.vn/sp?id=123",
-    "Giao hàng CHẬM quá :(  Gọi 0912.345.678 hoặc hotro@example.vn",
-    "Shop của chị Ho\u0300a  KHÔNG tệ,\tgiá 1.250.000đ.",
+    "Sp OK lắm!!!   10đ, xem tại https://example.vn/sp?id=123",  # data: vi
+    "Giao hàng CHẬM quá :(  Gọi 0912.345.678 hoặc hotro@example.vn", # data: vi
+    "Shop của chị Ho\u0300a  KHÔNG tệ,\tgiá 1.250.000đ.",  # data: vi
 ]
 for t in texts:
     print(f"{'input':<10} {len(t):>2} {t!r}")

@@ -1,4 +1,4 @@
-# Phân loại cảm xúc bằng DistilBERT đã fine-tune trên SST-2 (chỉ tiếng Anh)
+# Sentiment classification with DistilBERT fine-tuned on SST-2 (English only)
 from transformers import pipeline
 
 clf = pipeline(
@@ -10,9 +10,9 @@ texts = [
     "The food was not good.",
     "Not bad at all.",
     "Great food, but the service was painfully slow.",
-    # mỉa mai: chữ khen, ý chê
+    # sarcasm: positive words, negative meaning
     "Great, another hour of waiting for cold soup.",
-    # câu trung tính: mô hình vẫn phải chọn một trong hai nhãn
+    # neutral sentence: the model still has to pick one of the two labels
     "The restaurant opens at 9 am.",
 ]
 for text, out in zip(texts, clf(texts)):

@@ -44,7 +44,7 @@ import lloydCode from '@code/ml/k-means/lloyd.en.py?raw';
 import initCode from '@code/ml/k-means/init.en.py?raw';
 import chooseKCode from '@code/ml/k-means/choose-k.en.py?raw';
 
-## Objectives
+## Goals
 
 After this lesson, you will be able to:
 
@@ -241,7 +241,7 @@ The mean Silhouette score across all samples $\bar{s} = \frac{1}{m} \sum_{i=1}^m
 - **Sensitive to outliers.** Squaring Euclidean distances gives distant anomalies outsized leverage, pulling centroids away from dense modes.
 - **Demands feature scaling.** If one feature has vastly larger numerical magnitude than others, Euclidean distance is dominated by that single dimension.
 
-## Visualization
+## Illustration
 
 The table below traces Lloyd's algorithm across our 36-sample dataset with 3 initial centroids seeded at samples 2, 20, and 1:
 
@@ -267,7 +267,7 @@ Key takeaways:
     Interactivity: "Next Step" toggles assignment and update phases with Voronoi region coloring; slider k sweeps 1 to 6; "Reinitialize" tests random seeds or K-means++.
     Dataset: make_blobs(n_samples=36, centers=[[2, 2], [8, 3], [5, 8]], cluster_std=1.0, random_state=10). */}
 
-## Code Examples
+## Code examples
 
 The three cells execute independently.
 
@@ -295,7 +295,7 @@ Both diagnostics cleanly identify $k = 3$ as optimal:
 1. The Elbow plot displays an inflection point at $k = 3$, after which reductions in $J$ plateau.
 2. The Silhouette curve achieves an isolated maximum at $k = 3$ with score $0.728$.
 
-## Common Pitfalls
+## Common pitfalls
 
 :::caution[Omitting Feature Standardization Before Clustering]
 Because K-means relies on Euclidean distance $\sum (x_j - \mu_j)^2$, features with large numerical magnitudes dominate cluster assignments. Always scale features to zero mean and unit variance using `StandardScaler` prior to clustering.
@@ -309,11 +309,11 @@ Voronoi partitions form linear decision boundaries. On datasets with non-convex 
 Inertia $J$ decreases monotonically as $k$ increases, reaching $J = 0$ when $k = m$. Clustering aims to discover compact latent structures, not assign custom singletons. Always evaluate candidate counts via the Elbow inflection point or Silhouette peak.
 :::
 
-## Quick Check
+## Quick check
 
 <Quiz />
 
-## Summary and Further Reading
+## Summary and further reading
 
 **Key Takeaways:**
 

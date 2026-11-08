@@ -17,14 +17,15 @@ Mọi thay đổi đáng chú ý của AI Atlas được ghi ở đây. Mỗi m�
   - Hỗ trợ trợ năng (A11y): tự động thêm điều hướng bàn phím (`tabindex="0"`) cho các khối công thức KaTeX và bảng dữ liệu cuộn ngang (`scroll-regions.ts`).
 
 - **Nội dung hoàn thành:**
-  - Hoàn thành xuất bản trọn vẹn 100% bản tiếng Việt cho toàn bộ 78 bài học thuộc 5 phần (Python, Toán, ML, DL, NLP, CV, LLM).
-  - Hoàn thành xuất bản 100% bản tiếng Anh cho toàn bộ 14 bài học thuộc phần Machine Learning.
-  - Nâng cấp bộ test tự động lên 2.222 unit tests (Vitest) và bộ e2e Playwright toàn diện.
+  - Hoàn thành xuất bản trọn vẹn 100% bản song ngữ (Việt – Anh) cho toàn bộ 78 bài học (78/78 bài vi và 78/78 bài en) qua tất cả các chuyên đề: Python (7 bài), Toán cho AI (3 bài), Machine Learning (14 bài), Deep Learning (8 bài), NLP (13 bài), Computer Vision (10 bài), Large Language Models (23 bài).
+  - Đồng bộ toàn bộ các ví dụ mã nguồn Python (`.vi.py` và `.en.py`) theo chuẩn chú thích tiếng Anh, tuân thủ giới hạn ký tự dòng (≤79 ký tự).
+  - Chuẩn hóa tiêu đề H2 theo mẫu chuẩn (Goals, Prerequisites, Intuition, Theory, Illustration, Code examples, Common pitfalls, Quick check, Summary and further reading).
+  - Nâng cấp bộ test tự động lên gần 2.500 unit tests (2.496/2.496 tests passed) và bộ e2e Playwright toàn diện.
 
 
 ### Thêm mới
 
-- Phần LLM, Phần 5c, bản tiếng Việt, nhánh `llm-lessons` (quyết định 53, 54, 59–61 trong [docs/mvp.md](mvp.md), [báo cáo](progress/2026-10-24-llm.md), [thiết kế](architecture/llm-lessons.md)). Chưa commit, bản en làm sau:
+- Phần LLM, Phần 5c, bản tiếng Việt (quyết định 53, 54, 59–61 trong [docs/mvp.md](mvp.md), [báo cáo](progress/2026-10-24-llm.md), [thiết kế](architecture/llm-lessons.md)):
   - 23 bài trong `src/content/docs/vi/llm/`, 49 file code minh họa `.vi.py` và 49 `.en.py` trong `src/code/llm/`. Mức kiểm chứng theo từng file `.vi.py`: 35 chạy thật, 14 chạy khô (file gọi API; chưa có `.env.llm` nên chưa có "Kết quả mẫu").
   - `LocalCode`: hiển thị code chạy trên máy người đọc, kèm nhãn và dòng yêu cầu.
   - VIZ `SamplingViz` (temperature, top-k, top-p) cho bài `text-api` và `build-first-llm`.
@@ -59,7 +60,7 @@ Mọi thay đổi đáng chú ý của AI Atlas được ghi ở đây. Mỗi m�
   - Tên truy cập cho công thức riêng dòng (`rehype-katex-a11y`).
   - SEO cho trang fallback: `noindex`, ra khỏi sitemap, bỏ `hreflang` tới bản chưa có, ra khỏi tìm kiếm Pagefind.
   - Nút "Bắt đầu học" ở hero trang chủ, link trong thư ngỏ.
-- Mốc M3 (đang làm), bản tiếng Việt; bản en làm sau MVP (quyết định 43 trong [docs/decisions.md](decisions.md)):
+- Mốc M3, bản tiếng Việt (quyết định 43 trong [docs/decisions.md](decisions.md)):
   - Bài Tổng quan về Học máy (`ml/ml-overview`): ba nhóm học máy, quy trình học có giám sát, tách train/test, 2 hình SVG tĩnh.
   - Bài Overfitting và Underfitting (`ml/overfitting-underfitting`): hồi quy đa thức, sai số train/test theo bậc, bias–variance, kiểm định chéo. VIZ `PolyFitViz`.
   - Bài Ridge, Lasso, Elastic Net (`ml/regularization`): hàm mục tiêu, nghiệm Ridge, vì sao L1 cho hệ số bằng 0, chọn λ. VIZ `RegularizationViz` và đồ thị tĩnh L1/L2.

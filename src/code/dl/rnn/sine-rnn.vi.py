@@ -6,7 +6,7 @@ K = 50  # độ dài mỗi đoạn của truncated BPTT
 
 
 def make_series(start, n):
-    """Sóng sin cộng nhiễu nhỏ, bước thời gian 0.1."""
+    # Sóng sin cộng nhiễu nhỏ, bước thời gian 0.1.
     t = (start + torch.arange(n + 1)) * 0.1
     s = torch.sin(t) + 0.05 * torch.randn(n + 1)
     # Đầu vào: giá trị hiện tại; nhãn: giá trị kế tiếp

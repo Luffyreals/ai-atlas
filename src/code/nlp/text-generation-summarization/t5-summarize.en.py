@@ -1,4 +1,4 @@
-# Tóm tắt một đoạn tin tiếng Anh bằng T5-small với ba cách giải mã.
+# Summarize an English news paragraph with T5-small in three decoding modes.
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, set_seed
 
 NAME = "google-t5/t5-small"
@@ -13,18 +13,18 @@ text = (
     "Forecasters expect the rain to continue until Wednesday, and the city "
     "has asked residents to avoid low-lying roads."
 )
-# T5 biết cần làm việc gì nhờ tiền tố tác vụ ở đầu đầu vào
+# T5 knows which task to run from the task prefix at the start of the input
 inputs = tok("summarize: " + text, return_tensors="pt")
 print("input tokens:", inputs["input_ids"].shape[1])
 
 settings = {
     "greedy": dict(num_beams=1, do_sample=False),
     "beam 4": dict(num_beams=4, do_sample=False),
-    # top_k=0 tắt top-k (generate mặc định dùng top_k=50 khi lấy mẫu)
+    # top_k=0 disables top-k (generate defaults to top_k=50 when sampling)
     "top-p 0.9": dict(do_sample=True, top_p=0.9, top_k=0),
 }
 for name, kwargs in settings.items():
-    set_seed(0)  # cố định seed để lần lấy mẫu lặp lại được
+    set_seed(0)  # fix the seed so the sampling run is reproducible
     out = model.generate(**inputs, max_new_tokens=60, **kwargs)
     summary = tok.decode(out[0], skip_special_tokens=True)
     print(f"[{name}] {summary}")
