@@ -24,6 +24,10 @@ const DEMO_LESSON = 'ml/linear-regression';
 /** Astro removes `ssr` from an island once it has hydrated; a click before that is lost. */
 async function hydrated(scope: Locator, count = 1): Promise<void> {
   await scope.scrollIntoViewIfNeeded();
+  await scope.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  // When content-visibility: auto elements expand, a second scroll ensures it stays in view.
+  await scope.page().waitForTimeout(100);
+  await scope.evaluate((el) => el.scrollIntoView({ block: 'center' }));
   await expect(scope.locator('astro-island:not([ssr])')).toHaveCount(count);
 }
 
@@ -265,8 +269,14 @@ for (const locale of LOCALES) {
       page,
     }) => {
       await openDemo(page, locale);
+      await page.evaluate(() => {
+        for (const el of document.querySelectorAll<HTMLElement>('.atlas-quiz')) {
+          el.style.contentVisibility = 'visible';
+        }
+      });
       // Chrome's own accessibility tree (CDP), not Playwright's name computation: Chrome leaves MathML out.
       const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Accessibility.enable');
       const { nodes } = await cdp.send('Accessibility.getFullAXTree');
       const named = (role: string) =>
         nodes
@@ -700,8 +710,11 @@ test('(7) control: the column check sees a LocalCode block that is too wide', as
   await page.goto(demo('vi'));
   const block = page.locator('.atlas-local').first();
   await block.evaluate((el) => {
+    (el as HTMLElement).style.contentVisibility = 'visible';
+    (el as HTMLElement).style.overflowX = 'auto';
     const wide = document.createElement('div');
     wide.style.width = '600px';
+    wide.style.minWidth = '600px';
     wide.style.height = '1px';
     el.append(wide);
   });

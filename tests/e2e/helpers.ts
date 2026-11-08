@@ -67,11 +67,17 @@ export async function scrollThrough(
   page: Page,
   { hydrated = false, networkIdle = false }: { hydrated?: boolean; networkIdle?: boolean } = {},
 ): Promise<void> {
-  const height = await page.evaluate(() => document.documentElement.scrollHeight);
   const step = page.viewportSize()?.height ?? 800;
-  for (let y = 0; y <= height; y += step) {
+  let y = 0;
+  // content-visibility: auto increases scrollHeight as skipped blocks come near; keep scrolling until the real bottom.
+  while (true) {
     await page.evaluate((top) => window.scrollTo(0, top), y);
     await page.waitForTimeout(100);
+    const height = await page.evaluate(() => document.documentElement.scrollHeight);
+    if (y >= height) break;
+    const nextY = Math.min(y + step, height);
+    if (nextY === y) break;
+    y = nextY;
   }
   if (hydrated) await expect(page.locator('astro-island[ssr]')).toHaveCount(0);
   if (networkIdle) await page.waitForLoadState('networkidle');

@@ -201,6 +201,14 @@ function figureContrast(figure: Element): { text: Contrast[]; marks: Contrast[];
   return { text, marks, unmeasured };
 }
 
+async function forceContentVisible(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll<HTMLElement>('.sl-markdown-content > *')) {
+      el.style.contentVisibility = 'visible';
+    }
+  });
+}
+
 if (WITH_PAGE.length === 0) {
   test.skip('lesson pages: no lesson has a vi page yet, so there is no lesson page to check', () => {});
 }
@@ -221,6 +229,7 @@ for (const lesson of WITH_PAGE) {
         test.skip(!isNarrow(page), 'mobile project (375px) only');
         test.skip(shape.displayMath < 1, 'the lesson has no display formula');
         await page.goto(path);
+        await forceContentVisible(page);
         const selector = '.sl-markdown-content .katex-display';
         const blocks = await page.locator(selector).evaluateAll((items) =>
           items.map((el) => ({
@@ -370,9 +379,7 @@ for (const lesson of WITH_PAGE) {
       }) => {
         test.skip(!isNarrow(page), 'mobile project (375px) only');
         await page.goto(path);
-        for (const box of await page.locator(SCROLL_BOXES).all()) {
-          await box.scrollIntoViewIfNeeded();
-        }
+        await forceContentVisible(page);
         await page.evaluate(() => document.fonts.ready);
         // The script batches its work (ResizeObserver, then 100 ms, then idle time): poll until it is done.
         await expect
@@ -412,9 +419,7 @@ for (const lesson of WITH_PAGE) {
       }) => {
         test.skip(!isNarrow(page), 'mobile project (375px) only');
         await page.goto(path);
-        for (const pre of await page.locator('.expressive-code pre').all()) {
-          await pre.scrollIntoViewIfNeeded();
-        }
+        await forceContentVisible(page);
         const template = s(textLocale, 'common.codeBlock');
         await expect
           .poll(() => page.locator('.expressive-code pre').evaluateAll(codeLabelMismatches, template), { timeout: 10_000 })
@@ -461,6 +466,7 @@ function codeLabelMismatches(items: Element[], template: string): string[] {
 test('at 375px the sample lesson has a code block that scrolls, so the label test above is not empty', async ({ page }) => {
   test.skip(!isNarrow(page), 'mobile project (375px) only');
   await page.goto(pathOf('vi', 'ml/linear-regression'));
+  await forceContentVisible(page);
   await expect
     .poll(() => page.locator('.expressive-code pre[role="region"]').count(), { timeout: 10_000 })
     .toBeGreaterThan(0);
@@ -473,6 +479,7 @@ test('at 375px the sample lesson has a code block that scrolls, so the label tes
 test('at 375px, a code block name goes when Expressive Code drops role="region" (box fits again)', async ({ page }) => {
   test.skip(!isNarrow(page), 'mobile project (375px) only');
   await page.goto(pathOf('vi', 'ml/linear-regression'));
+  await forceContentVisible(page);
   const region = page.locator('.expressive-code pre[role="region"]').first();
   await expect(region).toHaveAttribute('aria-label', /^Khối code \d+$/, { timeout: 10_000 });
   const handle = await region.elementHandle();
@@ -565,6 +572,7 @@ for (const locale of LOCALES) {
 test('at 375px, a formula whose content gets wider (box size unchanged) still becomes a Tab stop', async ({ page }) => {
   test.skip(!isNarrow(page), 'mobile project (375px) only');
   await page.goto(pathOf('vi', 'ml/linear-regression'));
+  await forceContentVisible(page);
   await page.evaluate(() => document.fonts.ready);
   await expect
     .poll(() => page.locator(SCROLL_BOXES).evaluateAll(scrollBoxMismatches), { timeout: 10_000 })

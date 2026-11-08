@@ -242,6 +242,11 @@ for (const { path } of PAGES) {
 
     test('(2) each VIZ keeps its height through hydration (±1px)', async ({ page }) => {
       await page.goto(path);
+      await page.evaluate(() => {
+        for (const el of document.querySelectorAll<HTMLElement>('.atlas-viz')) {
+          el.style.contentVisibility = 'visible';
+        }
+      });
       await page.evaluate(() => document.fonts.ready);
       const vizs = await page.locator('.atlas-viz').all();
       let measured = 0;
